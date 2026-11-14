@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using Forge.Abstractions;
+using Forge.Core.Agents;
 using Forge.Core.Providers;
 
 namespace Forge.Bench;
@@ -42,6 +44,7 @@ internal static class RateLimitScenarios
         yield return Miss();
         yield return Contended();
         yield return Fairness();
+        yield return RequestOverhead();
     }
 
     /// <summary>A limiter whose budget is far above anything the batch can spend, so the row measures the acquire itself.</summary>
@@ -196,6 +199,84 @@ internal static class RateLimitScenarios
                     Iterations = 20,
                     Note = $"{ContendedThreads} threads x {ContendedBatch} acquires of one provider",
                     Check = Contention("eight threads share one bucket with room: every acquire authorized, nothing refused"),
+                });
+            });
+    }
+
+    /// <summary>
+    /// What one model request pays in total when the budget is on: the prompt estimate, the acquire, the settle against the
+    /// reported usage and the observe of the response headers. The estimate (a walk over the prompt) is the part the acquire rows
+    /// do not show and the part skipped when the budget is off; the baseline is that estimate alone, so the gap is the limiter.
+    /// </summary>
+    private static BenchScenario RequestOverhead()
+    {
+        return new BenchScenario(
+            "ratelimit.request.overhead",
+            "ratelimit",
+            Heavy: false,
+            PrepareAsync: _ =>
+            {
+                var limiter = Limiter();
+                var counter = new ApproximateTokenCounter();
+                var messages = new List<ChatMessage>();
+                for (var index = 0; index < 20; index++)
+                {
+                    messages.Add(index % 2 == 0
+                        ? ChatMessage.User("Please look at the failing test and tell me what changed in the last commit.")
+                        : ChatMessage.Assistant("The commit renamed the helper and moved the retry logic into its own class."));
+                }
+
+                const string System = "You are a coding agent working in the user's repository. Prefer small, reviewable changes.";
+                var reading = new ProviderRateLimit(null, null, RateLimitStatus.Unknown, null, null, RateLimitStatus.Unknown, null, RateLimitStatus.Unknown)
+                {
+                    Throttle = new ProviderThrottle(6_000_000, 5_999_000, null, 400_000_000, 399_000_000, null),
+                };
+                var now = DateTimeOffset.UtcNow;
+                var result = Task.FromResult(new OpResult(Items: Batch, Signature: Batch, Observation: "all authorized"));
+                return Task.FromResult(new BenchCase
+                {
+                    Run = cancellationToken =>
+                    {
+                        var taken = 0;
+                        for (var index = 0; index < Batch; index++)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var estimate = counter.Count(System) + counter.Count(messages);
+                            if (limiter.Acquire(Provider, estimate, out var wait, out var charged) == RateLimitDecision.Authorized)
+                            {
+                                taken++;
+                            }
+
+                            limiter.Settle(Provider, charged, estimate);
+                            limiter.Observe(Provider, reading, now, answered: true);
+                        }
+
+                        return taken == Batch ? result : Task.FromResult(new OpResult(Items: Batch, Signature: taken));
+                    },
+                    Baseline = cancellationToken =>
+                    {
+                        var sum = 0L;
+                        for (var index = 0; index < Batch; index++)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            sum += counter.Count(System) + counter.Count(messages);
+                        }
+
+                        return sum > 0 ? result : Task.FromResult(new OpResult(Items: Batch, Signature: 0));
+                    },
+                    BaselineName = "the prompt estimate alone (the whole cost when the budget is off is zero)",
+                    Iterations = 30,
+                    Check = comparison =>
+                    {
+                        var measurement = comparison.Implementation;
+                        var nanoseconds = measurement.P50Ms * 1_000_000 / Batch;
+                        return new Verdict(
+                            "one request's total budget overhead (estimate + acquire + settle + observe), reported",
+                            string.Create(
+                                CultureInfo.InvariantCulture,
+                                $"alloc={measurement.AllocatedBytesPerOp} B/call p50={nanoseconds:0.0} ns/request"),
+                            measurement.Signature == Batch);
+                    },
                 });
             });
     }

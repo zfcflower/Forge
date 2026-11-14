@@ -67,7 +67,7 @@ public abstract class HttpChatProvider : IChatProvider
     /// this. Null means the response reported no meter at all, which is not the same as an account with an empty window.
     /// </summary>
     protected virtual ProviderRateLimit? ReadRateLimit(HttpResponseMessage response) =>
-        RateLimitHeaders.ReadRateLimit(response.Headers, TimeProvider.System.GetUtcNow());
+        RateLimitHeaders.ReadRateLimit(response.Headers, Options.Time.GetUtcNow());
 
     /// <summary>
     /// Headers that need the request rather than the provider (a session id, for one). Applied after the credential and

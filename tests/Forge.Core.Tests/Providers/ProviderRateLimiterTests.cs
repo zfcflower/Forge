@@ -432,7 +432,7 @@ public class ProviderRateLimiterTests
     }
 
     [Fact]
-    public void A_reported_limit_outranks_a_hand_typed_override()
+    public void A_reported_limit_never_loosens_a_hand_typed_override()
     {
         var time = new SteppingTimeProvider(Start);
         var limiter = new ProviderRateLimiter(time);
@@ -443,18 +443,50 @@ public class ProviderRateLimiterTests
             Overrides = new Dictionary<string, ProviderRateLimitLimits> { ["p"] = new(RequestsPerMinute: 20) },
         });
 
-        // The account reports 50 per window with 45 left. What a provider says about itself is more accurate than anything typed
-        // in the settings page - tier, plan and what its other clients already spent - so the bucket is adopted at 50 even
-        // though the override asked for 20. Pinned because it is the documented precedence, and a future "the override also caps
-        // calibration" change would silently make the local budget looser than the provider allows.
+        // The account says 50 with 45 left. The user typed 20 on purpose (a stricter ceiling than the vendor enforces is the
+        // reason the field exists), so the effective ceiling is the lower of the two: 20.
         limiter.Observe("p", Throttle(new ProviderThrottle(50, 45, Start + TimeSpan.FromSeconds(60), null, null, null)), Start);
 
-        for (var request = 0; request < 45; request++)
+        for (var request = 0; request < 20; request++)
         {
             Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
         }
 
         Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out _));
+    }
+
+    [Fact]
+    public void A_reported_limit_below_the_override_tightens_the_bucket_and_survives_a_publish()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        var policy = new ProviderRateLimitPolicy
+        {
+            RequestsPerMinute = 100,
+            TokensPerMinute = 0,
+            Overrides = new Dictionary<string, ProviderRateLimitLimits> { ["p"] = new(RequestsPerMinute: 50) },
+        };
+        limiter.Publish(policy);
+
+        limiter.Observe("p", Throttle(new ProviderThrottle(20, 20, Start + TimeSpan.FromSeconds(60), null, null, null)), Start);
+        Assert.Equal(20, Room(limiter, "p"));
+
+        // A preference change republishes the policy. The reported 20 lives beside the bucket, so it is not washed out by the
+        // override's 50 (or by a raised global): after a while the bucket refills to 20, not to 50 or 100.
+        limiter.Publish(policy with { RequestsPerMinute = 500 });
+        time.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal(20, Room(limiter, "p", ceiling: 200));
+    }
+
+    [Fact]
+    public void A_reported_limit_meters_a_dimension_the_policy_left_unlimited()
+    {
+        var limiter = new ProviderRateLimiter(new SteppingTimeProvider(Start));
+        limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 0, TokensPerMinute = 0 });
+
+        limiter.Observe("p", Throttle(new ProviderThrottle(3, 3, null, null, null, null)), Start);
+
+        Assert.Equal(3, Room(limiter, "p", ceiling: 50));
     }
 
     [Fact]
@@ -472,6 +504,128 @@ public class ProviderRateLimiterTests
         Assert.Equal(0, policy.Overrides["negative"].RequestsPerMinute);
         Assert.Equal(0, policy.Overrides["negative"].TokensPerMinute);
         Assert.False(policy.Overrides.ContainsKey("empty"));
+    }
+
+    // ------------------------------------------------------------------ hold exits, switch, races
+
+    [Fact]
+    public void An_accepted_answer_with_a_rejected_window_sets_no_hold_but_a_refusal_does()
+    {
+        var limiter = new ProviderRateLimiter(new SteppingTimeProvider(Start));
+        var reset = Start + TimeSpan.FromHours(2);
+
+        // The answer proves the account took the request (an overage allowance can carry it past a spent window).
+        limiter.Observe("p", RejectedAt(reset), Start, answered: true);
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
+
+        limiter.Observe("p", RejectedAt(reset), Start);
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out _));
+    }
+
+    [Fact]
+    public void A_hold_is_capped_at_an_hour_and_ends_with_a_policy_publish()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+
+        limiter.Observe("p", RejectedAt(Start + TimeSpan.FromDays(7)), Start);
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out var held));
+        Assert.True(held <= TimeSpan.FromHours(1), held.ToString());
+
+        // The user's way out: any publish (including switching the budget off and on again) clears what is held.
+        limiter.Publish(ProviderRateLimitPolicy.Default);
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
+    }
+
+    [Fact]
+    public void A_disabled_policy_reserves_no_automation_slot()
+    {
+        var limiter = new ProviderRateLimiter(new SteppingTimeProvider(Start));
+        limiter.Publish(new ProviderRateLimitPolicy { Enabled = false, AutomationGap = TimeSpan.FromSeconds(30) });
+
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("p"));
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("p"));
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("p"));
+
+        // Switched back on, the spacing applies again from a clean slate (nothing was reserved while it was off).
+        limiter.Publish(new ProviderRateLimitPolicy { Enabled = true, AutomationGap = TimeSpan.FromSeconds(30) });
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("p"));
+        Assert.Equal(TimeSpan.FromSeconds(30), limiter.ReserveAutomationSlot("p"));
+    }
+
+    [Fact]
+    public async Task Buckets_created_while_a_policy_is_being_published_end_up_on_the_new_policy()
+    {
+        for (var round = 0; round < 20; round++)
+        {
+            var limiter = new ProviderRateLimiter(new SteppingTimeProvider(Start));
+            limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 600, TokensPerMinute = 0 });
+            using var go = new ManualResetEventSlim();
+            var workers = Enumerable.Range(0, 4).Select(worker => Task.Run(() =>
+            {
+                go.Wait();
+                for (var id = 0; id < 200; id++)
+                {
+                    limiter.Acquire($"p{worker}-{id}", 0, out _);
+                }
+            })).ToArray();
+
+            go.Set();
+            limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 1, TokensPerMinute = 0 });
+            await Task.WhenAll(workers);
+
+            // Whether a bucket was built before, during or after the publish, none may be left on the old 600: at most one
+            // request (the new ceiling) can still be authorized from any of them.
+            for (var worker = 0; worker < 4; worker++)
+            {
+                for (var id = 0; id < 200; id++)
+                {
+                    var authorized = 0;
+                    for (var attempt = 0; attempt < 3; attempt++)
+                    {
+                        if (limiter.Acquire($"p{worker}-{id}", 0, out _) == RateLimitDecision.Authorized)
+                        {
+                            authorized++;
+                        }
+                    }
+
+                    Assert.InRange(authorized, 0, 1);
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ charged tokens
+
+    [Fact]
+    public void Acquire_reports_the_tokens_it_charged_and_zero_when_it_charged_none()
+    {
+        var limiter = TokensOnly(1000);
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 400, out _, out var charged));
+        Assert.Equal(400, charged);
+
+        // Refused, over capacity and disabled all charge nothing.
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 700, out _, out charged));
+        Assert.Equal(0, charged);
+        Assert.Equal(RateLimitDecision.ExceedsCapacity, limiter.Acquire("p", 5000, out _, out charged));
+        Assert.Equal(0, charged);
+
+        limiter.Publish(new ProviderRateLimitPolicy { Enabled = false });
+        Assert.Equal(RateLimitDecision.Disabled, limiter.Acquire("p", 400, out _, out charged));
+        Assert.Equal(0, charged);
+    }
+
+    [Fact]
+    public void Settling_what_was_never_charged_changes_nothing()
+    {
+        var limiter = TokensOnly(1000);
+
+        // A request over the whole budget leaves with nothing metered (and empties the bucket); settling "reserved 5000 vs
+        // actual 100" as if 5000 had been taken would hand back 4900 tokens of credit that never existed.
+        Assert.Equal(RateLimitDecision.ExceedsCapacity, limiter.Acquire("p", 5000, out _, out var charged));
+        limiter.Settle("p", charged, 100);
+
+        Assert.Equal(0, Room(limiter, "p"));
     }
 
     // ------------------------------------------------------------------ Settle

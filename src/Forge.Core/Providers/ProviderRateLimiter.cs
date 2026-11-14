@@ -45,8 +45,9 @@ public enum RateLimitDecision
 /// <para>
 /// <b>One budget per provider, not one for the process.</b> Two providers are two accounts and two throttle windows; sharing a
 /// budget between them would make one slow provider hold up an unrelated one, and would hide a per-account rejection behind a
-/// global number. The numbers come from one policy (<see cref="Publish"/>) because nobody wants to fill in a per-provider
-/// matrix; the split is in the buckets, which is where it matters.
+/// global number. The numbers come from one policy (<see cref="Publish"/>): global defaults, plus an optional per-provider
+/// override for a gateway the user knows is tighter. The ceiling a bucket enforces is the <em>lower</em> of the policy's number
+/// and the one the provider reported on the wire: a response can tighten the budget, never loosen what the user chose.
 /// </para>
 /// <para>
 /// <b>What a refusal is not.</b> A spent <em>quota</em> (hours, days) is not this layer's business: it is classified by
@@ -88,21 +89,51 @@ public sealed class ProviderRateLimiter
         {
             // Each bucket follows the ceilings of its own provider: an override that appears, changes or is removed has to reach
             // the bucket that already exists, which is the whole point of reconfiguring in place instead of rebuilding providers.
-            var (requests, tokens) = normalized.LimitsFor(providerId);
-            entry.Requests.Configure(requests, requests / 60.0);
-            entry.Tokens.Configure(tokens, tokens / 60.0);
+            Apply(providerId, entry, normalized);
+
+            // A settings change is the user's way out of a hold: whatever a rejected window or a stale reset left behind (a
+            // misread header can put a reset far in the future) ends here, and a still-real one is re-learned from the very
+            // next response.
+            entry.Hold.Release();
         }
     }
+
+    /// <summary>
+    /// Points one provider's buckets at the lower of the policy's ceilings and what the provider itself reported. The reported
+    /// numbers live beside the buckets, not in them, so a settings change cannot wash them out.
+    /// </summary>
+    private static void Apply(string providerId, ProviderBuckets entry, ProviderRateLimitPolicy current)
+    {
+        var (requests, tokens) = current.LimitsFor(providerId);
+        var effectiveRequests = Effective(requests, Volatile.Read(ref entry.ReportedRequests));
+        var effectiveTokens = Effective(tokens, Volatile.Read(ref entry.ReportedTokens));
+        entry.Requests.Configure(effectiveRequests, effectiveRequests / 60.0);
+        entry.Tokens.Configure(effectiveTokens, effectiveTokens / 60.0);
+    }
+
+    /// <summary>The binding ceiling: the lower of the two that exist, where zero (or no report) means "no limit from this side".</summary>
+    private static int Effective(int policyLimit, int reported) =>
+        reported <= 0 ? policyLimit : policyLimit <= 0 ? reported : Math.Min(policyLimit, reported);
 
     /// <summary>
     /// Asks permission for one request of <paramref name="requestTokens"/> estimated tokens. On
     /// <see cref="RateLimitDecision.Authorized"/> the budget has been charged; the caller reports the real token count back
     /// through <see cref="Settle"/> when the answer arrives. Any other decision charges nothing.
     /// </summary>
-    public RateLimitDecision Acquire(string providerId, int requestTokens, out TimeSpan retryAfter)
+    public RateLimitDecision Acquire(string providerId, int requestTokens, out TimeSpan retryAfter) =>
+        Acquire(providerId, requestTokens, out retryAfter, out _);
+
+    /// <summary>
+    /// <see cref="Acquire(string, int, out TimeSpan)"/> that also says how many tokens it actually took out of the token
+    /// bucket. That number - not the estimate - is what <see cref="Settle"/> reconciles: a request that skipped the token
+    /// dimension (disabled, no ceiling, over capacity, refused) took nothing, and settling it as if it had would hand credit
+    /// back that was never taken or charge the bucket for a request it did not meter.
+    /// </summary>
+    public RateLimitDecision Acquire(string providerId, int requestTokens, out TimeSpan retryAfter, out int chargedTokens)
     {
         ArgumentException.ThrowIfNullOrEmpty(providerId);
         retryAfter = TimeSpan.Zero;
+        chargedTokens = 0;
         var current = Policy;
         if (!current.Enabled)
         {
@@ -121,7 +152,11 @@ public sealed class ProviderRateLimiter
 
         // The ceilings this provider actually has: its own override where it has one, else the globals. Skipping a dimension is
         // decided on those numbers, so an override of 0 really means "no limit here" rather than "whatever the global says".
+        // The ceilings that count are the lower of the policy's and the provider's own report, so a dimension the user left
+        // unlimited is still metered once the provider says it has a limit.
         var (requestsPerMinute, tokensPerMinute) = current.LimitsFor(providerId);
+        requestsPerMinute = Effective(requestsPerMinute, Volatile.Read(ref entry.ReportedRequests));
+        tokensPerMinute = Effective(tokensPerMinute, Volatile.Read(ref entry.ReportedTokens));
         if (requestsPerMinute > 0)
         {
             var request = entry.Requests.Take(1, out retryAfter);
@@ -137,7 +172,13 @@ public sealed class ProviderRateLimiter
         }
 
         var tokens = entry.Tokens.Take(requestTokens, out retryAfter);
-        if (tokens is RateLimitDecision.Authorized or RateLimitDecision.ExceedsCapacity)
+        if (tokens == RateLimitDecision.Authorized)
+        {
+            chargedTokens = requestTokens;
+            return tokens;
+        }
+
+        if (tokens == RateLimitDecision.ExceedsCapacity)
         {
             return tokens;
         }
@@ -149,22 +190,21 @@ public sealed class ProviderRateLimiter
     }
 
     /// <summary>
-    /// Reconciles the charge with what the answer actually cost: <paramref name="actualTokens"/> replaces the estimate, so a
-    /// long prompt that was undercounted is paid for and an overcount is handed back. A no-op when they agree.
+    /// Reconciles the charge with what the answer actually cost: <paramref name="actualTokens"/> replaces
+    /// <paramref name="chargedTokens"/>, so a long prompt that was undercounted is paid for and an overcount is handed back.
     /// </summary>
-    public void Settle(string providerId, int reservedTokens, int actualTokens)
+    /// <param name="providerId">Which budget was charged.</param>
+    /// <param name="chargedTokens">What <see cref="Acquire(string, int, out TimeSpan, out int)"/> reported taking; zero settles nothing.</param>
+    /// <param name="actualTokens">What the provider says the request cost.</param>
+    public void Settle(string providerId, int chargedTokens, int actualTokens)
     {
         ArgumentException.ThrowIfNullOrEmpty(providerId);
-        if (reservedTokens == actualTokens || !buckets.TryGetValue(providerId, out var entry))
+        if (chargedTokens <= 0 || chargedTokens == actualTokens || !buckets.TryGetValue(providerId, out var entry))
         {
             return;
         }
 
-        var delta = (double)reservedTokens - actualTokens;
-        if (delta != 0 && Policy.LimitsFor(providerId).TokensPerMinute > 0)
-        {
-            entry.Tokens.Adjust(delta);
-        }
+        entry.Tokens.Adjust((double)chargedTokens - actualTokens);
     }
 
     /// <summary>
@@ -175,7 +215,12 @@ public sealed class ProviderRateLimiter
     /// <param name="providerId">Which budget to calibrate.</param>
     /// <param name="reading">The parsing of the response headers; null (no such headers) leaves the budget alone.</param>
     /// <param name="now">The instant the response was read, used to turn a reset time into a hold.</param>
-    public void Observe(string providerId, ProviderRateLimit? reading, DateTimeOffset now)
+    /// <param name="answered">
+    /// True when the reading came with an accepted answer. A rejected spending window in it then sets no hold: the answer
+    /// itself proves the account took the request (an overage allowance can keep it going past a spent window), and a hold
+    /// would stall the next turn for nothing. A refusal (false, the default) is what a hold is for.
+    /// </param>
+    public void Observe(string providerId, ProviderRateLimit? reading, DateTimeOffset now, bool answered = false)
     {
         ArgumentException.ThrowIfNullOrEmpty(providerId);
         if (reading is null)
@@ -188,13 +233,14 @@ public sealed class ProviderRateLimiter
         var sawRemaining = false;
         if (reading.Throttle is { } throttle)
         {
-            Calibrate(entry.Requests, throttle.RequestLimit, throttle.RequestRemaining, throttle.RequestResetAt, now, ref hold, ref sawRemaining);
-            Calibrate(entry.Tokens, throttle.TokenLimit, throttle.TokenRemaining, throttle.TokenResetAt, now, ref hold, ref sawRemaining);
+            var (policyRequests, policyTokens) = Policy.LimitsFor(providerId);
+            Calibrate(entry.Requests, ref entry.ReportedRequests, policyRequests, throttle.RequestLimit, throttle.RequestRemaining, throttle.RequestResetAt, now, ref hold, ref sawRemaining);
+            Calibrate(entry.Tokens, ref entry.ReportedTokens, policyTokens, throttle.TokenLimit, throttle.TokenRemaining, throttle.TokenResetAt, now, ref hold, ref sawRemaining);
         }
 
         // A rejected spending window is not this layer's to wait out, but its reset is a floor: nothing this account sends
         // can succeed before it, so the hold keeps the retry loop from burning its attempts on refusals.
-        if (reading.IsRejected && reading.ResetAt is { } reset)
+        if (!answered && reading.IsRejected && reading.ResetAt is { } reset)
         {
             hold = hold is { } current && current > reset ? current : reset;
         }
@@ -224,8 +270,12 @@ public sealed class ProviderRateLimiter
     public TimeSpan ReserveAutomationSlot(string providerId)
     {
         ArgumentException.ThrowIfNullOrEmpty(providerId);
-        var gap = Policy.AutomationGap;
-        if (gap <= TimeSpan.Zero)
+        var current = Policy;
+        var gap = current.AutomationGap;
+
+        // The master switch covers the spacing too ("off" means every request is authorized without arithmetic, and the
+        // setting's own text says the automatic resume interval stops applying with it).
+        if (!current.Enabled || gap <= TimeSpan.Zero)
         {
             return TimeSpan.Zero;
         }
@@ -245,14 +295,30 @@ public sealed class ProviderRateLimiter
 
         var (requestsPerMinute, tokensPerMinute) = current.LimitsFor(providerId);
         var created = new ProviderBuckets(this, requestsPerMinute, tokensPerMinute);
-        return buckets.TryAdd(providerId, created) ? created : buckets[providerId];
+        if (!buckets.TryAdd(providerId, created))
+        {
+            return buckets[providerId];
+        }
+
+        // Publish writes the policy before it walks the buckets. A bucket built from the policy read above and added after
+        // that walk passed would keep the old ceilings; reading the policy again after the add closes the window: either the
+        // walk saw the bucket, or this read sees the new policy.
+        var latest = Policy;
+        if (!ReferenceEquals(latest, current))
+        {
+            Apply(providerId, created, latest);
+        }
+
+        return created;
     }
 
     private AutomationSlot CreateSlot(string _) => new(time);
 
     /// <summary>Adopts one reported limit, its remaining count and its reset; reports any hold the reading implies.</summary>
-    private void Calibrate(
+    private static void Calibrate(
         RateLimitBucket bucket,
+        ref int reportedLimit,
+        int policyLimit,
         int? limit,
         int? remaining,
         DateTimeOffset? resetAt,
@@ -265,11 +331,15 @@ public sealed class ProviderRateLimiter
             return;
         }
 
-        // The reported limit is a per-minute budget: that is what the header family means on the providers that send it. A
-        // remaining count without a limit still tells us what is left right now.
-        if (limit is { } ceiling)
+        // The reported limit is remembered and the bucket follows the lower of it and the policy's number: the wire may only
+        // tighten what the user set, never loosen it (a stricter ceiling typed on purpose must survive a server that says it
+        // would allow more). It is assumed to be a per-minute budget, which is what the header family means on the providers
+        // that send it. A remaining count without a limit still tells us what is left right now.
+        if (limit is { } ceiling && ceiling > 0)
         {
-            bucket.Configure(ceiling, ceiling / 60.0);
+            Volatile.Write(ref reportedLimit, ceiling);
+            var effective = Effective(policyLimit, ceiling);
+            bucket.Configure(effective, effective / 60.0);
         }
 
         if (remaining is { } left)
@@ -292,6 +362,9 @@ public sealed class ProviderRateLimiter
     /// </summary>
     private sealed class Hold(TimeProvider time)
     {
+        /// <summary>The longest a single reading can hold a provider.</summary>
+        public static readonly TimeSpan MaxHold = TimeSpan.FromHours(1);
+
         private long until;
 
         public TimeSpan Remaining()
@@ -322,6 +395,13 @@ public sealed class ProviderRateLimiter
                 return;
             }
 
+            // Capped: a reset far in the future (a misread header, a weekly window) must not park the provider for days with no
+            // way out. After the cap the next request goes out and the server decides again; a settings change also clears it.
+            if (delay > MaxHold)
+            {
+                delay = MaxHold;
+            }
+
             var stamp = time.GetTimestamp() + (long)(delay.TotalSeconds * time.TimestampFrequency);
             while (true)
             {
@@ -339,6 +419,12 @@ public sealed class ProviderRateLimiter
     /// <summary>One provider's two budgets and its hold.</summary>
     private sealed class ProviderBuckets
     {
+        /// <summary>What the provider last reported as its per-minute request limit; 0 means it never did.</summary>
+        public int ReportedRequests;
+
+        /// <summary>The same for tokens.</summary>
+        public int ReportedTokens;
+
         public ProviderBuckets(ProviderRateLimiter owner, int requestsPerMinute, int tokensPerMinute)
         {
             Requests = new RateLimitBucket(owner.time, requestsPerMinute, requestsPerMinute / 60.0);

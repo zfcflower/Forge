@@ -113,7 +113,7 @@ public class RateLimitBucketTests
     }
 
     [Fact]
-    public void A_cost_above_the_capacity_exceeds_it_and_charges_nothing()
+    public void A_cost_above_the_capacity_exceeds_it_and_spends_what_the_bucket_had()
     {
         var time = new SteppingTimeProvider(Start);
         var bucket = new RateLimitBucket(time, capacityTokens: 2, perSecondTokens: 1);
@@ -122,7 +122,9 @@ public class RateLimitBucketTests
 
         Assert.Equal(RateLimitDecision.ExceedsCapacity, decision);
         Assert.Equal(TimeSpan.Zero, retryAfter);
-        Assert.Equal(2, bucket.RemainingTokens);
+
+        // It is sent anyway and the provider will count it, so the bucket is emptied rather than left looking full.
+        Assert.Equal(0, bucket.RemainingTokens);
     }
 
     // ------------------------------------------------------------------ refilling
@@ -199,8 +201,8 @@ public class RateLimitBucketTests
 
         Assert.Equal(4, bucket.CapacityTokens);
         Assert.Equal(4, bucket.RemainingTokens);
-        Assert.Equal(RateLimitDecision.ExceedsCapacity, bucket.Take(5, out _));
         Assert.Equal(RateLimitDecision.Authorized, bucket.Take(4, out _));
+        Assert.Equal(RateLimitDecision.ExceedsCapacity, bucket.Take(5, out _));
     }
 
     [Fact]
@@ -335,6 +337,143 @@ public class RateLimitBucketTests
         // 100 tokens at 7 each: fourteen requests fit, and the refused ones must have changed nothing.
         Assert.Equal(Capacity / (int)Cost, authorized);
         Assert.Equal(Capacity - (authorized * (int)Cost), bucket.RemainingTokens);
+    }
+
+    [Fact]
+    public void Take_and_refund_churn_never_shows_a_negative_balance_or_loses_credit()
+    {
+        const int Capacity = 100;
+        const long Cost = 7;
+        var bucket = new RateLimitBucket(new SteppingTimeProvider(Start), Capacity, perSecondTokens: 0);
+        long outstanding = 0;
+        long highWater = 0;
+        var start = new ManualResetEventSlim(false);
+
+        var workers = Enumerable.Range(0, 8)
+            .Select(worker => new Thread(() =>
+            {
+                start.Wait();
+                for (var attempt = 0; attempt < 20_000; attempt++)
+                {
+                    if (bucket.Take(Cost, out _) != RateLimitDecision.Authorized)
+                    {
+                        continue;
+                    }
+
+                    var now = Interlocked.Add(ref outstanding, Cost);
+                    long seen;
+                    while (now > (seen = Interlocked.Read(ref highWater)) && Interlocked.CompareExchange(ref highWater, now, seen) != seen)
+                    {
+                    }
+
+                    // The answer settled lower than the estimate: the charge goes back, exactly once.
+                    Interlocked.Add(ref outstanding, -Cost);
+                    bucket.Adjust(Cost);
+                }
+            }))
+            .ToList();
+        foreach (var worker in workers)
+        {
+            worker.Start();
+        }
+
+        start.Set();
+        foreach (var worker in workers)
+        {
+            Assert.True(worker.Join(TimeSpan.FromSeconds(60)), "a worker never finished");
+        }
+
+        // What is out at any instant never exceeds the budget (a transient negative balance would have let a second request
+        // be refused for credit that was only borrowed, and the clamp in Adjust would then have refunded more than was taken).
+        Assert.True(highWater <= Capacity, $"{highWater} tokens were out at once from a bucket of {Capacity}");
+        Assert.Equal(Capacity, bucket.RemainingTokens);
+    }
+
+    [Fact]
+    public void Concurrent_takes_with_a_moving_clock_and_refunds_never_exceed_capacity_plus_refill()
+    {
+        const int Capacity = 50;
+        const long Cost = 5;
+        const int Steps = 200;
+        var time = new SteppingTimeProvider(Start);
+        var bucket = new RateLimitBucket(time, Capacity, perSecondTokens: 10);
+        var authorized = 0L;
+        var done = 0;
+        var start = new ManualResetEventSlim(false);
+
+        var advancer = new Thread(() =>
+        {
+            start.Wait();
+            for (var step = 0; step < Steps; step++)
+            {
+                time.Advance(TimeSpan.FromMilliseconds(100));
+                Thread.Yield();
+            }
+
+            Volatile.Write(ref done, 1);
+        });
+        var workers = Enumerable.Range(0, 6)
+            .Select(worker => new Thread(() =>
+            {
+                start.Wait();
+                while (Volatile.Read(ref done) == 0)
+                {
+                    if (bucket.Take(Cost, out _) == RateLimitDecision.Authorized)
+                    {
+                        Interlocked.Increment(ref authorized);
+                    }
+                }
+            }))
+            .ToList();
+        advancer.Start();
+        foreach (var worker in workers)
+        {
+            worker.Start();
+        }
+
+        start.Set();
+        Assert.True(advancer.Join(TimeSpan.FromSeconds(60)), "the clock never finished");
+        foreach (var worker in workers)
+        {
+            Assert.True(worker.Join(TimeSpan.FromSeconds(60)), "a worker never finished");
+        }
+
+        // 200 steps of 100 ms at 10 tokens per second add 200 tokens on top of the 50 the bucket started with.
+        Assert.True(authorized * Cost <= Capacity + 200, $"{authorized * Cost} tokens were handed out of at most {Capacity + 200}");
+        Assert.InRange(bucket.RemainingTokens, 0, Capacity);
+    }
+
+    [Fact]
+    public void A_calibration_racing_takes_leaves_a_balance_inside_the_ceiling()
+    {
+        var bucket = new RateLimitBucket(new SteppingTimeProvider(Start), 100, perSecondTokens: 0);
+        var start = new ManualResetEventSlim(false);
+        var taker = new Thread(() =>
+        {
+            start.Wait();
+            for (var attempt = 0; attempt < 50_000; attempt++)
+            {
+                if (bucket.Take(3, out _) == RateLimitDecision.Authorized)
+                {
+                    bucket.Adjust(3);
+                }
+            }
+        });
+        var calibrator = new Thread(() =>
+        {
+            start.Wait();
+            for (var attempt = 0; attempt < 50_000; attempt++)
+            {
+                bucket.SetRemaining(attempt % 2 == 0 ? 10 : 90);
+            }
+        });
+        taker.Start();
+        calibrator.Start();
+
+        start.Set();
+        Assert.True(taker.Join(TimeSpan.FromSeconds(60)) && calibrator.Join(TimeSpan.FromSeconds(60)), "a worker never finished");
+
+        Assert.InRange(bucket.RemainingTokens, 0, 100);
     }
 }
 

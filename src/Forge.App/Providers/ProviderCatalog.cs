@@ -420,7 +420,7 @@ internal sealed class ConnectedProvider
                     credentials,
                     (key, baseUrl, style, preamble, extraHeaders) => ChatProviderPipeline.Build(
                         ProviderFactory.Create(BuildConfig(key, baseUrl, style, preamble, extraHeaders), http, Options),
-                        new RetryMiddleware()));
+                        new RetryMiddleware(ProviderRateLimiter.Shared)));
 
             default:
                 return Missing(ProviderStrings.NoCredentialText());
@@ -431,7 +431,7 @@ internal sealed class ConnectedProvider
                 BuildConfig(apiKey, Definition.BaseUrl, ProviderAuthStyle.Default, preamble: null),
                 http,
                 Options),
-            new RetryMiddleware());
+            new RetryMiddleware(ProviderRateLimiter.Shared));
 
         IChatProvider Missing(LocText reason) => new MissingCredentialProvider(Id, reason);
     }
