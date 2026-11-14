@@ -1,3 +1,4 @@
 {
-    "dotnet.defaultSolution": "Forge.slnx"
+    "dotnet.defaultSolution": "Forge.slnx",
+    "deslop.topOffenders.groupBy": "file"
 }

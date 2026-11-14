@@ -8,4 +8,8 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+  <!-- FORGE_RUN=1 puts Forge.App's output in the single, git-ignored artifacts/run/ so a running app never locks src/Forge.App/bin/. -->
+  <PropertyGroup Condition="'$(FORGE_RUN)' == '1' And '$(MSBuildProjectName)' == 'Forge.App'">
+    <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts/run/</BaseOutputPath>
+  </PropertyGroup>
 </Project>

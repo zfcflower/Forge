@@ -27,7 +27,10 @@
 - 实现与测试 Agent 都在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),跑完与本次任务相关的测试且全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。副本不存在须先创建,复制失败须报告阻塞,不得回退到共享主仓原地修改。创建副本用 `robocopy <主仓> <副本> /E /XD bin obj .git .vs /R:1 /W:1 /NFL /NDL /NJH /NJS`:`.vs` 里有 IDE 锁住的文件,不排除、不限重试时 robocopy 默认每 30 秒重试、最多 100 万次,会无限挂起。子 Agent 只在自己的副本内搜索,搜索排除 `bin`/`obj`;禁止在 `D:/FORGE` 根下递归搜索(那里有大量副本,曾导致单条 grep 跑了一小时)。NuGet 包里的类型搜源码搜不到,参考仓内现有用法。副本用完即可删除。
 - 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节在能并行时交给 Worker,不能并行时自己写。
 - 无论自己实现还是复核子 Agent 的产出,都要**构建**、**只跑与本次改动相关的测试**(见下节)、并检查是否越界改动,再决定是否采纳。
-- 本地跑测试而 `Forge.App` 正开着时,`src/Forge.App/bin/Debug/net11.0/` 被进程锁住,构建以 `MSB3027`/`MSB3026` 失败(不是代码问题)。用 `dotnet test <proj> -p:BaseOutputPath=artifacts/<name>/` 重定向输出。**输出目录必须留在仓库内**:`KeyRegistryTests`、`NoHardcodedChineseTests`、`StringTableTests`、`MinorRegressionTests` 从测试程序集往上找 `Forge.slnx` 读源码,放到仓库外(如 `D:/tmp/...`)时它们会以“找不到仓库根”失败,看起来像真失败。同一现象也会由**上一个被中断的测试留下的 `testhost`/`ExtensionHost` 孤儿进程**造成:先确认没有残留进程再改代码,不要把它当成代码问题。
+- **进程锁(`MSB3027`/`MSB3026`)的处理:让长驻进程换目录,而不是让每次构建/测试换目录。** 锁的来源只有两类,都不是代码问题:(a) 人在开着 `Forge.App`;(b) 上一次被中断的测试留下的 `testhost`/`ExtensionHost` 孤儿进程(也会让源码扫描类测试出现假红)。
+  1. **默认不要给 `dotnet build`/`dotnet test` 加 `-p:BaseOutputPath=...`**,测试用默认 `bin/`,不新建逐任务的 `artifacts/<name>/`(不会被清理,会堆积)。万一必须重定向,输出放哪都行:源码扫描类测试的仓库根在构建时由 `Forge.App.Tests.csproj` 写进程序集元数据(`ForgeRepoRoot`,由 `tests/Forge.App.Tests/RepoRoot.cs` 读取),不再依赖输出目录位置。
+  2. **开 App 时设 `FORGE_RUN=1`**:`FORGE_RUN=1 dotnet run --project src/Forge.App`(PowerShell:`$env:FORGE_RUN=1`)。`Directory.Build.props` 会把 `Forge.App` 的输出固定到 `artifacts/run/`,整个仓库只有这一个目录,反复覆盖;`artifacts/` 已在 `.gitignore`,删除即清理。`src/Forge.App/bin/` 因此不会被运行中的 App 锁住。**跑测试的 shell 里不要设 `FORGE_RUN`**(否则测试项目会引用到 `artifacts/run/` 的 Forge.App)。
+  3. **遇到锁先排查再动手**:用 `tasklist`/`Get-Process Forge.App,testhost,ExtensionHost` 找占用者。是孤儿 `testhost`/`ExtensionHost` 就结束它们;是用户正在用的 `Forge.App` 就报告阻塞并请用户关闭或改用 `artifacts/run/` 启动,不要自行绕开。
 - 派活文本里写明该任务适用的 `.github/skills/...` 路径。Worker 的上下文是干净的,不会自己去找 skill,不带路径等于没这份约束。
 
 ## 测试分层与执行

@@ -183,20 +183,5 @@ public sealed class StringTableTests
         Assert.True(violations.Count == 0, "unregistered .axaml keys:\n" + string.Join("\n", violations));
     }
 
-    /// <summary>Walks up from the test binaries to the checkout root (the directory holding Forge.slnx).</summary>
-    private static string? FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Forge.slnx")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        return null;
-    }
+    private static string? FindRepositoryRoot() => RepoRoot.Find();
 }

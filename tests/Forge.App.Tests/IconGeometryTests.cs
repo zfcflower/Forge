@@ -118,20 +118,6 @@ public sealed class IconGeometryTests
             .ToList();
     }
 
-    /// <summary>Walks up from the test binaries to the checkout root (the directory holding Forge.slnx).</summary>
-    private static string RepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Forge.slnx")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("no directory above the test binaries holds Forge.slnx.");
-    }
+    private static string RepositoryRoot() =>
+        RepoRoot.Find() ?? throw new InvalidOperationException("no checkout root found for the test binaries.");
 }
