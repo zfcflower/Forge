@@ -117,8 +117,8 @@
 | 命令 | 结果 |
 |---|---|
 | `dotnet build Forge.slnx -c Debug` | 0 警告 0 错误(含 Native AOT 分析器) |
-| `dotnet test tests/Forge.Core.Tests`(承载改动的项目全量,L2) | 2296 通过 / 0 失败 |
-| `dotnet test tests/Forge.Core.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~Forge.Core.Tests.Providers"` | 612 通过(新增 49 个:桶 18、限速器 23、响应头 8+28 参数、重试层 8+4 参数) |
+| `dotnet test tests/Forge.Core.Tests`(承载改动的项目全量,L2) | 2387 通过 / 0 失败 |
+| `dotnet test tests/Forge.Core.Tests --filter "FullyQualifiedName~RateLimit"` | 104 通过(新增 51 个:桶 18、限速器 25、响应头 8+28 参数、重试层 8+4 参数;其中 2 个是评审修复的回归用例) |
 | `dotnet test tests/Forge.App.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~QuotaResume\|FullyQualifiedName~Localization\|FullyQualifiedName~MinorRegression\|FullyQualifiedName~Settings\|FullyQualifiedName~Views"` | 799 通过(新增 App 侧 14 个;另改写 `QuotaResumeTests` 的 4 个预留用例) |
 | `dotnet run -c Release --project tools/Forge.Bench -- ratelimit` | 4/4 验收通过(数字见第五节) |
 
