@@ -554,7 +554,7 @@ public sealed class ProjectTreeMainCheckoutTests
         public Task<bool> MoveAsync(string projectId, int sortOrder, CancellationToken ct) => Task.FromResult(false);
     }
 
-    private sealed class FakeCatalog(List<SessionInfo> seed) : ISessionCatalog
+    private sealed class FakeCatalog(List<SessionInfo> seed) : SessionCatalogDouble
     {
         private readonly object gate = new();
         private readonly List<SessionCreate> created = [];
@@ -581,7 +581,7 @@ public sealed class ProjectTreeMainCheckoutTests
             }
         }
 
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
+        public override Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
         {
             lock (gate)
             {
@@ -598,7 +598,7 @@ public sealed class ProjectTreeMainCheckoutTests
                 });
         }
 
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
+        public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
         {
             if (query.ParentSessionId is { Length: > 0 })
             {
@@ -607,13 +607,5 @@ public sealed class ProjectTreeMainCheckoutTests
 
             return Task.FromResult<IReadOnlyList<SessionInfo>>(seed.ToArray());
         }
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 }

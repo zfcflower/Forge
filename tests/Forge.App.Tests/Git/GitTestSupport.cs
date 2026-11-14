@@ -382,11 +382,11 @@ internal static class GitPanelTesting
 /// An in-memory pull request platform for the screenshot suites: it answers the availability check and the pull request
 /// read from what a test sets, records every edit, and throws for everything the screenshot step never calls.
 /// </summary>
-internal sealed class ScreenshotFakePlatform : IPrPlatform
+internal sealed class ScreenshotFakePlatform : ThrowingPrPlatform
 {
     private readonly List<(int Number, string? Title, string? Body)> edits = [];
 
-    public string Name => "FakeHub";
+    public override string Name => "FakeHub";
 
     public PullRequestInfo? Current { get; set; }
 
@@ -398,10 +398,10 @@ internal sealed class ScreenshotFakePlatform : IPrPlatform
     /// <summary>When true, an accepted edit is not applied (the platform "lost" it).</summary>
     public bool DropEdits { get; set; }
 
-    public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+    public override Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
         Task.FromResult(Availability);
 
-    public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
+    public override Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
         Task.FromResult(Current is { } current
             ? PrResult<PullRequestInfo>.Ok(current)
             : PrResult<PullRequestInfo>.Fail(
@@ -409,17 +409,7 @@ internal sealed class ScreenshotFakePlatform : IPrPlatform
                 "no pull requests found",
                 reason: PrFailureReason.PullRequestNotFound));
 
-    public Task<PrResult<PrReference>> CreatePullRequestAsync(
-        string workingDirectory,
-        string title,
-        string body,
-        string baseBranch,
-        string headBranch,
-        bool draft = false,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReference>> EditPullRequestAsync(
+    public override Task<PrResult<PrReference>> EditPullRequestAsync(
         string workingDirectory,
         int number,
         string? title = null,
@@ -439,26 +429,8 @@ internal sealed class ScreenshotFakePlatform : IPrPlatform
         return Task.FromResult(PrResult<PrReference>.Ok(new PrReference(number, Current?.Url ?? string.Empty)));
     }
 
-    public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+    public override Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
         Task.FromResult(PrResult<IReadOnlyList<PrReviewThread>>.Ok([]));
-
-    public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
 }
 
 /// <summary>

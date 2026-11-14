@@ -2,28 +2,15 @@ using System.Collections.Concurrent;
 using Forge.Abstractions;
 using Forge.Core.Agents;
 using Xunit;
+using static Forge.Core.Tests.Agents.SubAgentTestSupport;
 
 namespace Forge.Core.Tests.Agents;
 
 /// <summary>Pins steer / follow-up / stop semantics of live sub-agent runs.</summary>
 public sealed class SubAgentSteerFollowUpStopPinTests
 {
-    private static string Workspace => Path.GetTempPath();
-
-    private static readonly AgentDefinition Scout =
-        new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
-
     private static readonly AgentDefinition OpenScout =
         new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), null);
-
-    private static AgentOptions Options(int maxParallel = 4, int maxDepth = 3, int maxTurns = 10) =>
-        new() { MaxParallelSubAgents = maxParallel, MaxSubAgentDepth = maxDepth, MaxTurns = maxTurns };
-
-    private static string Spawn(string kind, string task) =>
-        $$"""{"kind":"{{kind}}","task":"{{task}}"}""";
-
-    private static int ToolRounds(ChatRequest request) =>
-        request.Messages.Count(m => m.Role == MessageRole.Tool);
 
     private sealed class ListSink : IAgentEventSink
     {

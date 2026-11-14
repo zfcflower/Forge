@@ -385,7 +385,7 @@ public sealed class MinorRegressionTests
         public Task<bool> MoveAsync(string projectId, int sortOrder, CancellationToken ct) => Task.FromResult(false);
     }
 
-    private sealed class CountingCatalog : ISessionCatalog
+    private sealed class CountingCatalog : SessionCatalogDouble
     {
         private readonly Lock gate = new();
         private int queries;
@@ -401,10 +401,10 @@ public sealed class MinorRegressionTests
             }
         }
 
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
+        public override Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
             Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, At));
 
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
+        public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
         {
             lock (gate)
             {
@@ -413,11 +413,5 @@ public sealed class MinorRegressionTests
 
             return Task.FromResult<IReadOnlyList<SessionInfo>>([]);
         }
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 }

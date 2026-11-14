@@ -1258,44 +1258,17 @@ public sealed class GitSyncViewModelTests
     /// The smallest pull-request platform the ship row talks to: availability and the branch's pull request are answered,
     /// every write throws so a test that accidentally creates something fails loudly.
     /// </summary>
-    private sealed class StubPullRequestPlatform(PrResult<PullRequestInfo> pullRequest) : IPrPlatform
+    private sealed class StubPullRequestPlatform(PrResult<PullRequestInfo> pullRequest) : ThrowingPrPlatform
     {
-        public string Name => "Stub";
+        public override string Name => "Stub";
 
         public PrPlatformAvailability Availability { get; set; } = new(PrPlatformState.Ready, string.Empty);
 
-        public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+        public override Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
             Task.FromResult(Availability);
 
-        public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
+        public override Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
             Task.FromResult(pullRequest);
-
-        public Task<PrResult<PrReference>> CreatePullRequestAsync(string workingDirectory, string title, string body, string baseBranch, string headBranch, bool draft = false, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrReference>> EditPullRequestAsync(string workingDirectory, int number, string? title = null, string? body = null, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
     }
 
 }

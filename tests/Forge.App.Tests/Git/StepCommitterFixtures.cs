@@ -236,6 +236,16 @@ internal sealed class StepCommitRepo : IDisposable
 }
 
 /// <summary>
+/// A session store that only answers <see cref="ThrowingSessionStore.GetSessionAsync"/> from its seed; everything else
+/// refuses loudly, because the committer needs nothing else.
+/// </summary>
+internal sealed class WorktreeSessionStore(params SessionInfo[] sessions) : ThrowingSessionStore
+{
+    public override Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) =>
+        Task.FromResult(sessions.FirstOrDefault(session => session.Id == sessionId));
+}
+
+/// <summary>
 /// A <see cref="StepCommitter"/> over a real repository and a real <see cref="SqliteTodoStore"/>. The store can be
 /// wrapped to inject faults or watch calls; items are added through the real store.
 /// </summary>
@@ -329,6 +339,14 @@ internal sealed class StepCommitHarness : IAsyncDisposable
             ? null
             : new TodoStepFields(commitSubject, summary, verification);
         var updated = await Store.UpdateAsync(added.Id, null, status, null, step, CancellationToken.None);
+        return updated ?? throw new InvalidOperationException("the item vanished");
+    }
+
+    /// <summary>Adds a done item for a session other than <see cref="SessionId"/> (a second worktree's session).</summary>
+    public async Task<TodoItem> AddDoneInAsync(string sessionId, string title)
+    {
+        var added = await Store.AddAsync(sessionId, title, null, null, CancellationToken.None);
+        var updated = await Store.UpdateAsync(added.Id, null, TodoStatus.Done, null, CancellationToken.None);
         return updated ?? throw new InvalidOperationException("the item vanished");
     }
 

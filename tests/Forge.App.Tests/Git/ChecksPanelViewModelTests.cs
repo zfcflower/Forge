@@ -848,7 +848,7 @@ internal static class ChecksSample
 /// what the test pinned. A read at or past <see cref="HoldFrom"/> answers only by throwing the read's cancellation, so a
 /// test can look at a poll in flight without sleeping.
 /// </summary>
-internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatform
+internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : ThrowingPrPlatform, IPrPlatform
 {
     private readonly Lock gate = new();
     private readonly List<TaskCompletionSource> reads = [];
@@ -858,7 +858,7 @@ internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatfo
     private int checksCalls;
     private int mergeCalls;
 
-    public string Name => "Fake";
+    public override string Name => "Fake";
 
     /// <summary>The first read index that only ends by cancellation instead of answering at once.</summary>
     public int HoldFrom { get; init; } = int.MaxValue;
@@ -932,31 +932,7 @@ internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatfo
         return started.WaitAsync(TimeSpan.FromSeconds(20));
     }
 
-    public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReference>> CreatePullRequestAsync(
-        string workingDirectory,
-        string title,
-        string body,
-        string baseBranch,
-        string headBranch,
-        bool draft = false,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReference>> EditPullRequestAsync(
-        string workingDirectory,
-        int number,
-        string? title = null,
-        string? body = null,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public async Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default)
+    public override async Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default)
     {
         var index = Interlocked.Increment(ref checksCalls) - 1;
         LastNumber = number;
@@ -970,7 +946,7 @@ internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatfo
         return polls[Math.Min(index, polls.Length - 1)].Checks;
     }
 
-    public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default)
+    public override Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default)
     {
         var index = Interlocked.Increment(ref mergeCalls) - 1;
         return Task.FromResult(polls[Math.Min(index, polls.Length - 1)].Merge);
@@ -986,7 +962,7 @@ internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatfo
         return Task.FromResult(ReadyResult ?? PrResult<PrReference>.Ok(new PrReference(number, string.Empty)));
     }
 
-    public async Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default)
+    public override async Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default)
     {
         if (HoldLogs)
         {
@@ -1009,18 +985,6 @@ internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatfo
 
         return answer;
     }
-
-    public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
 
     /// <summary>Announces that the read with <paramref name="index"/> started.</summary>
     private void Signal(int index)

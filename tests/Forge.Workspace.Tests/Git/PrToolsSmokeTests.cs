@@ -4,9 +4,9 @@ using Xunit;
 namespace Forge.Workspace.Tests.Git;
 
 /// <summary>An in-memory pull request platform that records every call and lets a test change what the next read sees.</summary>
-internal sealed class PrLifecycleFakePlatform : IPrPlatform
+internal sealed class PrLifecycleFakePlatform : ThrowingPrPlatform
 {
-    public string Name => "FakeHub";
+    public override string Name => "FakeHub";
 
     public PrPlatformAvailability Availability { get; set; } = new(PrPlatformState.Ready, "logged in");
 
@@ -29,10 +29,10 @@ internal sealed class PrLifecycleFakePlatform : IPrPlatform
 
     public PrResult<PrReference>? CreateFailure { get; set; }
 
-    public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+    public override Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
         Task.FromResult(Availability);
 
-    public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default)
+    public override Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default)
     {
         ViewCount++;
         ViewSelectors.Add(selector);
@@ -45,7 +45,7 @@ internal sealed class PrLifecycleFakePlatform : IPrPlatform
                 reason: PrFailureReason.PullRequestNotFound));
     }
 
-    public Task<PrResult<PrReference>> CreatePullRequestAsync(
+    public override Task<PrResult<PrReference>> CreatePullRequestAsync(
         string workingDirectory,
         string title,
         string body,
@@ -67,7 +67,7 @@ internal sealed class PrLifecycleFakePlatform : IPrPlatform
         return Task.FromResult(PrResult<PrReference>.Ok(new PrReference(7, Url)));
     }
 
-    public Task<PrResult<PrReference>> EditPullRequestAsync(
+    public override Task<PrResult<PrReference>> EditPullRequestAsync(
         string workingDirectory,
         int number,
         string? title = null,
@@ -82,27 +82,6 @@ internal sealed class PrLifecycleFakePlatform : IPrPlatform
 
         return Task.FromResult(PrResult<PrReference>.Ok(new PrReference(number, Current?.Url ?? string.Empty)));
     }
-
-    public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
 }
 
 /// <summary>A todo store that only knows a plan summary and a list of steps.</summary>

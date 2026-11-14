@@ -817,8 +817,8 @@ public sealed class RemovalFlowTests : IDisposable
                 : Task.FromResult(Worktrees ?? [.. Directory.GetDirectories(Root, "*", SearchOption.AllDirectories).Select(Listed)]);
     }
 
-    /// <summary>In-memory catalog and store: the members <see cref="RemovalFlow"/> uses, with injectable failures.</summary>
-    private sealed class FakeCatalog : ISessionCatalog, ISessionStore
+    /// <summary>In-memory catalog and store: the members <see cref="RemovalFlow"/> uses, with injectable failures; everything else refuses loudly.</summary>
+    private sealed class FakeCatalog : ThrowingSessionStore, ISessionCatalog
     {
         private readonly List<SessionInfo> rows = [];
 
@@ -838,12 +838,12 @@ public sealed class RemovalFlowTests : IDisposable
 
         public SessionInfo Get(string id) => Assert.IsType<SessionInfo>(Find(id));
 
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
+        public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<SessionInfo>>(rows
                 .Where(r => r.Status != SessionStatus.Deleted && (query.ProjectId is null || r.ProjectId == query.ProjectId))
                 .ToArray());
 
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult(Find(sessionId));
+        public override Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult(Find(sessionId));
 
         public Task<int> SoftDeleteAsync(IReadOnlyList<string> sessionIds, CancellationToken ct)
         {
@@ -880,29 +880,5 @@ public sealed class RemovalFlowTests : IDisposable
             rows.RemoveAll(r => purged.Contains(r.Id));
             return Task.FromResult<IReadOnlyList<string>>(purged);
         }
-
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) => throw new NotSupportedException();
-
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) => throw new NotSupportedException();
     }
 }

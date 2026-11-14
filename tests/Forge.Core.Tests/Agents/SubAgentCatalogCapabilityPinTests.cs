@@ -3,6 +3,7 @@ using Forge.Core.Agents;
 using Forge.Core.Prompts;
 using Forge.Core.Storage;
 using Xunit;
+using static Forge.Core.Tests.Agents.SubAgentTestSupport;
 
 namespace Forge.Core.Tests.Agents;
 
@@ -16,9 +17,6 @@ namespace Forge.Core.Tests.Agents;
 /// </summary>
 public sealed class SubAgentCatalogCapabilityPinTests
 {
-    private static readonly AgentDefinition Scout =
-        new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
-
     /// <summary>Plain store with call counting; deliberately NOT an <see cref="ISessionCatalog"/>.</summary>
     private sealed class PlainStore : ISessionStore
     {
@@ -114,8 +112,8 @@ public sealed class SubAgentCatalogCapabilityPinTests
         AgentTestHost.Create(
             provider,
             [FakeTool.Echo("read")],
-            options: new AgentOptions { MaxParallelSubAgents = 4, MaxSubAgentDepth = 3, MaxTurns = 10 },
-            agents: [Scout],
+            options: Options(),
+            agents: [SubAgentTestSupport.Scout],
             store: store);
 
     private static FakeProvider SpawningProvider() =>
@@ -123,7 +121,7 @@ public sealed class SubAgentCatalogCapabilityPinTests
             Turn.LastUserText(request) == "do research"
                 ? Turn.Say("child report")
                 : index == 0
-                    ? Turn.Call(("call-1", "spawn_agent", """{"kind":"Scout","task":"do research"}"""))
+                    ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "do research")))
                     : Turn.Say("parent done"));
 
     [Fact]

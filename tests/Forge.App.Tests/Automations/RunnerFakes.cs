@@ -254,7 +254,7 @@ internal sealed class ScriptedMailbox : ISessionMailbox
     }
 }
 
-internal sealed class RunnerCatalog : ISessionCatalog
+internal sealed class RunnerCatalog : ThrowingSessionCatalog
 {
     public IReadOnlyList<SessionInfo> Sessions { get; set; } = [];
 
@@ -262,9 +262,9 @@ internal sealed class RunnerCatalog : ISessionCatalog
 
     public List<(string Id, SessionStatus Status)> StatusChanges { get; } = [];
 
-    public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) => Task.FromResult(Sessions);
+    public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) => Task.FromResult(Sessions);
 
-    public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct)
+    public override Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct)
     {
         if (RefuseStatus.Contains(sessionId))
         {
@@ -274,12 +274,6 @@ internal sealed class RunnerCatalog : ISessionCatalog
         StatusChanges.Add((sessionId, status));
         return Task.FromResult(true);
     }
-
-    public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => throw new NotSupportedException();
 }
 
 internal sealed class RunnerProjects : IProjectRegistry

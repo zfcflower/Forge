@@ -148,6 +148,42 @@ internal static class TerminalWait
             }
         }
     }
+
+    /// <summary>Waits for a shell to write a child's pid into <paramref name="fileName"/> under
+    /// <paramref name="directory"/>. The file may be seen before its content is complete, so an unreadable
+    /// or non-positive pid is polled again instead of failing.</summary>
+    public static async Task<int> WaitForPidFileAsync(string directory, string fileName, TimeSpan limit, CancellationToken ct)
+    {
+        var marker = Path.Combine(directory, fileName);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(limit);
+        while (true)
+        {
+            if (File.Exists(marker))
+            {
+                try
+                {
+                    if (int.TryParse(File.ReadAllText(marker).Trim(), out var pid) && pid > 0)
+                    {
+                        return pid;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // The shell still holds the file open for writing; keep polling.
+                }
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException($"Timed out after {limit.TotalSeconds:0} s waiting for the pid file '{marker}'.");
+            }
+        }
+    }
 }
 
 /// <summary>A real Extension Host process driven over a raw <see cref="IpcPeer"/> with the
@@ -526,4 +562,37 @@ internal sealed class RawTerminalHost : IAsyncDisposable
         await peer.DisposeAsync().ConfigureAwait(false);
         await host.DisposeAsync().ConfigureAwait(false);
     }
+}
+
+/// <summary>Commands that start a 60 s sleeper child inside the terminal's shell and write its pid to a
+/// marker file. The child outlives any parent-only kill, so a test that waits for the pid file and then
+/// for the child's death proves the whole tree was taken.</summary>
+internal static class TerminalSleeper
+{
+    /// <summary>The sleeper command for the current platform. On Windows the child inherits the shell's
+    /// private Job Object, so killing the job kills it too; on POSIX the background job owns a process group
+    /// of its own inside the shell's session, which only a session-wide sweep takes.</summary>
+    public static string SpawnCommand(string pidFile) =>
+        OperatingSystem.IsWindows()
+            ? "$p = Start-Process -FilePath powershell.exe -ArgumentList '-NoExit','-Command','Start-Sleep 60' -PassThru; " +
+              "$p.Id | Out-File -Encoding ascii '" + pidFile.Replace('\\', '/') + "'\r"
+            : "sleep 60 & echo $! > '" + pidFile + "'\r";
+}
+
+/// <summary>The numbered-line flood the output and flow-control tests push through a shell. Every line has
+/// the same fixed-length body, so a gap, duplicate or reorder shows up in both the byte count and the text.</summary>
+internal static class TerminalFlood
+{
+    public const string LineBody = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+    /// <summary>Prints <c>LINE-0000001</c> … <c>LINE-&lt;lines&gt;</c> followed by the done marker.</summary>
+    public static string Command(int lines) =>
+        OperatingSystem.IsWindows()
+            ? $"$n = {lines}; 1..$n | % {{ 'LINE-{{0:D7}}-{LineBody}' -f $_ }}; \"DONE-COUNT-$n\"\r"
+            : $"n={lines}; i=1; while [ $i -le $n ]; do printf 'LINE-%07d-{LineBody}\\n' \"$i\"; i=$((i+1)); done; echo \"DONE-COUNT-$i\"\r";
+
+    /// <summary>The marker the flood prints after its last line. POSIX shells print it after the loop
+    /// counter has been incremented once more, so its number differs from Windows by one.</summary>
+    public static string DoneMarker(int lines) =>
+        OperatingSystem.IsWindows() ? $"DONE-COUNT-{lines}" : $"DONE-COUNT-{lines + 1}";
 }

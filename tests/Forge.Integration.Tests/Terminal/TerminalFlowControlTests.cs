@@ -28,22 +28,16 @@ public sealed class TerminalFlowControlTests
         if (OperatingSystem.IsWindows())
         {
             await host.WaitForTextAsync(terminalId, "PS", TimeSpan.FromSeconds(30), ct);
-            await host.SendInputAsync(
-                terminalId,
-                $"$n = {FloodLines}; 1..$n | % {{ 'LINE-{{0:D7}}-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' -f $_ }}; \"DONE-COUNT-$n\"\r",
-                ct);
-            doneMarker = $"DONE-COUNT-{FloodLines}";
+            await host.SendInputAsync(terminalId, TerminalFlood.Command(FloodLines), ct);
         }
         else
         {
             await host.SendInputAsync(terminalId, "echo FLOW-READY\r", ct);
             await host.WaitForTextAsync(terminalId, "FLOW-READY", TimeSpan.FromSeconds(30), ct);
-            await host.SendInputAsync(
-                terminalId,
-                $"n={FloodLines}; i=1; while [ $i -le $n ]; do printf 'LINE-%07d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' \"$i\"; i=$((i+1)); done; echo \"DONE-COUNT-$i\"\r",
-                ct);
-            doneMarker = $"DONE-COUNT-{FloodLines + 1}";
+            await host.SendInputAsync(terminalId, TerminalFlood.Command(FloodLines), ct);
         }
+
+        doneMarker = TerminalFlood.DoneMarker(FloodLines);
 
         await host.WaitForTextAsync(terminalId, $"LINE-{FloodLines:0000000}", TimeSpan.FromSeconds(120), ct);
         await host.WaitForTextAsync(terminalId, doneMarker, TimeSpan.FromSeconds(60), ct);
@@ -64,7 +58,6 @@ public sealed class TerminalFlowControlTests
         host.AutoAck = false;
         var (terminalId, _, _) = await host.StartTerminalAsync(TerminalShells.Rich(), ct: ct);
 
-        string doneMarker;
         if (OperatingSystem.IsWindows())
         {
             await host.WaitForTextAsync(terminalId, "PS", TimeSpan.FromSeconds(30), ct);
@@ -79,22 +72,8 @@ public sealed class TerminalFlowControlTests
         await host.AckAsync(terminalId, acknowledged, ct);
         var floor = host.ByteCountOf(terminalId);
 
-        if (OperatingSystem.IsWindows())
-        {
-            await host.SendInputAsync(
-                terminalId,
-                $"$n = {FillLines}; 1..$n | % {{ 'LINE-{{0:D7}}-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' -f $_ }}; \"DONE-COUNT-$n\"\r",
-                ct);
-            doneMarker = $"DONE-COUNT-{FillLines}";
-        }
-        else
-        {
-            await host.SendInputAsync(
-                terminalId,
-                $"n={FillLines}; i=1; while [ $i -le $n ]; do printf 'LINE-%07d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' \"$i\"; i=$((i+1)); done; echo \"DONE-COUNT-$i\"\r",
-                ct);
-            doneMarker = $"DONE-COUNT-{FillLines + 1}";
-        }
+        await host.SendInputAsync(terminalId, TerminalFlood.Command(FillLines), ct);
+        var doneMarker = TerminalFlood.DoneMarker(FillLines);
 
         // The window fills: delivery reaches ~1 MiB past the floor and then freezes.
         var frozenAt = await WaitForFrozenAsync(host, terminalId, floor, TimeSpan.FromSeconds(90), ct);

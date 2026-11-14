@@ -331,7 +331,7 @@ public sealed class ProjectTreeWorktreeSessionTests
     /// Records every create request (the flow calls it on a pool thread) and either answers like a working store or
     /// throws <see cref="Failure"/> after noting whether the worktree directory existed at that moment.
     /// </summary>
-    private sealed class RecordingCatalog : ISessionCatalog
+    private sealed class RecordingCatalog : SessionCatalogDouble
     {
         private readonly object gate = new();
         private readonly List<CreateRequest> requests = [];
@@ -360,7 +360,7 @@ public sealed class ProjectTreeWorktreeSessionTests
             }
         }
 
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
+        public override Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
         {
             lock (gate)
             {
@@ -385,15 +385,7 @@ public sealed class ProjectTreeWorktreeSessionTests
                 });
         }
 
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
+        public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 }

@@ -6,19 +6,13 @@ namespace Forge.App.Tests;
 /// A session catalog that stores nothing: every write reports success and every read is empty, so a test can build a
 /// session-backed view model without a database.
 /// </summary>
-internal sealed class EmptySessionCatalog(DateTimeOffset createdAt) : ISessionCatalog
+internal sealed class EmptySessionCatalog(DateTimeOffset createdAt) : SessionCatalogDouble
 {
-    public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
+    public override Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
         Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, createdAt));
 
-    public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
+    public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-    public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-    public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-    public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
 }
 
 /// <summary>
@@ -48,33 +42,34 @@ internal sealed class EmptyTodoStore(string itemId, DateTimeOffset at) : ITodoSt
 }
 
 /// <summary>
-/// A message log that keeps nothing: every read is empty, every write reports success, and a created session is named
-/// "created" under <paramref name="at"/>. The fakes of the turn-routing suites only need the store to behave like one.
+/// A message log double that keeps nothing unless a subclass overrides a member: every read is empty, every write
+/// reports success, and a created session is named "created" under <paramref name="at"/>. The fakes of the
+/// turn-routing suites only need the store to behave like one.
 /// </summary>
-internal sealed class EmptySessionStore(DateTimeOffset at) : ISessionStore
+internal class EmptySessionStore(DateTimeOffset at) : ISessionStore
 {
-    public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
+    public virtual Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
         Task.FromResult(new SessionInfo("created", workspacePath, title, at));
 
-    public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult<SessionInfo?>(null);
+    public virtual Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult<SessionInfo?>(null);
 
-    public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
+    public virtual Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<SessionInfo>>([]);
 
-    public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) =>
+    public virtual Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) =>
         Task.FromResult(1L);
 
-    public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
+    public virtual IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
         Empty();
 
-    public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => Task.FromResult(0L);
+    public virtual Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => Task.FromResult(0L);
 
-    public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
+    public virtual Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
 
-    public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
+    public virtual Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<SummaryRecord>>([]);
 
-    public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
+    public virtual Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<SearchHit>>([]);
 
     private static async IAsyncEnumerable<StoredMessage> Empty()

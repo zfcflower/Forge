@@ -775,13 +775,13 @@ internal static class PrCheckSample
 /// An <see cref="IPrPlatform"/> that answers the n-th poll with the n-th scripted step (the last step repeats). Only the
 /// calls the check tools make are implemented.
 /// </summary>
-internal sealed class PrCheckFakePlatform(IReadOnlyList<PrCheckStep> script) : IPrPlatform
+internal sealed class PrCheckFakePlatform(IReadOnlyList<PrCheckStep> script) : ThrowingPrPlatform
 {
     private int checksCalls;
     private int mergeCalls;
     private int viewCalls;
 
-    public string Name => "Fake";
+    public override string Name => "Fake";
 
     /// <summary>Invoked with the zero-based poll index at the start of every checks read; tests cancel from here.</summary>
     public Action<int>? OnChecks { get; set; }
@@ -815,33 +815,14 @@ internal sealed class PrCheckFakePlatform(IReadOnlyList<PrCheckStep> script) : I
 
     public string? LastDirectory { get; private set; }
 
-    public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default)
+    public override Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default)
     {
         Interlocked.Increment(ref viewCalls);
         LastSelector = selector;
         return Task.FromResult(ViewResult);
     }
 
-    public Task<PrResult<PrReference>> CreatePullRequestAsync(
-        string workingDirectory,
-        string title,
-        string body,
-        string baseBranch,
-        string headBranch,
-        bool draft = false,
-        CancellationToken ct = default) => throw new NotSupportedException();
-
-    public Task<PrResult<PrReference>> EditPullRequestAsync(
-        string workingDirectory,
-        int number,
-        string? title = null,
-        string? body = null,
-        CancellationToken ct = default) => throw new NotSupportedException();
-
-    public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default)
+    public override Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default)
     {
         var index = Interlocked.Increment(ref checksCalls) - 1;
         LastNumber = number;
@@ -855,24 +836,9 @@ internal sealed class PrCheckFakePlatform(IReadOnlyList<PrCheckStep> script) : I
         return Task.FromResult(script[Math.Min(index, script.Count - 1)].Checks);
     }
 
-    public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default)
+    public override Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default)
     {
         var index = Interlocked.Increment(ref mergeCalls) - 1;
         return Task.FromResult(script[Math.Min(index, script.Count - 1)].Merge);
     }
-
-    public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
 }

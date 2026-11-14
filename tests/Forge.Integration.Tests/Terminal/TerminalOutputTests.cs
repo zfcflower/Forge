@@ -19,27 +19,21 @@ public sealed class TerminalOutputTests
         if (OperatingSystem.IsWindows())
         {
             await host.WaitForTextAsync(terminalId, "PS", TimeSpan.FromSeconds(30), ct);
-            await host.SendInputAsync(
-                terminalId,
-                $"$n = {FloodLines}; 1..$n | % {{ 'LINE-{{0:D7}}-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' -f $_ }}; \"DONE-COUNT-$n\"\r",
-                ct);
+            await host.SendInputAsync(terminalId, TerminalFlood.Command(FloodLines), ct);
             await host.WaitForTextAsync(terminalId, $"LINE-{FloodLines:0000000}", TimeSpan.FromSeconds(90), ct);
-            await host.WaitForTextAsync(terminalId, $"DONE-COUNT-{FloodLines}", TimeSpan.FromSeconds(30), ct);
+            await host.WaitForTextAsync(terminalId, TerminalFlood.DoneMarker(FloodLines), TimeSpan.FromSeconds(30), ct);
             TerminalAsserts.SequenceIsContinuous(host.FramesOf(terminalId), terminalId);
-            TerminalAsserts.FloodIsLosslessInOrder(host.TextOf(terminalId), FloodLines, $"DONE-COUNT-{FloodLines}");
+            TerminalAsserts.FloodIsLosslessInOrder(host.TextOf(terminalId), FloodLines, TerminalFlood.DoneMarker(FloodLines));
         }
         else
         {
             await host.SendInputAsync(terminalId, "echo SEQ-READY\r", ct);
             await host.WaitForTextAsync(terminalId, "SEQ-READY", TimeSpan.FromSeconds(30), ct);
-            await host.SendInputAsync(
-                terminalId,
-                $"n={FloodLines}; i=1; while [ $i -le $n ]; do printf 'LINE-%07d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' \"$i\"; i=$((i+1)); done; echo \"DONE-COUNT-$i\"\r",
-                ct);
+            await host.SendInputAsync(terminalId, TerminalFlood.Command(FloodLines), ct);
             await host.WaitForTextAsync(terminalId, $"LINE-{FloodLines:0000000}", TimeSpan.FromSeconds(90), ct);
-            await host.WaitForTextAsync(terminalId, $"DONE-COUNT-{FloodLines + 1}", TimeSpan.FromSeconds(30), ct);
+            await host.WaitForTextAsync(terminalId, TerminalFlood.DoneMarker(FloodLines), TimeSpan.FromSeconds(30), ct);
             TerminalAsserts.SequenceIsContinuous(host.FramesOf(terminalId), terminalId);
-            TerminalAsserts.FloodIsLosslessInOrder(host.TextOf(terminalId), FloodLines, $"DONE-COUNT-{FloodLines + 1}");
+            TerminalAsserts.FloodIsLosslessInOrder(host.TextOf(terminalId), FloodLines, TerminalFlood.DoneMarker(FloodLines));
         }
 
         Assert.Empty(host.Problems());

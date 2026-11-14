@@ -767,7 +767,7 @@ public sealed class GitSyncShipFinaleTests
     /// successful mark-ready clears the draft flag. <see cref="Hold"/> keeps the merge call in flight, so a test can look at
     /// the row mid-write instead of sleeping.
     /// </summary>
-    private sealed class ShipPlatform : IPrPlatform
+    private sealed class ShipPlatform : ThrowingPrPlatform, IPrPlatform
     {
         private readonly Lock gate = new();
         private readonly List<(string Directory, int Number, PrMergeMethod Method, bool DeleteBranch)> merges = [];
@@ -775,7 +775,7 @@ public sealed class GitSyncShipFinaleTests
         private int views;
         private int creates;
 
-        public string Name => "ForgeHub";
+        public override string Name => "ForgeHub";
 
         /// <summary>The pull request the branch has right now; null is "no pull request for this branch".</summary>
         public PullRequestInfo? Current { get; set; }
@@ -822,10 +822,10 @@ public sealed class GitSyncShipFinaleTests
             }
         }
 
-        public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+        public override Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
             Task.FromResult(new PrPlatformAvailability(PrPlatformState.Ready, "logged in"));
 
-        public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(
+        public override Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(
             string workingDirectory,
             string? selector = null,
             CancellationToken ct = default)
@@ -901,7 +901,7 @@ public sealed class GitSyncShipFinaleTests
         /// <summary>How many pull requests the row asked to create.</summary>
         public int CreateCalls => Volatile.Read(ref creates);
 
-        public Task<PrResult<PrReference>> CreatePullRequestAsync(
+        public override Task<PrResult<PrReference>> CreatePullRequestAsync(
             string workingDirectory,
             string title,
             string body,
@@ -913,35 +913,6 @@ public sealed class GitSyncShipFinaleTests
             Interlocked.Increment(ref creates);
             return Task.FromResult(CreateResult ?? PrResult<PrReference>.Ok(new PrReference(91, UrlOf(91))));
         }
-
-        public Task<PrResult<PrReference>> EditPullRequestAsync(
-            string workingDirectory,
-            int number,
-            string? title = null,
-            string? body = null,
-            CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
 
         private static string UrlOf(int number) => "https://example.test/acme/forge/pull/" + number.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }

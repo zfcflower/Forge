@@ -4,6 +4,7 @@ using Forge.Abstractions;
 using Forge.Core.Agents;
 using Forge.Core.Prompts;
 using Forge.Core.Storage;
+using Xunit;
 
 namespace Forge.Core.Tests.Agents;
 
@@ -492,4 +493,43 @@ internal static class AgentTestHost
 
     public static AgentDefinition Definition(string name, ModelSettings? model = null, IReadOnlyList<string>? tools = null) =>
         new(name, $"{name} kind.", $"{name} role prompt.", model ?? new ModelSettings("default"), tools);
+}
+
+/// <summary>The Scout definition, default sub-agent options and the spawn/id helpers every sub-agent test file repeats.</summary>
+internal static class SubAgentTestSupport
+{
+    public static readonly AgentDefinition Scout =
+        new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
+
+    public static string Workspace => Path.GetTempPath();
+
+    public static AgentOptions Options(int maxParallel = 4, int maxDepth = 3, int maxTurns = 10) =>
+        new() { MaxParallelSubAgents = maxParallel, MaxSubAgentDepth = maxDepth, MaxTurns = maxTurns };
+
+    public static string Spawn(string kind, string task, string? resumeId = null) =>
+        resumeId is null
+            ? $$"""{"kind":"{{kind}}","task":"{{task}}"}"""
+            : $$"""{"kind":"{{kind}}","task":"{{task}}","resume_id":"{{resumeId}}"}""";
+
+    public static int ToolRounds(ChatRequest request) =>
+        request.Messages.Count(m => m.Role == MessageRole.Tool);
+
+    public static string AgentId(string content)
+    {
+        const string marker = "[agent_id: ";
+        var start = content.LastIndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"No agent id in '{content}'.");
+        start += marker.Length;
+        return content[start..content.IndexOf(']', start)];
+    }
+
+    /// <summary>The root spawns a Scout child on <paramref name="task"/> in its first turn; the child answers its only
+    /// turn with <paramref name="childReply"/> and the parent then finishes with <paramref name="parentReply"/>.</summary>
+    public static FakeProvider ParentSpawnsScout(string task, string childReply = "child report", string parentReply = "parent done") =>
+        new((request, index) =>
+            request.Messages.Count == 1 && Turn.LastUserText(request) == task
+                ? Turn.Say(childReply)
+                : index == 0
+                    ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", task)))
+                    : Turn.Say(parentReply));
 }

@@ -1,6 +1,7 @@
 using Forge.Abstractions;
 using Forge.Core.Agents;
 using Xunit;
+using static Forge.Core.Tests.Agents.SubAgentTestSupport;
 
 namespace Forge.Core.Tests.Agents;
 
@@ -8,17 +9,6 @@ namespace Forge.Core.Tests.Agents;
 /// merging, tool visibility by depth, and how control outcomes surface in tool results.</summary>
 public sealed class SubAgentControlSurfacePinTests
 {
-    private static string Workspace => Path.GetTempPath();
-
-    private static readonly AgentDefinition Scout =
-        new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
-
-    private static AgentOptions Options(int maxParallel = 4, int maxDepth = 3, int maxTurns = 10) =>
-        new() { MaxParallelSubAgents = maxParallel, MaxSubAgentDepth = maxDepth, MaxTurns = maxTurns };
-
-    private static string Spawn(string kind, string task) =>
-        $$"""{"kind":"{{kind}}","task":"{{task}}"}""";
-
     [Fact]
     public void Unknown_ids_report_NotFound()
     {
@@ -36,12 +26,7 @@ public sealed class SubAgentControlSurfacePinTests
     [Fact]
     public async Task Finished_children_report_AlreadyFinished()
     {
-        var provider = new FakeProvider((request, index) =>
-            request.Messages.Count == 1 && Turn.LastUserText(request) == "inspect"
-                ? Turn.Say("child report")
-                : index == 0
-                    ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "inspect")))
-                    : Turn.Say("parent done"));
+        var provider = ParentSpawnsScout("inspect");
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
         var (_, events) = await AgentTestHost.RunRootAsync(host, "session-cs-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(15));
         Assert.Empty(events.OfType<AgentFailed>());
@@ -196,9 +181,6 @@ public sealed class SubAgentControlSurfacePinTests
         Assert.True(results[1].IsError);
         Assert.Contains("already finished", results[1].Content, StringComparison.OrdinalIgnoreCase);
     }
-
-    private static int ToolRounds(ChatRequest request) =>
-        request.Messages.Count(m => m.Role == MessageRole.Tool);
 
     private sealed class CollectingSink : IAgentEventSink
     {

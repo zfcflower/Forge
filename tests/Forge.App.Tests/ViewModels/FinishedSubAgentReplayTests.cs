@@ -151,21 +151,15 @@ public sealed class FinishedSubAgentReplayTests
     private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition);
 
     /// <summary>Only the child session's message log matters; anything else the workspace reads is empty.</summary>
-    private sealed class ChildStore(IReadOnlyList<StoredMessage> childMessages) : ISessionStore
+    private sealed class ChildStore(IReadOnlyList<StoredMessage> childMessages) : EmptySessionStore(DateTimeOffset.UnixEpoch)
     {
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
+        public override Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
             Task.FromResult(Info(ChildSessionId, ChildKind, ChildTask));
 
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) =>
+        public override Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) =>
             Task.FromResult<SessionInfo?>(Info(sessionId, null, null));
 
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) =>
-            Task.FromResult(1L);
-
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
+        public override IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
             ReadCoreAsync(sessionId, fromSeq, toSeq);
 
         private async IAsyncEnumerable<StoredMessage> ReadCoreAsync(string sessionId, long fromSeq, long? toSeq)
@@ -184,35 +178,21 @@ public sealed class FinishedSubAgentReplayTests
             await Task.Yield();
         }
 
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) =>
+        public override Task<long> LastSeqAsync(string sessionId, CancellationToken ct) =>
             Task.FromResult(string.Equals(sessionId, ChildSessionId, StringComparison.Ordinal) ? (long)childMessages.Count : 0L);
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SummaryRecord>>([]);
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SearchHit>>([]);
     }
 
     /// <summary>One child session of <see cref="ParentSessionId"/>, as the catalog returns it after a restart.</summary>
-    private sealed class ChildCatalog : ISessionCatalog
+    private sealed class ChildCatalog : SessionCatalogDouble
     {
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
+        public override Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
             Task.FromResult(Info(ChildSessionId, ChildKind, ChildTask));
 
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
+        public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<SessionInfo>>(
                 string.Equals(query.ParentSessionId, ParentSessionId, StringComparison.Ordinal)
                     ? [Info(ChildSessionId, ChildKind, ChildTask)]
                     : []);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 
 }

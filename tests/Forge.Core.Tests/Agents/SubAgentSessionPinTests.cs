@@ -3,20 +3,13 @@ using System.Runtime.CompilerServices;
 using Forge.Abstractions;
 using Forge.Core.Agents;
 using Xunit;
+using static Forge.Core.Tests.Agents.SubAgentTestSupport;
 
 namespace Forge.Core.Tests.Agents;
 
 /// <summary>Pins session wiring of sub-agents: catalog fields, touch failures, resume and host isolation.</summary>
 public sealed class SubAgentSessionPinTests
 {
-    private static string Workspace => Path.GetTempPath();
-
-    private static readonly AgentDefinition Scout =
-        new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
-
-    private static AgentOptions Options(int maxParallel = 4, int maxDepth = 3, int maxTurns = 10) =>
-        new() { MaxParallelSubAgents = maxParallel, MaxSubAgentDepth = maxDepth, MaxTurns = maxTurns };
-
     private sealed class FakeCatalogStore : ISessionStore, ISessionCatalog
     {
         private readonly Lock gate = new();
@@ -239,12 +232,7 @@ public sealed class SubAgentSessionPinTests
             LastActiveAt = DateTimeOffset.UtcNow,
         };
         store.SeedParent(parentSeed);
-        var provider = new FakeProvider((request, index) =>
-            Turn.LastUserText(request) == "do research"
-                ? Turn.Say("child report")
-                : index == 0
-                    ? Turn.Call(("call-1", "spawn_agent", """{"kind":"Scout","task":"do research"}"""))
-                    : Turn.Say("parent done"));
+        var provider = ParentSpawnsScout("do research");
         var host = AgentTestHost.Create(
             provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout], store: store);
         var root = host.CreateRoot(parentSeed.Id, Workspace);
@@ -367,7 +355,7 @@ public sealed class SubAgentSessionPinTests
                 Turn.LastUserText(request) == "child-" + tag
                     ? Turn.Say("report-" + tag)
                     : index == 0
-                        ? Turn.Call(("call-1", "spawn_agent", $$"""{"kind":"Scout","task":"child-{{tag}}"}"""))
+                        ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "child-" + tag)))
                         : Turn.Say("parent-" + tag));
             return AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
         }

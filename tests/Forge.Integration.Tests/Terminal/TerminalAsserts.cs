@@ -30,4 +30,18 @@ internal static class TerminalAsserts
 
         Assert.Contains(doneMarker, text, StringComparison.Ordinal);
     }
+
+    /// <summary>The host's output carries no terminal cleanup failure: a line naming the terminal and
+    /// saying it could not / did not / is still running is a teardown defect.</summary>
+    public static void NoCleanupFailures(RawTerminalHost host)
+    {
+        var failures = host.HostOutput
+            .Where(line =>
+                line.Contains("terminal", StringComparison.OrdinalIgnoreCase) &&
+                (line.Contains("could not", StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains("did not", StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains("still running", StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+        Assert.Empty(failures);
+    }
 }

@@ -75,7 +75,7 @@ public sealed class StepCommitterConcurrencyTests
         const string OtherSession = "session-2";
         harness.WorktreeBySession[OtherSession] = Spell(harness.Repo.Path, spelling);
         var first = await harness.AddDoneAsync("first");
-        var second = await AddDoneInAsync(harness, OtherSession, "second");
+        var second = await harness.AddDoneInAsync(OtherSession, "second");
         harness.Repo.WriteFile("one.txt", "1\n");
         using var cts = Bound();
 
@@ -214,7 +214,7 @@ public sealed class StepCommitterConcurrencyTests
         harness.Repo.WriteFile("change.txt", "1\n");
         other.WriteFile("change.txt", "2\n");
         var first = await harness.AddDoneAsync("first");
-        var second = await AddDoneInAsync(harness, OtherSession, "second");
+        var second = await harness.AddDoneInAsync(OtherSession, "second");
         using var cts = Bound();
 
         var results = await Task.WhenAll(
@@ -239,7 +239,7 @@ public sealed class StepCommitterConcurrencyTests
         harness.Repo.WriteFile("change.txt", "1\n");
         other.WriteFile("change.txt", "2\n");
         var blocked = await harness.AddDoneAsync("blocked");
-        var free = await AddDoneInAsync(harness, OtherSession, "free");
+        var free = await harness.AddDoneInAsync(OtherSession, "free");
         using var cts = Bound();
 
         var blockedTask = Task.Run(() => harness.Committer.CommitStepAsync(blocked, cts.Token), cts.Token);
@@ -272,13 +272,6 @@ public sealed class StepCommitterConcurrencyTests
     }
 
     // ------------------------------------------------------------ helpers
-
-    private static async Task<TodoItem> AddDoneInAsync(StepCommitHarness harness, string sessionId, string title)
-    {
-        var added = await harness.Store.AddAsync(sessionId, title, null, null, CancellationToken.None);
-        var updated = await harness.Store.UpdateAsync(added.Id, null, TodoStatus.Done, null, CancellationToken.None);
-        return updated ?? throw new InvalidOperationException("the item vanished");
-    }
 
     private static string Spell(string path, string spelling) => spelling switch
     {

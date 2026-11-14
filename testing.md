@@ -162,6 +162,20 @@ L1 只跑一个命名空间时,若改动跨了两个落点(例如同时改了 `W
 
 验证:`dotnet build tests/Forge.App.Tests` 0 警告 0 错误;改动触到的 12 个命名空间(含 Providers)2,334 例全绿(8 m 5 s);`Forge.App.LiveSwitch.Tests` 8/8 全绿(22 s)。
 
+## 夹具登记表(2026-11-14 deslop 审计后的收敛)
+
+同一测试项目内写新测试时**优先引用既有替身/夹具**;没有就往登记文件里加一份,不允许再声明私有同名副本。全仓 deslop 扫描(`docs/analysis/deslop-audit.md`)与五路并行重构已把下列注册表建好:
+
+| 项目 | 登记文件 | 内容 |
+| --- | --- | --- |
+| `Forge.App.Tests` | `SessionStoreDoubles.cs` | `MemorySessionStore`(带日志的 ISessionStore+ISessionCatalog)、`SessionCatalogDouble`(平凡成员基类)、`ThrowingSessionCatalog`/`ThrowingSessionStore`(虚方法全抛) |
+| `Forge.App.Tests` | `PrPlatformDoubles.cs` | `ThrowingPrPlatform`(非 DIM 成员全抛;`Merge/MarkReady` 是接口默认实现,刻意不声明) |
+| `Forge.Core.Tests/Agents` | `TestSupport.cs :: SubAgentTestSupport` | `Scout` 定义、`Options()`、`Spawn()`、`ToolRounds`、`AgentId`、`ParentSpawnsScout()` |
+| `Forge.Integration.Tests/Terminal` | `TerminalHosts.cs`/`TerminalAsserts.cs` | `TerminalWait.WaitForPidFileAsync`、`TerminalSleeper.SpawnCommand`、`TerminalFlood`、`NoCleanupFailures` |
+| `Forge.Editor.Tests/Lsp` | `WorkspaceDiagnosticsTests.cs :: WorkspaceFixture` | 诊断聚合器+目录+池的一体化夹具与 `OpenSessionAsync` |
+
+注意 C# 默认接口方法(DIM)陷阱:替身基类下再声明 DIM 同名公共方法不会重实现接口,必须在类上重新列出接口(`RemovalFlowTests`/`TreeMenuRowTests`/`GitSyncShipFinaleTests`/`ChecksPanelViewModelTests` 里有四处先例)。`Forge.App.LiveSwitch.Tests` 的替身拷贝是跨程序集结构性重复,动它需要 csproj 层面动作,未收敛。
+
 ## 已知债务(未处理,按收益排序)
 
 1. **放开 `Forge.App.Tests` 的并行。** 前置条件是把数据根从进程级环境变量改成可注入的实例(或把所有读写 `AppPaths` 的测试类收进同一个串行 collection),再逐个命名空间验证;放开后需连续跑 3 轮全量确认无偶发。收益最大、风险也最大,必须单独一个任务做。

@@ -52,11 +52,11 @@ internal static class PrCommentHarness
 }
 
 /// <summary>An in-memory pull request platform that keeps thread state, so a reply posted by a tool shows up in the next read.</summary>
-internal sealed class FakePrPlatform : IPrPlatform
+internal sealed class FakePrPlatform : ThrowingPrPlatform
 {
     private int nextComment = 1000;
 
-    public string Name => "Fake";
+    public override string Name => "Fake";
 
     /// <summary>The login the fake "posts" replies as.</summary>
     public string Login { get; set; } = "octo";
@@ -87,26 +87,26 @@ internal sealed class FakePrPlatform : IPrPlatform
 
     public PrResult<PrText> Diff { get; set; } = PrResult<PrText>.Ok(new PrText("diff --git a/src/A.cs b/src/A.cs\n+added\n", false));
 
-    public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+    public override Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
         Task.FromResult(new PrPlatformAvailability(PrPlatformState.Ready, "ok"));
 
-    public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default)
+    public override Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         return Task.FromResult(ViewFailure ?? PrResult<PullRequestInfo>.Ok(PullRequest));
     }
 
-    public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default)
+    public override Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         ThreadReads++;
         return Task.FromResult(ThreadsFailure ?? PrResult<IReadOnlyList<PrReviewThread>>.Ok(Threads.ToArray()));
     }
 
-    public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+    public override Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
         Task.FromResult(Diff);
 
-    public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default)
+    public override Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         if (ReplyFailure is not null)
@@ -140,7 +140,7 @@ internal sealed class FakePrPlatform : IPrPlatform
         return Task.FromResult(PrResult<PrReviewComment>.Ok(comment));
     }
 
-    public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default)
+    public override Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         if (ResolveFailure is not null)
@@ -163,21 +163,6 @@ internal sealed class FakePrPlatform : IPrPlatform
         Threads[index] = Threads[index] with { IsResolved = true, ResolvedBy = Login };
         return Task.FromResult(PrResult<PrThreadResolution>.Ok(new PrThreadResolution(threadId, true)));
     }
-
-    public Task<PrResult<PrReference>> CreatePullRequestAsync(string workingDirectory, string title, string body, string baseBranch, string headBranch, bool draft = false, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReference>> EditPullRequestAsync(string workingDirectory, int number, string? title = null, string? body = null, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
 }
 
 public sealed class PrCommentToolsSmokeTests
@@ -265,41 +250,14 @@ public sealed class PrCommentToolsSmokeTests
             () => PrCommentHarness.InvokeAsync(tools.Comments, temp.Path, "{}", source.Token));
     }
 
-    private sealed class CancellingPlatform : IPrPlatform
+    private sealed class CancellingPlatform : ThrowingPrPlatform
     {
-        public string Name => "Cancelling";
+        public override string Name => "Cancelling";
 
-        public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+        public override Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
             throw new OperationCanceledException(ct);
 
-        public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
+        public override Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
             throw new OperationCanceledException(ct);
-
-        public Task<PrResult<PrReference>> CreatePullRequestAsync(string workingDirectory, string title, string body, string baseBranch, string headBranch, bool draft = false, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrReference>> EditPullRequestAsync(string workingDirectory, int number, string? title = null, string? body = null, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-
-        public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
-            throw new NotSupportedException();
     }
 }

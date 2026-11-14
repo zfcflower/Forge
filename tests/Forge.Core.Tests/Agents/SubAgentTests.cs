@@ -1,21 +1,14 @@
 using Forge.Abstractions;
 using Forge.Core.Agents;
 using Xunit;
+using static Forge.Core.Tests.Agents.SubAgentTestSupport;
 
 namespace Forge.Core.Tests.Agents;
 
 public class SubAgentTests
 {
-    private static string Workspace => Path.GetTempPath();
-
-    private static readonly AgentDefinition Scout =
-        new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
-
     private static readonly AgentDefinition Worker =
         new("Worker", "worker kind", "worker role", new ModelSettings("worker-model"), ["read"]);
-
-    private static AgentOptions Options(int maxParallel = 4, int maxDepth = 3, int maxTurns = 10) =>
-        new() { MaxParallelSubAgents = maxParallel, MaxSubAgentDepth = maxDepth, MaxTurns = maxTurns };
 
     private static void Raise(ref int peak, int value)
     {
@@ -26,32 +19,10 @@ public class SubAgentTests
         }
     }
 
-    private static string Spawn(string kind, string task, string? resumeId = null) =>
-        resumeId is null
-            ? $$"""{"kind":"{{kind}}","task":"{{task}}"}"""
-            : $$"""{"kind":"{{kind}}","task":"{{task}}","resume_id":"{{resumeId}}"}""";
-
-    private static int ToolRounds(ChatRequest request) =>
-        request.Messages.Count(message => message.Role == MessageRole.Tool);
-
-    private static string AgentId(string content)
-    {
-        const string marker = "[agent_id: ";
-        var start = content.LastIndexOf(marker, StringComparison.Ordinal);
-        Assert.True(start >= 0, $"No agent id in '{content}'.");
-        start += marker.Length;
-        return content[start..content.IndexOf(']', start)];
-    }
-
     [Fact]
     public async Task Spawn_returns_the_child_text_with_its_id()
     {
-        var provider = new FakeProvider((request, index) =>
-            request.Messages.Count == 1 && Turn.LastUserText(request) == "inspect"
-                ? Turn.Say("child report")
-                : index == 0
-                    ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "inspect")))
-                    : Turn.Say("parent done"));
+        var provider = ParentSpawnsScout("inspect");
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
         var (root, events) = await AgentTestHost.RunRootAsync(host);
 
@@ -78,12 +49,7 @@ public class SubAgentTests
     {
         var store = new InMemorySessionStore();
         var session = await store.CreateSessionAsync(Workspace, "root", CancellationToken.None);
-        var provider = new FakeProvider((request, index) =>
-            request.Messages.Count == 1 && Turn.LastUserText(request) == "inspect"
-                ? Turn.Say("child report")
-                : index == 0
-                    ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "inspect")))
-                    : Turn.Say("parent done"));
+        var provider = ParentSpawnsScout("inspect");
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout], store: store);
         var root = host.CreateRoot(session.Id, Workspace);
 
@@ -295,8 +261,7 @@ public class SubAgentTests
                 _ => Turn.Say("parent done"),
             };
         });
-        var worker = new AgentDefinition("Worker", "worker kind", "worker role", new ModelSettings("worker-model"), ["read"]);
-        var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout, worker]);
+        var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout, Worker]);
         var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());

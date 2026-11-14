@@ -47,7 +47,7 @@ internal sealed class CiFakeEngine : IAutomationEngine
     }
 }
 
-internal sealed class CiFakeCatalog : ISessionCatalog
+internal sealed class CiFakeCatalog : ThrowingSessionCatalog
 {
     public IReadOnlyList<SessionInfo> Sessions { get; set; } = [];
 
@@ -55,7 +55,7 @@ internal sealed class CiFakeCatalog : ISessionCatalog
 
     public int Calls { get; private set; }
 
-    public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
+    public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
     {
         Calls++;
         if (ThrowOnce)
@@ -66,37 +66,13 @@ internal sealed class CiFakeCatalog : ISessionCatalog
 
         return Task.FromResult(Sessions);
     }
-
-    public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => throw new NotSupportedException();
 }
 
-internal sealed class CiFakeSessions : ISessionStore
+internal sealed class CiFakeSessions : ThrowingSessionStore
 {
     public SessionInfo? Session { get; set; }
 
-    public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult(Session);
-
-    public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) => throw new NotSupportedException();
-
-    public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) => throw new NotSupportedException();
-
-    public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) => throw new NotSupportedException();
+    public override Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult(Session);
 }
 
 /// <summary>Only the key/value state of the store is used by the CI chain.</summary>
@@ -134,10 +110,8 @@ internal sealed class CiFakeState : IAutomationRunStore
     public Task<int> TrimAsync(int perAutomation, int total, CancellationToken ct) => throw new NotSupportedException();
 }
 
-internal sealed class CiFakePr : IPrPlatform
+internal sealed class CiFakePr : ThrowingPrPlatform
 {
-    public string Name => "Fake";
-
     public PullRequestInfo? Pull { get; set; }
 
     public IReadOnlyList<PrCheck> Checks { get; set; } = [];
@@ -148,10 +122,12 @@ internal sealed class CiFakePr : IPrPlatform
 
     public int ViewCalls { get; private set; }
 
-    public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+    public override string Name => "Fake";
+
+    public override Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
         Task.FromResult(new PrPlatformAvailability(PrPlatformState.Ready, "ok"));
 
-    public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default)
+    public override Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default)
     {
         ViewCalls++;
         if (workingDirectory == ThrowFor)
@@ -164,34 +140,13 @@ internal sealed class CiFakePr : IPrPlatform
             : PrResult<PullRequestInfo>.Fail(GitRemoteFailureKind.Other, "none", reason: PrFailureReason.PullRequestNotFound));
     }
 
-    public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+    public override Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
         Task.FromResult(PrResult<PrChecksSnapshot>.Ok(new PrChecksSnapshot(Checks)));
 
-    public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
+    public override Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
         Task.FromResult(Logs.TryGetValue(jobId, out var log)
             ? PrResult<PrText>.Ok(new PrText(log, false))
             : PrResult<PrText>.Fail(GitRemoteFailureKind.Other, "no log"));
-
-    public Task<PrResult<PrReference>> CreatePullRequestAsync(string workingDirectory, string title, string body, string baseBranch, string headBranch, bool draft = false, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReference>> EditPullRequestAsync(string workingDirectory, int number, string? title = null, string? body = null, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
-        throw new NotSupportedException();
-
-    public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
 }
 
 internal sealed class CiFakeGit : Forge.App.Automations.ICiGit

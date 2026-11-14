@@ -11,16 +11,21 @@ public sealed class McpToolAdapterImageTests
     private static readonly ToolCall Call = new("c", "srv__echo", "{}");
     private static readonly ToolContext Context = new("s", "/");
 
+    /// <summary>Starts a single scripted <c>srv</c> server answering <c>ToolsCall</c> with <paramref name="toolsCallResultJson"/>, then invokes its first tool with the shared call/context.</summary>
+    private static async Task<ToolResult> InvokeScriptedAsync(string toolsCallResultJson, int maxResultChars = 64 * 1024)
+    {
+        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ => toolsCallResultJson);
+        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server, maxResultChars: maxResultChars);
+        await fixture.Manager.StartAsync("srv", CancellationToken.None);
+        return await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
+    }
+
     [Fact]
     public async Task A_kept_png_becomes_an_image_block_with_the_exact_base64_and_no_text_placeholder()
     {
         const string base64 = "iVBORw0KGgoAAAANSUhEUg==";
-        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ =>
+        var result = await InvokeScriptedAsync(
             $$"""{"content":[{"type":"image","data":"{{base64}}","mimeType":"image/png"}]}""");
-        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
-        await fixture.Manager.StartAsync("srv", CancellationToken.None);
-
-        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
 
         var image = Assert.IsType<ImageBlock>(Assert.Single(result.Blocks));
         Assert.Equal("image/png", image.MediaType);
@@ -35,12 +40,8 @@ public sealed class McpToolAdapterImageTests
     public async Task Text_and_image_keep_the_text_first_and_the_image_second()
     {
         const string base64 = "iVBORw0KGgo=";
-        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ =>
+        var result = await InvokeScriptedAsync(
             $$"""{"content":[{"type":"text","text":"shot taken"},{"type":"image","data":"{{base64}}","mimeType":"image/png"}]}""");
-        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
-        await fixture.Manager.StartAsync("srv", CancellationToken.None);
-
-        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
 
         Assert.Equal(2, result.Blocks.Count);
         var text = Assert.IsType<TextBlock>(result.Blocks[0]);
@@ -54,12 +55,8 @@ public sealed class McpToolAdapterImageTests
     {
         // 6_990_508 base64 characters estimate 5_242_881 decoded bytes, just over the 5 MiB cap.
         var oversized = new string('A', 6_990_508);
-        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ =>
+        var result = await InvokeScriptedAsync(
             $$"""{"content":[{"type":"image","data":"{{oversized}}","mimeType":"image/png"}]}""");
-        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
-        await fixture.Manager.StartAsync("srv", CancellationToken.None);
-
-        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
 
         var text = Assert.IsType<TextBlock>(Assert.Single(result.Blocks));
         Assert.Equal("[image: image/png, 5 MiB]", text.Text);
@@ -69,12 +66,8 @@ public sealed class McpToolAdapterImageTests
     [Fact]
     public async Task An_svg_image_stays_a_placeholder()
     {
-        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ =>
+        var result = await InvokeScriptedAsync(
             """{"content":[{"type":"image","data":"PHN2Zz4=","mimeType":"image/svg+xml"}]}""");
-        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
-        await fixture.Manager.StartAsync("srv", CancellationToken.None);
-
-        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
 
         var text = Assert.IsType<TextBlock>(Assert.Single(result.Blocks));
         Assert.Equal("[image: image/svg+xml, 6 B]", text.Text);
@@ -83,12 +76,8 @@ public sealed class McpToolAdapterImageTests
     [Fact]
     public async Task A_text_only_result_is_the_same_single_text_block_as_before()
     {
-        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ =>
+        var result = await InvokeScriptedAsync(
             """{"content":[{"type":"text","text":"hello"},{"type":"text","text":"world"}]}""");
-        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
-        await fixture.Manager.StartAsync("srv", CancellationToken.None);
-
-        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
 
         var text = Assert.IsType<TextBlock>(Assert.Single(result.Blocks));
         Assert.Equal("hello\nworld", text.Text);
@@ -101,12 +90,9 @@ public sealed class McpToolAdapterImageTests
     public async Task The_character_truncation_still_applies_with_its_note_and_the_image_survives()
     {
         var text = new string('a', 10) + new string('b', 40);
-        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ =>
-            $$"""{"content":[{"type":"text","text":"{{text}}"},{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}]}""");
-        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server, maxResultChars: 10);
-        await fixture.Manager.StartAsync("srv", CancellationToken.None);
-
-        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
+        var result = await InvokeScriptedAsync(
+            $$"""{"content":[{"type":"text","text":"{{text}}"},{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}]}""",
+            maxResultChars: 10);
 
         Assert.Equal("aaaaaaaaaa\n…[output truncated: 40 characters omitted]", Assert.IsType<TextBlock>(result.Blocks[0]).Text);
         Assert.IsType<ImageBlock>(result.Blocks[1]);
@@ -120,11 +106,7 @@ public sealed class McpToolAdapterImageTests
         var payload = new string('A', 6_000_000);
         var image = $$"""{"type":"image","data":"{{payload}}","mimeType":"image/png"}""";
         var body = $$"""{"content":[{{string.Join(",", Enumerable.Repeat(image, 5))}}]}""";
-        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ => body);
-        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
-        await fixture.Manager.StartAsync("srv", CancellationToken.None);
-
-        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
+        var result = await InvokeScriptedAsync(body);
 
         Assert.Equal(4, result.Blocks.Count(static block => block is ImageBlock));
         var text = Assert.IsType<TextBlock>(result.Blocks[0]);
@@ -135,12 +117,8 @@ public sealed class McpToolAdapterImageTests
     [Fact]
     public async Task IsError_is_preserved_alongside_a_kept_image()
     {
-        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ =>
+        var result = await InvokeScriptedAsync(
             """{"content":[{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}],"isError":true}""");
-        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
-        await fixture.Manager.StartAsync("srv", CancellationToken.None);
-
-        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
 
         Assert.True(result.IsError);
         Assert.IsType<ImageBlock>(Assert.Single(result.Blocks));

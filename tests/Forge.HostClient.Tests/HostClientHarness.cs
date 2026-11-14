@@ -48,7 +48,15 @@ internal sealed class HostClientHarness : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Limit.Dispose();
-        await Client.DisposeAsync().ConfigureAwait(false);
-        await Host.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            await Client.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            // The stacked using declarations this replaces would release the host even if the client's
+            // disposal faulted; keep that guarantee instead of letting one failure leak the host.
+            await Host.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }

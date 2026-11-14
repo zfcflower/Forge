@@ -1,6 +1,7 @@
 using Forge.Abstractions;
 using Forge.Core.Agents;
 using Xunit;
+using static Forge.Core.Tests.Agents.SubAgentTestSupport;
 
 namespace Forge.Core.Tests.Agents;
 
@@ -14,9 +15,6 @@ namespace Forge.Core.Tests.Agents;
 /// </summary>
 public sealed class SubAgentRunRegistryPinTests
 {
-    private static readonly AgentDefinition Scout =
-        new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
-
     private sealed class CollectingSink : IAgentEventSink
     {
         private readonly Lock gate = new();
@@ -43,7 +41,7 @@ public sealed class SubAgentRunRegistryPinTests
         AgentTestHost.Create(
             provider,
             [FakeTool.Echo("read")],
-            options: new AgentOptions { MaxParallelSubAgents = 4, MaxSubAgentDepth = 3, MaxTurns = 10 },
+            options: Options(),
             agents: [Scout]);
 
     private static ToolContext Context(string sessionId) => new(sessionId, Path.GetTempPath());

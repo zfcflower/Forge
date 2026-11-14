@@ -2,30 +2,13 @@ using System.Collections.Concurrent;
 using Forge.Abstractions;
 using Forge.Core.Agents;
 using Xunit;
+using static Forge.Core.Tests.Agents.SubAgentTestSupport;
 
 namespace Forge.Core.Tests.Agents;
 
 /// <summary>Pins the per-child lifecycle ordering of the sub-agent scheduler and loop.</summary>
 public sealed class SubAgentLifecyclePinTests
 {
-    private static readonly AgentDefinition Scout =
-        new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
-
-    private static AgentOptions Options(int maxParallel = 4, int maxDepth = 3, int maxTurns = 10) =>
-        new() { MaxParallelSubAgents = maxParallel, MaxSubAgentDepth = maxDepth, MaxTurns = maxTurns };
-
-    private static string Spawn(string kind, string task) =>
-        $$"""{"kind":"{{kind}}","task":"{{task}}"}""";
-
-    private static string AgentIdOf(string content)
-    {
-        const string marker = "[agent_id: ";
-        var start = content.LastIndexOf(marker, StringComparison.Ordinal);
-        Assert.True(start >= 0, $"No agent id in '{content}'.");
-        start += marker.Length;
-        return content[start..content.IndexOf(']', start)];
-    }
-
     private static int IndexOf<T>(IReadOnlyList<AgentEvent> events, Func<T, bool> match) where T : AgentEvent
     {
         for (var i = 0; i < events.Count; i++)
@@ -63,12 +46,7 @@ public sealed class SubAgentLifecyclePinTests
     [Fact]
     public async Task Child_lifecycle_is_Started_then_Running_then_exactly_one_Finished()
     {
-        var provider = new FakeProvider((request, index) =>
-            request.Messages.Count == 1 && Turn.LastUserText(request) == "inspect"
-                ? Turn.Say("child report")
-                : index == 0
-                    ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "inspect")))
-                    : Turn.Say("parent done"));
+        var provider = ParentSpawnsScout("inspect");
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
         var (_, events) = await AgentTestHost.RunRootAsync(host, "session-lifecycle-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(15));
 

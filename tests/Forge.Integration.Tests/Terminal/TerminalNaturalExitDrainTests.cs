@@ -12,7 +12,6 @@ public sealed class TerminalNaturalExitDrainTests
 {
     private const int WindowBytes = 1_048_576;
     private const int PastWindowBytes = 8_000;
-    private const string LineBody = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
     private readonly ITestOutputHelper output;
 
@@ -154,7 +153,7 @@ public sealed class TerminalNaturalExitDrainTests
         var flood = new StringBuilder();
         for (var line = 1; line <= lines; line++)
         {
-            flood.Append("LINE-").Append(line.ToString("0000000", CultureInfo.InvariantCulture)).Append('-').Append(LineBody).Append(newline);
+            flood.Append("LINE-").Append(line.ToString("0000000", CultureInfo.InvariantCulture)).Append('-').Append(TerminalFlood.LineBody).Append(newline);
         }
 
         var path = Path.Combine(directory, name);

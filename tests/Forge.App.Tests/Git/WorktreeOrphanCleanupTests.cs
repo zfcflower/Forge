@@ -343,7 +343,7 @@ public sealed class WorktreeOrphanCleanupTests
     }
 
     /// <summary>A session catalog whose <c>CreateAsync</c> records the attempt and then fails with the given error (or succeeds when null).</summary>
-    private sealed class FailingCatalog(Exception? failure) : ISessionCatalog
+    private sealed class FailingCatalog(Exception? failure) : SessionCatalogDouble
     {
         private readonly List<SessionCreate> attempts = [];
 
@@ -358,7 +358,7 @@ public sealed class WorktreeOrphanCleanupTests
             }
         }
 
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
+        public override Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
         {
             lock (attempts)
             {
@@ -380,13 +380,7 @@ public sealed class WorktreeOrphanCleanupTests
                 });
         }
 
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
+        public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 }

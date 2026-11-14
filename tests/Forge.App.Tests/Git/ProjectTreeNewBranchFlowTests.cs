@@ -365,7 +365,7 @@ public sealed class ProjectTreeNewBranchFlowTests
         public Task<bool> MoveAsync(string projectId, int sortOrder, CancellationToken ct) => Task.FromResult(false);
     }
 
-    private sealed class RecordingCatalog : ISessionCatalog
+    private sealed class RecordingCatalog : SessionCatalogDouble
     {
         private readonly object gate = new();
         private readonly List<SessionInfo> seed;
@@ -397,7 +397,7 @@ public sealed class ProjectTreeNewBranchFlowTests
             }
         }
 
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
+        public override Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
         {
             lock (gate)
             {
@@ -415,7 +415,7 @@ public sealed class ProjectTreeNewBranchFlowTests
                 });
         }
 
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
+        public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
         {
             if (query.ParentSessionId is { Length: > 0 })
             {
@@ -424,13 +424,5 @@ public sealed class ProjectTreeNewBranchFlowTests
 
             return Task.FromResult<IReadOnlyList<SessionInfo>>(seed.ToArray());
         }
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 }

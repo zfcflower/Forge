@@ -639,21 +639,21 @@ public sealed class SessionLiveToolsTests
     }
 
     /// <summary>A message log in memory, so the real turn host has a session to resume and somewhere to append its turn.</summary>
-    private sealed class RecordingSessionStore(SessionInfo session) : ISessionStore
+    private sealed class RecordingSessionStore(SessionInfo session) : EmptySessionStore(DateTimeOffset.UnixEpoch)
     {
         private readonly Lock gate = new();
         private readonly Dictionary<string, List<StoredMessage>> log = new(StringComparer.Ordinal);
 
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
+        public override Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
             Task.FromResult(session);
 
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) =>
+        public override Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) =>
             Task.FromResult(string.Equals(sessionId, session.Id, StringComparison.Ordinal) ? session : null);
 
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
+        public override Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<SessionInfo>>([session]);
 
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct)
+        public override Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct)
         {
             lock (gate)
             {
@@ -668,24 +668,16 @@ public sealed class SessionLiveToolsTests
             }
         }
 
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
+        public override IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
             ReadCoreAsync(sessionId, fromSeq, toSeq);
 
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct)
+        public override Task<long> LastSeqAsync(string sessionId, CancellationToken ct)
         {
             lock (gate)
             {
                 return Task.FromResult(log.TryGetValue(sessionId, out var messages) ? (long)messages.Count : 0L);
             }
         }
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SummaryRecord>>([]);
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SearchHit>>([]);
 
         private async IAsyncEnumerable<StoredMessage> ReadCoreAsync(string sessionId, long fromSeq, long? toSeq)
         {

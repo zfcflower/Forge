@@ -494,25 +494,19 @@ public sealed class ForkTreeTests
         public Task<bool> MoveAsync(string projectId, int sortOrder, CancellationToken ct) => Task.FromResult(false);
     }
 
-    private sealed class FakeCatalog(List<SessionInfo> seed) : ISessionCatalog
+    private sealed class FakeCatalog(List<SessionInfo> seed) : SessionCatalogDouble
     {
         private int queryCalls;
 
         public int QueryCalls => Volatile.Read(ref queryCalls);
 
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
+        public override Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
             throw new Xunit.Sdk.XunitException("no session is created here");
 
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
+        public override Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
         {
             Interlocked.Increment(ref queryCalls);
             return Task.FromResult<IReadOnlyList<SessionInfo>>(query.ParentSessionId is { Length: > 0 } ? [] : seed.ToArray());
         }
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 }

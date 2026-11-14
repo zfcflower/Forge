@@ -845,29 +845,6 @@ public sealed class StepCommitterTests
         Assert.Equal("?? scratch/", await harness.Repo.StatusAsync());
     }
 
-    /// <summary>A session store that only answers <see cref="GetSessionAsync"/>; the committer needs nothing else.</summary>
-    internal sealed class WorktreeSessionStore(params SessionInfo[] sessions) : ISessionStore
-    {
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult(sessions.FirstOrDefault(session => session.Id == sessionId));
-
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) => throw new NotSupportedException();
-
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) => throw new NotSupportedException();
-    }
-
     /// <summary>A temp directory for the store of a test that has no repository.</summary>
     private sealed class TempData : IDisposable
     {

@@ -177,3 +177,43 @@
 | 10 | P2 | SubAgent pin 测试与 Terminal 集成测试夹具 | c610b231 / bbbb1c3b / c115e9e8 | `Forge.Core.Tests/Agents`、`Forge.Integration.Tests/Terminal` |
 
 （Ignore 级：Localization Strings 表、Avalonia StyledProperty 样板、CellWidth Unicode 数据表、`structural_only` 全部——详见 C 节。）
+
+---
+
+## F. 修复执行记录（2026-11-14，审计后同日）
+
+审计中 P0/P1 项已全部实施（行为保持重构，五个并行 Worker 在独立仓库副本中完成，独立模型评审后集成）：
+
+| # | 项 | 实施 | 结果 |
+| --- | --- | --- | --- |
+| 1 | OAuth 设备码流程统一 | 新增 `src/Forge.App/Providers/ProviderDeviceCode.cs`（259 行）共享骨架；Kimi 342→227、XAi 353→233、Meta 338→254、ChatGpt 534→515（仅并入零钩子机械助手）。测试侧新增 `DeviceCodeAuthTesting.cs`。补充精确断言钉住 wire 字段序与错误文案 | Providers 272/272；双评审 Approve |
+| 2 | Review 双控制器共享 | 新增 `src/Forge.App/Review/ReviewSurfaceCore.cs` 基类；File 713→440、Diff 793→480；`infos.Remove` 漂移经 `RemoveDraft` 钩子保留 | Review 43/43；App.Tests 全量 4682；评审 Approve |
+| 3 | HostClient 三件套（69 处） | 新增 `HostClientHarness.cs`；替换 68 处（第 69 处为手动 DisposeAsync 用例，形状不同保留）；释放顺序补 try/finally | 503/503；评审 Approve |
+| 4 | ISessionStore 空实现/抛桩收敛 | 新增 `SessionStoreDoubles.cs`（MemorySessionStore 合并三份 79 行同构副本 + 抛桩基类）；19 文件接入。**DIM 接口映射陷阱**：4 个替身重新列出接口触发重实现（派生类方法否则被默认接口方法静默绕过） | ViewModels 487、Lifecycle 327、Automations 284、Git 422 |
+| 5 | IPrPlatform 抛桩 | 新增 `PrPlatformDoubles.cs`/`PrPlatformStubs.cs`（两个测试项目各一份）；DIM 成员刻意不声明以保持接口默认实现语义 | 同上 |
+| 6 | StepCommitter 夹具 | `WorktreeSessionStore` 移入 Fixtures，`AddDoneInAsync` 收敛并发文件重复 | 同上 |
+| 7-10 | Mcp/Editor/Core/Integration/Workspace 散点 | `InvokeScriptedAsync`、`WorkspaceFixture`、`SubAgentTestSupport`（扩展现有 TestSupport.cs）、Terminal 共享件、Pr* 抛桩基类 | Mcp 95、Editor 165、Core.Agents 554、Workspace.Git 1048、Terminal 22 |
+
+### 复扫对比（deslop 0.42.0，同参数）
+
+| 指标 | 重构前 | 重构后 |
+| --- | --- | --- |
+| 整体重复率 | 12.74% | **12.41%** |
+| duplicated_loc | 62,408 | **60,703** |
+| `src/` 重复率 | 7.66% | **7.43%** |
+| Top-10 簇构成 | 含三件套（mass 2108）、OAuth、Review 等 P0/P1 簇 | 全部为 C 节刻意保留项（Localization/ViewModel 样板） |
+
+残存的高 mass 簇（StepCommitter 957/676 等）为合并逐字重复后剩下的语义相似断言本体，属预期。审计 Top-10 中 P0×2、P1×5 全部落地；P2×3 完成（#8、#9、#10）。
+
+### 评审发现与修复
+
+- HostClientHarness 释放链补 try/finally（client 释放抛错时 host 仍被释放，与原叠置 using 编译器语义一致）。
+- OAuth 测试断言收紧：三个提供商的 poll 表单体改为全串 `Assert.Equal`（钉死 wire 字段序）、expired/denied 消息改为精确断言。
+- `DeviceCodePoll.NullDetail` 死配置补文档注释；`SlowDownIntervalIncrementSeconds` internal→private。
+
+### 遗留（后续治理项，不阻塞）
+
+1. Diff 侧无「撤回→RestoreAsync→RetryUnmarkedAsync→RemoveDraft」链路用例（评审指出，既有缺口）。
+2. `TerminalPreferenceTests.New_terminals_use_the_current_shell_and_arguments` 为时序脆弱测试（HEAD 上同样 2/6 偶败，与本轮改动无关）。
+3. `tests/Forge.App.LiveSwitch.Tests/` 的跨程序集替身拷贝（需 csproj 层面动作，未动）。
+4. ViewModel `OnPropertyChanged` 级联（P2/Ignore）未收敛——语义就是各 VM 的计算属性失效集，只可做行数压缩不做语义合并，保持原判。

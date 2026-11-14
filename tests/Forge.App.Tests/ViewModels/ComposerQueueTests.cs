@@ -418,7 +418,7 @@ public sealed class ComposerQueueTests
                 async () =>
                 {
                     var provider = new GatedProvider(blockUntilCancelled, firstCallsTool);
-                    var store = new FakeSessionStore();
+                    var store = new MemorySessionStore();
                     var info = new SessionInfo(SessionId, root, "composer", DateTimeOffset.UnixEpoch);
                     using var runtime = new SessionRuntime(
                         new AgentRuntimeServices(
@@ -555,87 +555,6 @@ public sealed class ComposerQueueTests
             yield return new TextDelta("ok");
             yield return new MessageCompleted(ChatMessage.Assistant("ok"), new TokenUsage(1, 1), StopReason.EndTurn);
         }
-    }
-
-    /// <summary>In-memory message log; the checkpoints own the assertions, so the log only has to behave like a store.</summary>
-    private sealed class FakeSessionStore : ISessionStore, ISessionCatalog
-    {
-        private readonly Lock gate = new();
-        private readonly Dictionary<string, List<StoredMessage>> log = new(StringComparer.Ordinal);
-
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", workspacePath, title, DateTimeOffset.UnixEpoch));
-
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<SessionInfo?>(null);
-
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct)
-        {
-            lock (gate)
-            {
-                if (!log.TryGetValue(sessionId, out var messages))
-                {
-                    messages = [];
-                    log[sessionId] = messages;
-                }
-
-                messages.Add(new StoredMessage(messages.Count + 1, message, usage, DateTimeOffset.UnixEpoch));
-                return Task.FromResult((long)messages.Count);
-            }
-        }
-
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
-            ReadCoreAsync(sessionId, fromSeq, toSeq);
-
-        private async IAsyncEnumerable<StoredMessage> ReadCoreAsync(string sessionId, long fromSeq, long? toSeq)
-        {
-            List<StoredMessage> snapshot;
-            lock (gate)
-            {
-                snapshot = log.TryGetValue(sessionId, out var messages) ? [.. messages] : [];
-            }
-
-            foreach (var message in snapshot)
-            {
-                if (message.Seq >= fromSeq && (toSeq is null || message.Seq <= toSeq))
-                {
-                    yield return message;
-                }
-            }
-
-            await Task.Yield();
-        }
-
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct)
-        {
-            lock (gate)
-            {
-                return Task.FromResult(log.TryGetValue(sessionId, out var messages) ? (long)messages.Count : 0L);
-            }
-        }
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SummaryRecord>>([]);
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SearchHit>>([]);
-
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, DateTimeOffset.UnixEpoch));
-
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 
 }

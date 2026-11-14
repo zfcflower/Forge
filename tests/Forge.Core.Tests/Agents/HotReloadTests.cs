@@ -2,6 +2,7 @@ using Forge.Abstractions;
 using Forge.Core.Agents;
 using Forge.Core.Prompts;
 using Xunit;
+using static Forge.Core.Tests.Agents.SubAgentTestSupport;
 
 namespace Forge.Core.Tests.Agents;
 
@@ -363,9 +364,6 @@ public sealed class HotReloadTests
 
         AssertHistoryLegallyPaired(root);
     }
-
-    private static int ToolRounds(ChatRequest request) =>
-        request.Messages.Count(message => message.Role == MessageRole.Tool);
 
     private sealed class StubTodoStore : ITodoStore
     {
