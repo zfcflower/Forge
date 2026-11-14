@@ -134,7 +134,9 @@ public sealed class VendorCacheKnobsTests
             })
             .EnqueueSse(Done());
         var provider = new OpenAiCompatibleProvider(
-            TestData.OpenAiConfig(),
+            // A degradation is remembered process-wide under provider id + base URL. This test makes one, so it owns a URL no other
+            // test uses; on the shared default URL it left every concurrently running OpenAI test without its cache fields.
+            TestData.OpenAiConfig("https://refuses-cache-fields.example.test/v1"),
             handler.CreateClient(),
             options: new ProviderOptions { SendPromptCacheRetention = true, SendPromptCacheKey = true });
 
