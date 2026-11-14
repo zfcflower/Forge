@@ -58,7 +58,7 @@ tags: [testing, ci, agent-cost]
 ### 已确认的结构性问题
 
 1. **`Forge.App.Tests` 全量串行。** `tests/Forge.App.Tests/TestAssemblySettings.cs` 关掉了整个程序集的并行(`DisableTestParallelization = true`),理由是 headless Avalonia 会安装进程级 `Application`/`Dispatcher`。真正的并发约束只来自 UI 会话,而这类测试已经用 `[Collection("forge-app-ui")]` 分组(119 个文件);其余 169 个测试文件是纯 ViewModel/存储/格式化测试,却跟着一起串行。
-2. **进程级环境变量被当作业务状态。** `TempDataRoot.Redirect` 直接改 `AppPaths` 的三个进程级环境变量,25 个测试类这么干。因此“关掉全程序集并行”同时也在掩盖跨测试类的全局状态竞争——放开并行前必须先消除这个共享面,否则会变成偶发失败。
+2. **进程级环境变量被当作业务状态。** `TempDataRoot.Redirect` 直接改 `AppPaths` 的三个进程级环境变量,22 个测试文件这么干。因此“关掉全程序集并行”同时也在掩盖跨测试类的全局状态竞争——放开并行前必须先消除这个共享面,否则会变成偶发失败。
 3. **测试代码重复集中在 arrange 样板,不是重复用例。** Deslop 结果:704 个测试文件带重复,合计 34,641 行重复(占这些文件 180,324 行的 19.2%);5,802 个重复簇触及 `tests/`。但把 6,884 个测试方法体规范化后逐字节比对,真正完全重复的只有 2 对。**所以“删重复测试”能省下的行数远小于“合并样板”。**
 4. **没有分层。** 只有一条口头约定(“只跑与本次改动相关的测试”),没有可执行的落点映射;全量跑一次的成本高到不敢跑,Agent 每次都要重新猜过滤范围。
 5. **子进程与孤儿进程。** 被中断的 `dotnet test` 会留下 `testhost.exe` 与 `Forge.ExtensionHost.dll` 子进程,继续锁住 `src/Forge.ExtensionHost/bin/...`,让后续任意任务的构建直接以 `MSB3027` 失败。

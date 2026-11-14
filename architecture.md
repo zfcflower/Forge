@@ -19,19 +19,24 @@ depends-on: [forge-goal]
 |---|---|
 | `Forge.Abstractions` | 主程序内部共享契约(工具、审批、存储、提示词、Agent 事件);零外部依赖 |
 | `Forge.IO` | 文件与进程原语 + Agent 的文件/搜索/shell 工具:`AtomicFile`、工作区路径守卫、有界文件读写、目录遍历、`.gitignore` 匹配、grep 引擎、`ProcessRunner`、7 个 `ITool`(`read`/`write`/`edit`/`ls`/`find`/`grep`/`bash`);只依赖 BCL 与 `Abstractions` |
-| `Forge.Ipc`(新增) | 命名管道 + 4 字节长度前缀 MessagePack 帧的传输、帧编解码、请求关联、协议版本;主程序、宿主、Worker 共用;须 AOT 兼容 |
-| `Forge.Ipc.Protocol`(新增) | 宿主内部各操作的类型化负载(插件执行、Worker、`host.tool_call`、终端);依赖 `Ipc`、`Plugin.Sdk`,不属插件 SDK;须 AOT 兼容 |
-| `Forge.Plugin.Sdk`(新增) | 供插件源码引用的稳定 SDK 与契约,独立版本化,不依赖 Core |
-| `Forge.Core` | Agent 循环、会话、模型提供商(OpenAI 兼容、Anthropic)、SubAgent 调度与提示词缓存、提示词三层合成 |
+| `Forge.Ipc` | 命名管道 + 4 字节长度前缀 MessagePack 帧的传输、帧编解码、请求关联、协议版本;主程序、宿主、Worker 共用;AOT 兼容 |
+| `Forge.Ipc.Protocol` | 宿主内部各操作的类型化负载(插件执行、Worker、`host.tool_call`、终端);依赖 `Ipc`、`Plugin.Sdk`,不属插件 SDK;AOT 兼容 |
+| `Forge.Plugin.Sdk` | 供插件源码引用的稳定 SDK 与契约,独立版本化,不依赖 Core |
+| `Forge.Approval` | 用户插件的源码哈希审批引擎:纯逻辑求值 + SQLite 持久化;AOT 兼容 |
+| `Forge.Core` | Agent 循环、会话、模型提供商(OpenAI 兼容、Anthropic、Responses)、SubAgent 调度与提示词缓存、提示词三层合成、网络栈、自动化引擎 |
 | `Forge.Workspace` | Git 与 Worktree、规格图(spec-graph)读写、评审意见存储 |
 | `Forge.Mcp` | MCP 客户端与服务器管理 |
 | `Forge.Editor` | 文本缓冲、LSP 客户端(含语义 token)、TextMate 着色、补全、Diff 模型;不含 UI |
-| `Forge.ExtensionHost`(新增,JIT) | 常驻进程:插件发现与注册、生命周期、Roslyn 编译与缓存、声明式工作流执行、Worker 管理、版本与依赖管理 |
-| `Forge.PluginWorker`(新增,JIT) | 独立进程:加载并执行动态 C# 插件与 run_code 脚本;可被整体终止 |
-| `Forge.HostClient`(新增,AOT) | 主程序侧的 `ExtensionHostClient`:启动/连接 Host、`ITool` 代理、`host.tool_call` 回传(审批在主程序)、Host 崩溃保留工具快照;只依赖 Abstractions、Ipc、Ipc.Protocol、Plugin.Sdk |
+| `Forge.Workflows` | 声明式工作流引擎(L0):JSON 步骤、`after` 依赖、并行、JSON 路径映射;工具调用经 `IHostFacade`,不持注册表、不审批、不落盘 |
+| `Forge.Scripting`(JIT) | Roslyn 编译/源码哈希缓存/版本化产物/可卸载 AssemblyLoadContext,以及 `run_code` 常驻编译服务;脚本执行面在 `ScriptRuntime` |
+| `Forge.ScriptRuntime` | `run_code` 的脚本执行面、运行回路与产物校验;只依赖 SDK 与 BCL,不含 Roslyn,供 Host、编译服务与一次性执行器共同引用 |
+| `Forge.ScriptExecutor`(JIT) | `run_code` 的一次性执行器:每次调用一个全新进程,装载一个已验证产物、运行一次,随后被 Host 杀掉并等待整棵进程树;不编译、不缓存 |
+| `Forge.ExtensionHost`(JIT) | 常驻进程:插件发现与注册、生命周期、审批把关、编译服务(经 `Scripting`)、声明式工作流执行、Worker 与执行器管理、进程归属、交互终端 PTY |
+| `Forge.PluginWorker`(JIT) | 独立进程:加载并执行一个动态 C# 插件;可被整体终止(run_code 脚本不在这里执行,走 `ScriptExecutor`) |
+| `Forge.HostClient`(AOT) | 主程序侧的 `ExtensionHostClient`:启动/连接 Host、`ITool` 代理、`host.tool_call` 回传(审批在主程序)、Host 崩溃保留工具快照;只依赖 Abstractions、Ipc、Ipc.Protocol、Plugin.Sdk |
 | `Forge.App` | Avalonia 桌面 UI 与组合根(含 `ExtensionHostClient`);唯一知道所有主程序项目的层 |
 
-主程序侧(Native AOT):`Abstractions`、`IO`、`Ipc`、`Ipc.Protocol` ← `Core`、`Workspace`、`Mcp`、`Editor` ← `App`。JIT 侧:`Plugin.Sdk`、`Ipc`、`Ipc.Protocol` ← `ExtensionHost` ← `PluginWorker`。主程序不引用 Roslyn;`ExtensionHost` 不引用 `Core`。(新分层待 Stage 0–2 验证,未确认)
+主程序侧(Native AOT)依赖闭包:`Abstractions`、`IO`、`Ipc`、`Ipc.Protocol`、`Plugin.Sdk`、`Approval` ← `Core`、`Workspace`、`Mcp`、`Editor`、`HostClient` ← `App`。JIT 侧:`Plugin.Sdk`、`Ipc`、`Ipc.Protocol`、`ScriptRuntime` ← `Scripting` ← `ExtensionHost`(另引用 `Workflows`、`Approval`);`PluginWorker` 引用 `Scripting`;`ScriptExecutor` 引用 `ScriptRuntime`(不引用 `Scripting`,部署闭包不含 Roslyn)。主程序不引用 Roslyn;`ExtensionHost` 不引用 `Core`。
 
 ## 关键决策
 
@@ -44,7 +49,7 @@ depends-on: [forge-goal]
 
 **文件与命令能力留在进程内,不走 shell。** Agent 读写文件、列目录、找文件、搜内容全部由 `Forge.IO` 的原生实现完成,不启动外部进程;只有真正需要外部程序时才创建子进程(搜索可由可选的 ripgrep 加速,但它只做加速,不是前提)。工具面固定为 `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 七个,名字与内置 Agent 的白名单一致;`bash` 先用 Direct(参数向量、不经 shell),只有出现 shell 语法时才走平台解释器。所有工具都有按字节的输出上限、超时、取消与工作区路径校验,超限只截断结果而不会停止读取子进程管道。(已确认)
 
-**Native AOT 主程序(已确认要求;可行性已由 Stage 0 实测确认)。** 主程序不可变、Native AOT 发布;不在其中使用 Roslyn 动态编译或 `AssemblyLoadContext` 加载插件。五个主程序项目(`Abstractions`/`Core`/`Workspace`/`Mcp`/`Editor`)已开启 `IsAotCompatible` 且 AOT 分析器 0 警告;Workspace 的 JSON 输出改走反射无关的 `JsonPayload`,持久化类型走 `WorkspaceJsonContext` 源生成。体积与延迟均按实测记录,不给估算:`25.3 MiB` 是 Stage 0 可行性探针(**只含一个最小 Avalonia 窗口**)的数,不是产品基线。2026-11 在 .NET 11 / Avalonia 12.1.6 上重测(win-x64,同一台机器):最小 Avalonia 窗口 16.5 MiB,加 AvaloniaEdit+TextMate 编辑器栈 28.7 MiB,完整 `Forge.App` 49.7 MiB——即约 +12 MiB 编辑器栈、+21 MiB 产品自身代码与其余模块,其中嵌入资源(TextMate 语法、Avalonia 资源、图标)8.6 MiB。构建开关实测:`OptimizationPreference=Size` 降到 42.8 MiB,再关托管堆栈追踪 40.8 MiB;两者都不建议默认开(前者牺牲速度,后者丢掉插件与 Agent 链路最需要的托管堆栈)。headless 对话 81-84ms、GUI 到窗口句柄 166ms 同样来自 Stage 0 探针,产品化后未重测。风险:Avalonia 与 Microsoft.Data.Sqlite/SQLitePCLRaw 未声明 AOT 兼容,靠实测背书,CI 需三平台冒烟;原生库不能静态链接,"单文件"不成立;Linux/macOS 发布未在本机验证(需 CI)。只有核心依赖确实无法解决时才重新评估放弃 AOT。
+**Native AOT 主程序(已确认要求;可行性已由 Stage 0 实测确认)。** 主程序不可变、Native AOT 发布;不在其中使用 Roslyn 动态编译或 `AssemblyLoadContext` 加载插件。主程序侧全部项目(`Abstractions`/`IO`/`Ipc`/`Ipc.Protocol`/`Plugin.Sdk`/`Approval`/`Core`/`Workspace`/`Mcp`/`Editor`/`HostClient`/`App`)已开启 `IsAotCompatible` 且 AOT 分析器 0 警告;Workspace 的 JSON 输出改走反射无关的 `JsonPayload`,持久化类型走 `WorkspaceJsonContext` 源生成。体积与延迟均按实测记录,不给估算:`25.3 MiB` 是 Stage 0 可行性探针(**只含一个最小 Avalonia 窗口**)的数,不是产品基线。2026-11 在 .NET 11 / Avalonia 12.1.6 上重测(win-x64,同一台机器):最小 Avalonia 窗口 16.5 MiB,加 AvaloniaEdit+TextMate 编辑器栈 28.7 MiB,完整 `Forge.App` 49.7 MiB——即约 +12 MiB 编辑器栈、+21 MiB 产品自身代码与其余模块,其中嵌入资源(TextMate 语法、Avalonia 资源、图标)8.6 MiB。构建开关实测:`OptimizationPreference=Size` 降到 42.8 MiB,再关托管堆栈追踪 40.8 MiB;两者都不建议默认开(前者牺牲速度,后者丢掉插件与 Agent 链路最需要的托管堆栈)。headless 对话 81-84ms、GUI 到窗口句柄 166ms 同样来自 Stage 0 探针,产品化后未重测。风险:Avalonia 与 Microsoft.Data.Sqlite/SQLitePCLRaw 未声明 AOT 兼容,靠实测背书,CI 需三平台冒烟;原生库不能静态链接,"单文件"不成立;Linux/macOS 发布未在本机验证(需 CI)。只有核心依赖确实无法解决时才重新评估放弃 AOT。
 
 **扩展点统一为契约,执行在进程外。** 工具、命令、提示词、Agent、工作流经 `Forge.Plugin.Sdk` 注册,由 `ExtensionHost` 通过 IPC 向主程序报告;主程序侧以代理 `ITool` 暴露。模型提供商内置,仅在设置中配置,不开放插件注册。
 
@@ -64,7 +69,7 @@ depends-on: [forge-goal]
 
 **SubAgent 与缓存。** 相同目的的 SubAgent 共享稳定的提示词前缀以命中提示词缓存;动态内容(时间、工作区状态等)作为请求末尾的一条临时 user 消息,不进历史与存储。内置 Scout、Worker、Plan、Reviewer,每种可单独设置模型与思考强度;同类型实例可按 id 续跑。嵌套深度上限 3,同时活跃的 Agent 数按整棵树计数(默认 4),父 Agent 等待子 Agent 结果时交还名额;均由 `forge-core` 强制。
 
-**codemode。** 模型输出一段 C# 脚本,脚本可并行(`Task.WhenAll`)调用已注册工具,只把最终结果一次返回模型。已确认的执行架构是**常驻编译服务缓存编译产物 + 一次性 JIT 执行器**:编译服务不执行脚本,每次调用取得从未执行过脚本的执行器,成功、失败、取消或超时都终止并等待其归属进程树退出后才完成调用。不得复用已执行过脚本的进程,也不以静态状态/线程/句柄污染检测决定是否复用。主程序仍保持 Native AOT,只持有 `run_code` 代理工具;工具调用经 IPC 回到主程序审批、限流和截断。产物只经内存管道交付并从已验证字节装载;执行器部署依赖闭包不得含 Roslyn。可选的预启动执行器池只能提供 Take,不能 Return 已用执行器;是否采用须由分段实测决定,不是当前实现前提。一次性进程提供状态与生命周期隔离,不提供文件/网络权限沙箱。正式路径已切换为“Host 常驻编译服务 + 每次调用一个一次性执行器”:执行过的进程不复用,调用返回前先杀并等待整棵进程树,因此不再有跨调用残留;work78 分段测量(暖调用约 134–137 ms)与实现自测数据见 `forge-extension-host`。取代此前的 T1/T2/T3 分层;`dotnet run` 文件式应用(T3)只作为可选能力,不是前提。
+**codemode。** 模型输出一段 C# 脚本,脚本可并行(`Task.WhenAll`)调用已注册工具,只把最终结果一次返回模型。已确认的执行架构是**常驻编译服务缓存编译产物 + 一次性 JIT 执行器**:编译服务不执行脚本,每次调用取得从未执行过脚本的执行器,成功、失败、取消或超时都终止并等待其归属进程树退出后才完成调用。不得复用已执行过脚本的进程,也不以静态状态/线程/句柄污染检测决定是否复用。主程序仍保持 Native AOT,只持有 `run_code` 代理工具;工具调用经 IPC 回到主程序审批、限流和截断。产物只经内存管道交付并从已验证字节装载;执行器部署依赖闭包不得含 Roslyn。可选的预启动执行器池只能提供 Take,不能 Return 已用执行器;是否采用须由分段实测决定,不是当前实现前提。一次性进程提供状态与生命周期隔离,不提供文件/网络权限沙箱。正式路径为“Host 常驻编译服务 + 每次调用一个一次性执行器”:执行过的进程不复用,调用返回前先杀并等待整棵进程树,因此不再有跨调用残留;分段测量(暖调用约 134–137 ms)与实现自测数据见 `forge-extension-host`。
 
 **原生进程归属边界。** P/Invoke 只允许位于 JIT Host 的一个内部类,负责平台分支、原生句柄与进程树归属;Native AOT 主程序、执行器和插件 Worker 不含 P/Invoke。这一点已经满足:唯一的原生类是 `Forge.ExtensionHost.WorkerProcessOwnership`,Worker 原先自管的 `setpgid` 已随 `WorkerProcessGroup` 一起删除,执行器与主程序本来就没有。Windows 每执行器一个独立 Job Object,启用 KILL_ON_JOB_CLOSE,以 Job 终止为主清理机制。Linux/macOS 的进程组改由 Host 侧 `posix_spawn` + `POSIX_SPAWN_SETPGROUP(0)` 建立:组在 spawn 系统调用内原子创建,子进程执行第一条指令前就已是自成一组的组长,因此事后 `setpgid` 那个(实测必然 `EACCES` 的)窗口不存在,`kill(-pgid)` 恒有效,执行器也自动获得自己的组。宿主另有强制的收割循环(BCL 不收割非自己启动的子进程,僵尸会让 `HasExited` 永远为假),顺序为 `waitid(WNOWAIT)` 观察退出 → `kill(-pgid)` 趁 pid 未被释放时扫组 → `waitpid` 释放 pid,以免收割放大 pid 复用窗口。Linux 已在 WSL2 上验证(见 `forge-extension-host`);macOS 的 `pipe`+`fcntl`(无 `pipe2`)、`WNOWAIT` 常量与 `siginfo` 偏移分支**完全未验证**,须由 CI 的 macOS runner 确认,不得据此声称 macOS 已支持。进程组**不是**硬边界:后代自己 `setsid`/`setpgid` 即可脱离,POSIX 也没有 KILL_ON_JOB_CLOSE 的等价物——Host 被强杀时 Worker 只靠管道断开自行退出,其残留后代不被清理,因此不得宣称与 Windows Job 等价。操作系统权限沙箱及 CPU/内存/活动进程限制须另行确认威胁模型,不因进程隔离而视为已实现。交互终端的 PTY(Windows ConPTY、POSIX `posix_openpt` + `posix_spawnp(SETSID)`)放在同一个类的 `partial` 文件 `WorkerProcessOwnership.Pty.cs` 里,不新增原生类;终端 shell 在 Windows 上也进私有 Job,在 POSIX 上按会话扫树(见 `forge-extension-host`“交互终端”)。
 

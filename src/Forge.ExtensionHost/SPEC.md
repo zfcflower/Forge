@@ -4,7 +4,7 @@ type: module-design
 status: draft
 title: Forge.ExtensionHost
 parent: forge-architecture
-depends-on: [forge-ipc, forge-scripting, forge-script-runtime, forge-script-executor, forge-approval]
+depends-on: [forge-ipc, forge-scripting, forge-script-runtime, forge-script-executor, forge-approval, forge-workflows]
 ---
 
 # Forge.ExtensionHost

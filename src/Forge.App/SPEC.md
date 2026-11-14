@@ -461,3 +461,5 @@ Cmd/Ctrl+P 三个入口之外没有第四种面板:一个覆盖层、五个来�
 - `TurnCheckpointService` 是否上移到 `forge-workspace`(目前只做编排)未定。
 - Worker 资源限制受威胁模型决策门控,不在此模块实现。
 - `ReviewStore`(Forge.Workspace)不可释放:`reviews.db` 的池化句柄是靠 `SqliteSessionStore` 拆除时进程级 `ClearAllPools` 才释放的(`CompositionDisposeTests` 钉住)。拆除顺序或那次清池一变就会回退;给 `ReviewStore` 加 `IDisposable` 属于 forge-workspace,未做。
+- 会话/工作区生命周期刻意推迟:只读并行会话(`bash` 无法区分读写,要么禁 `bash` 要么每次审批);一个会话切换多个工作区目录(`turn_checkpoints` 主键要扩成 `(session, worktree, turn)`,步骤提交/PR 闸门/索引都要按当前目录取);恢复到某轮(届时被接手会话的检查点只读);子 Agent 跨工作区派发;同父会话多个子 Agent 抢 `obj/`、`bin/` 与子 Agent `bash` 里的 git 写(另立任务)。旧会话忙时“排队结束后自动接手”、rebase/cherry-pick 式并回、第二实例转交均已否决,不做。
+- 界面小项推迟:ChangesPanel 汇总行是否也换数量徽标;文件面板刷新失败原因目前无呈现位置;`TextBlock.h2` 与 `section-title` 的 SemiBold 中英混重(拉丁 600、汉字 700)保持不动;小尺寸图标可读性二次打磨;文件/规格树箭头槽宽 8px 与 `IndentMarks`(10/6/6)不一致,随区域重排收尾。

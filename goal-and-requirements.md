@@ -50,7 +50,7 @@ Forge 是一个桌面应用,承载 LLM 编码 Agent 的完整工作环境:会话
 - Specs as ground truth:规格树(spec-graph)浏览与读写,Agent 以其为依据。
 - MCP servers:接入并管理 MCP 服务器及其工具。
 - 提供商自选:用户自配模型提供商与凭据(OpenAI 兼容、Anthropic)。
-- codemode:Agent 生成 C# 脚本(Roslyn),在 Extension Host/Worker 中并行按需调用已注册的 C# 工具,只向模型返回最终一次结果。
+- codemode:Agent 生成 C# 脚本(Roslyn),经 Host 常驻编译服务编译、在一次性执行器中并行按需调用已注册的 C# 工具,只向模型返回最终一次结果。
 - 动态工作流:可自定义,参考 ThinkRail 的 choosing-a-workflow(按任务类型路由到不同工作流技能)。
 - 可自定义命令、工具、Prompts:系统提示词 + 全局 Agent + 项目 Agent 三层,机制与 PI harness 一致。
 - 可重用 SubAgents:相同目的的子 Agent 复用提示词缓存以省 Token;内置 Scout、Worker、Plan、Reviewer;嵌套最多三级。
@@ -72,7 +72,7 @@ Forge 是一个桌面应用,承载 LLM 编码 Agent 的完整工作环境:会话
 | Agent 核心 | 参考 microsoft/agent-framework (dotnet) 与 microsoft/mcp | 只取必要源码并改命名空间,不引用 NuGet 包 |
 | 编辑器/Git 及其他三方 | 学习成熟开源库并内化源码 | NuGet 白名单:BCL、Avalonia、Roslyn、neuecc 的库;新增须经用户同意 |
 | 开发 Skills | 采用 Avalonia-skills、BlazingFastDotnet、dotnet/skills 中适用者 | 约束本项目开发实践 |
-| codemode | Roslyn 脚本,在 Extension Host/Worker 中编译执行 | 全 C#,并行调用工具;主程序保持 AOT |
+| codemode | Roslyn 脚本:Host 常驻编译服务编译,一次性 ScriptExecutor 执行 | 全 C#,并行调用工具;主程序保持 AOT |
 | 主程序发布 | Native AOT(可行性经 Stage 0 实测确认) | 主程序不可变、启动快;用户扩展不需重新编译 |
 | 扩展执行 | 独立 Extension Host(JIT,要求已安装 .NET 运行时)+ Plugin Worker 进程 | Roslyn 与 AssemblyLoadContext 不进入 AOT 主程序;崩溃与死循环可整体终止 |
 
