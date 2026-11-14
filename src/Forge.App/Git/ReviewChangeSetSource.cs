@@ -97,7 +97,7 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
                 };
                 commits = head is null || baseRevision is null
                     ? []
-                    : await ReadCommitsAsync(directory, baseRevision, head, ct).ConfigureAwait(false);
+                    : await ReadCommitsAsync(directory, baseRevision, head, request.Paths, ct).ConfigureAwait(false);
             }
 
             // The text call ignores IncludeUntracked: an untracked file has no diff text of its own, so the file list below is
@@ -140,14 +140,27 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
         }
     }
 
-    /// <summary>The branch's own commits, newest first, as the package lists them.</summary>
-    private async Task<IReadOnlyList<ReviewCommit>> ReadCommitsAsync(string directory, string exclude, string head, CancellationToken ct)
+    /// <summary>
+    /// The commits the package lists: the range's own commits, newest first, narrowed to the requested paths like the file
+    /// list and the diff are. A commit whose changes are all outside those paths is not part of this change set, and listing
+    /// it would make the reviewer read a change it was not given.
+    /// </summary>
+    private async Task<IReadOnlyList<ReviewCommit>> ReadCommitsAsync(
+        string directory,
+        string exclude,
+        string head,
+        IReadOnlyList<string> paths,
+        CancellationToken ct)
     {
-        var history = await git.GetCommitsAsync(directory, exclude, head, CommitListLimit, ct).ConfigureAwait(false);
+        var history = await git.GetLogAsync(
+                directory,
+                new GitLogOptions { Revision = exclude + ".." + head, Paths = paths, Limit = CommitListLimit },
+                ct)
+            .ConfigureAwait(false);
         var commits = new List<ReviewCommit>(history.Count);
         foreach (var commit in history)
         {
-            commits.Add(new ReviewCommit(commit.Sha, commit.Subject));
+            commits.Add(new ReviewCommit(commit.Id, commit.Subject));
         }
 
         return commits;

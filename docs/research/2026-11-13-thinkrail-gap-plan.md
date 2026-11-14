@@ -217,3 +217,46 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 隐私统计/问卷/反馈、JetBrains Central;不引新包前提下的语法高亮替换、tree-sitter;PDF 预览在拍板前不做(占位页);网页不在面板内渲染,只给可编辑源码与「在浏览器中打开」。
 
 **W0 收尾补充**:新增设置分区的视图不再改 `App.axaml`——`App.axaml` 已挂一个 `Views/SectionViewTemplate`,各波在自己的 `*Composition.Register` 里调 `SectionViewTemplate.Register<TViewModel>(() => new XView())` 即可。`chat` 分区归 W5(Mermaid 与工具图片缩略图两项设置的视图都放进 W5 的 chat 分区视图;W4 只提供数据项,不建分区)。
+
+## 八、W12 交付记录(评审包 + `request_review`)
+
+开工前分支落后 `main` 55 个提交(W0–W5、W7 已合入,`pr_create` 的四道闸门、`GitReviewLedger`、计划面板都在),先快进再动手,所以下面每条都是按合入后的现状估的代价。
+
+**范围**:计划里 W12 的两条——给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话)。三条边界在开工前由用户拍定:
+
+1. **评审目标两种都要**:`step_id`(审一个计划步骤,用它自己的那次提交)与自由范围(`base` + `paths`,默认仓库默认分支,含未提交与未跟踪)。
+2. **一次评审不满足 `pr_create` 的自评闸门**:闸门仍只认本会话在这个 HEAD 上读过完整 `git_diff`;Reviewer 的 `git_diff` 记在它自己的子会话上(`GitReviewLedger` 按 sessionId + worktree 分键)。
+3. **`request changes` 只回会话**:工具结果由归一化结论 + 下一步组成,代码层面不硬阻断任何东西;不落存储、不升 schema、不改计划面板。
+
+**落点**(对照计划给的独占路径):
+
+- `src/Forge.Core/Tools/ReviewPackage.cs`(契约,主 Agent 写,FROZEN)、`ReviewPackageText.cs`(包渲染)、`RequestReviewVerdict.cs`(结论归一化)、`RequestReviewTool.cs`(工具)。
+- `src/Forge.Core/Prompts/BuiltInAgents.cs`:Reviewer 白名单加只读 `git_diff`,提示词加一段"你会收到评审包,diff 被截断时用 `git_diff` 读其余"。
+- `src/Forge.Core/Agents/AgentHost.cs`:`AgentHostOptions.Reviews`(可空)+ 注册 `request_review`(没有实现就没有这个工具)。
+- `src/Forge.App/Git/ReviewChangeSetSource.cs`:实现 `IReviewChangeSetSource`,用 `GitCli` 公开 API;`AgentRuntimeServices.Reviews` 与组合根接线;`ToolCatalog` 把它归到 `agents` 组。
+- 规格:`Forge.Core/SPEC.md`(评审工具一段 + 未决两条)、`Forge.App/SPEC.md`(会话工具面一段)、`Forge.IO/SPEC.md`(白名单那句不再笼统地说"Scout/Plan/Reviewer 用前面四个")。
+
+**偏差(已记录)**:
+
+1. **没有新建 `Localization/Strings.Review.cs`**。W12 没有用户可见的新表面:工具行显示工具名与结果(与其他工具一样),评审结论是模型可读的英文。计划本身在 W0 已否掉"建空表"的做法,所以不为凑文件名建一张空表;要让评审有本地化界面,应该是结论持久化/计划面板显示那一档(见下面的延后项)。
+2. **动了一个 `Forge.Workspace` 文件**:`GitCli.Review.cs` 的 `EmptyTreeSha` 由 `private` 提升为 `public`。评审"仓库的第一个提交"必须对空树做 diff,而那个常量只能有一份定义。没有新增 API、没有改行为。
+3. **动了三个计划外的 App 文件**(`SessionRuntime.cs` 两行、`AppComposition.cs` 三行、`ToolCatalog.cs` 两行):`request_review` 只有在组合根把 git 实现交出去时才存在,而 `FeatureComposition` 的各模块拿不到 `GitCli`,所以运行期接线只能留在 `Create()`。
+4. **内部常量**(不进设置,六·二表无 W12 项):包内 diff 48000 字符、提交与文件清单合计 200 行、每个文本字段 2000 字符、结论原文 8000 字符。它们是防止子 Agent 上下文爆炸的边界,与 `AgentLoop` 的 artifact 阈值同性质;`diff` 与清单的 `stat_only` 退路都是 `git_diff`。
+5. **评审方式可配置未做**(`goal-and-requirements.md` 的"Reviewer 子 Agent 一次评审,或人工逐行评审"):需要设置项 + 一条"步骤提交后自动评审"的触发路径,属于新的产品面,未在 W12 授权范围内。结论也不持久化。
+
+**验证**(合入前实测):
+
+- `dotnet build Forge.slnx` → 0 警告 0 错误(含 Native AOT 分析器)。
+- `Forge.Core.Tests --filter "Review|AgentCatalog"` → 84 通过;`--filter "Tools|Agents"` → 819 通过。
+- `Forge.App.Tests --filter "ReviewChangeSetSource"` → 12 通过;`--filter "Forge.App.Tests.Git"` → 408 通过;`--filter "Localization|MinorRegression"` → 131 通过。
+- `Forge.Workspace.Tests --filter "Git"` → 1006 通过(`EmptyTreeSha` 提高可见性那一行)。
+- 未跑全量 `dotnet test`(按仓库约定,全量混着与本次无关的偶发失败);只跑与改动落点相关的过滤。
+
+**测试 Agent 拉出来的四个真问题(已改)**——它们不是测试补丁,而是实现缺陷:
+
+1. 结论行只往下扫 40 行:把结论写在前面、补充说明写在后面的 Reviewer 会被判成 `unstructured`,代价是多跑一轮评审。改成扫全文。
+2. `AppendClamped` 无换行时取“第一个空格前”,一个 2500 字符的 URL 前面写着 `Fix ` 时,意图到达 Reviewer 只剩 `Fix…`。改成只在词边界能保留 ≥3/4 字段时才采用,否则硬截。
+3. 用户改写 Reviewer 模板把 `request_review` 加进白名单后,评审可以要求再评审(靠深度上限兜住,但会白烧 token)。按 agent 名拦下。
+4. 子 Agent 被深度上限拒绝时的文案只说“不能派生”,不指向评审。前缀改成 `The review could not be started: `。
+
+另外两处一致性修正:分支评审的**提交清单也按 `paths` 收窄**(否则评审包里会列出全部不在范围内的提交);`ReviewChangeSetSource` 把“是否 git 仓库”的检查移进 `try`,git 起不来时也变成可读文本而不是原始异常。
