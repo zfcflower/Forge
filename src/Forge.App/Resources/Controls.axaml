@@ -228,7 +228,6 @@
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="Background" Value="{DynamicResource UserBubbleBrush}" />
     <Setter Property="HorizontalAlignment" Value="Right" />
-    <Setter Property="MaxWidth" Value="640" />
   </Style>
 
   <Style Selector="Border.turn-card">
@@ -238,21 +237,6 @@
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
     <Setter Property="Padding" Value="10,8" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
-  </Style>
-
-  <Style Selector="Border.turn-header">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-    <Setter Property="BorderThickness" Value="0,0,0,1" />
-    <Setter Property="Padding" Value="4,2" />
-    <Setter Property="Margin" Value="0,0,0,6" />
-  </Style>
-
-  <Style Selector="Border.turn-body">
-    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
-    <Setter Property="BorderThickness" Value="2,0,0,0" />
-    <Setter Property="Padding" Value="10,0,0,0" />
-    <Setter Property="Margin" Value="2,0,0,0" />
   </Style>
 
   <Style Selector="Border.tool-row">

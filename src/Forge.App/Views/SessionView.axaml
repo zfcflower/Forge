@@ -383,7 +383,7 @@
     <Panel Grid.Row="0">
       <ListBox x:Name="Transcript"
                ItemsSource="{Binding Transcript.Items}"
-               Padding="16,10,16,4"
+               Padding="{DynamicResource ChatTranscriptPadding}"
                SelectionMode="Single"
                ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
       <StackPanel IsVisible="{Binding Transcript.IsEmpty}"
@@ -406,7 +406,7 @@
     <Border x:Name="AutomationBanner"
             Grid.Row="1"
             Classes="composer-card"
-            Margin="12,6,12,0"
+            Margin="{DynamicResource ChatBannerMargin}"
             Padding="10,6"
             IsVisible="{Binding HasAutomationBanner}"
             AutomationProperties.AutomationId="automation-banner">
@@ -427,7 +427,7 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="2" Margin="12,6,12,8">
+    <Grid Grid.Row="2" Margin="{DynamicResource ChatComposerMargin}">
       <!-- A session that is not the active one of its workspace is a read-only view: no composer, only the way back. -->
       <Border x:Name="ReadOnlyBar"
               Classes="composer-card"
