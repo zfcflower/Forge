@@ -235,7 +235,13 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - 超链接:只认 http/https/mailto,需 Ctrl/Cmd,交给系统默认程序(经 Avalonia `Launcher`);Forge 在编辑器层接管 `VisualLineLinkText.OpenUriEvent`,失败写编辑器提示行,不静默吞掉。
 - 补全:按服务器声明的 `triggerCharacters` 自动触发(方向键/PageUp/PageDown/Home/End 在弹窗打开时由编辑器自己移动选中项;弹窗内的 `ListBoxItem` 用 `completion` 类拿回可见的选中背景——工作台的列表样式默认把选中背景清成透明,曾让弹窗“无法选择”),`isIncomplete` 在下一个字符后重试,`InsertTextFormat.Snippet` 的项按纯文本插入(`${1:name}`→`name`,占位符无默认值则不插入,选择项取首项,畸形片段整段消失,不做 Tab 占位符跳转);无会话或服务不支持时用文档词表补全(光标附近窗口、200 项上限)。
 
-语言交互边界:使用原生补全窗口、诊断波浪线、悬停文本与 F12/Ctrl(或 Cmd)点击定义跳转。补全由 Ctrl+Space、服务器声明的触发符或无会话时的词表提供;只跟随第一个定义目标,悬停以纯文本展示;声明不支持 `insert/replace` 之外的 item defaults,不把非法编辑映射为文件开头。异步结果须验证文档、版本、会话与绑定代次,分离视图取消请求。跨文件定义沿源文件的工作区与固定评审会话打开,显式无所属会话不得回退到活动会话;已打开目标保持自身归属。
+**语义 token 叠加。** 服务器声明 `semanticTokensProvider.full` 时,编辑器把它的分类叠在 TextMate 词法色之上:词法层给「看起来像什么」,语义层给「实际是什么」(属性、参数、方法、类型名等词法分不清的标识符)。叠加由 `SemanticTokenColorizer`(`DocumentColorizingTransformer`)完成,库只为**即将绘制的行**调它,因此只读可见行的按行索引,文档其余部分零工作。颜色取自编辑器自己的 `Syntax*Brush`——那套值就是 Dark+/Light+ 的调色板,与周围 TextMate 文字同源,所以语义叠加读起来是「更精确的分类」而不是「第二套主题」;取色按编辑器实际使用的主题变体解析(`EditorSettings.Theme` 固定主题时也一致)。请求时机:视图绑定、编辑防抖 400ms、服务器发 `workspace/semanticTokens/refresh`、以及打开后 2.5s 一次兜底(项目型服务器先分析再分类);`full/delta` 由客户端解码并应用,索引按行分桶,**只有服务器真的改了分类的行才重建数组**(`SemanticLineIndex.BuiltLines`/`ReusedLines` 可断言),映射在 UI 线程之外完成,结果带快照版本号。服务器对已变更文本作出的答案落地后,若版本已过期会立即再要一份,不留长期错位的叠加。
+
+**查找引用。** Shift+F12 向服务器要 `textDocument/references`(含声明),结果按「本文件在前,然后路径、行、列」排序并去重(服务器常把同一位置报两次);远程 URI 丢弃。列表以 `Flyout` 贴在光标处(`Views/ReferenceListView`),行显示 文件名 · 目录 · 行:列,Enter 或双击跳转:本文件用 `RevealEditorPosition`,跨文件走与定义跳转同一条「沿源文件工作区打开并定位」的路径。空结果是真答案,在编辑器状态行写「没有找到引用」;服务器未声明 `referencesProvider` 时写「不支持查找引用」。请求绑定绑定代次、文档版本与编辑器实例,过期即丢。
+
+**问题面板。** 右侧工具组的 `问题` 固定标签(`ProblemsPanelView`)列出**所有语言会话当前持有的诊断**——跨文件、跨工作区,而不只是当前打开的那一个。数据来自 `WorkspaceDiagnostics`:它订阅会话池的 `SessionStarted`/`SessionClosed` 与每个会话的 `Diagnostics.Changed`,只把变化冒泡成一次通知,面板再把通知合并成一次 UI 线程刷新,展平与排序在 UI 线程之外做,不轮询、闲置时零开销。列表按严重度→路径→行排序,可在 错误/警告/信息/提示 四档间筛选,标题行给「错误数 · 警告数 · 总数」;超过 2000 条只列前 2000 条并明说已截断(上限是内部实现细节,不进设置)。双击或 Enter 打开该文件并定位到诊断,工作区取自诊断本身而不是当前活动会话。面板只在被显示时刷新(附加到可视树或 DataContext 变化),语言切换后按当前语言重建文案。
+
+语言交互边界:使用原生补全窗口、诊断波浪线、悬停文本、语义 token 叠加、查找引用列表与 F12/Ctrl(或 Cmd)点击定义跳转。补全由 Ctrl+Space、服务器声明的触发符或无会话时的词表提供;只跟随第一个定义目标,悬停以纯文本展示;声明不支持 `insert/replace` 之外的 item defaults,不把非法编辑映射为文件开头。异步结果须验证文档、版本、会话与绑定代次,分离视图取消请求。跨文件定义沿源文件的工作区与固定评审会话打开,显式无所属会话不得回退到活动会话;已打开目标保持自身归属。
 
 **语言服务器来源。** 除 `languages.json` 显式配置外,启动时自动检测本机已装的语言服务器(`Forge.Editor.Languages.LanguageServerDiscovery`):先查 PATH 上的已知命令(C#、TS/JS、JSON、CSS、HTML、Python、Go、Rust、C/C++、Shell、YAML、Lua),再查 VS Code / Cursor 的扩展目录(含 C# 扩展里的 Roslyn LSP、`.roslyn` 同名片与 OmniSharp)与安装目录自带的服务(node 启动的 JSON/CSS/HTML);安装目录按三种布局展开(根、`resources/app`、`<版本>/resources/app`)。有界且离线:只做存在性检查、不下载、不安装、不执行探测命令;不存在的目录直接跳过,每个扩展最多看 32 个版本(按版本号取最新)。带注释的 JSON 用独立的 `jsonc` 语言(`.jsonc`、`tsconfig.json`/`jsconfig.json`/`devcontainer.json`,以及 `.vscode` 目录下的任意 `.json`;判定顺序是精确文件名 → `.vscode` 路径段 → 最长扩展名),否则 JSON 服务器会把注释当错误报。TypeScript 会带上 `initializationOptions.tsserver.path`,来源依次是服务器同级的 npm 全局 `node_modules`、npm prefix、编辑器安装目录自带的 `typescript`;找不到就不带选项,让工作区自己的 TypeScript 生效。合并规则:用户在 `languages.json` 里配置过的语言(包括显式配成无服务器或 `disabled`)一律不被覆盖;未被配置的语言才使用发现结果,并继承该服务器的扩展名表与初始化选项。命中后静默使用,并在编辑器状态行写明“语言服务:<服务器名>(来源)”(启动器被隐藏时取实际被启动的文件名,不写成 dotnet/node);仍找不到时提示里说明已查过 PATH 与 VS Code 扩展/安装目录。不使用 Pylance(其许可只允许在 VS Code 内使用)。
 
@@ -370,7 +376,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 
 ## 未决
 
-- 文件预览已支持编辑保存、TextMate 着色及 LSP 文档同步(AvaloniaEdit 编辑视图),非文本文件另有图片/CSV/TSV/.ipynb/LFS/二进制预览与 PDF 占位,网页则直接给可编辑源码 + 「在浏览器中打开」(见「富文件查看器」;不含 SVG 内部渲染——按文本打开——与图片 diff、缩放/平移);LSP 诊断、悬停、补全与跳转定义已接到 UI。未做:语义 token 叠加(`HighlightMerger`/`SemanticTokenMapper` 在 App 零调用)、查找引用 UI、问题列表面板、code action / rename。声明式插件面板渲染未做。
+- 文件预览已支持编辑保存、TextMate 着色、LSP 文档同步、诊断(波浪线 + 行尾圆点 + 拉取)、补全、悬停、跳转定义、语义 token 叠加、查找引用与工作区级问题面板。非文本文件另有图片/CSV/TSV/.ipynb/LFS/二进制预览与 PDF 占位,网页则是可编辑源码 + 「在浏览器中打开」(见「富文件查看器」;不含 SVG 内部渲染与图片 diff、缩放/平移)。未做:代码操作(code action)、重命名、文档符号列表、内联提示(inlay hints)、语义 token 的 range 请求(只用 full/delta)。语义叠加在两次答案之间不随编辑重映射:一次编辑后旧索引的行内坐标可能短暂落在改动过的行上,下一次答案(防抖 400ms 或服务器 refresh)即纠正——不做编辑重映射是为了不在热路径上维护第二份坐标表。声明式插件面板渲染未做。
 - 聊天消息:助手回复与用户消息下各有一枚复制按钮(`CopyTextButton`,点击时读 `ICopyableText.CopyText`,整条纯文本);流式回复结束前不显示。聊天尚不过 Markdown 渲染。
 - git 写工具(`git_branch`/`git_sync`)按工具名划为写操作,经会话的审批队列逐次询问;读工具自动放行,且 git 工具不暴露给 `run_code` 脚本(脚本内调用不经逐次审批呈现)。
 - 搜索图标是按钮(AutomationId `shell-search`),绑 `OpenPaletteCommand`;命令面板落地(W3)前禁用。

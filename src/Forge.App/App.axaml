@@ -60,6 +60,9 @@
     <DataTemplate DataType="vm:SpecTreeViewModel" x:DataType="vm:SpecTreeViewModel">
       <views:SpecTreeToolView />
     </DataTemplate>
+    <DataTemplate DataType="vm:ProblemsPanelViewModel" x:DataType="vm:ProblemsPanelViewModel">
+      <views:ProblemsPanelView />
+    </DataTemplate>
 
     <!-- Window overlays (MainWindowViewModel.Palette/Checks/Plan/Inspector/Onboarding): placeholders until their waves. -->
     <DataTemplate DataType="vm:PaletteViewModel" x:DataType="vm:PaletteViewModel">

@@ -1,0 +1,104 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             x:Class="Forge.App.Views.ProblemsPanelView"
+             x:DataType="vm:ProblemsPanelViewModel">
+  <UserControl.Styles>
+    <Style Selector="Ellipse.problem-severity">
+      <Setter Property="Width" Value="7" />
+      <Setter Property="Height" Value="7" />
+      <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="Ellipse.problem-severity.error">
+      <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Ellipse.problem-severity.warning">
+      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Ellipse.problem-severity.information">
+      <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto" Background="Transparent" Margin="8,6">
+    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+      <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <CheckBox Classes="filter"
+                  IsChecked="{Binding ShowErrors}"
+                  Content="{Binding [problems.filter.errors], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="problems-filter-errors" />
+        <CheckBox Classes="filter"
+                  IsChecked="{Binding ShowWarnings}"
+                  Content="{Binding [problems.filter.warnings], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="problems-filter-warnings" />
+        <CheckBox Classes="filter"
+                  IsChecked="{Binding ShowInformation}"
+                  Content="{Binding [problems.filter.information], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="problems-filter-information" />
+        <CheckBox Classes="filter"
+                  IsChecked="{Binding ShowHints}"
+                  Content="{Binding [problems.filter.hints], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="problems-filter-hints" />
+      </StackPanel>
+
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 Text="{Binding Summary}"
+                 VerticalAlignment="Center"
+                 HorizontalAlignment="Right"
+                 TextTrimming="CharacterEllipsis" />
+
+      <Button Grid.Column="2"
+              Classes="ghost icon"
+              Width="26"
+              Height="24"
+              Command="{Binding RefreshCommand}"
+              ToolTip.Tip="{Binding [problems.refresh], Source={x:Static loc:Loc.Instance}}"
+              AutomationProperties.AutomationId="problems-refresh"
+              AutomationProperties.Name="{Binding [problems.refresh], Source={x:Static loc:Loc.Instance}}">
+        <wc:FluentIcon Data="{DynamicResource IconRefresh}" Width="14" Height="14" />
+      </Button>
+    </Grid>
+
+    <ListBox x:Name="ProblemList"
+             Grid.Row="1"
+             Margin="0,6,0,0"
+             ItemsSource="{Binding Items}"
+             AutomationProperties.AutomationId="problems-list"
+             DoubleTapped="OnDoubleTapped">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:ProblemRowViewModel">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="2,3">
+            <Ellipse Classes="problem-severity"
+                     Classes.error="{Binding IsError}"
+                     Classes.warning="{Binding IsWarning}"
+                     Classes.information="{Binding IsInformation}"
+                     VerticalAlignment="Top"
+                     Margin="0,5,0,0"
+                     ToolTip.Tip="{Binding SeverityText}" />
+            <StackPanel Grid.Column="1" Spacing="1">
+              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                <TextBlock Classes="mono" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="1" Classes="mono" Text="{Binding Location}" Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBlock Grid.Column="2" Classes="caption" Text="{Binding Code}" Foreground="{DynamicResource TextMutedBrush}" />
+              </Grid>
+              <TextBlock Classes="caption"
+                         Text="{Binding Message}"
+                         TextWrapping="Wrap"
+                         ToolTip.Tip="{Binding Description}" />
+            </StackPanel>
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <TextBlock Grid.Row="2"
+               Margin="0,4,0,0"
+               Classes="caption"
+               Foreground="{DynamicResource WarningBrush}"
+               IsVisible="{Binding IsTruncated}"
+               Text="{Binding TruncatedNotice}" />
+  </Grid>
+</UserControl>
