@@ -327,3 +327,41 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 **基准(计划要求先于实现落基线)。** 实施前只有锁基线:成功路径 70 ns/acquire、等待路径 64 ns/acquire、8 线程争用 197 ns/op(5.1 Mitems/s),均 0 字节/次。实施后同一份场景对照(实现与基线在同一循环里交替):成功 38.8 ns 对 62.8 ns(0.62x)、等待 77.1 ns 对 65.9 ns(1.17x,拒绝必须读时钟算精确 retryTime,仍在 100 ns 内)、争用 72.3 ns/op/15.0 Mitems/s 对 185.7 ns/op(0.39x),紧预算共享 16.8 ms 对 33.1 ms(0.51x)。四条验收(0 字节/acquire、无争用 <100 ns、8 线程争用无一被拒、紧预算下 8000 请求只花一次)全绿。初版的“每线程计数在 2x 内”被评审指出是同义反复(全授权行的 spread 恒为 1),已改为紧预算共享行只断言“不超发”,spread 与锁基线的同项一起只作报告——十几毫秒的窗口里它主要反映任务落核,不做断言。
 
 **验证。** `dotnet build Forge.slnx -c Debug` 0 警告 0 错误(含 AOT 分析器);`Forge.Core.Tests` 全量 2296 通过(L2),其中 `~RateLimit|~Providers` 612 通过(新增 49 个);`Forge.App.Tests` 的 `~RateLimit|~QuotaResume|~Localization|~MinorRegression|~Settings|~Views` 805 通过(新增 20 个 + 改写 `QuotaResumeTests` 的 4 个预留用例);`Forge.Bench -- ratelimit` 3/3 验收通过。一次 testhost 在 438 个用例后崩溃(无失败断言),重跑全绿。独立评审(`custom-baidu-6f4a99/glm-5.3` high)报出 5 条,全部在本波内修好:`Settle` 把缓存读写计了两次(blocking,长缓存会话按两倍速吃预算);`SetRemaining` 不推进补充时间戳,校准会被陈旧窗口抹掉;一个维度有余额就取消另一维度的 hold;hold 过期后仍每请求读时钟;基准的公平性验收是同义反复(见上)。测试会话(独立、同模型)报出 1 个真实缺陷并在本波内修好:`RateLimitBucket.Adjust` 的负 delta 原本被非负的 `ToUnits` 压成 0,导致 `Settle` 的“实际用量更大则补扣”半边恒不生效(低估会单向累积);改成有符号的 `ToDelta` 后两个红灯转绿。未跑 `Forge.Integration.Tests`/`Forge.App.LiveSwitch.Tests`(按仓库约定只在 L3 跑,本波无跨模块协议改动),`Forge.Workspace`/`Forge.Editor`/`Forge.Mcp` 未改未跑。
+
+## 十、W11 交付记录(流程图 / Mermaid)
+
+**范围**:计划里 W11 的四条——聊天与 diff 预览里的 ```mermaid 本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随;**按 2026-11-14 的有条件批准引入 `Mermaider` 0.15.1 + `Svg.Skia` 4.9.1**(纯 .NET、无 JS 运行时、不联网)。实现说明见 `2026-11-13-w11-implementation.md`。
+
+**落点**:
+- 新增 `src/Forge.App/Services/MermaidDiagramTypes.cs`(白名单 token 解析 + header 嗅探)、`MermaidSvgColors.cs`(color-mix/var 解析)、`MermaidPalette.cs`(主题调色板)、`MermaidRenderService.cs`(后台渲染 + 缓存 + 并发/超时 + 失败分类)、`MermaidSettings.cs`(偏好的 ambient 投影)、`ComposerDraft.cs`(会话交接的草稿拼接,checks 与 Mermaid 共用)。
+- 新增 `src/Forge.App/Views/MermaidBlockView.cs`(块状态机 + 失败回路 + 修正交接 + `MermaidFixHost`)、`MermaidDiagramView.cs`(SKPicture 矢量回放控制)、`MermaidFixMessage.cs`(修正请求)、`src/Forge.App/ViewModels/IAgentMessageHost.cs`(会话交接契约)。
+- 新增 `src/Forge.App/Changes/Markdown/MarkdownCodeChrome.cs`:把 W4b 的代码块头部与正文抽成 `MarkdownCodeHeader`/`MarkdownCodeTextView`,Mermaid 块与普通代码块共用;`MarkdownCodeBlock` 改为组合它们(对外的 `CopyText`/`Update`/自动化 id 不变,现有 W4b 用例全绿)。
+- 改:`MarkdownBlockParser`(`MdBlock.FenceClosed`)、`MarkdownRenderer`(mermaid 分支 + `IsMermaid`)、`ChatMarkdownView`(闭合/未闭合就地更新;围栏 info 串分段到达时升级为 Mermaid 块)、`ChatSettingsSectionViewModel`/`ChatSettingsSectionView`(白名单 + 超时两行)、`ViewerSettingsComposition`(两行投影)、`SessionWorkspace`(实现 `IAgentMessageHost`)、`MainWindowViewModel.Checks`(改为调用会话的交接契约,删掉 checks 自己那份 run/queue 逻辑与日志)、`Strings.Chat`/`Strings.Mermaid`、`MarkdownStyles.axaml`(mermaid-* 样式)、`Forge.App.csproj`(Mermaider/Svg.Skia/SkiaSharp 三行)、`architecture.md`(两个包钉版本 + 条件已满足的说明)、`Forge.App/SPEC.md`(Mermaid 一段 + 未决更新)。
+
+**关键技术决定**:
+1. **`Svg.Skia` 取 4.9.1,不取 5.x**:5.x 依赖 SkiaSharp 4.148,与 Avalonia 12.1.6 编成的 SkiaSharp 3.119.4 是 major 冲突;4.9.1 与 Avalonia 同版(SkiaSharp ≥3.119.2、HarfBuzzSharp 8.3.1.3),NuGet 统一到 3.119.4,不新增原生资产。Windows AOT 发布 0 警告;IL/trim 分析是平台无关的,三平台的最终门仍是 PR CI 的 `publish` 矩阵。
+2. **`color-mix()` 预处理**:Svg.Skia 4.9.1 不认 CSS Color 5 的 `color-mix()`,未解析的填充画成黑色(菱形决策框整块变黑、标签压在上面);`MermaidSvgColors` 按 CSS 的百分比规则(省略一个 = 100−另一个、两个都省略 = 50/50、和 >100 归一、和 <100 时 alpha 乘该和)把 mermaider 实际产生的形态算成具体 `#rrggbb`,解析不了就判失败——绝不把黑图当成功。
+3. **矢量回放而不是栅格化**:`ICustomDrawOperation` + `ISkiaSharpApiLeaseFeature` 在渲染线程回放 `SKPicture`;2x/3x DPI 与窗口缩放零成本、单图约 2 KB、没有 PNG 编码与纹理上传。
+4. **流式不渲染**:`MdBlock.FenceClosed` 由块解析器记录;围栏没闭合时只显示源码,闭合(或定稿重建)时才渲染一次;同一条回复只在 `Complete()` 重建一次。
+5. **缓存与并发**:以 (源码, 调色板, 白名单) 为键缓存 24 条(同一张图的并发请求共享一次渲染),失败不缓存;渲染限 2 并发;超时 = 设置(默认 2000 ms,钳 [500, 30000])由 mermaider 的 `RenderDeadline` + 外层墙钟兜底。
+6. **失败回路**:源码 + 渲染器原文(异常文本带行号时写"第 N 行";mermaider 0.15 不提供行列号,头部错误固定第 1 行)+ 重试 + "让模型修正";修正消息交给最近祖先 `SessionView` 的会话(后台标签页不会发错会话),diff 预览回落到窗口的活动会话,会话忙则进输入框草稿。
+7. **可配置项**:只读 W0 已登记的两项(`chat` 分区的白名单与超时),不新增登记项;内部常量只有源码上限 64 KiB、修正消息源码上限 16 KiB、缓存 24 条、渲染并发 2。
+
+**偏差(已记录)**:
+1. **ASCII 退路未启用**:计划写"先上 ASCII 输出、再接 SVG 栅格化",但 `Mermaider.RenderAscii` 只支持 flowchart/state/xychart——默认白名单里的 sequence/class/er 一张都渲染不出来。SVG 回放通过了 AOT 冒烟,故直接落地 SVG;ASCII 只保留为"包不可用时"的退路(未写代码)。
+2. **跨出清单的文件(已记录,勿重复踩)**:`ViewModels/SessionWorkspace.cs`(实现 `IAgentMessageHost` + 交接方法)、`ViewModels/MainWindowViewModel.Checks.cs`(改为调用会话的交接契约,删掉重复的 run/queue 逻辑)、`Views/ChatMarkdownView.axaml.cs`(Mermaid 分支)、`Views/Settings/ChatSettingsSection*`(两项设置;W0 原计划把 chat 分区归 W5,但本树没有 W5 的改动)、`Changes/Markdown/MarkdownCodeBlock.cs`(改用抽出的 chrome,行为不变)、`Resources/MarkdownStyles.axaml`(只追加 mermaid-* 样式)、`Localization/Strings.Chat.cs`(三项 `chat.settings.*`)、`tests/Forge.App.Tests/Localization/StringTableTests.cs`(前缀表加 `mermaid`,一行)、`architecture.md`/`Forge.App/SPEC.md`。
+3. **`Services/` 下的具体文件名**:计划写 `Services/MermaidRender*`,实际按单一职责拆成 `MermaidRenderService`/`MermaidSvgColors`/`MermaidPalette`/`MermaidDiagramTypes`/`MermaidSettings`;都是 W11 新建,没有跨波冲突。
+4. **测试缝**:`MermaidFixHost.ResolveOverride` 是 static Func,只为单测在无会话的树里注入假 host;生产路径不设置它,真正的解析仍走"最近 SessionView → 窗口活动会话"。
+
+**验证**(最终树上实测):
+- `dotnet build Forge.slnx -c Debug` → 0 警告 0 错误。
+- `Forge.App.Tests --filter "FullyQualifiedName~Mermaid"` → 148 通过(服务/颜色/类型白名单/设置/修正消息/块状态机/主题切换/缓存淘汰/Markdown 与 diff 集成);`--filter "Views|Changes|Services|Settings"` → 727 通过;源码门槛(`Localization|MinorRegressionTests|KeyRegistry|StringTable|NoHardcodedChinese`)→ 131 通过;`ChecksHandOffTests` 15 通过。
+- `Forge.App.Tests` 全量(L2):见下"收尾验证"。
+- `dotnet publish src/Forge.App -c Release -r win-x64 -p:PublishAot=true -p:SelfContained=true -p:TreatWarningsAsErrors=true` → 成功(原生 exe 73.8 MB),仅 Avalonia.Win32 既有的两条 ILC 信息行;`dotnet list package --include-transitive` 确认 SkiaSharp 3.119.4 / HarfBuzzSharp 8.3.1.3 与 Avalonia 同版,未引入 SkiaSharp 4.x。
+- 视觉核对:浅色中文 flowchart、深色中文 flowchart、失败面板各一张(headless Skia 帧;临时冒烟文件已删除,不进仓库)。
+
+**独立测试会话**(与实现会话分开):新增 136 个用例(10 个文件),全部在 `tests/Forge.App.Tests`,未改产品代码;拉出 1 个真实缺陷并已修——`MermaidSvgColors.Mix` 在百分比和 <100% 时把通道除以已缩放的 alpha,颜色偏亮(`#9F009F` → 应为 `#800080`),现在是 `#800080CC` 的断言。测试会话报告的未覆盖面由主 Agent 补了 12 个用例:默认白名单里 sequence/state/class/er 各渲一张、`MaxLines` 超限 → TooLarge、200 节点图 + 1 ms 超时 → Timeout、明暗切换后 picture 引用变化、缓存 24 条淘汰、调色板明暗不同、`color-mix` 只改属性值不改 `<text>` 标签文本、`<style>` 正文仍解析。最终 Mermaid 过滤 148 个用例。
+
+**独立评审**(glm-5.3,只读):结论 `approve`,5 条 minor 已全部处理——(1) `Forget` 在 `order` 里留陈旧位 → 改 `LinkedList` + 位置字典;(2) `color-mix` 扫描会改写 `<text>` 标签文本 → 只解析标签属性与 `<style>` 正文,补两条用例;(3) 状态图标每次迁移重复 `Bind` 不释放 → 保存并 Dispose 旧绑定;(4) 默认类型的端到端用例与 Timeout/TooLarge 未构造 → 已补;(5) 实现说明的收尾小节为空 → 已填。评审同时核对了 ASCII 偏差、清单外文件、64 KiB 边界、测试缝、color-mix 数学、checks 语义迁移与 `MermaidPicture` 不显式 Dispose 的决定,确认与记录一致。
+
+**收尾验证**:`Forge.App.Tests` 全量在最终树上 **4830 通过 / 0 失败**(13 m 29 s)。过程中的两次 `testhost` 原生崩溃(2852 个用例后、以及第 116 个 `Git.StepCommitterTests` 用例处)判定为与本波无关的环境问题:崩溃前没有任何 Mermaid 用例执行过,Mermaid 过滤连跑 3 次全绿,`StepCommitterTests` 单独连跑 3 次全绿,同机另有一个工作区在跑测试;更早的一次全量还出现 1 个 `Terminal.TerminalLifecycleTests.Osc_title_becomes_the_tab_title` 偶发失败,单独连跑 3 次全绿(`Terminal/**` 本波未改)。

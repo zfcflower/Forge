@@ -89,4 +89,28 @@
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
+
+  <!-- The Mermaid block (wave W11): its render/failed status line, the renderer's message and the action buttons. -->
+  <Style Selector="TextBlock.mermaid-status">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+  <Style Selector="TextBlock.mermaid-status-error">
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+  </Style>
+  <Style Selector="SelectableTextBlock.mermaid-detail">
+    <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+  <Style Selector="TextBlock.mermaid-fix-status">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+  <Style Selector="Button.mermaid-action">
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
 </Styles>

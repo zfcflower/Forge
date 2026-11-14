@@ -5,8 +5,9 @@ using Xunit;
 namespace Forge.App.Tests.Settings;
 
 /// <summary>
-/// Pins <see cref="ChatSettingsSectionViewModel"/>: both rows write through to the live preferences and read back
-/// from them (with the preference's clamp for the thumbnail edge), and the control bounds mirror the preference's.
+/// Pins <see cref="ChatSettingsSectionViewModel"/>: every row writes through to the live preferences and reads back from
+/// them (with the preference's clamp for the thumbnail edge and the Mermaid timeout), the control bounds mirror the
+/// preference's, and the Mermaid caption lists each diagram-type token once.
 /// </summary>
 public sealed class ChatSettingsSectionTests
 {
@@ -57,5 +58,57 @@ public sealed class ChatSettingsSectionTests
         Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, ChatSettingsSectionViewModel.MaxThumbnailEdge);
         Assert.Equal(ChatSettingsSectionViewModel.MinThumbnailEdge, ChatSettingsSectionViewModel.MinThumbnailEdgeDecimal);
         Assert.Equal(ChatSettingsSectionViewModel.MaxThumbnailEdge, ChatSettingsSectionViewModel.MaxThumbnailEdgeDecimal);
+    }
+
+    [Fact]
+    public void The_mermaid_whitelist_writes_through_the_preferences_and_reads_back()
+    {
+        var preferences = new AppPreferences();
+        var section = new ChatSettingsSectionViewModel(preferences);
+        Assert.Equal(AppPreferences.DefaultChatMermaidDiagramTypes, section.MermaidTypes);
+
+        section.MermaidTypes = "flowchart, gantt";
+
+        Assert.Equal("flowchart, gantt", preferences.ChatMermaidDiagramTypes);
+        Assert.Equal("flowchart, gantt", new ChatSettingsSectionViewModel(preferences).MermaidTypes);
+    }
+
+    [Fact]
+    public void The_mermaid_timeout_writes_through_is_clamped_and_notifies()
+    {
+        var preferences = new AppPreferences();
+        var section = new ChatSettingsSectionViewModel(preferences);
+        var raised = PropertyChangeLog.For(section);
+
+        section.MermaidTimeoutMilliseconds = 4000;
+        Assert.Equal(4000, preferences.ChatMermaidTimeoutMilliseconds);
+        Assert.Equal(4000, section.MermaidTimeoutMilliseconds);
+
+        // Out of range lands on the preference's clamp, so the box shows the value that was kept.
+        section.MermaidTimeoutMilliseconds = 1;
+        Assert.Equal(AppPreferences.MinChatMermaidTimeoutMilliseconds, section.MermaidTimeoutMilliseconds);
+        section.MermaidTimeoutMilliseconds = 999_999;
+        Assert.Equal(AppPreferences.MaxChatMermaidTimeoutMilliseconds, section.MermaidTimeoutMilliseconds);
+        Assert.Equal(3, raised.Count(name => name == nameof(ChatSettingsSectionViewModel.MermaidTimeoutMilliseconds)));
+    }
+
+    [Fact]
+    public void The_known_mermaid_types_caption_lists_each_token_once()
+    {
+        var known = ChatSettingsSectionViewModel.KnownMermaidTypes;
+
+        var tokens = known.Split(", ", StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains("flowchart", tokens);
+        Assert.Contains("pie", tokens);
+        Assert.Equal(tokens.Length, tokens.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void The_mermaid_timeout_bounds_mirror_the_preference_clamp()
+    {
+        Assert.Equal(AppPreferences.MinChatMermaidTimeoutMilliseconds, ChatSettingsSectionViewModel.MinMermaidTimeout);
+        Assert.Equal(AppPreferences.MaxChatMermaidTimeoutMilliseconds, ChatSettingsSectionViewModel.MaxMermaidTimeout);
+        Assert.Equal(AppPreferences.MinChatMermaidTimeoutMilliseconds, ChatSettingsSectionViewModel.MinMermaidTimeoutDecimal);
+        Assert.Equal(AppPreferences.MaxChatMermaidTimeoutMilliseconds, ChatSettingsSectionViewModel.MaxMermaidTimeoutDecimal);
     }
 }

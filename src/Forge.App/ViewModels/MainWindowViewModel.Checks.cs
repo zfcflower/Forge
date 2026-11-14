@@ -76,58 +76,22 @@ internal sealed partial class MainWindowViewModel
     }
 
     /// <summary>
-    /// Hands the panel's message to the session: an idle session runs it as one turn, a busy one gets it in its composer so
-    /// the user sends it when the current turn is done. Never starts a second turn behind the user's back.
+    /// Hands the panel's message to the session through the session's own hand-off contract (wave W11): an idle session runs
+    /// it as one turn, a busy one gets it in its composer so the user sends it when the current turn is done. Never starts a
+    /// second turn behind the user's back.
     /// </summary>
     private async Task<ChecksHandOff> HandChecksToAgentAsync(SessionWorkspaceViewModel? session, string message)
     {
-        if (session is null || session.IsAutomationClosed)
+        if (session is null || !session.CanHandOff)
         {
             return ChecksHandOff.NoSession;
         }
 
-        if (!session.IsAutomationIdle)
-        {
-            QueueChecksMessage(session, message);
-            return ChecksHandOff.Queued;
-        }
-
-        try
-        {
-            var result = await session
-                .RunAutomationTurnAsync(message, LocText.Literal(Loc.Instance[ChecksStrings.HandOffOrigin]), agent: null)
-                .ConfigureAwait(true);
-
-            if (result.Status is MailboxStatus.Completed or MailboxStatus.TurnFailed)
-            {
-                return ChecksHandOff.Ran;
-            }
-
-            // Withdrawn between the idle check and the turn (the tab was taken over, archived or removed): the message was
-            // not delivered and must not be lost, so it goes where a draft would.
-            QueueChecksMessage(session, message);
-            return ChecksHandOff.Queued;
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            AppLogs.Session.ZLogWarning($"checks hand-off failed: {exception.Message}");
-            QueueChecksMessage(session, message);
-            return ChecksHandOff.Queued;
-        }
+        var ran = await session
+            .HandMessageAsync(message, LocText.Literal(Loc.Instance[ChecksStrings.HandOffOrigin]))
+            .ConfigureAwait(true);
+        return ran ? ChecksHandOff.Ran : ChecksHandOff.Queued;
     }
-
-    /// <summary>
-    /// Puts the message in the session's composer after whatever the user already typed there: a queued hand-off must not
-    /// erase a draft the user was writing.
-    /// </summary>
-    private static void QueueChecksMessage(SessionWorkspaceViewModel session, string message)
-    {
-        session.Draft = ComposeQueuedDraft(session.Draft, message);
-    }
-
-    /// <summary>The composer text after a queued hand-off: the existing draft, a blank line, then the message.</summary>
-    internal static string ComposeQueuedDraft(string? draft, string message) =>
-        string.IsNullOrWhiteSpace(draft) ? message : draft.TrimEnd() + "\n\n" + message;
 
     /// <summary>Opens a link from the panel in the system browser; a failure is traced, never thrown into the click.</summary>
     /// <remarks>Only http and https links are opened: a check's link is whatever the CI integration reported, and a

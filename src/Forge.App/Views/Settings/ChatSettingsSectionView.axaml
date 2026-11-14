@@ -34,6 +34,41 @@
                 AutomationProperties.Name="{Binding [chat.settings.sendToolImages], Source={x:Static loc:Loc.Instance}}" />
     </Grid>
 
+    <!-- Which Mermaid diagram types are drawn (wave W11); the accepted tokens are a constant, so they bind statically. -->
+    <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [chat.settings.mermaidTypes], Source={x:Static loc:Loc.Instance}}" />
+      <StackPanel Grid.Column="1" Spacing="3">
+        <TextBox Text="{Binding MermaidTypes, Mode=TwoWay}"
+                 AutomationProperties.AutomationId="chat-mermaid-types"
+                 AutomationProperties.Name="{Binding [chat.settings.mermaidTypes], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [chat.settings.mermaidTypesHint], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{x:Static set:ChatSettingsSectionViewModel.KnownMermaidTypes}" />
+      </StackPanel>
+    </Grid>
+
+    <!-- Wall-clock bound of one diagram render; the preference clamps it to the same bounds as this control. -->
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [chat.settings.mermaidTimeout], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{x:Static set:ChatSettingsSectionViewModel.MinMermaidTimeoutDecimal}"
+                     Maximum="{x:Static set:ChatSettingsSectionViewModel.MaxMermaidTimeoutDecimal}"
+                     Increment="100"
+                     FormatString="0"
+                     Value="{Binding MermaidTimeoutMilliseconds, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="chat-mermaid-timeout"
+                     AutomationProperties.Name="{Binding [chat.settings.mermaidTimeout], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
                Text="{Binding [chat.settings.hint], Source={x:Static loc:Loc.Instance}}" />

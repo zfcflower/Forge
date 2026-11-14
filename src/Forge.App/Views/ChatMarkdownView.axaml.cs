@@ -181,7 +181,25 @@ public partial class ChatMarkdownView : UserControl
 
         if (block.Kind is MdBlockKind.Code or MdBlockKind.Html && control is MarkdownCodeBlock code)
         {
+            // The fence's info string can arrive in pieces ("```" then "mermaid"): the block that started as plain code
+            // becomes a Mermaid block as soon as the info says so, instead of waiting for the reply to be rebuilt.
+            if (MarkdownRenderer.IsMermaid(MarkdownRenderer.CodeInfo(block)))
+            {
+                Truncate(position);
+                Add(block);
+                return;
+            }
+
             code.Update(block.Text, MarkdownRenderer.CodeInfo(block));
+            blocks[position] = (block, control, now);
+            return;
+        }
+
+        if (block.Kind is MdBlockKind.Code && control is MermaidBlockView mermaid)
+        {
+            // The block decides what to do with an open fence (show the source) and with a closed one (render); the view only
+            // hands it the current text and whether the fence just closed.
+            mermaid.Update(block.Text, MarkdownRenderer.CodeInfo(block), block.FenceClosed);
             blocks[position] = (block, control, now);
             return;
         }

@@ -1,13 +1,15 @@
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Services;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Settings;
 
 /// <summary>
 /// The <c>chat</c> settings section (<see cref="SettingsSectionIds.Chat"/>): how large a tool result's images render in
-/// the transcript and whether those images reach the model. Edits <see cref="AppPreferences"/> directly, so the next
-/// row completion and the next request read the new values and the preferences store persists them on its debounce.
+/// the transcript, whether those images reach the model, and which Mermaid diagram types are drawn (wave W11). Edits
+/// <see cref="AppPreferences"/> directly, so the next row completion, request or diagram render reads the new values and the
+/// preferences store persists them on its debounce.
 /// <para>The labels and hints are <see cref="Loc"/> keys bound in XAML and the heading comes from the section's title
 /// key, so a language switch re-renders all of them without this view model raising anything — it holds no
 /// subscription and needs no disposal.</para>
@@ -25,6 +27,17 @@ internal sealed class ChatSettingsSectionViewModel : ObservableObject
     public static decimal MinThumbnailEdgeDecimal => MinThumbnailEdge;
 
     public static decimal MaxThumbnailEdgeDecimal => MaxThumbnailEdge;
+
+    /// <summary>Bounds of the Mermaid timeout control, mirrored from the preference's clamp so both stay one number.</summary>
+    public const int MinMermaidTimeout = AppPreferences.MinChatMermaidTimeoutMilliseconds;
+    public const int MaxMermaidTimeout = AppPreferences.MaxChatMermaidTimeoutMilliseconds;
+
+    public static decimal MinMermaidTimeoutDecimal => MinMermaidTimeout;
+
+    public static decimal MaxMermaidTimeoutDecimal => MaxMermaidTimeout;
+
+    /// <summary>The tokens the Mermaid whitelist accepts, for the caption under the field; constant, so it binds statically.</summary>
+    public static string KnownMermaidTypes => string.Join(", ", MermaidDiagramTypes.Tokens);
 
     private readonly AppPreferences preferences;
 
@@ -60,6 +73,31 @@ internal sealed class ChatSettingsSectionViewModel : ObservableObject
         set
         {
             preferences.ChatToolImagesToModel = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// The comma-separated Mermaid whitelist. The preference trims it; unknown tokens are ignored by the parser and simply leave
+    /// those diagram types as code blocks, so a typo narrows the set instead of breaking a render.
+    /// </summary>
+    public string MermaidTypes
+    {
+        get => preferences.ChatMermaidDiagramTypes;
+        set
+        {
+            preferences.ChatMermaidDiagramTypes = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Longest one Mermaid diagram may take before it is reported as timed out, in milliseconds.</summary>
+    public int MermaidTimeoutMilliseconds
+    {
+        get => preferences.ChatMermaidTimeoutMilliseconds;
+        set
+        {
+            preferences.ChatMermaidTimeoutMilliseconds = value;
             OnPropertyChanged();
         }
     }

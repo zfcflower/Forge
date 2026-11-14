@@ -16,6 +16,13 @@ internal static class ChatStrings
     public const string SettingsThumbnailEdge = "chat.settings.thumbnailEdge";
     public const string SettingsSendToolImages = "chat.settings.sendToolImages";
 
+    /// <summary>Wave W11: which Mermaid diagram types the transcript and the diff preview draw.</summary>
+    public const string SettingsMermaidTypes = "chat.settings.mermaidTypes";
+    public const string SettingsMermaidTypesHint = "chat.settings.mermaidTypesHint";
+
+    /// <summary>Wave W11: how long one Mermaid diagram may take to render.</summary>
+    public const string SettingsMermaidTimeout = "chat.settings.mermaidTimeout";
+
     /// <summary>The caption under both rows: the thumbnail never re-encodes the stored image and the switch only changes what the model receives.</summary>
     public const string SettingsHint = "chat.settings.hint";
 
@@ -25,6 +32,12 @@ internal static class ChatStrings
         Loc.Register(SettingsTitle, "对话", "Chat");
         Loc.Register(SettingsThumbnailEdge, "工具图片缩略图最长边（像素）", "Tool image thumbnail edge (pixels)");
         Loc.Register(SettingsSendToolImages, "把工具图片发送给模型", "Send tool images to the model");
+        Loc.Register(SettingsMermaidTypes, "Mermaid 图类型", "Mermaid diagram types");
+        Loc.Register(
+            SettingsMermaidTypesHint,
+            "逗号分隔；未列出的类型按普通代码块显示，改下一次渲染生效。",
+            "Comma separated; types not listed stay ordinary code blocks, and a change applies to the next render.");
+        Loc.Register(SettingsMermaidTimeout, "Mermaid 渲染超时（毫秒）", "Mermaid render timeout (ms)");
         Loc.Register(
             SettingsHint,
             "缩略图只约束会话记录里显示时解码的大小，从不重新编码已存储的图片；此开关只决定模型是否收到这些图片，记录始终照常显示。",

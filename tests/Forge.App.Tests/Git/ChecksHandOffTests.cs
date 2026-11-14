@@ -1,3 +1,4 @@
+using Forge.App.Services;
 using Forge.App.ViewModels;
 using Xunit;
 
@@ -15,13 +16,13 @@ public sealed class ChecksHandOffTests
     [InlineData("   \n")]
     public void A_queued_hand_off_fills_an_empty_composer_with_the_message(string? draft)
     {
-        Assert.Equal("fix the checks", MainWindowViewModel.ComposeQueuedDraft(draft, "fix the checks"));
+        Assert.Equal("fix the checks", ComposerDraft.Append(draft, "fix the checks"));
     }
 
     [Fact]
     public void A_queued_hand_off_keeps_the_users_draft_and_appends_the_message()
     {
-        var composed = MainWindowViewModel.ComposeQueuedDraft("half a thought\n\n", "fix the checks");
+        var composed = ComposerDraft.Append("half a thought\n\n", "fix the checks");
 
         Assert.Equal("half a thought\n\nfix the checks", composed);
     }

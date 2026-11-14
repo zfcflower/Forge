@@ -71,6 +71,12 @@ internal sealed class MdBlock
     /// <summary>Fence info string; "yaml" for front matter.</summary>
     public string Info { get; init; } = "";
 
+    /// <summary>
+    /// A fenced code block whose closing fence was seen. An open fence is the block a streaming reply is still writing, so a
+    /// renderer waits for it (wave W11): parsing half a diagram would report errors the finished text does not have.
+    /// </summary>
+    public bool FenceClosed { get; init; }
+
     public bool Ordered { get; init; }
 
     public List<MdListItem> Items { get; } = [];
@@ -398,7 +404,12 @@ internal static class MarkdownBlockParser
             sb.Append(l.AsSpan(Math.Min(ind, Indent(l))));
         }
 
-        output.Add(new MdBlock(MdBlockKind.Code, s[i], s[closeAt >= 0 ? closeAt : to - 1]) { Text = sb.ToString(), Info = info });
+        output.Add(new MdBlock(MdBlockKind.Code, s[i], s[closeAt >= 0 ? closeAt : to - 1])
+        {
+            Text = sb.ToString(),
+            Info = info,
+            FenceClosed = closeAt >= 0,
+        });
         return closeAt >= 0 ? closeAt + 1 : to;
     }
 
