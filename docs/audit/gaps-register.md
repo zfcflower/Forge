@@ -199,12 +199,12 @@ WS-07 工具清单、Core 凭据并发串行、Core FTS 回退、HostClient 安�
 
 - **F-SCRIPT-45** ✅ Evict/Clear 主动失效接线:PluginEntry.CacheKey + PluginCatalog.EvictCacheKey + ExtensionHost.EvictCompilation 在 5 依赖变化路径(refresh 替换/消失、revoke、disable/delete、commit 顶替)。run_code 脚本缓存(进程级静态键+LRU)与 discard 草稿(LRU)合理不接 Clear。6 测试+变异验证。
 - **FileArtifactStore.cs:132 artifacts.at** ✅ 纳入 TimestampColumns + EnsureOwnedTimestampsAsync(owner 建表后规范化+装守卫,不加版本步因 artifacts 阶梯外自建)+ 严格 ParseCanonicalTimestamp。Core SPEC 同步 13 表 20 列。
-- **降级 purge 清双表** ✅ PurgeOp 清 messages_fts/messages_text 各按存在性(FTS5 仅可用时)。Core SPEC 同步。残留:降级构建 purge 无法清它读不到的 messages_fts,换回 FTS5 仍可能命中已清理会话(需 FTS5 开启时按 messages 反向修剪索引,搜索路径改动,记遗留)。
+- **降级 purge 清双表** ✅ PurgeOp 清 messages_fts/messages_text 各按存在性(FTS5 仅可用时)。Core SPEC 同步。残留已收口:降级构建 purge 清不到的 messages_fts 残留行,由下一个能读该索引的构建按 messages 反向修剪(StorageSchema.PruneOrphanedSearchRowsAsync,ReadFtsOrDegradeAsync 判定可读后执行,以 messages_text 存在为门槛;变异验证)。
 - **6 环境侧通知接线测试** ✅ 3 生产接缝(internal 零行为变更:ExtensionHostSupervisor.WrapClient/MainWindowViewModel.ProjectListRead/FileDocumentView.Review)+ NotificationWiringTests 11→19(host:failed/model-fetch/review-file/review-diff/preferences-problem/startup-failed/projects-problem/purge-cleanup)。
 - **4 控件守卫用例** ✅ DiffEditorView/MermaidBlockView/TimelineGutter/ReviewOverlay 哨兵值法,ControlLanguageThreadGuardTests 3→7。
 - **minor 反向行为** ✅ 核实均已 documented 或过时:关派生禁 request_review 已在 App SPEC:143、usageLog 已在 L149、ChatMermaidTimeout 已被 W11 消费(非死设置)。
 
 ### 收尾后仍剩余
 - MainWindow.axaml.cs:224 startup-failed 兜底站点(窗口 code-behind catch-all)接线测试:需 MainWindow 级夹具+让 InitializeAsync 抛过滤器外异常,成本高。
-- 降级构建 purge 无法清 messages_fts(换回 FTS5 索引仍可能命中已清理会话):需搜索路径改动。
+- ~~降级构建 purge 无法清 messages_fts(换回 FTS5 索引仍可能命中已清理会话)~~ ✅ 已收口:FTS5 恢复可读时按 messages 反向修剪孤儿索引行(StorageSchema.PruneOrphanedSearchRowsAsync,2 新例+变异验证)。**相邻新缺口(未修)**:降级期 append 的消息只进 messages+messages_text,换回 FTS5 后不补进 messages_fts(EnsureFallbackTableAsync 只做反方向补行),FTS5 全文搜不到降级期写入的消息。
 - UNVERIFIED 平台项:POSIX 真实残留/不可杀进程(Linux CI)、服务端行为、真实 LSP/PTY/gh 集成。
