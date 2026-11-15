@@ -12,7 +12,7 @@ MCP(Model Context Protocol)客户端与服务器管理。自写 JSON-RPC 与传�
 
 ## 边界
 
-- 支持 stdio 本地进程与可流式 HTTP 两种传输;不含 OAuth、旧版 HTTP+SSE、`resources/subscribe`、`completions`、进度通知。
+- 支持 stdio 本地进程与可流式 HTTP 两种传输;不含旧版 HTTP+SSE 与 `completions`。OAuth、`resources/subscribe` 与进度通知的契约已定(W10d,见下「OAuth 与资源订阅」),实现落地前本节以该契约为准。
 - 服务器工具经 `McpToolAdapter` 暴露为 `<server>__<tool>`,副作用默认 Execute,配置 `readOnlyTools` 可标只读;脚本/MCP 工具调用仍走主程序审批。
 - 配置读 `~/.forge/mcp.json` 与 `<workspace>/.forge/mcp.json`(项目按名覆盖全局),坏条目产生诊断不致命;`url` 仅接受绝对 http/https URI(拒绝相对路径与 file 等其它 scheme)。
 - **写**同一批文件(增删改/启停标记/从别家配置导入):只替换被编辑的那一条目,其它条目与其它根键原样保留;不展开 `${VAR}`(写回去的永远是占位符),JSON 注释不保留(`JsonNode` 无此能力,文档写明)。文件 IO 与锁**不在本库**:本库提供纯文本变换(`McpConfigFile`)与原文形态(`McpServerEntry`),原子写与互斥由 App 的 `McpConfigStore` 复用 `SettingsFileMutex` + `AtomicFile`。
@@ -43,9 +43,19 @@ MCP(Model Context Protocol)客户端与服务器管理。自写 JSON-RPC 与传�
 
 **工具结果的块。** `tools/call` 的 `content` 按块保留而不是先扁平成字符串(audio 也只留占位),`McpContent` 携带 `Type`/`Text`(给人看的形态,放在字幕与日志里)/`MimeType`/`Uri`/`SizeBytes`,图片块额外带 `Data`。去程到 `Forge.Abstractions` 只留 app 能显示的四种图片格式(png/jpeg/gif/webp);单张解码后超过 5 MB 的**丢弃字节只留占位**,一次结果的图片合计超过 20 MB 时其后的图片同样只留占位(安全边界,不是可配值——它们同时是内存上限;单张上限挡不住「一次返回很多张」);`audio` 不保留字节。`McpToolAdapter` 因此返回块列表:文本优先(把已变成图片的块从文本里剔掉,免得同一张图说两遍),随后每张图一个 `ImageBlock`;`result.Text` 只在没有结构化 `content` 时作为唯一文本块。字符截断只作用于文本,图片不受字符数上限抽头。
 
+## OAuth 与资源订阅(W10d 契约,2026-11-15 拍板)
+
+**OAuth 只对可流式 HTTP。** 401 + `WWW-Authenticate` 触发发现:RFC 9728 protected-resource metadata → RFC 8414 授权服务器 metadata → RFC 7591 动态客户端注册 → 授权码 + PKCE(S256)+ loopback 回调(BCL `HttpListener`,随机端口)→ token 交换;过期用 refresh token 刷新,刷新后重试一次。**不静默弹浏览器**:连接遇 401 只把服务器置为需要登录的状态,用户在 MCP 设置里点「登录」才走流程;「退出」清除 token。
+
+**token 不落明文。** 本库不存储 token:经 `IMcpTokenStore`(按 server url origin + resource 指示符的稳定键)注入,App 用 `ProviderSecretStore` 同款 AES-GCM 旁钥模式实现(`mcp-secrets.json` + owner-only 旁钥,原子写);浏览器经 `IMcpOAuthUi` 注入。本库依赖边界(只 Abstractions + BCL)不变;PKCE/loopback 助手在本库内实现而不抽公共——App 的 OpenRouter 助手进不了本库的依赖边界,记为故意重复。
+
+**进度。** `tools/call` 携带 `_meta.progressToken`(每调用唯一),`notifications/progress` 按 token 路由到该调用的 `ToolContext.Progress`(最新尾快照语义,与 BashTool 同口径),资源检查器直接消费;无 token 的进度通知落通用事件。
+
+**资源订阅。** `resources/subscribe`/`unsubscribe` 请求 + `notifications/resources/updated` → `ResourceUpdated` 事件;能力位 `resources.subscribe` 已解析。App 表面:MCP 设置分区每服务器的资源浏览器(列表/读取/订阅,更新通知即时刷新);**不加 agent 资源工具**(用户拍板)。会话 id 跨重启持久化仍未决。
+
 ## 未决
 
-- MCP OAuth 登录、会话 id 跨重启持久化、`resources/subscribe` 与进度通知(均按需)。
+- 会话 id 跨重启持久化、`completions/complete`(按需)。
 - `ProviderException` 式的协议错误细节未完全类型化(部分以 DataJson 字符串承载)。
 - 写回 `mcp.json` 会丢注释、统一为两空格缩进:要保留注释需要一个带 trivia 的 JSON 模型,目前无此依赖。
 - 工具选面按“当前请求文本”打分,没有跨回合的使用频次记忆(那需要会话级的调用统计接缝);请求没命中任何词时按目录顺序取前 N 名。

@@ -187,6 +187,7 @@
     its own constructor, so the root view model does not have to carry it. -->
     <!-- Window overlays: each draws the template of its view model (App.axaml) and is empty while the property is null. -->
     <ContentControl Grid.Row="1" Content="{Binding Checks}" />
+    <ContentControl Grid.Row="1" Content="{Binding Comments}" />
     <ContentControl Grid.Row="1" Content="{Binding Plan}" />
     <ContentControl Grid.Row="1" Content="{Binding Inspector}" />
     <ContentControl Grid.Row="1" Content="{Binding Onboarding}" />

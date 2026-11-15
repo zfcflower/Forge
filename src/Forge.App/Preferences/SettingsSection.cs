@@ -160,6 +160,9 @@ internal static class SettingsSectionIds
     /// <summary>Update checks and channel (wave W10).</summary>
     public const string Updates = "updates";
 
+    /// <summary>The keymap: every rebindable shortcut and its overrides (wave W10e).</summary>
+    public const string Keymap = "keymap";
+
     public const int ProviderOrder = 100;
     public const int AppearanceOrder = 200;
     public const int LanguageOrder = 300;
@@ -208,4 +211,7 @@ internal static class SettingsSectionIds
     public const int IdleArchiveOrder = 570;
     public const int InspectorOrder = 740;
     public const int UpdatesOrder = 800;
+
+    /// <summary>Keyboard shortcuts sit with the interface choices, right after appearance (wave W10e).</summary>
+    public const int KeymapOrder = 210;
 }

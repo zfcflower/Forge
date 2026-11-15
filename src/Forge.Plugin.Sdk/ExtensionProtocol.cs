@@ -29,6 +29,10 @@ public static class ExtensionProtocol
     public const string ExtensionsPending = "extensions.pending"; // IpcEmpty → StagedExtensionList
     public const string ExtensionsCommit = "extensions.commit";   // ExtensionCommitRequest → ExtensionCommitResult; approval_mismatch when the staged bytes differ
     public const string ExtensionsDiscard = "extensions.discard"; // ExtensionIdRequest → IpcEmpty
+    // Repository/local-package installation (wave W10a, ExtensionInstallation.cs). The main program downloads, verifies the
+    // package SHA-256 and extracts to a temp directory; the host validates the manifest and swaps the directory in with the
+    // same trash rollback as extensions.commit. The new version starts Draft — installation never approves.
+    public const string ExtensionsInstall = "extensions.install";   // ExtensionInstallRequest → ExtensionInstallResult
     public const string PluginDisable = "plugin.disable";         // PluginVersionRequest → IpcEmpty; unregisters tools and stops the worker
     public const string PluginEnable = "plugin.enable";           // PluginVersionRequest → IpcEmpty; runs again only if the approved hashes still match
     public const string PluginDelete = "plugin.delete";           // PluginVersionRequest → IpcEmpty; marks the version uninstalled (blocked for good) and removes the directory

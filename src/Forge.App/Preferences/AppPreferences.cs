@@ -188,6 +188,21 @@ internal sealed class AppPreferences : ObservableObject
     private static readonly string[] UpdatesCheckFrequencyTokens = ["daily", "weekly", "never"];
     public const string DefaultUpdatesChannel = "stable";
     private static readonly string[] UpdatesChannelTokens = ["stable", "beta"];
+    // Wave W10/W17 registers the update source, the extension repository index, the keymap overrides, the review mode and
+    // the terminal font overrides. The manifest default is this repository's GitHub release asset (user decision 2026-11-15);
+    // the repository index starts empty so a fresh profile only shows installed extensions and local zip installs.
+    public const string DefaultUpdatesManifestUrl = "https://github.com/zfcflower/Forge/releases/latest/download/updates.json";
+    public const string DefaultExtensionRepositoryUrl = "";
+    public const string DefaultReviewMode = "subagent";
+    private static readonly string[] ReviewModeTokens = ["subagent", "manual"];
+    public const bool DefaultReviewAfterStepCommit = false;
+    public const string DefaultTerminalFontFamily = "";
+    public const double DefaultTerminalFontSize = 0;
+    public const double MinTerminalFontSize = 8;
+    public const double MaxTerminalFontSize = 32;
+
+    /// <summary>One keymap override as <c>actionId|gesture</c> (wave W10e); the action id cannot contain the pipe.</summary>
+    public const char KeymapOverrideSeparator = '|';
     public const string DefaultPaletteExcludeDirectories = "";
     public const string DefaultChatMermaidDiagramTypes = "flowchart,sequence,state,class,er";
     public const string DefaultProjectsCloneDirectory = "";
@@ -273,6 +288,13 @@ internal sealed class AppPreferences : ObservableObject
     private string idleArchiveScope = DefaultIdleArchiveScope;
     private string updatesCheckFrequency = DefaultUpdatesCheckFrequency;
     private string updatesChannel = DefaultUpdatesChannel;
+    private string updatesManifestUrl = DefaultUpdatesManifestUrl;
+    private string extensionRepositoryUrl = DefaultExtensionRepositoryUrl;
+    private IReadOnlyList<string> keymapOverrides = [];
+    private string reviewMode = DefaultReviewMode;
+    private bool reviewAfterStepCommit = DefaultReviewAfterStepCommit;
+    private string terminalFontFamily = DefaultTerminalFontFamily;
+    private double terminalFontSize = DefaultTerminalFontSize;
     private string paletteExcludeDirectories = DefaultPaletteExcludeDirectories;
     private string chatMermaidDiagramTypes = DefaultChatMermaidDiagramTypes;
     private string projectsCloneDirectory = DefaultProjectsCloneDirectory;
@@ -698,6 +720,43 @@ internal sealed class AppPreferences : ObservableObject
     /// <summary>Which release channel updates come from (wave W10). An unknown token means the default.</summary>
     public string UpdatesChannel { get => updatesChannel; set => Set(ref updatesChannel, Token(value, UpdatesChannelTokens, DefaultUpdatesChannel)); }
 
+    /// <summary>The update manifest URL (wave W10b); empty disables update checks. Validated by the update service, not here.</summary>
+    public string UpdatesManifestUrl { get => updatesManifestUrl; set => Set(ref updatesManifestUrl, Text(value, DefaultUpdatesManifestUrl)); }
+
+    /// <summary>The extension repository index URL (wave W10a); empty means no remote repository, local zip installs still work.</summary>
+    public string ExtensionRepositoryUrl { get => extensionRepositoryUrl; set => Set(ref extensionRepositoryUrl, Text(value, DefaultExtensionRepositoryUrl)); }
+
+    /// <summary>Keymap overrides as <c>actionId|gesture</c> entries (wave W10e); absent actions use the catalog default.</summary>
+    public IReadOnlyList<string> KeymapOverrides
+    {
+        get => keymapOverrides;
+        set
+        {
+            var normalized = NormalizeKeymapOverrides(value);
+            if (!keymapOverrides.SequenceEqual(normalized, StringComparer.Ordinal))
+            {
+                keymapOverrides = normalized;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>How a plan step is reviewed (wave W17b): <c>subagent</c> (one Reviewer pass) or <c>manual</c>. An unknown token means the default.</summary>
+    public string ReviewMode { get => reviewMode; set => Set(ref reviewMode, Token(value, ReviewModeTokens, DefaultReviewMode)); }
+
+    /// <summary>Whether a step commit automatically starts a review (wave W17b); off by default.</summary>
+    public bool ReviewAfterStepCommit { get => reviewAfterStepCommit; set => Set(ref reviewAfterStepCommit, value); }
+
+    /// <summary>Terminal font family override (wave W17a); empty follows <see cref="CodeFontFamily"/>.</summary>
+    public string TerminalFontFamily { get => terminalFontFamily; set => Set(ref terminalFontFamily, Text(value, DefaultTerminalFontFamily)); }
+
+    /// <summary>Terminal font size override (wave W17a); 0 follows <see cref="CodeFontSize"/>, otherwise clamped to [8, 32].</summary>
+    public double TerminalFontSize
+    {
+        get => terminalFontSize;
+        set => Set(ref terminalFontSize, value <= 0 ? 0 : Math.Clamp(value, MinTerminalFontSize, MaxTerminalFontSize));
+    }
+
     /// <summary>Directories (comma or newline separated) the palette content search skips besides what <c>.gitignore</c> excludes (wave W3).</summary>
     public string PaletteExcludeDirectories { get => paletteExcludeDirectories; set => Set(ref paletteExcludeDirectories, Text(value, DefaultPaletteExcludeDirectories)); }
 
@@ -896,6 +955,15 @@ internal sealed class AppPreferences : ObservableObject
         idleArchiveScope = Token(section.IdleArchiveScope, IdleArchiveScopeTokens, DefaultIdleArchiveScope);
         updatesCheckFrequency = Token(section.UpdatesCheckFrequency, UpdatesCheckFrequencyTokens, DefaultUpdatesCheckFrequency);
         updatesChannel = Token(section.UpdatesChannel, UpdatesChannelTokens, DefaultUpdatesChannel);
+        updatesManifestUrl = Text(section.UpdatesManifestUrl, DefaultUpdatesManifestUrl);
+        extensionRepositoryUrl = Text(section.ExtensionRepositoryUrl, DefaultExtensionRepositoryUrl);
+        keymapOverrides = NormalizeKeymapOverrides(section.KeymapOverrides);
+        reviewMode = Token(section.ReviewMode, ReviewModeTokens, DefaultReviewMode);
+        reviewAfterStepCommit = section.ReviewAfterStepCommit ?? DefaultReviewAfterStepCommit;
+        terminalFontFamily = Text(section.TerminalFontFamily, DefaultTerminalFontFamily);
+        terminalFontSize = section.TerminalFontSize is { } terminalFontSizeLoaded
+            ? (terminalFontSizeLoaded <= 0 ? 0 : Math.Clamp(terminalFontSizeLoaded, MinTerminalFontSize, MaxTerminalFontSize))
+            : DefaultTerminalFontSize;
         paletteExcludeDirectories = Text(section.PaletteExcludeDirectories, DefaultPaletteExcludeDirectories);
         chatMermaidDiagramTypes = Text(section.ChatMermaidDiagramTypes, DefaultChatMermaidDiagramTypes);
         projectsCloneDirectory = Text(section.ProjectsCloneDirectory, DefaultProjectsCloneDirectory);
@@ -983,6 +1051,13 @@ internal sealed class AppPreferences : ObservableObject
             IdleArchiveScope = idleArchiveScope,
             UpdatesCheckFrequency = updatesCheckFrequency,
             UpdatesChannel = updatesChannel,
+            UpdatesManifestUrl = updatesManifestUrl,
+            ExtensionRepositoryUrl = extensionRepositoryUrl,
+            KeymapOverrides = keymapOverrides.Count == 0 ? null : [.. keymapOverrides],
+            ReviewMode = reviewMode,
+            ReviewAfterStepCommit = reviewAfterStepCommit,
+            TerminalFontFamily = terminalFontFamily,
+            TerminalFontSize = terminalFontSize,
             PaletteExcludeDirectories = paletteExcludeDirectories,
             ChatMermaidDiagramTypes = chatMermaidDiagramTypes,
             ProjectsCloneDirectory = projectsCloneDirectory,
@@ -992,6 +1067,45 @@ internal sealed class AppPreferences : ObservableObject
             CodeScriptTools = codeScriptTools,
             ModelsHidden = modelsHidden.Count == 0 ? null : [.. modelsHidden],
         };
+
+    /// <summary>
+    /// Normalizes keymap override entries (wave W10e): <c>actionId|gesture</c>, both sides trimmed and non-empty, one entry
+    /// per action (the last wins). Gesture syntax itself is validated by the keymap catalog, not here — the preference only
+    /// keeps the shape, exactly like <see cref="NormalizeRateLimitOverrides"/> keeps the provider-override shape.
+    /// </summary>
+    private static string[] NormalizeKeymapOverrides(IEnumerable<string>? entries)
+    {
+        if (entries is null)
+        {
+            return [];
+        }
+
+        var byAction = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+
+            var separator = entry.IndexOf(KeymapOverrideSeparator);
+            if (separator <= 0 || separator == entry.Length - 1)
+            {
+                continue;
+            }
+
+            var actionId = entry[..separator].Trim();
+            var gesture = entry[(separator + 1)..].Trim();
+            if (actionId.Length == 0 || gesture.Length == 0 || actionId.Contains(KeymapOverrideSeparator))
+            {
+                continue;
+            }
+
+            byAction[actionId] = actionId + KeymapOverrideSeparator + gesture;
+        }
+
+        return [.. byAction.Values];
+    }
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
     internal static bool TryParseLanguage(string? text, out UiLanguage parsed)
@@ -1382,6 +1496,29 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("updatesChannel")]
     public string? UpdatesChannel { get; set; }
+
+    [JsonPropertyName("updatesManifestUrl")]
+    public string? UpdatesManifestUrl { get; set; }
+
+    [JsonPropertyName("extensionRepositoryUrl")]
+    public string? ExtensionRepositoryUrl { get; set; }
+
+    /// <summary>Keymap overrides as <c>actionId|gesture</c>; absent when every action uses its default.</summary>
+    [JsonPropertyName("keymapOverrides")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? KeymapOverrides { get; set; }
+
+    [JsonPropertyName("reviewMode")]
+    public string? ReviewMode { get; set; }
+
+    [JsonPropertyName("reviewAfterStepCommit")]
+    public bool? ReviewAfterStepCommit { get; set; }
+
+    [JsonPropertyName("terminalFontFamily")]
+    public string? TerminalFontFamily { get; set; }
+
+    [JsonPropertyName("terminalFontSize")]
+    public double? TerminalFontSize { get; set; }
 
     [JsonPropertyName("paletteExcludeDirectories")]
     public string? PaletteExcludeDirectories { get; set; }
