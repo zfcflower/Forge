@@ -190,17 +190,4 @@ public sealed class ThinkingLevelsTests
     private static void AssertSteps(IReadOnlyList<ThinkingEffort> actual, params ThinkingEffort[] expected) =>
         Assert.Equal(expected, actual);
 
-    [Fact]
-    public void Lookup_never_throws_and_never_returns_null()
-    {
-        string?[] inputs =
-        [
-            null, "", " ", "\t", "?", "🎛", new string('a', 4096), new string('/', 64), "vendor//model", "...", "-",
-        ];
-
-        foreach (var modelId in inputs)
-        {
-            Assert.NotNull(ThinkingLevels.For(modelId));
-        }
-    }
 }

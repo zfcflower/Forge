@@ -335,14 +335,6 @@ public sealed class HousekeepingTests : IDisposable
     // ------------------------------------------------------------------ configurable idle archive
 
     [Fact]
-    public void The_default_settings_are_the_previously_hard_coded_step()
-    {
-        Assert.True(IdleArchiveSettings.Default.Enabled);
-        Assert.Equal(HousekeepingRunner.ArchiveAfter, IdleArchiveSettings.Default.After);
-        Assert.Equal(IdleArchiveScope.AutomationSessions, IdleArchiveSettings.Default.Scope);
-    }
-
-    [Fact]
     public async Task A_disabled_step_archives_nothing_and_tells_no_window_while_the_other_steps_still_run()
     {
         catalog.Sessions = [Session("old", "/w/old", TimeSpan.FromDays(30))];

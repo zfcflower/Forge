@@ -242,26 +242,17 @@ public sealed class PrCheckPollerSmokeTests
         Assert.True(result.Observation!.Checks.NoneReported);
     }
 
-    [Fact]
-    public async Task The_number_of_confirmations_is_configurable()
+    [Theory]
+    [InlineData(5, 5)]
+    [InlineData(1, 1)]
+    public async Task The_number_of_confirmations_is_configurable(int confirmations, int polls)
     {
         var rig = new PrCheckPollerRig(PrCheckSample.Step(PrMergeStateStatus.Clean));
 
-        var result = await rig.WaitAsync(new PrChecksPollerOptions { NoChecksConfirmations = 5 });
+        var result = await rig.WaitAsync(new PrChecksPollerOptions { NoChecksConfirmations = confirmations });
 
         Assert.Equal(PrWaitOutcome.NoCi, result.Outcome);
-        Assert.Equal(5, result.Polls);
-    }
-
-    [Fact]
-    public async Task A_single_confirmation_concludes_no_ci_on_the_first_empty_read()
-    {
-        var rig = new PrCheckPollerRig(PrCheckSample.Step(PrMergeStateStatus.Clean));
-
-        var result = await rig.WaitAsync(new PrChecksPollerOptions { NoChecksConfirmations = 1 });
-
-        Assert.Equal(PrWaitOutcome.NoCi, result.Outcome);
-        Assert.Equal(1, result.Polls);
+        Assert.Equal(polls, result.Polls);
     }
 
     [Fact]

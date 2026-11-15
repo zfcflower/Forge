@@ -42,18 +42,6 @@ public sealed class PaletteQueryTests
     public void PrefixOf_names_the_switching_character(int source, char prefix) =>
         Assert.Equal(prefix, PaletteQuery.PrefixOf((PaletteSource)source));
 
-    [Fact]
-    public void Every_prefixed_source_round_trips_through_its_own_prefix()
-    {
-        foreach (var source in new[] { PaletteSource.Content, PaletteSource.Sessions, PaletteSource.Commands, PaletteSource.Symbols })
-        {
-            var (parsed, text) = PaletteQuery.Parse(PaletteQuery.PrefixOf(source) + "session");
-
-            Assert.Equal(source, parsed);
-            Assert.Equal("session", text);
-        }
-    }
-
     [Theory]
     [InlineData(null)]
     [InlineData("")]

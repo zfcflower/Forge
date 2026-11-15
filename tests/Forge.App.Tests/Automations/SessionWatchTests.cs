@@ -12,12 +12,13 @@ public sealed class SessionWatchTests
     // ------------------------------------------------------------------ WatchFinding
 
     [Theory]
-    [InlineData(0, 15)]
-    [InlineData(1, 42)]
-    [InlineData(2, 0)]
-    public void Finding_round_trips(int kindValue, int minutes)
+    [InlineData(0, 15, "My title")]
+    [InlineData(1, 42, "My title")]
+    [InlineData(2, 0, "My title")]
+    [InlineData(2, 10, "")]
+    public void Finding_round_trips(int kindValue, int minutes, string title)
     {
-        var finding = new WatchFinding((WatchKind)kindValue, "s1", minutes, "My title");
+        var finding = new WatchFinding((WatchKind)kindValue, "s1", minutes, title);
 
         Assert.Equal(finding, WatchFinding.Parse(finding.Serialize()));
     }
@@ -29,14 +30,6 @@ public sealed class SessionWatchTests
 
         Assert.NotNull(parsed);
         Assert.Equal("a b", parsed.Title);
-    }
-
-    [Fact]
-    public void Finding_with_an_empty_title_round_trips()
-    {
-        var finding = new WatchFinding(WatchKind.Approval, "s1", 10, string.Empty);
-
-        Assert.Equal(finding, WatchFinding.Parse(finding.Serialize()));
     }
 
     [Theory]

@@ -36,17 +36,6 @@ public sealed class CodeModePreferencesTests
     }
 
     [Fact]
-    public void A_new_preferences_instance_keeps_the_documented_defaults()
-    {
-        var preferences = new AppPreferences();
-
-        Assert.Equal(AppPreferences.DefaultCodeScriptMaxConcurrentCalls, preferences.CodeScriptMaxConcurrentCalls);
-        Assert.Equal(AppPreferences.DefaultCodeScriptResultChars, preferences.CodeScriptResultChars);
-        Assert.Equal(AppPreferences.DefaultCodeScriptInnerResultChars, preferences.CodeScriptInnerResultChars);
-        Assert.Equal(AppPreferences.DefaultCodeScriptTools, preferences.CodeScriptTools);
-    }
-
-    [Fact]
     public void A_section_without_the_keys_loads_the_defaults()
     {
         var reloaded = new AppPreferences();

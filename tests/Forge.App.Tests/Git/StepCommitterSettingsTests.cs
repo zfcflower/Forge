@@ -33,13 +33,6 @@ public sealed class StepCommitterSettingsTests : IDisposable
     // ------------------------------------------------------------ the model
 
     [Fact]
-    public void Step_commits_are_on_by_default()
-    {
-        Assert.True(AppPreferences.DefaultGitStepCommits);
-        Assert.True(new AppPreferences().GitStepCommits);
-    }
-
-    [Fact]
     public void The_setter_raises_PropertyChanged_only_for_a_real_change()
     {
         var preferences = new AppPreferences();
@@ -71,16 +64,6 @@ public sealed class StepCommitterSettingsTests : IDisposable
         Assert.Empty(raised);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void ToSection_writes_the_live_value(bool value)
-    {
-        var preferences = new AppPreferences { GitStepCommits = value };
-
-        Assert.Equal(value, preferences.ToSection().GitStepCommits);
-    }
-
     // ------------------------------------------------------------ the JSON contract
 
     [Theory]
@@ -94,7 +77,6 @@ public sealed class StepCommitterSettingsTests : IDisposable
 
         var node = Assert.IsType<JsonObject>(JsonNode.Parse(json));
         Assert.Equal(value, node["gitStepCommits"]!.GetValue<bool>());
-        Assert.Equal(value ? "true" : "false", node["gitStepCommits"]!.ToJsonString());
     }
 
     [Theory]

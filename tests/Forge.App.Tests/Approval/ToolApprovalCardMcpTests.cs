@@ -103,20 +103,14 @@ public sealed class ToolApprovalCardMcpTests : IDisposable
         Assert.Equal(string.Empty, without.McpUrl);
     }
 
-    [Fact]
-    public void FormatMcpCommandLine_quotes_arguments_with_whitespace_or_nothing()
+    [Theory]
+    [InlineData("cmd", new[] { "a", "b c", "", "d\te" }, "cmd a \"b c\" \"\" \"d\te\"")]
+    [InlineData(null, new[] { "x", "y z" }, "x \"y z\"")]
+    public void FormatMcpCommandLine_quotes_only_the_arguments_that_need_it(string? command, string[] args, string expected)
     {
-        var server = Server(command: "cmd", args: ["a", "b c", "", "d\te"]);
+        var server = Server(command: command, args: args);
 
-        Assert.Equal("cmd a \"b c\" \"\" \"d\te\"", ToolApprovalCardViewModel.FormatMcpCommandLine(server));
-    }
-
-    [Fact]
-    public void FormatMcpCommandLine_joins_arguments_when_there_is_no_command()
-    {
-        var server = Server(command: null, args: ["x", "y z"]);
-
-        Assert.Equal("x \"y z\"", ToolApprovalCardViewModel.FormatMcpCommandLine(server));
+        Assert.Equal(expected, ToolApprovalCardViewModel.FormatMcpCommandLine(server));
     }
 
     [Fact]

@@ -95,14 +95,10 @@ public sealed class AgentRuntimeManagerSubAgentLimitsTests : IAsyncDisposable
     }
 
     [Fact]
-    public void A_manager_with_no_runtimes_refreshes_as_a_no_op()
+    public async Task Refreshing_is_harmless_with_nothing_to_refresh_and_after_dispose()
     {
         Assert.Null(Record.Exception(manager.RefreshSubAgentLimits));
-    }
 
-    [Fact]
-    public async Task Refreshing_a_disposed_manager_does_not_throw()
-    {
         var runtime = manager.Get(Session("a"));
         await TurnAsync(runtime);
         manager.Dispose();

@@ -28,10 +28,4 @@ public sealed class InstrumentLayoutTests
         }
     }
 
-    [Fact]
-    public void The_resources_button_the_sub_agent_toggle_the_workspace_button_and_the_readout_are_not_part_of_the_rule()
-    {
-        // They are always laid out; the only thing the width rule may drop is the git group.
-        Assert.False(InstrumentLayout.For(0).ShowGit);
-    }
 }

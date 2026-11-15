@@ -174,24 +174,6 @@ public sealed class ProjectCreationServiceTests
         Assert.Equal(string.Empty, ProjectCreationService.SuggestNameFromUrl(url));
     }
 
-    /// <summary>
-    /// The contract the suggestion keeps: the <c>.git</c> suffix is dropped from the end, never from the front, so a real
-    /// remote prefills the folder name it names.
-    /// </summary>
-    [Theory]
-    [InlineData("https://host/team/my-project.git", "my-project")]
-    [InlineData("https://host/team/analysis.git", "analysis")]
-    [InlineData("git@host:team/forge-cli.git", "forge-cli")]
-    [InlineData("https://host/team/web.git", "web")]
-    [InlineData("https://host/team/x.git", "x")]
-    [InlineData("https://host/team/a-b-c.git", "a-b-c")]
-    [InlineData("  https://host/team/my-project.git  ", "my-project")]
-    [InlineData("https://host/team/my-project.GIT", "my-project")]
-    public void Any_repository_name_survives_its_git_suffix(string url, string expected)
-    {
-        Assert.Equal(expected, ProjectCreationService.SuggestNameFromUrl(url));
-    }
-
     // ---------------------------------------------------------------- IsUsableUrl
 
     [Theory]

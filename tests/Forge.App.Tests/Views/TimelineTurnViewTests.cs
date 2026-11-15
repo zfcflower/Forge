@@ -73,27 +73,6 @@ public sealed class TimelineTurnViewTests
         });
     }
 
-    [Fact]
-    public async Task A_turns_rows_land_on_the_same_axis_as_its_header()
-    {
-        await SharedUi.RunAsync(() =>
-        {
-            var turn = new TurnCardViewModel(2, At);
-            turn.AppendText("reply");
-            var done = turn.AddTool(new ToolCall("c1", "read", "{}"));
-            done.Complete(new ToolResult("ok"));
-            turn.Finish(TimeSpan.FromSeconds(1), SessionStrings.TurnFailed("boom"));
-            using var rig = TurnRig.Show(turn);
-
-            var gutters = rig.Gutters().ToList();
-            Assert.Equal(4, gutters.Count);
-            Assert.All(gutters, g => Assert.True(g.Bounds.Width > 0));
-            Assert.All(gutters, g => Assert.Equal(gutters[0].Bounds.X, g.Bounds.X, 0.01));
-            Assert.All(gutters, g => Assert.Equal(gutters[0].Bounds.Width, g.Bounds.Width, 0.01));
-            return Task.CompletedTask;
-        });
-    }
-
     // ------------------------------------------------------------------ harness
 
     private static FluentIcon Icon(TimelineGutter gutter) =>

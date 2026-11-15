@@ -24,40 +24,22 @@ public sealed class SessionRuntimePolicyTests
     private static ApprovalRequest ToolCall(string tool, ToolSideEffect sideEffect = ToolSideEffect.Execute) =>
         new(tool, "{}", sideEffect, Path.GetTempPath());
 
-    [Fact]
-    public void Staging_and_switching_tools_do_not_ask()
+    [Theory]
+    [InlineData(ExtensionToolNames.List, ToolSideEffect.ReadOnly, ApprovalMode.Allow)]
+    [InlineData(ExtensionToolNames.Create, ToolSideEffect.Execute, ApprovalMode.Allow)]
+    [InlineData(ExtensionToolNames.Update, ToolSideEffect.Execute, ApprovalMode.Allow)]
+    [InlineData(ExtensionToolNames.Disable, ToolSideEffect.Execute, ApprovalMode.Allow)]
+    [InlineData(ExtensionToolNames.Delete, ToolSideEffect.Execute, ApprovalMode.Ask)]
+    [InlineData(TodoTool.Name, ToolSideEffect.Write, ApprovalMode.Allow)]
+    [InlineData("shell_run", ToolSideEffect.Execute, ApprovalMode.Ask)]
+    [InlineData("write_file", ToolSideEffect.Write, ApprovalMode.Ask)]
+    public void The_tool_to_mode_table(string tool, ToolSideEffect sideEffect, ApprovalMode expected)
     {
+        // Staging and switching off extensions go through without a tool card (their real gate is the plugin approval
+        // card), deletion still asks, and the checklist stays allowed; anything else writes or executes and asks.
         var policy = SessionPolicy();
 
-        Assert.Equal(ApprovalMode.Allow, policy.Evaluate(ToolCall(ExtensionToolNames.List, ToolSideEffect.ReadOnly)));
-        Assert.Equal(ApprovalMode.Allow, policy.Evaluate(ToolCall(ExtensionToolNames.Create)));
-        Assert.Equal(ApprovalMode.Allow, policy.Evaluate(ToolCall(ExtensionToolNames.Update)));
-        Assert.Equal(ApprovalMode.Allow, policy.Evaluate(ToolCall(ExtensionToolNames.Disable)));
-    }
-
-    [Fact]
-    public void Extension_delete_still_asks()
-    {
-        var policy = SessionPolicy();
-
-        Assert.Equal(ApprovalMode.Ask, policy.Evaluate(ToolCall(ExtensionToolNames.Delete)));
-    }
-
-    [Fact]
-    public void Todo_stays_allowed()
-    {
-        var policy = SessionPolicy();
-
-        Assert.Equal(ApprovalMode.Allow, policy.Evaluate(ToolCall(TodoTool.Name, ToolSideEffect.Write)));
-    }
-
-    [Fact]
-    public void Unknown_write_or_execute_tool_asks()
-    {
-        var policy = SessionPolicy();
-
-        Assert.Equal(ApprovalMode.Ask, policy.Evaluate(ToolCall("shell_run")));
-        Assert.Equal(ApprovalMode.Ask, policy.Evaluate(ToolCall("write_file", ToolSideEffect.Write)));
+        Assert.Equal(expected, policy.Evaluate(ToolCall(tool, sideEffect)));
     }
 
     [Fact]

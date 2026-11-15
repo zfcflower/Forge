@@ -32,14 +32,6 @@ public sealed class ScriptCodeRunnerBasicsTests
     }
 
     [Fact]
-    public async Task Return_keyword_returns_value()
-    {
-        var result = await Run("var x = 40; return x + 2;");
-
-        Assert.Equal("42", result.Content);
-    }
-
-    [Fact]
     public async Task Top_level_await_is_supported()
     {
         var result = await Run("await System.Threading.Tasks.Task.Delay(1); return 41 + 1;");

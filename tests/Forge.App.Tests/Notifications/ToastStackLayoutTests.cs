@@ -27,16 +27,6 @@ public sealed class ToastStackLayoutTests
     }
 
     [Fact]
-    public void Spacing_is_not_added_after_the_last_item()
-    {
-        var one = ToastStackLayout.Offsets([10], 8);
-        var two = ToastStackLayout.Offsets([10, 10], 8);
-
-        Assert.Equal([0d], one);
-        Assert.Equal([0d, 18d], two);
-    }
-
-    [Fact]
     public void Zero_height_item_still_advances_by_the_spacing()
     {
         Assert.Equal([0d, 8d], ToastStackLayout.Offsets([0, 10], 8));

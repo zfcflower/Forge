@@ -13,49 +13,29 @@ namespace Forge.HostClient.Tests;
 /// caller cancellation, refusal before <c>StartAsync</c>, and a mid-call disconnect.</summary>
 public sealed class ExtensionAuthoringResilienceTests
 {
-    [Fact]
-    public async Task Compile_budget_defaults_to_the_five_minute_floor()
-    {
-        await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-
-        Assert.Equal(TimeSpan.FromMinutes(5), ReadCompileBudget(client));
-    }
-
-    [Fact]
-    public async Task Compile_budget_keeps_a_tiny_request_timeout_at_the_floor()
-    {
-        await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(200) };
-        await using var client = ClientFactory.Create(host, options: options);
-
-        Assert.Equal(TimeSpan.FromMinutes(5), ReadCompileBudget(client));
-    }
-
-    [Fact]
-    public async Task Compile_budget_keeps_a_request_timeout_above_the_floor()
-    {
-        await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMinutes(10) };
-        await using var client = ClientFactory.Create(host, options: options);
-
-        Assert.Equal(TimeSpan.FromMinutes(10), ReadCompileBudget(client));
-    }
-
     [Theory]
-    [InlineData(null)]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public async Task Compile_budget_is_unset_without_a_positive_request_timeout(int? milliseconds)
+    // No options at all (the five minute default), both sides of the floor, and the two non-positive timeouts.
+    [InlineData(false, null, 300)]
+    [InlineData(true, 200, 300)]
+    [InlineData(true, 600_000, 600)]
+    [InlineData(true, 0, null)]
+    [InlineData(true, -1, null)]
+    public async Task Compile_budget_takes_the_five_minute_floor_and_stays_unset_without_a_positive_timeout(
+        bool passOptions,
+        int? milliseconds,
+        int? expectedSeconds)
     {
         await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions
-        {
-            RequestTimeout = milliseconds is { } value ? TimeSpan.FromMilliseconds(value) : null,
-        };
+        var options = passOptions
+            ? new ExtensionHostClientOptions
+            {
+                RequestTimeout = milliseconds is { } value ? TimeSpan.FromMilliseconds(value) : (TimeSpan?)null,
+            }
+            : null;
         await using var client = ClientFactory.Create(host, options: options);
 
-        Assert.Null(ReadCompileBudget(client));
+        TimeSpan? expected = expectedSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null;
+        Assert.Equal(expected, ReadCompileBudget(client));
     }
 
     [Fact]

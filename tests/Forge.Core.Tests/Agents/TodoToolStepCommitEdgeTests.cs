@@ -1126,6 +1126,10 @@ public sealed class TodoToolStepCommitEdgeTests
             Assert.Contains(operation, tool.Definition.Description, StringComparison.Ordinal);
         }
 
+        // The commit hand-off is documented on the tool itself, not only in the settings page.
+        Assert.Contains("git_log", tool.Definition.Description, StringComparison.Ordinal);
+        Assert.Contains("Conventional Commits", tool.Definition.Description, StringComparison.Ordinal);
+
         Assert.Equal("todo", tool.Definition.Name);
     }
 }

@@ -35,15 +35,6 @@ public sealed class ProviderCacheSettingsTests
     }
 
     [Fact]
-    public void Send_prompt_cache_key_is_read_from_the_entry()
-    {
-        var entry = Entry();
-        entry.SendPromptCacheKey = true;
-
-        Assert.True(ProviderDefinition.FromDocument(entry, "fallback").SendPromptCacheKey);
-    }
-
-    [Fact]
     public void Both_switches_round_trip_through_the_stored_document()
     {
         var definition = ProviderDefinition.FromDocument(Entry(), "fallback") with

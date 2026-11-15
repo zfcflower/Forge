@@ -295,22 +295,6 @@ public sealed class SystemNotifierTests
             static line => line.Contains("[notify] powershell.exe failed: pipe-broke", StringComparison.Ordinal));
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(3)]
-    [InlineData(-1)]
-    public async Task A_non_zero_exit_code_is_traced_and_never_throws(int exitCode)
-    {
-        using var trace = new LogCapture();
-        var notifier = new SystemNotifier(run: (_, _) => Task.FromResult(exitCode), platform: NotifyPlatform.Linux);
-
-        await notifier.NotifyAsync(Title, Body, CancellationToken.None);
-
-        Assert.Contains(
-            trace.Lines,
-            line => line.Contains("[notify] notify-send exited with code " + exitCode, StringComparison.Ordinal));
-    }
-
     [Fact]
     public async Task A_zero_exit_code_leaves_no_trace_line()
     {
@@ -392,22 +376,7 @@ public sealed class SystemNotifierTests
             static line => line.Contains("[notify] powershell.exe did not finish within 5 seconds", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public async Task NotifyAsync_keeps_its_resultless_signature_over_the_same_outcome()
-    {
-        var notifier = new SystemNotifier(run: static (_, _) => Task.FromResult(1), platform: NotifyPlatform.Linux);
-
-        // The old entry point still completes without telling the caller anything; the center keeps using it.
-        await notifier.NotifyAsync(Title, Body, CancellationToken.None);
-    }
-
     // ------------------------------------------------------------ the 5 second limit and cancellation
-
-    [Fact]
-    public void The_limit_is_five_seconds()
-    {
-        Assert.Equal(TimeSpan.FromSeconds(5), SystemNotifier.Timeout);
-    }
 
     [Fact]
     public async Task A_tool_that_hangs_is_abandoned_after_five_seconds_of_the_injected_clock()

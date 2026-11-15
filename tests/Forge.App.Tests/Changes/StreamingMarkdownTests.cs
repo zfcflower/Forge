@@ -197,16 +197,12 @@ public sealed class StreamingMarkdownTests
         Assert.False(StreamingMarkdown.SameBlock(block, new MdBlock(MdBlockKind.Code, 2, 5) { Text = "first", FenceClosed = true }));
     }
 
-    [Fact]
-    public void Any_chunking_of_a_plain_document_equals_one_parse_of_the_whole_text()
+    [Theory]
+    [InlineData(PlainDocument)]
+    [InlineData(FrontMatterDocument)]
+    public void Any_chunking_of_a_document_equals_one_parse_of_the_whole_text(string document)
     {
-        AssertAnyChunking(PlainDocument);
-    }
-
-    [Fact]
-    public void Any_chunking_of_a_front_matter_document_equals_one_parse_of_the_whole_text()
-    {
-        AssertAnyChunking(FrontMatterDocument);
+        AssertAnyChunking(document);
     }
 
     [Fact]

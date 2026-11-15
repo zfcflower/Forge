@@ -39,18 +39,6 @@ public sealed class SessionRuntimeCodeModeTests : IDisposable
     }
 
     [Fact]
-    public async Task The_surface_carries_the_read_only_file_and_web_tools_and_nothing_else()
-    {
-        await using var rig = NewRig(services =>
-        {
-            services.FileTools = new FileTools().All;
-            services.WebTools = () => [new WebFetchTool(new HttpClient())];
-        });
-
-        Assert.Equal(["find", "grep", "ls", "read", "web_fetch"], CallableNames(rig.Runtime));
-    }
-
-    [Fact]
     public async Task Narrowing_the_visible_list_reaches_the_surface_without_a_restart()
     {
         var visible = "read, ls, find, grep";

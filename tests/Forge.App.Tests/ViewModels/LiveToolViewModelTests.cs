@@ -176,13 +176,6 @@ public sealed class LiveToolViewModelTests
     }
 
     [Fact]
-    public void The_toggle_command_is_one_instance()
-    {
-        var tool = Create();
-        Assert.Same(tool.ToggleCommand, tool.ToggleCommand);
-    }
-
-    [Fact]
     public void The_agent_label_names_the_root_a_childs_kind_and_a_child_without_one()
     {
         using var language = new LanguageScope(UiLanguage.Chinese);

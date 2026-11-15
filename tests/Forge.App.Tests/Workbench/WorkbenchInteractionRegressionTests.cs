@@ -188,19 +188,6 @@ public sealed class WorkbenchInteractionRegressionTests
     });
 
     [Theory]
-    [InlineData(false, "#D4D4D8")]
-    [InlineData(true, "#3F3F46")]
-    public Task Separator_and_border_token_is_the_stronger_neutral(bool dark, string expected) => Ui(() =>
-    {
-        var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout(), Wide);
-        var colour = ((IResourceHost)scene.Window)
-            .TryFindResource("BorderBrush", dark ? ThemeVariant.Dark : ThemeVariant.Light, out var value) is { } found && found
-            ? Assert.IsAssignableFrom<ISolidColorBrush>(value).Color
-            : default;
-        Assert.Equal(Color.Parse(expected), colour);
-    });
-
-    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]

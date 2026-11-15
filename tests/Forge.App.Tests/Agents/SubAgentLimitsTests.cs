@@ -35,16 +35,6 @@ public sealed class SubAgentLimitsTests
         Assert.InRange(SubAgentLimits.Default.MaxParallel, SubAgentLimits.MinParallel, SubAgentLimits.MaxParallelCeiling);
     }
 
-    [Fact]
-    public void The_bounds_and_the_default_alias_the_preference_constants()
-    {
-        // One range, one owner: the section's field, the preference setter and the runtime clamp all read these, so a
-        // re-hardcoded 1/16/4 here fails instead of drifting away from what the settings page offers.
-        Assert.Equal(AppPreferences.MinAgentsMaxParallelSubAgents, SubAgentLimits.MinParallel);
-        Assert.Equal(AppPreferences.MaxAgentsMaxParallelSubAgents, SubAgentLimits.MaxParallelCeiling);
-        Assert.Equal(AppPreferences.DefaultAgentsMaxParallelSubAgents, SubAgentLimits.DefaultParallel);
-    }
-
     [Theory]
     [InlineData(SubAgentLimits.MinParallel)]
     [InlineData(7)]

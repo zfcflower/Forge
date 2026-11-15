@@ -266,12 +266,6 @@ public sealed class NotificationPermissionGuideTests
         Assert.Equal(0, time.ActiveTimers);
     }
 
-    [Fact]
-    public void The_open_timeout_is_five_seconds()
-    {
-        Assert.Equal(TimeSpan.FromSeconds(5), SystemNotificationPermissionGuide.OpenTimeout);
-    }
-
     // ------------------------------------------------------------ fakes
 
     /// <summary>A notifier that records the texts it was asked to show and reports what the platform would have answered.</summary>

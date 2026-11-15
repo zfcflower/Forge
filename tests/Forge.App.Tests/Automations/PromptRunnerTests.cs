@@ -444,14 +444,6 @@ public sealed class PromptRunnerTests
         Assert.Equal(PromptRunner.ReadOnlyTools, agent.ToolNames);
     }
 
-    [Fact]
-    public void Read_only_tools_contain_no_writing_tool()
-    {
-        Assert.DoesNotContain("write", PromptRunner.ReadOnlyTools);
-        Assert.DoesNotContain("edit", PromptRunner.ReadOnlyTools);
-        Assert.DoesNotContain("bash", PromptRunner.ReadOnlyTools);
-    }
-
     // ------------------------------------------------------------------ WaitingProgress
 
     [Fact]

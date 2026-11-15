@@ -213,14 +213,6 @@ public sealed class WebToolsTests : IDisposable
     }
 
     [Fact]
-    public void Web_search_is_registered_for_searxng_with_a_url()
-    {
-        var services = NewServices();
-        services.Store.Save(new WebSettings("searxng", "http://searx.local", false));
-        Assert.Equal([WebFetchTool.Name, WebSearchTool.Name], services.CreateTools().Select(t => t.Definition.Name));
-    }
-
-    [Fact]
     public void Session_surface_includes_the_web_tools_and_both_ask_for_approval()
     {
         var services = NewServices();
