@@ -203,8 +203,8 @@ public partial class SessionView
 
     /// <summary>
     /// Attaches each file in turn through the composer's classifier; refusals show inline and as a Warning toast (image
-    /// rejections, read-file failures and model/provider refusals); file-level count/size limits stay inline-only. Stops at
-    /// the per-message limit, since every further file would be refused for the same reason.
+    /// rejections, read-file failures, file-level count/size limits and model/provider refusals). Stops at the per-message
+    /// limit, since every further file would be refused for the same reason.
     /// </summary>
     private static async Task AttachFilesAsync(ComposerViewModel composer, IReadOnlyList<string> paths)
     {

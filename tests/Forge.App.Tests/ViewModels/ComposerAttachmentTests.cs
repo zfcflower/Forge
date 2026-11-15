@@ -186,7 +186,7 @@ public sealed class ComposerAttachmentTests
     }
 
     [Fact]
-    public async Task A_text_file_over_its_limit_is_refused()
+    public async Task A_text_file_over_its_limit_is_refused_with_a_toast()
     {
         await RunAsync(async (composer, toasts) =>
         {
@@ -195,8 +195,12 @@ public sealed class ComposerAttachmentTests
 
             Assert.Equal(AttachmentRejection.TooLarge, await composer.AddFileAsync(big, "big.txt"));
             Assert.Empty(composer.Files);
-            Assert.Contains("big.txt", composer.AttachmentError, StringComparison.Ordinal);
-            Assert.Empty(toasts.Calls);
+            Assert.Equal(AttachmentStrings.TooLarge("big.txt", FileAttachmentRules.MaxTextBytes).Resolve(), composer.AttachmentError);
+            var refusal = Assert.Single(toasts.Calls);
+            Assert.Equal(NotificationLevel.Warning, refusal.Level);
+            Assert.Equal(AttachmentStrings.RefusedTitleKey, refusal.TitleKey);
+            Assert.Equal(AttachmentStrings.TooLargeKey, refusal.BodyKey);
+            Assert.Equal("attachment-refused:scope:TooLarge", refusal.Key);
 
             // Exactly at the limit is accepted.
             Assert.Equal(AttachmentRejection.None, await composer.AddFileAsync(big[..^1], "fits.txt"));
@@ -251,9 +255,9 @@ public sealed class ComposerAttachmentTests
     }
 
     [Fact]
-    public async Task The_eleventh_file_is_refused()
+    public async Task The_eleventh_file_is_refused_with_a_toast()
     {
-        await RunAsync(async (composer, _) =>
+        await RunAsync(async (composer, toasts) =>
         {
             for (var i = 0; i < FileAttachmentRules.MaxFilesPerMessage; i++)
             {
@@ -262,7 +266,12 @@ public sealed class ComposerAttachmentTests
 
             Assert.Equal(AttachmentRejection.TooMany, await composer.AddFileAsync("x"u8.ToArray(), "extra.txt"));
             Assert.Equal(FileAttachmentRules.MaxFilesPerMessage, composer.Files.Count);
-            Assert.Equal(AttachmentStrings.TooMany, composer.AttachmentError);
+            Assert.Equal(AttachmentStrings.TooMany.Resolve(), composer.AttachmentError);
+            var refusal = Assert.Single(toasts.Calls);
+            Assert.Equal(NotificationLevel.Warning, refusal.Level);
+            Assert.Equal(AttachmentStrings.RefusedTitleKey, refusal.TitleKey);
+            Assert.Equal(AttachmentStrings.TooManyKey, refusal.BodyKey);
+            Assert.Equal("attachment-refused:scope:TooMany", refusal.Key);
         });
     }
 

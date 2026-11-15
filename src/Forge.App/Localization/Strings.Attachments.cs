@@ -106,7 +106,8 @@ internal static class AttachmentStrings
 
     public static LocText Unsupported(string name) => new(UnsupportedKey, name);
 
-    public static string TooMany => Loc.Instance.Format(TooManyKey, TextFormat.Number(FileAttachmentRules.MaxFilesPerMessage));
+    // LocText, like TooLarge above: the same sentence is the inline reason under the input and the body of the warning toast.
+    public static LocText TooMany => new(TooManyKey, TextFormat.Number(FileAttachmentRules.MaxFilesPerMessage));
 
     public static string Count(int count) => Loc.Instance.Format(CountKey, TextFormat.Number(count));
 

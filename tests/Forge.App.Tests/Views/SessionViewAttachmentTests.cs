@@ -204,7 +204,7 @@ public sealed class SessionViewAttachmentTests
     [InlineData("big.wav", FileAttachmentRules.MaxAudioBytes)]
     [InlineData("big.mp4", FileAttachmentRules.MaxVideoBytes)]
     [InlineData("big.txt", FileAttachmentRules.MaxTextBytes)]
-    public async Task A_file_one_byte_over_its_kinds_limit_is_refused_before_it_is_read(string name, long limit)
+    public async Task A_file_one_byte_over_its_kinds_limit_is_refused_with_a_toast_before_it_is_read(string name, long limit)
     {
         await RunAsync(null, async rig =>
         {
@@ -214,7 +214,11 @@ public sealed class SessionViewAttachmentTests
 
             Assert.Empty(rig.Composer.Files);
             Assert.Equal(AttachmentStrings.TooLarge(name, limit).Resolve(), rig.ErrorLine());
-            Assert.Empty(rig.Refusals);
+            var refusal = Assert.Single(rig.Refusals);
+            Assert.Equal(NotificationLevel.Warning, refusal.Level);
+            Assert.Equal(AttachmentStrings.RefusedTitleKey, refusal.TitleKey);
+            Assert.Equal(AttachmentStrings.TooLargeKey, refusal.BodyKey);
+            Assert.Equal("attachment-refused:" + SessionId + ":TooLarge", refusal.Key);
         });
     }
 
@@ -246,7 +250,12 @@ public sealed class SessionViewAttachmentTests
             Assert.Equal(
                 Enumerable.Range(0, 10).Select(static i => $"f{i:D2}.txt"),
                 rig.Composer.Files.Select(static file => file.Name));
-            Assert.Equal(AttachmentStrings.TooMany, rig.ErrorLine());
+            Assert.Equal(AttachmentStrings.TooMany.Resolve(), rig.ErrorLine());
+            var refusal = Assert.Single(rig.Refusals);
+            Assert.Equal(NotificationLevel.Warning, refusal.Level);
+            Assert.Equal(AttachmentStrings.RefusedTitleKey, refusal.TitleKey);
+            Assert.Equal(AttachmentStrings.TooManyKey, refusal.BodyKey);
+            Assert.Equal("attachment-refused:" + SessionId + ":TooMany", refusal.Key);
             Assert.Equal(10, rig.AllById<Button>("composer-file-remove").Count);
 
             // A later drop is refused for the same reason; the chips already there are untouched.

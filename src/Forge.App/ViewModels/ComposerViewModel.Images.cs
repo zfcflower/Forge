@@ -12,10 +12,10 @@ namespace Forge.App.ViewModels;
 /// source files (chips, <see cref="Files"/>) - pasted, dropped or picked, waiting until the message is sent, queued or
 /// interjected, which takes them all (<see cref="TakeAttachments"/>). Every way in goes through one classifier
 /// (<see cref="FileAttachmentRules"/>) and one gate: a kind the current model is known not to take, a file the current
-/// provider's wire format cannot carry, an image of a format or size the composer does not take, or a file that cannot be
-/// read is refused with a warning toast and the same sentence under the input; an unknown capability allows it. When the model
-/// changes under attachments it no longer takes, they stay, sending is blocked and the composer says why, until the user
-/// removes them. Reading, decoding and encoding run off the UI thread; the lists are only touched on the UI thread.
+/// provider's wire format cannot carry, an attachment over the per-message count or its kind's size limit, or a file that
+/// cannot be read is refused with a warning toast and the same sentence under the input; an unknown capability allows it.
+/// When the model changes under attachments it no longer takes, they stay, sending is blocked and the composer says why,
+/// until the user removes them. Reading, decoding and encoding run off the UI thread; the lists are only touched on the UI thread.
 /// </summary>
 internal sealed partial class ComposerViewModel
 {
@@ -221,7 +221,7 @@ internal sealed partial class ComposerViewModel
 
         if (Files.Count + preparingFiles >= FileAttachmentRules.MaxFilesPerMessage)
         {
-            return Reject(AttachmentRejection.TooMany, AttachmentStrings.TooMany);
+            return RefuseWithToast(AttachmentRejection.TooMany, AttachmentStrings.TooMany);
         }
 
         byte[] data;
@@ -232,7 +232,7 @@ internal sealed partial class ComposerViewModel
             var info = new FileInfo(path);
             if (info.Exists && info.Length > limit)
             {
-                return Reject(AttachmentRejection.TooLarge, AttachmentStrings.TooLarge(name, limit).Resolve());
+                return RefuseWithToast(AttachmentRejection.TooLarge, AttachmentStrings.TooLarge(name, limit));
             }
 
             data = await File.ReadAllBytesAsync(path).ConfigureAwait(true);
@@ -366,12 +366,12 @@ internal sealed partial class ComposerViewModel
         var limit = FileAttachmentRules.MaxBytes(kind);
         if (data.LongLength > limit)
         {
-            return Reject(AttachmentRejection.TooLarge, AttachmentStrings.TooLarge(name, limit).Resolve());
+            return RefuseWithToast(AttachmentRejection.TooLarge, AttachmentStrings.TooLarge(name, limit));
         }
 
         if (Files.Count + preparingFiles >= FileAttachmentRules.MaxFilesPerMessage)
         {
-            return Reject(AttachmentRejection.TooMany, AttachmentStrings.TooMany);
+            return RefuseWithToast(AttachmentRejection.TooMany, AttachmentStrings.TooMany);
         }
 
         preparingFiles++;
@@ -440,16 +440,6 @@ internal sealed partial class ComposerViewModel
             AttachmentError = null;
             OnAttachmentsChanged();
         }
-    }
-
-    /// <summary>
-    /// A refusal the composer only says under the input: the per-message count limit and the size limit of an already
-    /// classified file, both of which the user caused by attaching too much on purpose and sees where the file is listed.
-    /// </summary>
-    private AttachmentRejection Reject(AttachmentRejection reason, string message)
-    {
-        AttachmentError = message;
-        return reason;
     }
 
     /// <summary>
