@@ -184,6 +184,81 @@ public sealed class SearchFallbackSchemaTests
         Assert.Equal([1L], (await store.SearchAsync(keptId, "quokka", 10, default)).Select(static hit => hit.Seq));
     }
 
+    [Fact]
+    public async Task An_index_row_a_purge_run_without_fts5_could_not_delete_is_trimmed_when_the_module_is_back()
+    {
+        using var directory = new TempDirectory();
+        string purgedId;
+        string keptId;
+        await using (var ftsBuild = new SqliteSessionStore(directory.Path))
+        {
+            var purged = await ftsBuild.CreateSessionAsync("D:/ws", "purged", default);
+            var kept = await ftsBuild.CreateSessionAsync("D:/other", "kept", default);
+            purgedId = purged.Id;
+            keptId = kept.Id;
+            await ftsBuild.AppendAsync(purged.Id, Text("quokka purged"), null, default);
+            await ftsBuild.AppendAsync(kept.Id, Text("quokka kept"), null, default);
+        }
+
+        // The purge of a build without the module clears the two tables it can write and leaves the one it cannot read.
+        await SetFtsModuleAsync(directory, AbsentModule);
+        await using (var degraded = new SqliteSessionStore(directory.Path))
+        {
+            ISessionCatalog catalog = degraded;
+            Assert.Equal(1, await catalog.SoftDeleteAsync([purgedId], default));
+            Assert.Equal([purgedId], await catalog.PurgeAsync(purgedId, default));
+            Assert.False(degraded.Fts5Available);
+        }
+
+        await SetFtsModuleAsync(directory, Fts5Module);
+
+        // What the next build with the module used to find: the purged session's text still indexed, its messages gone.
+        Assert.Equal(0L, await CountAsync(directory, $"SELECT count(*) FROM messages WHERE session_id = '{purgedId}'"));
+        Assert.Equal(1L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{purgedId}'"));
+
+        await using var store = new SqliteSessionStore(directory.Path);
+        // The first read is what opens the database, and opening is what trims the index.
+        Assert.NotNull(await store.GetSessionAsync(keptId, default));
+        Assert.True(store.Fts5Available);
+
+        // Full-text search must not find the purged session's text any more, and the index is trimmed back to the
+        // messages that exist: the purged rows are gone, the kept session's stay.
+        Assert.Empty(await store.SearchAsync(purgedId, "quokka", 10, default));
+        Assert.Equal([1L], (await store.SearchAsync(keptId, "quokka", 10, default)).Select(static hit => hit.Seq));
+        Assert.Equal(0L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{purgedId}'"));
+        Assert.Equal(1L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{keptId}'"));
+    }
+
+    [Fact]
+    public async Task An_fts5_build_reopening_a_database_a_degraded_build_only_opened_keeps_every_index_row()
+    {
+        using var directory = new TempDirectory();
+        string sessionId;
+        await using (var ftsBuild = new SqliteSessionStore(directory.Path))
+        {
+            var session = await ftsBuild.CreateSessionAsync("D:/ws", "t", default);
+            sessionId = session.Id;
+            await ftsBuild.AppendAsync(session.Id, Text("first message"), null, default);
+            await ftsBuild.AppendAsync(session.Id, Text("second message"), null, default);
+        }
+
+        await SetFtsModuleAsync(directory, AbsentModule);
+        await using (var degraded = new SqliteSessionStore(directory.Path))
+        {
+            Assert.Equal(2, await degraded.LastSeqAsync(sessionId, default));
+            Assert.False(degraded.Fts5Available);
+        }
+
+        await SetFtsModuleAsync(directory, Fts5Module);
+        await using var store = new SqliteSessionStore(directory.Path);
+        Assert.Equal(2, await store.LastSeqAsync(sessionId, default));
+        Assert.True(store.Fts5Available);
+
+        // A fallback table on its own is not residue: a session whose messages are all still stored keeps its index rows.
+        Assert.Equal(2L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{sessionId}'"));
+        Assert.Equal([1L, 2L], (await store.SearchAsync(sessionId, "message", 10, default)).Select(static hit => hit.Seq));
+    }
+
     /// <summary>
     /// Points the stored DDL of <c>messages_fts</c> at <paramref name="module"/>, changing nothing else about the table,
     /// so restoring <c>fts5</c> gives back byte-for-byte the DDL the store itself wrote.

@@ -568,6 +568,31 @@ public sealed class NotificationWiringTests : IDisposable
             });
 
     [Fact]
+    public Task An_initialization_fault_outside_the_database_filter_is_announced_by_the_shell_fallback() =>
+        WithShellAsync(
+            "forge-notify-shell-fallback-",
+            static _ => Task.CompletedTask,
+            async (shell, composition) =>
+            {
+                // The model's own catch only handles database faults (IOException/InvalidDataException/ArgumentException/
+                // SqliteException); anything else escapes to the shell's outer fallback (MainWindow.InitializeAsync),
+                // which must still announce startup-failed rather than crash silently.
+                shell.InitializationStep = () => throw new InvalidOperationException("the workbench could not be built");
+
+                await Forge.App.MainWindow.InitializeAsync(shell);
+
+                Assert.True(
+                    await TestPump.UntilAsync(() => composition.Notifications.Items.Count > 0),
+                    "the initialization fault outside the database filter was not announced");
+
+                var toast = Toast(composition.Notifications, "startup-failed");
+                Assert.Equal(NotificationLevel.Error, toast.Level);
+                Assert.Equal(Loc.Instance[NotificationsStrings.StartupProblemTitleKey], toast.Title);
+                Assert.Contains("the workbench could not be built", toast.Body, StringComparison.Ordinal);
+                Assert.Equal(toast.Body, shell.Status.HostDetail);
+            });
+
+    [Fact]
     public Task A_project_list_that_cannot_be_read_is_announced_as_a_warning_keyed_by_the_panel() =>
         WithShellAsync(
             "forge-notify-projects-",

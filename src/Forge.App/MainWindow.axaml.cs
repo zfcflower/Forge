@@ -197,7 +197,8 @@ public partial class MainWindow : Window
         }
     }
 
-    private static async Task InitializeAsync(MainWindowViewModel model)
+    /// <summary>Internal so a shell test can drive the startup-failed fallback with a faulted model.</summary>
+    internal static async Task InitializeAsync(MainWindowViewModel model)
     {
         try
         {

@@ -210,6 +210,14 @@ internal static class StorageSchema
     private const string UnsearchedMessagesSql = AllMessagesSql + " WHERE " + UnsearchedMessagesPredicate;
 
     /// <summary>
+    /// What a row of <c>messages_fts</c> has no message behind: the mark a purge leaves when the build running it could
+    /// not read the index. Written as a correlated <c>NOT EXISTS</c>, never <c>NOT IN</c>, so a row whose session id
+    /// cannot be read is dropped as well instead of surviving on a NULL comparison.
+    /// </summary>
+    private const string OrphanedSearchRowsPredicate =
+        "NOT EXISTS (SELECT 1 FROM messages WHERE messages.session_id = messages_fts.session_id)";
+
+    /// <summary>
     /// Brings the database to <see cref="Version"/> and makes sure the message search table exists. Returns true when
     /// FTS5 is available (searches then use it), false when the fallback table is used instead.
     /// </summary>
@@ -1009,16 +1017,38 @@ internal static class StorageSchema
     /// build whose SQLite had the FTS5 module, this one's has not - reads and writes <c>messages_text</c> instead, so
     /// that table is made ready here: without it every append would write its search row into a table that does not
     /// exist (and search would read the same missing table), which fails the whole write batch instead of degrading.
+    /// A build that can read the index trims whatever a degraded one could not delete from it.
     /// </summary>
     private static async Task<bool> ReadFtsOrDegradeAsync(SqliteConnection connection, CancellationToken ct)
     {
         if (await CanReadFtsAsync(connection, ct).ConfigureAwait(false))
         {
+            await PruneOrphanedSearchRowsAsync(connection, ct).ConfigureAwait(false);
             return true;
         }
 
         await EnsureFallbackTableAsync(connection, ct).ConfigureAwait(false);
         return false;
+    }
+
+    /// <summary>
+    /// Drops the index rows the sessions they name no longer have a message for. A build without the FTS5 module purges
+    /// a session from <c>messages</c> and <c>messages_text</c> and cannot touch the index it cannot read, so the text of
+    /// a purged session would otherwise still be found by the full-text search of the next build that has the module.
+    /// The fallback table is what marks that history - a build without FTS5 creates it on its first open - so a database
+    /// FTS5 has never been missing from is not scanned at all. Nothing else deletes a <c>messages</c> row, so no row a
+    /// live session still owns is dropped here.
+    /// </summary>
+    private static async Task PruneOrphanedSearchRowsAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        if (!await SearchTableExistsAsync(connection, "messages_text", null, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM messages_fts WHERE " + OrphanedSearchRowsPredicate;
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>

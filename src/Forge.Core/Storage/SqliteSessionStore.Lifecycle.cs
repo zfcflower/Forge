@@ -809,7 +809,9 @@ public sealed partial class SqliteSessionStore
             // Both search tables, each on its own existence: clearing only the one this build uses leaves the purged
             // text in the other, where a build that switches to it finds a session that is gone. The FTS5 index joins
             // only when this build can write it - without the module no statement against the virtual table can even
-            // be prepared, and its rows are unreachable here, so they do not fail the purge.
+            // be prepared, and its rows are unreachable here, so they do not fail the purge. The rows such a build
+            // leaves behind are trimmed against messages by the next build that can read the index
+            // (StorageSchema.PruneOrphanedSearchRowsAsync), so the purged text stops being findable there too.
             string[] searchTables = store.Fts5Available ? ["messages_fts", "messages_text"] : ["messages_text"];
             foreach (var search in searchTables)
             {

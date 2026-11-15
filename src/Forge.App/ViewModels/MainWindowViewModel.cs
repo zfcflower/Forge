@@ -466,7 +466,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     {
         try
         {
-            await composition.Initialization.ConfigureAwait(true);
+            await (InitializationStep ?? (() => composition.Initialization))().ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
         {
@@ -711,6 +711,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// that cannot answer does, and pin the announcement of that failure. Null reads through the composition.
     /// </summary>
     internal Func<CancellationToken, Task<IReadOnlyList<ProjectInfo>>>? ProjectListRead { get; set; }
+
+    /// <summary>
+    /// The initialization step the shell awaits on startup; settable so a shell test can inject a fault the database
+    /// catch in <see cref="InitializeAsync"/> does not handle, exercising the shell's outer startup-failed fallback
+    /// (MainWindow.InitializeAsync). Null awaits the composition's own initialization.
+    /// </summary>
+    internal Func<Task>? InitializationStep { get; set; }
 
     private void RefreshProjectCacheAsync() =>
         _ = Task.Run(
