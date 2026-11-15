@@ -23,6 +23,9 @@ internal sealed class WebSettingsSectionViewModel : ObservableObject, IDisposabl
     private string statusText = string.Empty;
     private bool disposed;
 
+    /// <summary>The thread the section was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     public WebSettingsSectionViewModel(WebServices services)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -173,6 +176,13 @@ internal sealed class WebSettingsSectionViewModel : ObservableObject, IDisposabl
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the picker's options are bound
+        // on the thread that built the section.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         options = CreateOptions();
         OnPropertyChanged(nameof(Backends));
         OnPropertyChanged(nameof(SelectedBackend));

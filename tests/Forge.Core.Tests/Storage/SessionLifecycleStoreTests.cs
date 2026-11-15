@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Core.Storage;
 using Microsoft.Data.Sqlite;
@@ -16,6 +17,12 @@ namespace Forge.Core.Tests.Storage;
 public sealed class SessionLifecycleStoreTests
 {
     private static SessionCreate Root(string workspace, string title = "t") => new(workspace, title);
+
+    /// <summary>
+    /// A block the store's serializer refuses: an append carrying one fails inside the writer, where the batch is built,
+    /// not in the caller's argument check.
+    /// </summary>
+    private sealed record UnserializableBlock : ContentBlock;
 
     private static ISessionCatalog Catalog(SqliteSessionStore store) => store;
 
@@ -186,6 +193,71 @@ public sealed class SessionLifecycleStoreTests
         Assert.Equal(holder.Id, refused.HolderSessionId);
         Assert.Equal(1, await append);
         Assert.Equal(SessionStatus.Archived, (await GetAsync(store, old.Id)).Status);
+    }
+
+    // ---- Write batches ----
+
+    [Fact]
+    public async Task A_refused_purge_fails_alone_and_the_append_batched_with_it_commits()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteSessionStore(directory.Path);
+        var catalog = Catalog(store);
+        var archived = await store.CreateAsync(Root(directory.Combine("wt")), default);
+        var bystander = await store.CreateAsync(Root(directory.Combine("other")), default);
+        Assert.Equal(1, await store.AppendAsync(bystander.Id, Text("before"), null, default));
+
+        // Purge carries a savepoint like the conflicting create does, so a business refusal - here a session that is
+        // not Deleted - rolls back to that savepoint and leaves the rest of the batch to commit.
+        var blocker = await HoldWriteLockAsync(store);
+        var first = store.TouchAsync(bystander.Id, DateTimeOffset.UtcNow, default);
+        await Task.Delay(300); // the writer has taken the touch and waits for the lock
+        var purge = catalog.PurgeAsync(archived.Id, default);
+        var append = store.AppendAsync(bystander.Id, Text("same batch"), null, default);
+        await ReleaseWriteLockAsync(blocker);
+
+        await first;
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => purge);
+        Assert.Contains("only a Deleted session can be purged", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(2, await append);
+        Assert.Equal([1L, 2L], (await CollectAsync(store.ReadAsync(bystander.Id, 1, null, default))).Select(static m => m.Seq));
+        Assert.Equal(2L, await CountAsync(store, "SELECT count(*) FROM sessions"));
+    }
+
+    [Fact]
+    public async Task A_failing_append_takes_its_whole_batch_down_and_the_writer_serves_the_next_one()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteSessionStore(directory.Path);
+        var poisoned = await store.CreateAsync(Root(directory.Combine("poison")), default);
+        var bystander = await store.CreateAsync(Root(directory.Combine("other")), default);
+        Assert.Equal(1, await store.AppendAsync(bystander.Id, Text("before"), null, default));
+
+        // Append carries no savepoint: a failure inside it fails the batch, so the unrelated append queued with it is
+        // lost too. Pinned as the narrowed contract of the write-queue spec, not as the behaviour anyone wants.
+        var blocker = await HoldWriteLockAsync(store);
+        var first = store.TouchAsync(bystander.Id, DateTimeOffset.UtcNow, default);
+        await Task.Delay(300); // the writer has taken the touch and waits for the lock
+        var bad = store.AppendAsync(
+            poisoned.Id,
+            new ChatMessage(MessageRole.User, [new UnserializableBlock()]),
+            null,
+            default);
+        var sameBatch = store.AppendAsync(bystander.Id, Text("same batch"), null, default);
+        await ReleaseWriteLockAsync(blocker);
+
+        await first;
+        var failure = await Assert.ThrowsAsync<JsonException>(() => bad);
+        Assert.Contains("Unsupported content block", failure.Message, StringComparison.Ordinal);
+        var collateral = await Assert.ThrowsAsync<JsonException>(() => sameBatch);
+        Assert.Equal(failure.Message, collateral.Message);
+
+        // Nothing of the failed batch landed, and the queue is not faulted: the next batch commits normally.
+        Assert.Equal(1L, await CountAsync(store, "SELECT count(*) FROM messages"));
+        Assert.Equal([1L], (await CollectAsync(store.ReadAsync(bystander.Id, 1, null, default))).Select(static m => m.Seq));
+        Assert.Equal(0L, await CountAsync(store, $"SELECT count(*) FROM messages WHERE session_id = '{poisoned.Id}'"));
+        Assert.Equal(2, await store.AppendAsync(bystander.Id, Text("after"), null, default));
+        Assert.Equal([1L, 2L], (await CollectAsync(store.ReadAsync(bystander.Id, 1, null, default))).Select(static m => m.Seq));
     }
 
     // ---- Activation ----

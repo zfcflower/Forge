@@ -237,8 +237,12 @@ public sealed class EditorFeatureTests : IDisposable
         var area = host.Editor.TextArea;
         Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(area.SelectionBrush);
         var colour = ((Avalonia.Media.ISolidColorBrush)area.SelectionBrush!).Color;
-        Assert.InRange(colour.A, 1, 0x80);
-        Assert.True(colour.B > colour.R, "the selection stays blue");
+        // The brand blue at two translucencies (light ~24%, dark ~30%): the hue is always #3399FF and the alpha
+        // stays a tint, whatever the theme variant the editor resolved.
+        Assert.Equal((byte)0x33, colour.R);
+        Assert.Equal((byte)0x99, colour.G);
+        Assert.Equal((byte)0xFF, colour.B);
+        Assert.InRange(colour.A, 0x30, 0x60);
         // The text keeps its own colour: a dark selection with a light foreground is what made the code unreadable.
         Assert.Null(area.SelectionForeground);
         Assert.Null(area.SelectionBorder);

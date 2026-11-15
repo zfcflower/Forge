@@ -120,8 +120,9 @@ public enum ProviderCacheWiring
 
     /// <summary>
     /// GitHub Copilot: <c>X-Interaction-Id</c>, the header its API keys the prompt cache on. A harness that leaves it empty gets
-    /// almost no cache hits on the Claude models it serves; <c>Copilot-Integration-Id</c> (sent by the adapter already) is a
-    /// different thing — that one selects the quota bucket and model allowlist.
+    /// almost no cache hits on the Claude models it serves. <c>Copilot-Integration-Id</c> is a different thing — that one selects
+    /// the quota bucket and model allowlist, and it travels in the caller's headers (the app's credential wiring injects it on
+    /// every Copilot request); the Core adapter itself never sends it.
     /// </summary>
     Copilot,
 }

@@ -1,3 +1,4 @@
+using Forge.Ipc;
 using Xunit;
 
 namespace Forge.Integration.Tests.Terminal;
@@ -91,6 +92,49 @@ public sealed class TerminalStopTests
         await TerminalWait.WaitForDeathAsync(jobPid, "the background job of the stopped shell", ct);
 
         TerminalAsserts.NoCleanupFailures(host);
+    }
+
+    /// <summary>F-EH-70: a kill-tree problem reaches the cleanup report on its own merits, never gated on the shell's
+    /// exit code being unobservable. On POSIX the shell routinely exits with an observable code (128+signal, so &gt;= 0)
+    /// while the session sweep still found job-control descendants that survived; before the fix that residue was hidden
+    /// behind <c>exitCode &lt; 0</c> and the host could exit 0 with survivors alive. A real survivor cannot be forced
+    /// deterministically (no process ignores SIGKILL, and an escaped setsid child leaves the session the sweep scans), so
+    /// a Debug-only seam injects the kill problem and this test proves the report - and therefore the non-zero host exit -
+    /// fires even though the shell exited cleanly with an observable code. The POSIX descendant-residue path itself stays
+    /// UNVERIFIED on this Windows host.</summary>
+    [Fact]
+    public async Task Stop_records_a_kill_tree_problem_even_when_the_shell_exit_code_is_observable()
+    {
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(180));
+        var ct = budget.Token;
+        await using var host = await RawTerminalHost.StartAsync(
+            ct,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["FORGE_HOST_TEST_FAIL_TERMINAL_KILL"] = "1" });
+
+        var (terminalId, _, _) = await host.StartTerminalAsync(null, ct: ct);
+        await host.SendInputAsync(terminalId, "echo KILL-READY\r", ct);
+        await host.WaitForTextAsync(terminalId, "KILL-READY", TimeSpan.FromSeconds(30), ct);
+
+        // Stopping runs the single shutdown path: KillTree (injected problem) -> wait for exit -> record. The shell exits
+        // with an observable code, so the pre-fix `&& exitCode < 0` guard would have skipped the record entirely.
+        await host.StopAsync(terminalId, ct);
+        var shellExit = await host.WaitForTerminalExitAsync(terminalId, TimeSpan.FromSeconds(30), ct);
+        Assert.True(shellExit >= 0, $"the stopped shell's exit code {shellExit} was not observable; the test needs the >= 0 case.");
+
+        try
+        {
+            await host.StopHostAsync(ct);
+        }
+        catch (IpcConnectionClosedException)
+        {
+            // The host may close its pipe before answering host.stop; the graceful exit code is what is asserted.
+        }
+
+        var exitCode = await host.WaitForExitAsync(ct);
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains(
+            host.HostOutput,
+            line => line.Contains("could not be verified as stopped", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string JobMarker(RawTerminalHost host) =>

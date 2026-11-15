@@ -33,6 +33,12 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     private readonly RootWaitGraph waits = new();
 #if DEBUG
     private readonly IHostTestHook? testHook;
+
+    /// <summary>Debug-only seam: when <see cref="FailCleanupEnvironmentVariable"/> names this host's pipe, the shutdown
+    /// records one injected cleanup failure so a test can exercise the <c>host_shutdown_failed</c> branch (non-zero exit
+    /// from <see cref="RunAsync"/> and a throw from <see cref="DisposeAsync"/>) deterministically. Scoping to the pipe name
+    /// keeps a concurrently running host of another test unaffected. Release builds contain neither the field nor the read.</summary>
+    private readonly bool injectCleanupFailure;
 #endif
     private readonly ScriptCodeCompiler scriptCompiler = new();
     private readonly ScriptExecutorSupervisor scriptExecutors;
@@ -61,8 +67,19 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         terminals = new TerminalManager(stop, cleanup, new TerminalNotifier(this));
 #if DEBUG
         testHook = FileHostTestHook.Activate(options.PipeName);
+        var failCleanup = Environment.GetEnvironmentVariable(FailCleanupEnvironmentVariable);
+        // "1" arms it for a host started as an isolated child process (the variable is set on that process only); naming
+        // a pipe arms exactly one in-process host so a concurrently running host of another test is never affected.
+        injectCleanupFailure =
+            string.Equals(failCleanup, "1", StringComparison.Ordinal)
+            || string.Equals(failCleanup, options.PipeName, StringComparison.Ordinal);
 #endif
     }
+
+#if DEBUG
+    /// <summary>Environment variable that arms the injected cleanup failure for the one host whose pipe name it equals.</summary>
+    internal const string FailCleanupEnvironmentVariable = "FORGE_HOST_TEST_FAIL_CLEANUP";
+#endif
 
     /// <summary>Every issue the last discovery reported, newest last.</summary>
     internal IReadOnlyList<PluginIssue> Issues
@@ -1084,8 +1101,10 @@ public sealed partial class ExtensionHost : IAsyncDisposable
 
             // Killing the worker is what ends the executions already in flight; draining them afterwards guarantees
             // that nothing this plugin dispatched is still running when the revoke returns, so no worker of a revoked
-            // plugin can be left behind and no later call can be recovered into a new one.
+            // plugin can be left behind and no later call can be recovered into a new one. A workflow package has no
+            // worker to kill, so its in-flight runs are terminated through their cancellation lifetime instead.
             await StopWorkerAsync(entry.Id).ConfigureAwait(false);
+            CancelWorkflowRuns(entry.Id);
             await state.WaitForIdleAsync(RevokeDrainWindow, ct).ConfigureAwait(false);
             await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
         }
@@ -1754,6 +1773,19 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         // Kills every terminal's process tree. This sends nothing: the connection ending is what tells the main program
         // that its terminals are gone, and a terminal that cannot be verified as gone is recorded in the cleanup report.
         await terminals.DisposeAsync().ConfigureAwait(false);
+
+#if DEBUG
+        if (injectCleanupFailure)
+        {
+            // Test seam: a real, unverifiable cleanup failure cannot be forced deterministically (Windows job containment
+            // and POSIX group kills both succeed on a cooperative process), so this injects one to prove the contract that
+            // a failed cleanup is never a silent success: RunAsync returns non-zero and DisposeAsync throws
+            // host_shutdown_failed. Debug builds only; a Release host never reads the variable.
+            cleanup.Record(
+                "an injected cleanup failure (FORGE_HOST_TEST_FAIL_CLEANUP) was recorded to exercise the "
+                + "host_shutdown_failed path");
+        }
+#endif
     }
 
     private async Task DrainWorkersAsync()

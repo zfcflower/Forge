@@ -192,6 +192,22 @@ internal sealed class EditorFoldingController : IDisposable
         var token = cts.Token;
         try
         {
+            // The line cap governs both range sources, not just the local heuristic: a document past the cap never folds
+            // at all, and the notice line says why instead of the editor quietly hanging on a giant file.
+            if (forge.LineCount > StructuralFolding.MaxLines)
+            {
+                ReportNotice(EditorStrings.FoldTooLargeText(StructuralFolding.MaxLines));
+                if (token.IsCancellationRequested || disposed)
+                {
+                    return;
+                }
+
+                Apply([]);
+                return;
+            }
+
+            ReportNotice(default);
+
             IReadOnlyList<FoldingRange>? ranges = null;
             try
             {
@@ -241,13 +257,6 @@ internal sealed class EditorFoldingController : IDisposable
             return [];
         }
 
-        if (forge.LineCount > StructuralFolding.MaxLines)
-        {
-            ReportNotice(EditorStrings.FoldTooLargeText(StructuralFolding.MaxLines));
-            return [];
-        }
-
-        ReportNotice(default);
         if (xml)
         {
             // The library's strategy reads the live document, so it runs on the UI thread; the debounce keeps it rare.

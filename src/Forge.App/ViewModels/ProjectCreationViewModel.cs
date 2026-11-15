@@ -67,6 +67,9 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
     /// </summary>
     private readonly Stopwatch progressClock = Stopwatch.StartNew();
 
+    /// <summary>The thread the dialog was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     /// <param name="mode">Clone a remote or create an empty repository.</param>
     /// <param name="service">The creator: validation rules, defaults and the git calls.</param>
     /// <param name="initialUrl">A remote the caller already knows (the clipboard is not read; a shell flow may prefill it).</param>
@@ -542,6 +545,13 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
     /// <summary>Recomputes every cached text after a language switch; resolved paths are language-independent.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the dialog's labels are bound
+        // on the thread that built it.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         RefreshInputState();
         OnPropertyChanged(nameof(TitleText));
         OnPropertyChanged(nameof(IntroText));

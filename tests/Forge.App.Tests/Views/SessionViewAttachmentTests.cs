@@ -171,6 +171,11 @@ public sealed class SessionViewAttachmentTests
             Assert.Equal(AttachmentStrings.Unsupported("archive.zip").Resolve(), rig.Composer.AttachmentError);
             Assert.Empty(rig.Composer.Files);
 
+            // The classifier's refusal reaches the notification centre as a warning, whatever the extension claimed.
+            var refusal = Assert.Single(rig.Refusals);
+            Assert.Equal(NotificationLevel.Warning, refusal.Level);
+            Assert.Equal(AttachmentStrings.UnsupportedKey, refusal.BodyKey);
+
             var folder = Path.Combine(rig.Directory, "a-folder");
             Directory.CreateDirectory(folder);
             rig.Composer.DismissAttachmentError();

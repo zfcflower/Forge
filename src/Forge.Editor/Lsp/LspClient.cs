@@ -567,9 +567,17 @@ public sealed class LspClient : IAsyncDisposable
         writer.WriteStartObject();
         writer.WriteBoolean("dynamicRegistration", false);
         writer.WriteEndObject();
+        // Roslyn only sends workspace/diagnostic/refresh ("analysis finished, ask again") when the client declares this;
+        // without it the first pull can be dropped as "before project load" and never repeated.
+        writer.WritePropertyName("diagnostics");
+        writer.WriteStartObject();
+        writer.WriteBoolean("refreshSupport", true);
+        writer.WriteEndObject();
+        // Likewise for semantic tokens: the refresh notification is a documented request trigger, so the client must
+        // declare it can handle one instead of telling well-behaved servers never to send it.
         writer.WritePropertyName("semanticTokens");
         writer.WriteStartObject();
-        writer.WriteBoolean("refreshSupport", false);
+        writer.WriteBoolean("refreshSupport", true);
         writer.WriteEndObject();
         writer.WriteEndObject();
 

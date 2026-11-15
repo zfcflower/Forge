@@ -248,7 +248,7 @@
       <SolidColorBrush x:Key="DiffHunkBrush" Color="#262626" />
       <SolidColorBrush x:Key="RunningBrush" Color="#79CC9A" />
 
-      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#4D5AA9FF" />
+      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#4D3399FF" />
       <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59B58B00" />
 
       <SolidColorBrush x:Key="DockStripBackgroundBrush" Color="#101010" />

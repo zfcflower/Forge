@@ -83,6 +83,68 @@ public sealed class StorageSchemaV3MigrationTests
     }
 
     [Fact]
+    public async Task A_message_timestamp_without_an_offset_is_left_untouched_and_reading_the_history_names_the_row()
+    {
+        using var directory = new TempDirectory();
+        string sessionId;
+        await using (var store = new SqliteSessionStore(directory.Path))
+        {
+            var session = await store.CreateSessionAsync("D:/ws", "t", default);
+            sessionId = session.Id;
+            await store.AppendAsync(session.Id, ChatMessage.User("hello"), null, default);
+        }
+
+        await ReopenAsVersion2Async(directory);
+        await TodoSchemaRaw.ExecuteAsync(
+            directory,
+            $"UPDATE messages SET at = '2026-11-04 07:44:28' WHERE session_id = '{sessionId}'");
+
+        await using var reopened = new SqliteSessionStore(directory.Path);
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => HistoryAsync(reopened, sessionId));
+        Assert.Contains("malformed at value", failure.Message, StringComparison.Ordinal);
+        Assert.Contains($"message 1 of session {sessionId}", failure.Message, StringComparison.Ordinal);
+
+        // Repairing it would have to invent an instant, so the history read reports the row instead of taking the
+        // value for local time - the failure mode the strict read exists for.
+        Assert.Equal(
+            "2026-11-04 07:44:28",
+            await TextAsync(directory, $"SELECT at FROM messages WHERE session_id = '{sessionId}'"));
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
+    }
+
+    [Fact]
+    public async Task A_summary_timestamp_without_an_offset_is_left_untouched_and_reading_the_summaries_names_the_row()
+    {
+        using var directory = new TempDirectory();
+        string sessionId;
+        await using (var store = new SqliteSessionStore(directory.Path))
+        {
+            var session = await store.CreateSessionAsync("D:/ws", "t", default);
+            sessionId = session.Id;
+            await store.AppendAsync(session.Id, ChatMessage.User("hello"), null, default);
+            await store.PutSummaryAsync(
+                new SummaryRecord(session.Id, 2, 1, 1, "stage summary", DateTimeOffset.UnixEpoch),
+                default);
+        }
+
+        await ReopenAsVersion2Async(directory);
+        await TodoSchemaRaw.ExecuteAsync(
+            directory,
+            $"UPDATE summaries SET at = '2026-11-04 07:44:28' WHERE session_id = '{sessionId}'");
+
+        await using var reopened = new SqliteSessionStore(directory.Path);
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => reopened.GetSummariesAsync(sessionId, default));
+        Assert.Contains("malformed at value", failure.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"layer-2 summary of session {sessionId} covering 1-1",
+            failure.Message,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            "2026-11-04 07:44:28",
+            await TextAsync(directory, $"SELECT at FROM summaries WHERE session_id = '{sessionId}'"));
+    }
+
+    [Fact]
     public async Task Every_timestamp_column_gets_an_insert_and_an_update_guard()
     {
         using var directory = new TempDirectory();
@@ -217,6 +279,18 @@ public sealed class StorageSchemaV3MigrationTests
     {
         await using var registry = new SqliteProjectRegistry(directory.Path);
         await registry.ListAsync(default);
+    }
+
+    /// <summary>Drains the history read: that is where a malformed <c>messages.at</c> surfaces.</summary>
+    private static async Task<List<StoredMessage>> HistoryAsync(SqliteSessionStore store, string sessionId)
+    {
+        var messages = new List<StoredMessage>();
+        await foreach (var message in store.ReadAsync(sessionId, 1, null, default))
+        {
+            messages.Add(message);
+        }
+
+        return messages;
     }
 
     /// <summary>One canonical row (or two) per guarded table, so the update theories have something to change.</summary>

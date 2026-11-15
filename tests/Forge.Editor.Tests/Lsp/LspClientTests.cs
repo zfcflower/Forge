@@ -47,6 +47,29 @@ public class LspClientTests
     }
 
     [Fact]
+    public async Task Initialize_declares_the_refresh_capabilities_the_server_notifications_depend_on()
+    {
+        await using var server = new FakeLanguageServer();
+        var process = new LanguageServerProcess(new LanguageServerLaunch("fake"));
+        var connecting = LspClient.ConnectAsync(process, server.Streams);
+
+        using var initialize = await server.ReceiveAsync();
+        var capabilities = initialize.RootElement.GetProperty("params").GetProperty("capabilities");
+        var workspace = capabilities.GetProperty("workspace");
+        // Roslyn only sends workspace/diagnostic/refresh (project loaded, ask again) to a client that declares
+        // refreshSupport, and well-behaved servers likewise gate semanticTokens/refresh on the same declaration.
+        Assert.True(workspace.GetProperty("diagnostics").GetProperty("refreshSupport").GetBoolean(),
+            "workspace.diagnostics.refreshSupport must be declared");
+        Assert.True(workspace.GetProperty("semanticTokens").GetProperty("refreshSupport").GetBoolean(),
+            "workspace.semanticTokens.refreshSupport must be declared");
+        Assert.True(capabilities.GetProperty("window").GetProperty("workDoneProgress").GetBoolean(),
+            "window.workDoneProgress must be declared");
+
+        await server.RespondAsync(initialize.RootElement.GetProperty("id"), "{}");
+        await using var client = await connecting.WaitAsync(Patience);
+    }
+
+    [Fact]
     public async Task Initialize_error_response_fails_the_connection()
     {
         await using var server = new FakeLanguageServer();

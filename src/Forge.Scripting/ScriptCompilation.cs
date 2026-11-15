@@ -5,14 +5,10 @@ namespace Forge.Scripting;
 
 /// <summary>
 /// One compiled script image and its descriptor, success or failure. The bytes are produced once per cache key; the
-/// entry point delegate is created once per image (under a lock) and then reused, because the delegate carries no
-/// per-run state.
+/// image is loaded fresh into its own collectible assembly-load context for every run.
 /// </summary>
 internal sealed class CompiledScript
 {
-    private readonly Lock gate = new();
-    private ScriptEntryPoint? entry;
-
     private CompiledScript(ScriptCompilation compilation) => Compilation = compilation;
 
     public ScriptCompilation Compilation { get; }
@@ -25,24 +21,6 @@ internal sealed class CompiledScript
     public static CompiledScript Success(ScriptCompilation compilation) => new(compilation);
 
     public static CompiledScript Failed(ScriptCompilation compilation) => new(compilation);
-
-    /// <summary>
-    /// Loading is part of the compilation, not of a run: it is done once and throws the same way for every caller that
-    /// asks for a broken image.
-    /// </summary>
-    public ScriptEntryPoint EntryPoint()
-    {
-        var current = Volatile.Read(ref entry);
-        if (current is not null)
-        {
-            return current;
-        }
-
-        lock (gate)
-        {
-            return entry ??= ScriptCodeLoader.Load(Compilation.Image!, Compilation.Descriptor!);
-        }
-    }
 }
 
 /// <summary>

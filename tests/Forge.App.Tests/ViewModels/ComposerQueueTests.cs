@@ -4,6 +4,7 @@ using Avalonia.Headless;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
+using Forge.App.Localization;
 using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.App.ViewModels;
@@ -14,8 +15,10 @@ namespace Forge.App.Tests.ViewModels;
 /// <summary>
 /// The composer's running-turn commands on <see cref="SessionWorkspaceViewModel"/>: Queue keeps the draft and sends it
 /// when the turn ends, Redirect stops the turn and sends right away, Stop pauses the queue until the next send, and
-/// Interject reaches the running root agent at its next tool batch (or falls back to the front of the queue). The turns
-/// run for real over a scripted provider whose first request waits on a gate.
+/// Interject reaches the running root agent at its next tool batch (or falls back to the front of the queue). Sending also
+/// owns the <c>/compact</c> gate: the command word alone compacts instead of sending, and with an attachment (or any text
+/// the parser refuses) it is the message it looks like. The turns run for real over a scripted provider whose first request
+/// waits on a gate.
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class ComposerQueueTests
@@ -45,6 +48,78 @@ public sealed class ComposerQueueTests
             provider.Release();
             Assert.True(await PumpUntilAsync(() => provider.Calls == 2 && !workspace.IsRunning && workspace.Queued.Count == 0));
             Assert.Equal(["first", "second"], provider.Seen);
+        });
+    }
+
+    /// <summary>
+    /// <c>/compact</c> in the input box is the compaction command, not a message: the draft is cleared, nothing reaches the
+    /// provider and the manual compaction runs — an empty session reports that there is nothing to compact.
+    /// </summary>
+    [Fact]
+    public async Task A_compact_command_compacts_instead_of_sending_a_message()
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            workspace.Draft = "  /COMPACT  keep the API notes  ";
+            workspace.SendCommand.Execute(null);
+
+            Assert.True(await PumpUntilAsync(() => Notices(workspace).Count > 0), "the compaction never reported its outcome");
+            await PumpAsync(10);
+
+            Assert.Equal(string.Empty, workspace.Draft);
+            Assert.Equal(0, provider.Calls);
+            Assert.Empty(provider.Seen);
+            Assert.Empty(workspace.Transcript.Items.OfType<UserMessageViewModel>());
+            Assert.Equal([CompactionStrings.Nothing().Resolve()], Notices(workspace));
+        });
+    }
+
+    /// <summary>
+    /// The attachment gate: a <c>/compact</c> carrying an image is what the user typed, so it is sent as a message and the
+    /// session is left alone.
+    /// </summary>
+    [Fact]
+    public async Task A_compact_command_with_an_attachment_is_sent_as_a_message()
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            workspace.Draft = "/compact";
+            workspace.Composer.RestoreAttachments([Image("AAAA")]);
+
+            workspace.SendCommand.Execute(null);
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 1 && !workspace.Composer.HasAttachments));
+
+            Assert.Equal(["/compact"], provider.Seen);
+            Assert.Equal([1], provider.Images);
+            Assert.Empty(Notices(workspace));
+            var user = Assert.Single(workspace.Transcript.Items.OfType<UserMessageViewModel>());
+            Assert.Equal("/compact", user.Text);
+
+            provider.Release();
+            Assert.True(await PumpUntilAsync(() => !workspace.IsRunning));
+            Assert.Equal(1, provider.Calls);
+            Assert.Empty(Notices(workspace));
+        });
+    }
+
+    /// <summary>Only the exact command word is intercepted: text the parser refuses is sent as the message it is.</summary>
+    [Theory]
+    [InlineData("/compactfoo")]
+    [InlineData("/compact-now")]
+    [InlineData("please /compact")]
+    public async Task Text_that_only_looks_like_the_compact_command_is_sent(string typed)
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            workspace.Draft = typed;
+            workspace.SendCommand.Execute(null);
+
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 1));
+            Assert.Equal([typed], provider.Seen);
+            Assert.Empty(Notices(workspace));
+
+            provider.Release();
+            Assert.True(await PumpUntilAsync(() => !workspace.IsRunning));
         });
     }
 
@@ -404,6 +479,10 @@ public sealed class ComposerQueueTests
     }
 
     private static ImageBlock Image(string data) => new("image/png", data);
+
+    /// <summary>The session-level notices (compaction outcomes, refusals) the transcript carries.</summary>
+    private static List<string> Notices(SessionWorkspaceViewModel workspace) =>
+        workspace.Transcript.Items.OfType<NoticeViewModel>().Select(static notice => notice.Text).ToList();
 
     private static async Task RunAsync(
         Func<SessionWorkspaceViewModel, GatedProvider, Task> body,

@@ -309,6 +309,81 @@ public sealed class NamedPipeFramingTests
         }
     }
 
+    [Fact]
+    public async Task A_body_that_fills_a_whole_pipe_segment_is_not_the_buffer_the_pipe_reuses()
+    {
+        // The layout the ownership check used to guess at: the leading frame ends four bytes short of the segment, so
+        // the next frame's prefix sits at the very end of it and its body fills the following pooled segment from
+        // offset 0 to its last byte. Handing that body over without a copy leaves the consumer holding an array the
+        // reader returns to the pool on the next AdvanceTo, where the following reads overwrite it.
+        const int segmentBytes = 1024;
+        const int churnBytes = 1000;
+        var name = TestPipes.NewName();
+        var options = new IpcPipeOptions { ReadBufferBytes = segmentBytes };
+        var (server, raw) = await AcceptRawAsync(name, options);
+        await using var _ = server;
+        using var __ = raw;
+        var aligned = new TaskCompletionSource<ReadOnlyMemory<byte>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var churned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.FrameReceived += frame =>
+        {
+            if (frame.Length == segmentBytes)
+            {
+                aligned.TrySetResult(frame);
+            }
+            else if (frame.Length == 1)
+            {
+                churned.TrySetResult();
+            }
+        };
+
+        var body = TestFrames.Filler(segmentBytes, 0xAB);
+        var lead = new byte[segmentBytes];
+        TestFrames.Header(segmentBytes - (2 * TestFrames.HeaderBytes)).CopyTo(lead, 0);
+        TestFrames.Filler(segmentBytes - (2 * TestFrames.HeaderBytes), 0x41).CopyTo(lead, TestFrames.HeaderBytes);
+        TestFrames.Header(segmentBytes).CopyTo(lead, segmentBytes - TestFrames.HeaderBytes);
+        var alignedFrame = new byte[segmentBytes + body.Length];
+        lead.CopyTo(alignedFrame, 0);
+        body.CopyTo(alignedFrame, segmentBytes);
+        await WriteAsync(raw, alignedFrame);
+        var captured = await aligned.Task.Bounded();
+
+        // Read enough further frames to make the reader rent every buffer it just returned.
+        for (var i = 0; i < 8; i++)
+        {
+            await WriteAsync(raw, TestFrames.Prefix(TestFrames.Filler(churnBytes, 0xFF)));
+        }
+
+        await WriteAsync(raw, TestFrames.Prefix([0x01]));
+        await churned.Task.Bounded();
+
+        Assert.Equal(body, captured.ToArray());
+        Assert.True(server.IsConnected);
+    }
+
+    [Fact]
+    public async Task A_payload_slice_of_a_delivered_frame_is_still_readable_after_the_transport_is_gone()
+    {
+        var name = TestPipes.NewName();
+        var (server, raw) = await AcceptRawAsync(name, new IpcPipeOptions());
+        await using var _ = server;
+        using var __ = raw;
+        var delivered = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.FrameReceived += frame => delivered.TrySetResult(FrameCodec.Default.Decode(frame));
+
+        var args = new EchoArgs("a payload that outlives the pipe", 7);
+        await WriteAsync(raw, TestFrames.Notification("keep", args));
+        var message = await delivered.Task.Bounded();
+
+        raw.Dispose();
+        await TestAwait.UntilAsync(() => !server.IsConnected, "the server to see the peer drop");
+        await server.DisposeAsync();
+
+        // The decoded payload is a slice of the delivered buffer, read only now that the connection and its reader
+        // are gone: the transport must have handed the buffer over rather than kept it for the next read.
+        Assert.Equal(args, message.Read<EchoArgs>());
+    }
+
     private static async Task<(NamedPipeServerTransport Server, NamedPipeClientStream Raw)> AcceptRawAsync(string name, IpcPipeOptions options)
     {
         var serverTask = IpcPipe.CreateServer(name, options);

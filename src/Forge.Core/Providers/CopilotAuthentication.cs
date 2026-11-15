@@ -211,7 +211,9 @@ public sealed class CopilotAuthentication
         message.Headers.TryAddWithoutValidation("Authorization", "token " + gitHubUserToken);
         message.Headers.TryAddWithoutValidation("Accept", "application/json");
         message.Headers.TryAddWithoutValidation("Editor-Version", EditorVersion);
-        message.Headers.TryAddWithoutValidation("Editor-Plugin-Version", EditorVersion);
+        // The plugin version, not the editor version again: the device-code request sends these same two values, and the
+        // exchange must not disagree with the flow that minted the user token.
+        message.Headers.TryAddWithoutValidation("Editor-Plugin-Version", EditorPluginVersion);
         message.Headers.TryAddWithoutValidation("Copilot-Integration-Id", IntegrationId);
 
         using var response = await SendAsync(message, ct).ConfigureAwait(false);

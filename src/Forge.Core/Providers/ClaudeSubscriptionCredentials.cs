@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -50,6 +51,12 @@ public sealed record ClaudeSubscription(
 /// starts with <c>claude-code/</c>, so it is sent as the CLI's own <c>axios/1.8.4</c>; and the <c>client_id</c> is the
 /// public Claude Code OAuth client, not a Forge-registered one.
 /// </para>
+/// <para>
+/// Refreshes are serialized per credentials file across the whole process — the same rule the device-code bundles follow.
+/// The endpoint rotates the refresh token, so two concurrent refreshes (a root turn and a child agent, say) would each
+/// spend the token the other is about to invalidate, and the loser's write-back could put an already-rotated token back
+/// into the file. One caller refreshes; everyone behind the gate re-reads the file and takes the rotated token from it.
+/// </para>
 /// </remarks>
 public sealed class ClaudeSubscriptionCredentials
 {
@@ -70,9 +77,18 @@ public sealed class ClaudeSubscriptionCredentials
 
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
 
+    /// <summary>
+    /// One refresh gate per credentials-file path, shared by every instance in the process: the file is the contended
+    /// resource, not the object, and more than one <see cref="ClaudeSubscriptionCredentials"/> can point at the same file.
+    /// Entries are never evicted on purpose — one small semaphore per distinct path, like the device-code bundles' gates.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> RefreshGates = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
     private readonly string _credentialsPath;
     private readonly HttpClient _http;
     private readonly TimeProvider _time;
+    private readonly string _gateKey;
 
     /// <summary>
     /// Whether the file on this machine holds a non-empty access token, without refreshing or touching the network. The
@@ -109,6 +125,20 @@ public sealed class ClaudeSubscriptionCredentials
         _credentialsPath = credentialsPath;
         _http = http;
         _time = time ?? TimeProvider.System;
+        _gateKey = GateKey(credentialsPath);
+    }
+
+    /// <summary>The full path when one can be resolved, else the given text; the gate only needs a key that is stable per file.</summary>
+    private static string GateKey(string credentialsPath)
+    {
+        try
+        {
+            return Path.GetFullPath(credentialsPath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
+        {
+            return credentialsPath;
+        }
     }
 
     /// <summary>The CLI's credential file for the current user.</summary>
@@ -152,26 +182,53 @@ public sealed class ClaudeSubscriptionCredentials
     /// </exception>
     public async Task<ClaudeSubscription> ReadAsync(CancellationToken ct)
     {
+        var stored = await ReadStoredAsync(ct).ConfigureAwait(false);
+        if (stored is null || !stored.NeedsRefresh)
+        {
+            return stored?.Subscription ?? ClaudeSubscription.None;
+        }
+
+        var gate = RefreshGates.GetOrAdd(_gateKey, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // Read again inside the gate: whoever waited behind a refresh must see the rotated bundle, not spend the old
+            // refresh token that the refresh in front of it has already invalidated at the endpoint.
+            stored = await ReadStoredAsync(ct).ConfigureAwait(false);
+            if (stored is null || !stored.NeedsRefresh)
+            {
+                return stored?.Subscription ?? ClaudeSubscription.None;
+            }
+
+            return await RefreshAsync(stored.Root, stored.OAuth, stored.Subscription, _time.GetUtcNow(), ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>What the file holds plus whether a refresh is due for it; null when nobody is signed in.</summary>
+    private sealed record Stored(JsonObject Root, JsonObject OAuth, ClaudeSubscription Subscription, bool NeedsRefresh);
+
+    private async Task<Stored?> ReadStoredAsync(CancellationToken ct)
+    {
         var root = await ReadDocumentAsync(ct).ConfigureAwait(false);
         if (root?[OAuthProperty] is not JsonObject oauth)
         {
-            return ClaudeSubscription.None;
+            return null;
         }
 
         var current = Parse(oauth);
         if (!current.IsSignedIn)
         {
-            return ClaudeSubscription.None;
+            return null;
         }
 
         var now = _time.GetUtcNow();
         var due = current.ExpiresAt is not { } expiresAt || expiresAt - now <= RefreshMargin;
-        if (!due || string.IsNullOrEmpty(current.RefreshToken))
-        {
-            return current;
-        }
-
-        return await RefreshAsync(root, oauth, current, now, ct).ConfigureAwait(false);
+        return new Stored(root, oauth, current, due && !string.IsNullOrEmpty(current.RefreshToken));
     }
 
     private async Task<JsonObject?> ReadDocumentAsync(CancellationToken ct)

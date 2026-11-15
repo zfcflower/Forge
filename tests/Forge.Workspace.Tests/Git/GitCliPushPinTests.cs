@@ -72,6 +72,51 @@ public sealed class GitCliPushPinTests
     }
 
     [Fact]
+    public async Task Everything_up_to_date_with_a_stale_lease_reports_non_fast_forward()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var sandbox = new RemoteSandbox();
+        var repo = sandbox.Clone("alice");
+        sandbox.CommitFile(repo, "base.txt", "base\n", "seed");
+        IsolatedGit.RunChecked(repo, "push", "-q", "-u", "origin", "main");
+
+        // The lease is taken while the remote still points at the seed commit; the local branch stays there.
+        var lease = await new GitCli().LsRemoteAsync(repo, "origin", "main");
+        Assert.True(lease.Result.Success);
+        Assert.NotNull(lease.Commit);
+
+        // While this clone's main branch stays put, another writer advances the remote to the very commit this
+        // push is pinned to, so git has nothing to update and skips its own lease check.
+        IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "dev");
+        var later = sandbox.CommitFile(repo, "later.txt", "later\n", "later work");
+        IsolatedGit.RunChecked(repo, "push", "-q", "origin", "dev:main");
+        IsolatedGit.RunChecked(repo, "checkout", "-q", "main");
+
+        var push = await new GitCli().PushAsync(
+            repo,
+            new GitPushOptions
+            {
+                Branch = "main",
+                Remote = "origin",
+                ForceWithLease = true,
+                ExpectedRemoteCommit = lease.Commit,
+                SourceCommit = later,
+            });
+
+        // The remote tip moved past the leased commit, so the stale lease is upgraded to non-fast-forward even
+        // though nothing needed pushing and the local branch still matches the lease.
+        Assert.False(push.Success);
+        Assert.Equal(GitRemoteFailureKind.NonFastForward, push.Failure);
+        Assert.Contains("lease", push.Message, StringComparison.Ordinal);
+        Assert.Equal(later, IsolatedGit.RunChecked(sandbox.Origin, "rev-parse", "refs/heads/main").Trim());
+        Assert.Equal(lease.Commit, IsolatedGit.Head(repo));
+    }
+
+    [Fact]
     public async Task A_source_commit_that_is_not_a_sha_is_refused_before_anything_is_pushed()
     {
         if (!GitProbe.IsAvailable)

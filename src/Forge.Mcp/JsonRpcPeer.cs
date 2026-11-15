@@ -58,14 +58,18 @@ internal sealed class JsonRpcPeer : IAsyncDisposable
         var token = linked.Token;
         var completion = new TaskCompletionSource<JsonDocument>(TaskCreationOptions.RunContinuationsAsynchronously);
         pending[id] = new Pending(method, completion);
+        var sent = false;
         try
         {
             await transport.SendAsync(RpcJson.Request(id, method, writeParams), token, id).ConfigureAwait(false);
+            sent = true;
             return await completion.Task.WaitAsync(token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            if (!IsClosed)
+            // The notification only goes out once the request reached the wire; a cancellation that
+            // preempted the send refers to an id the server has never seen.
+            if (sent && !IsClosed)
             {
                 SendCancellation(id, method, "cancelled by client");
             }
@@ -87,7 +91,11 @@ internal sealed class JsonRpcPeer : IAsyncDisposable
 
             if (deadline.IsCancellationRequested)
             {
-                SendCancellation(id, method, "request timed out");
+                if (sent)
+                {
+                    SendCancellation(id, method, "request timed out");
+                }
+
                 throw new McpTimeoutException(method, requestTimeout);
             }
 

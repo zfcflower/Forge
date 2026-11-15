@@ -55,13 +55,16 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     private string DegradationKey => Id + "|chat|" + Config.BaseUrl;
 
     /// <summary>
-    /// A 400 naming one of the cache fields means this model does not know it: the answer is to send less, not to fail the turn.
+    /// A 400 naming one of the cache knobs means this model or gateway does not know it: the answer is to send less, not to
+    /// fail the turn. Both families count — the body fields and the cache headers a strict gateway can refuse just the same.
     /// </summary>
     protected override bool CanDegrade(ProviderException failure) =>
         !downgraded
         && failure.StatusCode == 400
         && (failure.Message.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
-            || failure.Message.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase));
+            || failure.Message.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase)
+            || failure.Message.Contains("x-grok-conv-id", StringComparison.OrdinalIgnoreCase)
+            || failure.Message.Contains("X-Interaction-Id", StringComparison.OrdinalIgnoreCase));
 
     protected override void Degrade()
     {
@@ -70,7 +73,7 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     }
 
     protected override string? DegradationNotice => notice ??=
-        "This model or gateway refused the prompt-cache fields, so the request was resent without them. The answer is unaffected; "
+        "This model or gateway refused the prompt-cache fields or headers, so the request was resent without them. The answer is unaffected; "
         + "caching is then whatever the provider does on its own.";
 
     /// <summary>

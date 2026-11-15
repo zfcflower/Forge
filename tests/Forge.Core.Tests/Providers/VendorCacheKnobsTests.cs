@@ -86,7 +86,9 @@ public sealed class VendorCacheKnobsTests
             "https://api.individual.githubcopilot.com");
 
         Assert.Equal("lineage-root", handler.Last.Header("X-Interaction-Id"));
-        // The integration id is a different thing (quota bucket, model allowlist) and the adapter already sends it.
+        // The integration id is a different thing (quota bucket, model allowlist): it travels in the caller's headers, which
+        // the app's credential wiring fills in — the adapter itself never sends it.
+        Assert.Null(handler.Last.Header("Copilot-Integration-Id"));
         Assert.False(handler.Last.Root.TryGetProperty("prompt_cache_retention", out _));
     }
 
@@ -146,5 +148,54 @@ public sealed class VendorCacheKnobsTests
         Assert.False(handler.Requests[1].Root.TryGetProperty("prompt_cache_retention", out _));
         Assert.False(handler.Requests[1].Root.TryGetProperty("prompt_cache_key", out _));
         Assert.False(string.IsNullOrEmpty(events.Completed().Notice));
+    }
+
+    [Fact]
+    public async Task A_gateway_that_refuses_the_interaction_id_header_is_resent_without_it()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .Enqueue(() => new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("""{"error":{"message":"Unsupported request header: X-Interaction-Id"}}"""),
+            })
+            .EnqueueSse(Done());
+        var provider = new OpenAiCompatibleProvider(
+            // A degradation is remembered process-wide under provider id + base URL; this test owns its URL.
+            TestData.OpenAiConfig("https://refuses-interaction-id.example.test/v1"),
+            handler.CreateClient(),
+            options: new ProviderOptions { SendInteractionId = true });
+
+        var events = await provider.CollectAsync(Request("1h"));
+
+        // The refused cache header takes the same one-shot downgrade path as a refused body field: resend without any of the
+        // knobs, say so on the completion, and remember the refusal for the rest of the process.
+        Assert.Equal(2, handler.Calls);
+        Assert.Equal("lineage-root", handler.Requests[0].Header("X-Interaction-Id"));
+        Assert.Null(handler.Requests[1].Header("X-Interaction-Id"));
+        Assert.False(string.IsNullOrEmpty(events.Completed().Notice));
+        Assert.True(ProviderDegradations.Contains("openai|chat|https://refuses-interaction-id.example.test/v1"));
+    }
+
+    [Fact]
+    public async Task A_gateway_that_refuses_the_grok_conversation_header_is_resent_without_it()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .Enqueue(() => new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("""{"error":{"message":"Unknown header x-grok-conv-id in request"}}"""),
+            })
+            .EnqueueSse(Done());
+        var provider = new OpenAiCompatibleProvider(
+            TestData.OpenAiConfig("https://refuses-grok-conv-id.example.test/v1"),
+            handler.CreateClient(),
+            options: new ProviderOptions { SendConversationCacheHeader = true });
+
+        var events = await provider.CollectAsync(Request("1h"));
+
+        Assert.Equal(2, handler.Calls);
+        Assert.Equal("lineage-root", handler.Requests[0].Header("x-grok-conv-id"));
+        Assert.Null(handler.Requests[1].Header("x-grok-conv-id"));
+        Assert.False(string.IsNullOrEmpty(events.Completed().Notice));
+        Assert.True(ProviderDegradations.Contains("openai|chat|https://refuses-grok-conv-id.example.test/v1"));
     }
 }

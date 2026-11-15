@@ -662,6 +662,100 @@ public class McpServerManagerTests
         Assert.Throws<ArgumentNullException>(() => new McpToolRegistrySource(null!));
     }
 
+    [Fact]
+    public async Task A_name_held_by_a_vanished_tool_is_not_rebound_to_another_tool()
+    {
+        // Two tool names that sanitize to the same base and whose identity hashes collide, so the
+        // manager's name table — not the hash alone — is what keeps them apart for its lifetime.
+        var (first, second) = FindHashCollidingToolNames();
+        var tools = ToolsListJson(first, second);
+        var server = new ScriptedServer().On(McpProtocol.ToolsList, _ => tools);
+        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
+        var manager = fixture.Manager;
+        await manager.StartAsync("srv", CancellationToken.None);
+
+        var firstName = manager.Tools.Single(tool => tool.ToolName == first).ExposedName;
+        var secondName = manager.Tools.Single(tool => tool.ToolName == second).ExposedName;
+        Assert.Equal(McpToolNaming.Disambiguate(McpToolNaming.Build("srv", first), Identity("srv", first)), firstName);
+        // The collision was real: second's natural name is exactly the name first already holds.
+        Assert.Equal(firstName, McpToolNaming.Disambiguate(McpToolNaming.Build("srv", second), Identity("srv", second)));
+        Assert.NotEqual(firstName, secondName);
+
+        tools = ToolsListJson(second);
+        fixture.Transports[0].Push(JsonRpc.Notification(McpProtocol.ToolsListChanged));
+        Assert.True(await Eventually.Async(() => manager.Tools.Count == 1, Wait), "the vanished tool was not dropped");
+
+        var survivor = manager.Tools.Single();
+        Assert.Equal(second, survivor.ToolName);
+        Assert.Equal(secondName, survivor.ExposedName);
+        Assert.DoesNotContain(firstName, manager.Tools.Select(tool => tool.ExposedName));
+
+        tools = ToolsListJson(second, first);
+        fixture.Transports[0].Push(JsonRpc.Notification(McpProtocol.ToolsListChanged));
+        Assert.True(await Eventually.Async(() => manager.Tools.Count == 2, Wait), "the tool did not come back");
+
+        Assert.Equal(firstName, manager.Tools.Single(tool => tool.ToolName == first).ExposedName);
+        Assert.Equal(secondName, manager.Tools.Single(tool => tool.ToolName == second).ExposedName);
+    }
+
+    [Fact]
+    public async Task A_server_removed_and_re_added_keeps_the_exposed_names_of_its_tools()
+    {
+        var tools = ToolsListJson("a.b");
+        var server = new ScriptedServer().On(McpProtocol.ToolsList, _ => tools);
+        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
+        var manager = fixture.Manager;
+        await manager.StartAsync("srv", CancellationToken.None);
+        var originalName = manager.Tools.Single().ExposedName;
+
+        await manager.ApplyConfigAsync(Of(), CancellationToken.None);
+        Assert.Empty(manager.Tools);
+
+        await manager.ApplyConfigAsync(Of(Stdio("srv")), CancellationToken.None);
+        await manager.StartAsync("srv", CancellationToken.None);
+
+        Assert.Equal(originalName, manager.Tools.Single().ExposedName);
+        Assert.Equal(2, fixture.TransportCount("srv"));
+    }
+
+    private static string Identity(string serverName, string toolName) => serverName + '\u0001' + toolName;
+
+    private static string ToolsListJson(params string[] toolNames) =>
+        JsonSerializer.Serialize(new
+        {
+            tools = toolNames.Select(name => new { name, inputSchema = new { type = "object" } }),
+        });
+
+    private static (string First, string Second) FindHashCollidingToolNames()
+    {
+        var punctuation = "!#$%&()*+,.:;<=>?@[]^`{|}~".ToCharArray();
+        var seen = new Dictionary<string, string>(4096);
+        foreach (var a in punctuation)
+        {
+            foreach (var b in punctuation)
+            {
+                foreach (var c in punctuation)
+                {
+                    foreach (var d in punctuation)
+                    {
+                        var name = "a" + a + b + c + d + "b";
+                        // Every candidate sanitizes to "a____b" and is lossy, so naming always appends the
+                        // identity hash; a repeated 8-hex-digit suffix is a genuine identity collision.
+                        var suffix = McpToolNaming.Disambiguate("x", Identity("srv", name))[2..];
+                        if (seen.TryGetValue(suffix, out var first))
+                        {
+                            return (first, name);
+                        }
+
+                        seen[suffix] = name;
+                    }
+                }
+            }
+        }
+
+        throw new InvalidOperationException("The candidate space contains no colliding name pair.");
+    }
+
     private static string JsonNormalize(string json, string arrayProperty, int index, string property)
     {
         using var document = JsonDocument.Parse(json);

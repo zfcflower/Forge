@@ -19,6 +19,7 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
     private readonly ApprovalRules rules;
     private readonly Func<string, CancellationToken, Task<bool>> openPendingCard;
     private readonly IApprovalDispatcher dispatcher;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private ExtensionSnapshot? snapshot;
     private string? problem;
     private string? actionProblem;
@@ -421,7 +422,9 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        if (disposed)
+        // A switch raised on another thread belongs to a window that is gone (a test host): this section's lists are bound
+        // on the thread that built it, and the dispatcher below only reaches the app's UI thread.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {
             return;
         }

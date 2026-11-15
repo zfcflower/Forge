@@ -95,10 +95,37 @@ public sealed partial class ExtensionHost
             CancellationDrainTimeout = WorkerSlot.CancelGraceWindow,
         };
 
+        // The engine token is linked to the run's lifetime as well as the call budget: a workflow package has no worker
+        // process tree for a revoke to kill, so cancelling the run lifetime is what terminates an in-flight run. The
+        // lifetime source is owned (and disposed) by the bound call, never by the revoker, so linking to it here is safe.
+        using var engineToken = CancellationTokenSource.CreateLinkedTokenSource(budget.Token, call.Run.Lifetime);
         var result = await new WorkflowEngine()
-            .RunAsync(call.Definition, new WorkflowHostFacade(this, call.Run), options, budget.Token)
+            .RunAsync(call.Definition, new WorkflowHostFacade(this, call.Run), options, engineToken.Token)
             .ConfigureAwait(false);
         return DescribeWorkflowResult(call.Entry, result);
+    }
+
+    /// <summary>
+    /// Terminates the in-flight workflow runs of a plugin that is being revoked, disabled, deleted or replaced by a
+    /// commit. A workflow package has no worker process tree to kill, so cancelling each run's lifetime is what stops its
+    /// in-process <see cref="WorkflowEngine"/> run from scheduling further steps; the bound call then drains within its
+    /// cancellation window and releases its execution lease, which is what lets the stop's bounded in-flight wait return
+    /// instead of timing out silently. Returns how many runs were terminated.
+    /// </summary>
+    private int CancelWorkflowRuns(string pluginId)
+    {
+        var cancelled = workflowRuns.CancelForPlugin(pluginId);
+        if (cancelled > 0)
+        {
+            // stderr is the only channel the host has for a plugin problem (no protocol operation pushes plugin problems
+            // to the main program), so the termination is reported there; the cancelled run's own caller separately sees
+            // the cancellation in its tool result.
+            Console.Error.WriteLine(
+                $"forge-extension-host: {cancelled} in-flight workflow run(s) of plugin '{pluginId}' were terminated "
+                + "because the plugin was revoked or disabled.");
+        }
+
+        return cancelled;
     }
 
     private static readonly byte[] EmptyArguments = "{}"u8.ToArray();

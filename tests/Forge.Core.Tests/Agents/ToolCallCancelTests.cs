@@ -1,3 +1,4 @@
+using System.Text;
 using Forge.Abstractions;
 using Forge.Core.Agents;
 using Xunit;
@@ -9,7 +10,9 @@ namespace Forge.Core.Tests.Agents;
 /// <see cref="AgentHost.CancelToolCall"/> stops exactly that call - the loop answers it with a "cancelled by the user"
 /// tool error and the model goes on - while a turn cancel still takes every call down. A call that finishes while the stop
 /// is pressed never throws and never leaks its token source, a call that ignores the token keeps its real result, and a
-/// stopped <c>spawn_agent</c> call stops its child.
+/// stopped <c>spawn_agent</c> call stops its child. The work the loop does around a call follows the same split: storing
+/// an oversized result as an artifact runs on the turn's token, so a single-call stop leaves the spill of that call's
+/// result alive while a turn cancel reaches it.
 /// </summary>
 public class ToolCallCancelTests
 {
@@ -236,6 +239,88 @@ public class ToolCallCancelTests
         Assert.Equal(0, host.RunningToolCallCount);
     }
 
+    [Fact]
+    public async Task A_single_call_stop_leaves_the_spill_of_its_own_result_running()
+    {
+        var payload = new string('x', 500);
+        var artifacts = new RecordingArtifactStore();
+        var tool = new FakeTool("shot", ToolSideEffect.ReadOnly, async (_, _, ct) =>
+        {
+            // The stop lands mid-call and the tool ignores its own token, so the loop keeps the real result and still
+            // has to store it - which is where the token the spill runs on becomes visible.
+            await WhenCancelledAsync(ct);
+            return new ToolResult(payload);
+        });
+        var provider = AgentTestScripts.OneToolCallThenSay("shot", finalText: "carried on");
+        var host = AgentTestHost.Create(
+            provider,
+            [tool],
+            options: new AgentOptions { ArtifactThresholdChars = 100, ArtifactPreviewChars = 20 },
+            artifacts: artifacts);
+        var root = host.CreateRoot("session", Path.GetTempPath());
+        var accepted = false;
+
+        var events = await RunAsync(host, root, value =>
+        {
+            if (value is AgentToolStarted started)
+            {
+                accepted = host.CancelToolCall(started.AgentId, started.Call.Id);
+            }
+        });
+
+        Assert.True(accepted);
+        // The spill ran on the turn's token, which a stop of one call never touches.
+        Assert.Equal([false], artifacts.PutSawCancelledToken);
+        var spilled = ResultOf(events, "call-1");
+        Assert.False(spilled.IsError);
+        Assert.Contains("read_artifact", spilled.Content, StringComparison.Ordinal);
+        Assert.Equal(payload, artifacts.Text(ArtifactIdOf(spilled.Content)));
+        Assert.Empty(events.OfType<AgentFailed>());
+        Assert.Equal(2, provider.Requests.Count);
+        Assert.Equal("carried on", Turn.Text(root.History[^1]));
+        Assert.Equal(0, host.RunningToolCallCount);
+    }
+
+    [Fact]
+    public async Task A_turn_cancel_reaches_the_spill_so_the_artifact_is_never_written()
+    {
+        var payload = new string('x', 500);
+        var artifacts = new RecordingArtifactStore();
+        var tool = new FakeTool("shot", ToolSideEffect.ReadOnly, async (_, _, ct) =>
+        {
+            // Ignores the cancel and answers anyway: only the spill is left to notice that the turn is over.
+            await WhenCancelledAsync(ct);
+            return new ToolResult(payload);
+        });
+        var provider = AgentTestScripts.OneToolCallThenSay("shot", finalText: "never asked");
+        var host = AgentTestHost.Create(
+            provider,
+            [tool],
+            options: new AgentOptions { ArtifactThresholdChars = 100, ArtifactPreviewChars = 20 },
+            artifacts: artifacts);
+        var root = host.CreateRoot("session", Path.GetTempPath());
+        using var turn = new CancellationTokenSource();
+
+        var events = await RunAsync(
+            host,
+            root,
+            value =>
+            {
+                if (value is AgentToolStarted)
+                {
+                    turn.Cancel();
+                }
+            },
+            turn.Token);
+
+        // The spill carries the turn's token, so the cancel reaches it: nothing is stored and the turn ends there.
+        Assert.Equal([true], artifacts.PutSawCancelledToken);
+        Assert.Equal(0, artifacts.Count);
+        Assert.Empty(events.OfType<AgentToolFinished>());
+        Assert.Single(provider.Requests);
+        Assert.Equal(0, host.RunningToolCallCount);
+    }
+
     [Theory]
     [InlineData("root", "no-such-call")]
     [InlineData("no-such-agent", "call-1")]
@@ -308,5 +393,80 @@ public class ToolCallCancelTests
         Assert.Equal(AgentLoop.CancelledByUserResult, result.Content);
         Assert.Equal("parent done", Turn.Text(root.History[^1]));
         Assert.Equal(0, host.RunningToolCallCount);
+    }
+
+    /// <summary>Returns once <paramref name="ct"/> is cancelled; no polling, so the stop is observed where it lands.</summary>
+    private static async Task WhenCancelledAsync(CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var registration = ct.Register(() => cancelled.TrySetResult());
+        await cancelled.Task.WaitAsync(Limit);
+    }
+
+    /// <summary>The artifact id out of the truncation marker the spill leaves in the result text.</summary>
+    private static string ArtifactIdOf(string note)
+    {
+        var start = note.IndexOf('\'') + 1;
+        return note[start..note.IndexOf('\'', start)];
+    }
+
+    /// <summary>
+    /// An artifact store that records whether the token it was handed was already cancelled - the turn's token, or a
+    /// stopped call's own - and behaves like a real store towards a cancelled one: nothing is written.
+    /// </summary>
+    private sealed class RecordingArtifactStore : IArtifactStore
+    {
+        private readonly Lock gate = new();
+        private readonly Dictionary<string, string> texts = new(StringComparer.Ordinal);
+
+        /// <summary>One entry per <see cref="PutAsync"/>, in call order: whether the token was cancelled on arrival.</summary>
+        public List<bool> PutSawCancelledToken { get; } = [];
+
+        public int Count
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return texts.Count;
+                }
+            }
+        }
+
+        public string Text(string artifactId)
+        {
+            lock (gate)
+            {
+                return texts[artifactId];
+            }
+        }
+
+        public Task<ArtifactInfo> PutAsync(string sessionId, string name, ReadOnlyMemory<byte> content, CancellationToken ct)
+        {
+            lock (gate)
+            {
+                PutSawCancelledToken.Add(ct.IsCancellationRequested);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            var info = new ArtifactInfo(Guid.NewGuid().ToString("n")[..12], sessionId, name, content.Length, DateTimeOffset.UtcNow);
+            lock (gate)
+            {
+                texts[info.Id] = Encoding.UTF8.GetString(content.Span);
+            }
+
+            return Task.FromResult(info);
+        }
+
+        public Task<ArtifactInfo?> GetInfoAsync(string artifactId, CancellationToken ct) =>
+            throw new NotSupportedException($"{nameof(RecordingArtifactStore)} does not answer lookups.");
+
+        public Task<ReadOnlyMemory<byte>> ReadAsync(string artifactId, long offset, int? length, CancellationToken ct) =>
+            Task.FromResult<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(Text(artifactId)));
     }
 }

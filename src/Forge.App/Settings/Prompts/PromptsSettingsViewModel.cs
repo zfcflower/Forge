@@ -37,6 +37,7 @@ internal sealed class PromptsSettingsViewModel : NotifyingObject, IDisposable, I
     private int openVersion;
     private bool discardArmed;
     private PromptTemplateRef? discardTarget;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool disposed;
 
     public PromptsSettingsViewModel(PromptTemplateService service, Func<string?> workspace, TimeSpan? validationDelay = null)
@@ -373,7 +374,9 @@ internal sealed class PromptsSettingsViewModel : NotifyingObject, IDisposable, I
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        if (disposed)
+        // A switch raised on another thread belongs to a window that is gone (a test host): the list and the editor are
+        // bound on the thread that built the section.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {
             return;
         }

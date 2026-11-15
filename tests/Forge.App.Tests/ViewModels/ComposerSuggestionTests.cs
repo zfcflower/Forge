@@ -165,6 +165,38 @@ public sealed class ComposerSuggestionTests
             Assert.Equal("first", skills[0].Description);
             Assert.Equal("from the user folder", skills[2].Description);
             Assert.All(skills, skill => Assert.True(skill.IsSkill));
+
+            // Each entry carries the scope of the folder it was found in, for the settings page's source badge.
+            Assert.Equal(
+                [SkillScope.BuiltIn, SkillScope.Project, SkillScope.Global],
+                skills.Select(skill => skill.Scope));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>The first folder that names a skill keeps it, and its scope is the scope of that winning copy.</summary>
+    [Fact]
+    public void A_shadowed_skill_is_listed_once_with_the_scope_of_the_copy_that_wins()
+    {
+        var root = TestTempFiles.NewDirectory("forge-skill-scope-");
+        try
+        {
+            var workspace = Path.Combine(root, "ws");
+            var user = Path.Combine(root, "user");
+            Write(Path.Combine(workspace, ".github", "skills", "shared", "SKILL.md"), "---\nname: shared\ndescription: shipped\n---\n");
+            Write(Path.Combine(workspace, ".forge", "skills", "shared", "SKILL.md"), "---\nname: shared\ndescription: of the project\n---\n");
+            Write(Path.Combine(user, "skills", "only-global", "SKILL.md"), "---\nname: only-global\n---\n");
+
+            var skills = SkillCatalog.Discover(workspace, user);
+
+            var shared = Assert.Single(skills, skill => skill.Name == "shared");
+            Assert.Equal(SkillScope.BuiltIn, shared.Scope);
+            Assert.Equal("shipped", shared.Description);
+            Assert.EndsWith(Path.Combine(".github", "skills", "shared", "SKILL.md"), shared.Path, StringComparison.Ordinal);
+            Assert.Equal(SkillScope.Global, Assert.Single(skills, skill => skill.Name == "only-global").Scope);
         }
         finally
         {

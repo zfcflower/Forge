@@ -220,6 +220,9 @@ internal static class GitStrings
     /// <summary>The compare page of a branch that has no pull request yet — the creation path that needs no gh.</summary>
     public const string ShipComparePage = "git.ship.comparePage";
 
+    /// <summary>Why there is no compare page: the remote is on another host, whose URL shape this build does not guess.</summary>
+    public const string ShipCompareNotGitHub = "git.ship.compare.notGitHub";
+
     /// <summary>Format: <c>{0}</c> is the pull request number GitHub queued for merging.</summary>
     public const string ShipQueuedNumber = "git.ship.queuedNumber";
 
@@ -437,6 +440,10 @@ internal static class GitStrings
         Loc.Register(ShipRootDirty, "根检出（{0}）有 {1} 个未提交改动：先提交或暂存再合并。", "The root checkout ({0}) has {1} uncommitted change(s); commit or stash them first.");
         Loc.Register(RemoteNotPublished, "未发布", "Not published");
         Loc.Register(ShipComparePage, "在浏览器打开 compare 页面", "Open the compare page in the browser");
+        Loc.Register(
+            ShipCompareNotGitHub,
+            "远端不在 GitHub 上，没有 compare 页面可开",
+            "The remote is not on GitHub, so there is no compare page to open");
         Loc.Register(
             ShipQueuedNumber,
             "已加入合并队列 PR #{0}（GitHub 会在队列要求满足后合并）。",

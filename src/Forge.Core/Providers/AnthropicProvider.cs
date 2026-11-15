@@ -379,10 +379,26 @@ public sealed class AnthropicProvider : HttpChatProvider
             var blocks = new List<WireBlock>(message.Content.Count);
             foreach (var block in message.Content)
             {
-                if (IsSendable(block) && (block is not (ImageBlock or FileBlock) || message.Role == MessageRole.User))
+                if (!IsSendable(block))
                 {
-                    blocks.Add(new WireBlock(block, index));
+                    continue;
                 }
+
+                if ((block is ImageBlock or FileBlock) && message.Role != MessageRole.User)
+                {
+                    // Attachments only ever arrive in user turns; one standing in the assistant history (inherited or
+                    // hand-built) cannot be written on this wire. A file does not vanish silently, though: its placeholder
+                    // keeps the semantic fact — a file was here, this was its name and size — in what the model reads.
+                    // A user attachment is never touched here; an unwritable one still fails the request before sending.
+                    if (block is FileBlock file)
+                    {
+                        blocks.Add(new WireBlock(new TextBlock(ContentPlaceholders.FilePlaceholder(file)), index));
+                    }
+
+                    continue;
+                }
+
+                blocks.Add(new WireBlock(block, index));
             }
 
             if (blocks.Count == 0)

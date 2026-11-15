@@ -200,6 +200,47 @@ public class McpClientRequestTests
     }
 
     [Fact]
+    public async Task A_request_cancelled_before_it_was_sent_sends_no_cancellation_notification()
+    {
+        var transport = new LoopbackTransport { Responder = new ScriptedServer().Respond };
+        await using var client = new McpClient(transport, Clients.DefaultOptions());
+        await client.ConnectAsync(CancellationToken.None);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var sentBefore = transport.Sent.Count;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.PingAsync(cts.Token));
+
+        // Cancellation of a request that never reached the wire must not emit notifications/cancelled
+        // for an id the server has never seen; poll for a bounded window so a wrongly fired,
+        // fire-and-forget notification is still caught.
+        Assert.False(
+            await Eventually.Async(() => transport.Sent.Any(message => JsonRpc.MethodOf(message) == McpProtocol.Cancelled), TimeSpan.FromSeconds(2)),
+            "a cancellation notification was sent for a request that was never sent");
+        Assert.Equal(sentBefore, transport.Sent.Count);
+    }
+
+    [Fact]
+    public async Task A_request_cancelled_after_it_was_sent_still_sends_the_cancellation_notification()
+    {
+        var server = new ScriptedServer().On(McpProtocol.Ping, _ => null);
+        var transport = new LoopbackTransport { Responder = server.Respond };
+        await using var client = new McpClient(transport, Clients.DefaultOptions(TimeSpan.FromSeconds(30)));
+        await client.ConnectAsync(CancellationToken.None);
+        using var cts = new CancellationTokenSource();
+
+        var ping = client.PingAsync(cts.Token);
+        await Eventually.AssertAsync(() => transport.TrackedRequestIds.Count >= 2, "ping was not sent");
+        var pingId = transport.TrackedRequestIds[^1];
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ping);
+        await Eventually.AssertAsync(() => transport.Sent.Any(message => JsonRpc.MethodOf(message) == McpProtocol.Cancelled), "no cancellation sent");
+        using var document = JsonDocument.Parse(transport.Sent.Single(message => JsonRpc.MethodOf(message) == McpProtocol.Cancelled));
+        Assert.Equal(pingId, document.RootElement.GetProperty("params").GetProperty("requestId").GetInt64());
+    }
+
+    [Fact]
     public async Task Pending_requests_fault_with_connection_closed_when_the_transport_closes()
     {
         var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ => null).On(McpProtocol.ToolsList, _ => null);

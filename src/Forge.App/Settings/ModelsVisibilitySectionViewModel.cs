@@ -80,6 +80,7 @@ internal sealed class ModelsVisibilitySectionViewModel : NotifyingObject, IDispo
     /// <summary>Reused by <see cref="RefreshHiddenCount"/> so counting distinct hidden names allocates nothing.</summary>
     private readonly HashSet<string> hiddenNames = new(StringComparer.Ordinal);
 
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private string searchText = string.Empty;
     private bool hasProviders;
     private int hiddenCount;
@@ -269,6 +270,13 @@ internal sealed class ModelsVisibilitySectionViewModel : NotifyingObject, IDispo
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the column headings and the
+        // rows are bound on the thread that built the section.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Hint));
         OnPropertyChanged(nameof(SearchPlaceholder));
         OnPropertyChanged(nameof(VisibilityColumn));

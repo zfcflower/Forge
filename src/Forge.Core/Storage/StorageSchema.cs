@@ -195,6 +195,16 @@ internal static class StorageSchema
     private const string FallbackSchemaSql =
         "CREATE TABLE IF NOT EXISTS messages_text (session_id TEXT NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (session_id, seq))";
 
+    private const string AllMessagesSql = "SELECT session_id, seq, content_json FROM messages";
+
+    /// <summary>What a message row of <c>messages</c> does not yet have a search row for.</summary>
+    private const string UnsearchedMessagesPredicate =
+        "NOT EXISTS (SELECT 1 FROM messages_text WHERE messages_text.session_id = messages.session_id " +
+        "AND messages_text.seq = messages.seq)";
+
+    /// <summary>The messages the fallback table still lacks; a top-up reads exactly these.</summary>
+    private const string UnsearchedMessagesSql = AllMessagesSql + " WHERE " + UnsearchedMessagesPredicate;
+
     /// <summary>
     /// Brings the database to <see cref="Version"/> and makes sure the message search table exists. Returns true when
     /// FTS5 is available (searches then use it), false when the fallback table is used instead.
@@ -862,13 +872,14 @@ internal static class StorageSchema
     /// <summary>
     /// Makes sure a search table exists and is populated. The table is created and backfilled in one transaction, so an
     /// interrupted first run cannot leave an empty index behind: messages stored before this schema existed (or before
-    /// the SQLite build had FTS5) stay findable.
+    /// the SQLite build had FTS5) stay findable. Which of the two tables is used is decided per build, so a database
+    /// written by an FTS5-capable build stays writable and searchable by one that has no FTS5 module.
     /// </summary>
     private static async Task<bool> EnsureSearchTableAsync(SqliteConnection connection, CancellationToken ct)
     {
         if (await SearchTableExistsAsync(connection, "messages_fts", null, ct).ConfigureAwait(false))
         {
-            return await CanReadFtsAsync(connection, ct).ConfigureAwait(false);
+            return await ReadFtsOrDegradeAsync(connection, ct).ConfigureAwait(false);
         }
 
         if (await SearchTableExistsAsync(connection, "messages_text", null, ct).ConfigureAwait(false))
@@ -880,7 +891,7 @@ internal static class StorageSchema
         if (await SearchTableExistsAsync(connection, "messages_fts", transaction, ct).ConfigureAwait(false))
         {
             transaction.Rollback();
-            return true;
+            return await ReadFtsOrDegradeAsync(connection, ct).ConfigureAwait(false);
         }
 
         if (await SearchTableExistsAsync(connection, "messages_text", transaction, ct).ConfigureAwait(false))
@@ -906,9 +917,59 @@ internal static class StorageSchema
             }
         }
 
-        await BackfillSearchAsync(connection, transaction, fts5, ct).ConfigureAwait(false);
+        await BackfillSearchAsync(connection, transaction, fts5, onlyMissing: false, ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return fts5;
+    }
+
+    /// <summary>
+    /// True when this build can read the <c>messages_fts</c> it found. One that cannot - the index was written by a
+    /// build whose SQLite had the FTS5 module, this one's has not - reads and writes <c>messages_text</c> instead, so
+    /// that table is made ready here: without it every append would write its search row into a table that does not
+    /// exist (and search would read the same missing table), which fails the whole write batch instead of degrading.
+    /// </summary>
+    private static async Task<bool> ReadFtsOrDegradeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        if (await CanReadFtsAsync(connection, ct).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        await EnsureFallbackTableAsync(connection, ct).ConfigureAwait(false);
+        return false;
+    }
+
+    /// <summary>
+    /// Creates <c>messages_text</c> and fills it from <c>messages</c> in one transaction, like the first run does. An
+    /// existing table is only topped up with the messages it lacks - the ones an FTS5-capable build stored in
+    /// <c>messages_fts</c> in between - and a complete one is left alone, so opening a degraded database stays a read.
+    /// </summary>
+    private static async Task EnsureFallbackTableAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        var exists = await SearchTableExistsAsync(connection, "messages_text", null, ct).ConfigureAwait(false);
+        if (exists && !await HasUnsearchedMessagesAsync(connection, null, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        using var transaction = connection.BeginTransaction(deferred: false);
+        // Re-read under the write lock: another process opening the same file may have created and filled it already.
+        exists = await SearchTableExistsAsync(connection, "messages_text", transaction, ct).ConfigureAwait(false);
+        await ExecuteAsync(connection, transaction, FallbackSchemaSql, ct).ConfigureAwait(false);
+        await BackfillSearchAsync(connection, transaction, fts5: false, onlyMissing: exists, ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>True when <c>messages</c> holds a row the fallback search table does not.</summary>
+    private static async Task<bool> HasUnsearchedMessagesAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        await using var command = StorageDb.Command(
+            connection, transaction, "SELECT 1 FROM messages WHERE " + UnsearchedMessagesPredicate + " LIMIT 1");
+        var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return value is not null and not DBNull;
     }
 
     /// <summary>
@@ -947,11 +1008,13 @@ internal static class StorageSchema
         SqliteConnection connection,
         SqliteTransaction transaction,
         bool fts5,
+        bool onlyMissing,
         CancellationToken ct)
     {
         await using var select = connection.CreateCommand();
         select.Transaction = transaction;
-        select.CommandText = "SELECT session_id, seq, content_json FROM messages";
+        // A top-up is a fallback-table notion: messages_text has a primary key, the FTS index would take a row twice.
+        select.CommandText = onlyMissing && !fts5 ? UnsearchedMessagesSql : AllMessagesSql;
         await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {

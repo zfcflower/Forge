@@ -252,7 +252,12 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
             var seq = reader.GetInt64(0);
             var message = MessageJson.Deserialize(reader.GetString(1));
             var usage = reader.IsDBNull(2) ? null : MessageJson.ParseUsage(reader.GetString(2));
-            var at = StorageDb.ParseTimestamp(reader.GetString(3));
+            var row = $"message {seq.ToString(CultureInfo.InvariantCulture)} of session {sessionId}";
+            var at = StorageDb.ParseCanonicalTimestamp(
+                StorageDb.ReadText(reader, 3, "at", _databasePath, row),
+                "at",
+                _databasePath,
+                row);
             yield return new StoredMessage(seq, message, usage, at);
         }
     }
@@ -291,13 +296,23 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            var storedSessionId = reader.GetString(0);
+            var layer = reader.GetInt32(1);
+            var fromSeq = reader.GetInt64(2);
+            var toSeq = reader.GetInt64(3);
+            var row = $"layer-{layer.ToString(CultureInfo.InvariantCulture)} summary of session {storedSessionId} " +
+                $"covering {fromSeq.ToString(CultureInfo.InvariantCulture)}-{toSeq.ToString(CultureInfo.InvariantCulture)}";
             summaries.Add(new SummaryRecord(
-                reader.GetString(0),
-                reader.GetInt32(1),
-                reader.GetInt64(2),
-                reader.GetInt64(3),
+                storedSessionId,
+                layer,
+                fromSeq,
+                toSeq,
                 reader.GetString(4),
-                StorageDb.ParseTimestamp(reader.GetString(5))));
+                StorageDb.ParseCanonicalTimestamp(
+                    StorageDb.ReadText(reader, 5, "at", _databasePath, row),
+                    "at",
+                    _databasePath,
+                    row)));
         }
 
         return summaries;

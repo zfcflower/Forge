@@ -257,6 +257,28 @@ internal sealed class ActiveRun : IDisposable
         lifetime.Dispose();
     }
 
+    /// <summary>
+    /// Cancels this run's lifetime <em>without</em> ending it: the run stays registered and its owner still disposes the
+    /// lifetime source on its own thread, so a concurrent <see cref="End"/> never races a cross-thread dispose. A revoke
+    /// uses this to stop an in-flight workflow engine (whose token is linked to <see cref="Lifetime"/>) while the call
+    /// that owns the run keeps the only disposal path. Cancelling an already ended or already disposed run is a no-op.
+    /// </summary>
+    public void Cancel()
+    {
+        if (Volatile.Read(ref active) == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            lifetime.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
     public void Dispose() => End();
 }
 
@@ -325,6 +347,40 @@ internal sealed class ActiveRunTable
         {
             run.End();
         }
+    }
+
+    /// <summary>
+    /// Cancels the lifetime of every in-flight run belonging to <paramref name="pluginId"/> and returns how many were
+    /// cancelled. A revoke/disable uses this to terminate a workflow package's in-flight <c>WorkflowEngine.RunAsync</c>,
+    /// which has no worker process to kill: the engine's token is linked to the run lifetime, so cancelling it stops the
+    /// run from scheduling further steps. The runs stay registered - their owning calls dispose them - so this never
+    /// races a cross-thread dispose of the lifetime source.
+    /// </summary>
+    public int CancelForPlugin(string pluginId)
+    {
+        List<ActiveRun>? matching = null;
+        lock (sync)
+        {
+            foreach (var run in runs.Values)
+            {
+                if (run.IsActive && string.Equals(run.PluginId, pluginId, StringComparison.Ordinal))
+                {
+                    (matching ??= []).Add(run);
+                }
+            }
+        }
+
+        if (matching is null)
+        {
+            return 0;
+        }
+
+        foreach (var run in matching)
+        {
+            run.Cancel();
+        }
+
+        return matching.Count;
     }
 
     internal void Remove(string runId)

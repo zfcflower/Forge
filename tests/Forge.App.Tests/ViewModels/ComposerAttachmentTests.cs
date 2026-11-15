@@ -163,14 +163,25 @@ public sealed class ComposerAttachmentTests
     }
 
     [Fact]
-    public async Task An_unknown_binary_is_refused_inline_without_a_toast()
+    public async Task An_unknown_binary_is_refused_with_a_toast_as_well()
     {
         await RunAsync(async (composer, toasts) =>
         {
             Assert.Equal(AttachmentRejection.Unsupported, await composer.AddFileAsync([0x50, 0x4B, 3, 4, 0], "a.zip"));
+
+            // A NUL byte in a file whose extension claims nothing is refused exactly as loudly as one that claimed text.
+            Assert.Equal(AttachmentRejection.Unsupported, await composer.AddFileAsync([(byte)'a', 0, (byte)'b'], "blob.dat"));
+
             Assert.Empty(composer.Files);
-            Assert.Contains("a.zip", composer.AttachmentError, StringComparison.Ordinal);
-            Assert.Empty(toasts.Calls);
+            Assert.Contains("blob.dat", composer.AttachmentError, StringComparison.Ordinal);
+            Assert.Equal(2, toasts.Calls.Count);
+            Assert.All(toasts.Calls, call =>
+            {
+                Assert.Equal(NotificationLevel.Warning, call.Level);
+                Assert.Equal(AttachmentStrings.RefusedTitleKey, call.TitleKey);
+                Assert.Equal(AttachmentStrings.UnsupportedKey, call.BodyKey);
+                Assert.Equal("attachment-refused:scope:Unsupported", call.Key);
+            });
         });
     }
 

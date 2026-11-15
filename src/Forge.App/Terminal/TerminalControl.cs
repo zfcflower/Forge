@@ -79,6 +79,9 @@ internal sealed class TerminalControl : Control
     private MenuItem? clearItem;
     private bool attached;
 
+    /// <summary>The thread this surface was attached on; a language notification from another one is not ours.</summary>
+    private int attachedThread;
+
     private int scrollOffset;
     private long anchoredPushed;
     private long anchoredDropped;
@@ -141,6 +144,7 @@ internal sealed class TerminalControl : Control
     {
         base.OnAttachedToVisualTree(e);
         attached = true;
+        attachedThread = Environment.CurrentManagedThreadId;
         ActualThemeVariantChanged += OnThemeVariantChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
         SubscribePreferences();
@@ -257,6 +261,14 @@ internal sealed class TerminalControl : Control
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A surface of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // table; setting its automation name and menu text from another thread would touch this control off the dispatcher
+        // that owns it.
+        if (Environment.CurrentManagedThreadId != attachedThread)
+        {
+            return;
+        }
+
         AutomationProperties.SetName(this, Loc.Instance[TerminalStrings.AutomationSurface]);
         RefreshMenuText();
     }

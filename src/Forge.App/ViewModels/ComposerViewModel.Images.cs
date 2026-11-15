@@ -330,9 +330,13 @@ internal sealed partial class ComposerViewModel
         var type = FileAttachmentRules.Classify(data, name);
         if (type is null)
         {
+            // The bytes are neither a known binary shape nor strict UTF-8 text (a NUL, invalid UTF-8, or nothing at all). That
+            // is a refusal the user did not cause on purpose whatever the extension claimed, so both of its wordings — "not
+            // text" for a file that claimed to be and "not a supported attachment" for one that claimed nothing — are shown
+            // under the input and raised as a warning toast.
             return claimed == AttachmentKind.Text
                 ? RefuseWithToast(AttachmentRejection.NotText, AttachmentStrings.NotText(name))
-                : Reject(AttachmentRejection.Unsupported, AttachmentStrings.Unsupported(name).Resolve());
+                : RefuseWithToast(AttachmentRejection.Unsupported, AttachmentStrings.Unsupported(name));
         }
 
         var (kind, mediaType) = type.Value;

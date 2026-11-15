@@ -12,6 +12,7 @@ namespace Forge.App.Terminal;
 internal sealed class TerminalSettingsViewModel : ObservableObject
 {
     private readonly AppPreferences preferences;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     public TerminalSettingsViewModel(AppPreferences preferences)
     {
@@ -71,6 +72,13 @@ internal sealed class TerminalSettingsViewModel : ObservableObject
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the labels are bound on the
+        // thread that built the section.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(ShellLabel));
         OnPropertyChanged(nameof(ArgumentsLabel));
         OnPropertyChanged(nameof(ScrollbackLabel));

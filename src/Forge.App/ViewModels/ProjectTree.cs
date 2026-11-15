@@ -794,6 +794,9 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     private readonly Func<CancellationToken, Task> addProject;
     private readonly TreeScope scope;
     private readonly FlatTree<TreeNodeViewModel> tree = new();
+
+    /// <summary>The thread the tree was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool busy;
     private bool refreshPending;
     private LocText status;
@@ -2229,6 +2232,13 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// <summary>A language switch re-renders the stored status line and every row's label; the rows compute their text on read.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the flat row list is spliced and
+        // bound on the thread that built the tree, so a refresh from anywhere else would mutate it under that thread.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         RefreshStatus();
         foreach (var node in Enumerate(Sections))
         {

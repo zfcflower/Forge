@@ -12,6 +12,7 @@ namespace Forge.App.Approval;
 internal sealed class ApprovalQueueViewModel : NotifyingObject, IDisposable
 {
     private readonly ApprovalQueue queue;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool isExpanded = true;
     private bool disposed;
 
@@ -72,5 +73,15 @@ internal sealed class ApprovalQueueViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(CountText));
     }
 
-    private void OnLanguageChanged(object? sender, EventArgs e) => OnPropertyChanged(nameof(ToggleText));
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the header text is bound on
+        // the thread that built the queue.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(ToggleText));
+    }
 }

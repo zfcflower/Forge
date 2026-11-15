@@ -525,12 +525,14 @@ public sealed partial class ExtensionHost
 
     /// <summary>
     /// The stop half of a lifecycle change, identical to <c>plugin.revoke</c>: unregister first, then kill the worker tree
-    /// (which ends whatever is in flight), then wait until the in-flight count reached zero. The caller holds the gate.
+    /// (which ends whatever is in flight), then terminate any in-flight workflow runs (a workflow package has no worker to
+    /// kill), then wait until the in-flight count reached zero. The caller holds the gate.
     /// </summary>
     private async Task StopPluginAsync(PluginEntry entry, PluginState state, CancellationToken ct)
     {
         await UnregisterAllAsync(entry.Id, CancellationToken.None).ConfigureAwait(false);
         await StopWorkerAsync(entry.Id).ConfigureAwait(false);
+        CancelWorkflowRuns(entry.Id);
         await state.WaitForIdleAsync(RevokeDrainWindow, ct).ConfigureAwait(false);
     }
 

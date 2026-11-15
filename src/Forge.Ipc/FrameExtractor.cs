@@ -12,7 +12,10 @@ internal enum FrameStatus
     Fatal,
 }
 
-/// <summary>Splits a byte stream into 4-byte little-endian length prefixed frame bodies.</summary>
+/// <summary>Splits a byte stream into 4-byte little-endian length prefixed frame bodies. A complete body leaves as a
+/// freshly allocated array the caller owns: the reader advances past the frame right afterwards, which returns the
+/// pipe's pooled segments to the <see cref="ArrayPool{T}"></see>, so a body that still aliased them could be
+/// overwritten under the consumer.</summary>
 internal struct FrameExtractor
 {
     public const int HeaderBytes = 4;
@@ -23,10 +26,10 @@ internal struct FrameExtractor
         ref ReadOnlySequence<byte> buffer,
         int maxFrameBytes,
         long maxDiscardBytes,
-        out ReadOnlyMemory<byte> body,
+        out byte[] body,
         out int declaredLength)
     {
-        body = ReadOnlyMemory<byte>.Empty;
+        body = [];
         declaredLength = 0;
         while (true)
         {
@@ -85,7 +88,7 @@ internal struct FrameExtractor
             }
 
             var slice = buffer.Slice(HeaderBytes, length);
-            body = slice.IsSingleSegment ? slice.First : BuffersExtensions.ToArray(slice);
+            body = BuffersExtensions.ToArray(slice);
             buffer = buffer.Slice(HeaderBytes + length);
             declaredLength = length;
             return FrameStatus.Frame;

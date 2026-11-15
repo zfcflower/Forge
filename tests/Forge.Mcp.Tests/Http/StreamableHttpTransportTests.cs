@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Text;
 using Forge.Mcp.Tests.Fixtures;
 using Xunit;
 
@@ -439,6 +441,71 @@ public class StreamableHttpTransportTests
         Assert.True(client.IsConnected);
     }
 
+    [Fact]
+    public async Task A_message_from_before_the_restart_never_dispatches_after_the_transport_restarts()
+    {
+        // One POST SSE stream whose single event answers request 1 but is only delivered after a
+        // restart on the same transport: the old-generation reply must not reach the caller even
+        // though its bytes sit in the reader's buffer, while a new-generation reply still does.
+        var held = new HeldSseStream();
+        held.Enqueue("data: " + """{"jsonrpc":"2.0","id":1,"result":{"stale":true}}""" + "\n\n");
+        var messages = new ConcurrentQueue<string>();
+        var posts = 0;
+        using var handler = new ScriptedHttpMessageHandler(request =>
+        {
+            if (request.Method != HttpMethod.Post)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            }
+
+            if (Interlocked.Increment(ref posts) == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StreamContent(held) { Headers = { ContentType = new MediaTypeHeaderValue("text/event-stream") } },
+                };
+            }
+
+            return JsonResponse("""{"jsonrpc":"2.0","id":2,"result":{"fresh":true}}""");
+        });
+        using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        await using var transport = new StreamableHttpTransport(new McpHttpOptions
+        {
+            Endpoint = new Uri("http://scripted.invalid/mcp/"),
+            HttpClient = http,
+        });
+        transport.MessageReceived += payload => messages.Enqueue(Encoding.UTF8.GetString(payload.Span));
+        await transport.StartAsync(CancellationToken.None);
+
+        await transport.SendAsync(
+            Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","id":1,"method":"tools/list"}"""),
+            CancellationToken.None,
+            requestId: 1);
+        // The reply is on the wire and the reader is parked inside it before the restart lands.
+        await held.Entered.WaitAsync(Wait);
+        await transport.StartAsync(CancellationToken.None);
+
+        // The stale event is now delivered; a missing generation guard would dispatch it here.
+        held.Release();
+        Assert.False(await Eventually.Async(() => messages.Any(m => m.Contains("\"stale\":true")), TimeSpan.FromSeconds(1)),
+            "a message from before the restart was dispatched");
+
+        await transport.SendAsync(
+            Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}"""),
+            CancellationToken.None,
+            requestId: 2);
+
+        Assert.Equal(["""{"jsonrpc":"2.0","id":2,"result":{"fresh":true}}"""], messages);
+    }
+
+    private static HttpResponseMessage JsonResponse(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new ByteArrayContent(Encoding.UTF8.GetBytes(body))
+        {
+            Headers = { ContentType = new MediaTypeHeaderValue("application/json") },
+        },
+    };
+
     private static string? JsonRpcMethodOf(RecordedHttpRequest request) =>
         request.Body.Length == 0 ? null : JsonRpc.MethodOf(request.Body);
 
@@ -449,5 +516,67 @@ public class StreamableHttpTransportTests
         var port = ((IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
         return port;
+    }
+
+    /// <summary>
+    /// Answers every request synchronously from a script; no network is involved, so response bodies can be
+    /// streams the test parks and releases on demand.
+    /// </summary>
+    private sealed class ScriptedHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(respond(request));
+    }
+
+    /// <summary>
+    /// SSE body whose events are only handed to the reader once the test releases them; the cancellation token is
+    /// ignored on purpose — bytes already on the wire cannot be recalled by a restart.
+    /// </summary>
+    private sealed class HeldSseStream : Stream
+    {
+        private readonly ConcurrentQueue<byte[]> segments = new();
+        private readonly TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Entered => entered.Task;
+
+        public void Enqueue(string text) => segments.Enqueue(Encoding.UTF8.GetBytes(text));
+
+        public void Release() => released.TrySetResult();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        {
+            entered.TrySetResult();
+            if (!segments.TryDequeue(out var segment))
+            {
+                return 0;
+            }
+
+            await released.Task.ConfigureAwait(false);
+            segment.AsSpan().CopyTo(buffer.Span);
+            return segment.Length;
+        }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

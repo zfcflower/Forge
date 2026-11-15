@@ -20,6 +20,9 @@ internal sealed class MarkdownCodeHeader : Grid
     private readonly TextBlock label;
     private readonly CopyTextButton copy;
 
+    /// <summary>The thread this header was attached on; a language notification from another one is not ours.</summary>
+    private int attachedThread;
+
     /// <summary>Styles select by the base type; without this a sealed subclass matches none of the Grid styles.</summary>
     protected override Type StyleKeyOverride => typeof(Grid);
 
@@ -69,6 +72,7 @@ internal sealed class MarkdownCodeHeader : Grid
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        attachedThread = Environment.CurrentManagedThreadId;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
         LocalizeCopy();
     }
@@ -79,7 +83,15 @@ internal sealed class MarkdownCodeHeader : Grid
         base.OnDetachedFromVisualTree(e);
     }
 
-    private void OnLanguageChanged(object? sender, EventArgs e) => LocalizeCopy();
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        // A header of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // table; setting its tooltip from another thread would touch this control off the dispatcher that owns it.
+        if (Environment.CurrentManagedThreadId == attachedThread)
+        {
+            LocalizeCopy();
+        }
+    }
 
     private void LocalizeCopy()
     {

@@ -491,7 +491,7 @@ internal sealed class ConnectedProvider
             headers ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             headers["Copilot-Integration-Id"] = ProviderServices.CopilotIntegrationId;
             headers["Editor-Version"] = ProviderServices.CopilotEditorVersion;
-            headers["Editor-Plugin-Version"] = ProviderServices.CopilotEditorVersion;
+            headers["Editor-Plugin-Version"] = ProviderServices.CopilotEditorPluginVersion;
         }
 
         return new ProviderConfig(

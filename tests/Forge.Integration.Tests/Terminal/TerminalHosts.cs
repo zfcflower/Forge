@@ -217,9 +217,11 @@ internal sealed class RawTerminalHost : IAsyncDisposable
 
     public IReadOnlyList<string> HostOutput => host.Output;
 
-    public static async Task<RawTerminalHost> StartAsync(CancellationToken ct)
+    public static async Task<RawTerminalHost> StartAsync(
+        CancellationToken ct,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
-        var host = PluginQueueBudgetHost.Start([], "terminal");
+        var host = PluginQueueBudgetHost.Start([], "terminal", environment: environment);
         try
         {
             var peer = await ConnectAsync(host, ct).ConfigureAwait(false);

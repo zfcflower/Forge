@@ -18,6 +18,7 @@ internal sealed class UsageLogSettingsViewModel : NotifyingObject, IDisposable
 {
     private readonly UsageLogSettingsStore store;
     private readonly Func<string> directory;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool enabled;
     private string? saveError;
     private bool loading;
@@ -91,6 +92,13 @@ internal sealed class UsageLogSettingsViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the row's texts are bound on
+        // the thread that built it.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Label));
         OnPropertyChanged(nameof(Hint));
         if (SaveError is not null)

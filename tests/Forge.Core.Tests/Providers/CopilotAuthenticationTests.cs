@@ -134,7 +134,8 @@ public class CopilotAuthenticationTests
         Assert.Equal(CopilotAuthentication.IntegrationId, request.Header("Copilot-Integration-Id"));
         Assert.Equal("copilot-chat", request.Header("Copilot-Integration-Id"));
         Assert.Equal("Forge/1.0", request.Header("Editor-Version"));
-        Assert.Equal("Forge/1.0", request.Header("Editor-Plugin-Version"));
+        // The plugin version is the lowercase product slug — the same value the device-code request of this flow sends.
+        Assert.Equal("forge/1.0", request.Header("Editor-Plugin-Version"));
         Assert.Equal("application/json", request.Header("Accept"));
     }
 

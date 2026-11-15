@@ -101,6 +101,46 @@ public sealed class CopilotKeyRouteTests : IDisposable
         Assert.Equal(ProviderStatusKind.NeedsKey, services.CreateTransient(keyed).Status.Kind);
     }
 
+    /// <summary>
+    /// A signed-in Copilot lists its models under the client identity its session token is bound to: the editor version
+    /// in its own casing and the plugin slug lowercase, byte for byte what the sign-in call that minted the token sent.
+    /// </summary>
+    [Fact]
+    public async Task A_copilot_session_lists_models_under_the_client_identity_its_token_is_bound_to()
+    {
+        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds();
+        var handler = new RecordingHandler()
+            .Answer(
+                HttpStatusCode.OK,
+                "{\"token\":\"ghs_session\",\"expires_at\":" + expiresAt
+                + ",\"endpoints\":{\"api\":\"https://api.githubcopilot.com\"}}")
+            .Answer(HttpStatusCode.OK, """{"data":[{"id":"gpt-5-codex"}]}""");
+        var services = Services(handler);
+        services.Secrets.Set(ProviderCredentials.CopilotUserTokenReference("copilot"), "ghu_user");
+
+        var list = await services.RefreshModelsAsync(
+            services.CreateTransient(ProviderDefinition.FromPreset(Copilot, "copilot")),
+            CancellationToken.None);
+
+        Assert.Equal(["gpt-5-codex"], list.Ids);
+        Assert.Collection(
+            handler.Requests,
+            exchange =>
+            {
+                Assert.Equal("https://api.github.com/copilot_internal/v2/token", exchange.Uri.ToString());
+                Assert.Equal("Forge/1.0", exchange.Header("Editor-Version"));
+                Assert.Equal("forge/1.0", exchange.Header("Editor-Plugin-Version"));
+            },
+            models =>
+            {
+                Assert.Equal("https://api.githubcopilot.com/models", models.Uri.ToString());
+                Assert.Equal("Bearer ghs_session", models.Header("Authorization"));
+                Assert.Equal("copilot-chat", models.Header("Copilot-Integration-Id"));
+                Assert.Equal("Forge/1.0", models.Header("Editor-Version"));
+                Assert.Equal("forge/1.0", models.Header("Editor-Plugin-Version"));
+            });
+    }
+
     [Fact]
     public async Task A_copilot_provider_without_a_key_cannot_list_models_because_no_session_exists()
     {

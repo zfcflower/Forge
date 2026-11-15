@@ -486,6 +486,22 @@ internal sealed class WorkerSlot(
                     : $"{description} exceeded {budget.Total.TotalSeconds:0.#} s; the whole worker process tree was killed")
                 + (restartNote is null ? " and restarted; the call failed." : "; " + restartNote));
         }
+        catch (IpcRemoteException exception)
+        {
+            // The worker answered with an error frame instead of a result. A throwing tool/command already comes back as an
+            // error RESULT, so an error frame here is an abnormal worker event: a prompt contributor that threw or ran past
+            // its cooperative budget reaches the host as prompt_failed. Charge it against the plugin's failure budget so a
+            // repeatedly failing contributor is eventually refused (worker_disabled), exactly as EH's "prompts go through
+            // the same abnormal event and failure budget" requires. The worker answered, so it is not a crash: leave the
+            // responsive process running instead of killing a healthy tree, and surface the worker's own error code.
+            var failures = state.ChargeFailure();
+            throw new HostOperationException(
+                exception.Code,
+                $"{description} failed in the plugin worker: {exception.Message}"
+                + (failures >= PluginState.FailureBudget
+                    ? $" The plugin '{PluginId}' failed {failures} times in a row and stays stopped until the plugins are refreshed."
+                    : string.Empty));
+        }
         finally
         {
             if (!pending.IsCompleted)

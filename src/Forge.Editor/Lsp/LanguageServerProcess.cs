@@ -455,7 +455,11 @@ public class LanguageServerProcess : IAsyncDisposable
 
     private const string BatchLiteralCharacters = "#$*+-./:?@\\_";
 
-    private static string BuildBatchCommandLine(string script, IReadOnlyList<string>? arguments)
+    /// <summary>
+    /// The command line a <c>.cmd</c>/<c>.bat</c> server is launched with: <c>cmd /d /s /c "…"</c> quoting the script and
+    /// its arguments character for character. Exposed so the npm-shim quoting rules can be asserted directly.
+    /// </summary>
+    public static string BuildBatchCommandLine(string script, IReadOnlyList<string>? arguments)
     {
         if (script.AsSpan().IndexOfAny('"', '^', '%') >= 0 || script.EndsWith('\\'))
         {
@@ -464,7 +468,7 @@ public class LanguageServerProcess : IAsyncDisposable
         }
 
         var builder = new StringBuilder(64 + script.Length + ((arguments?.Count ?? 0) * 8));
-        builder.Append("/e:ON /v:OFF /d /c \"");
+        builder.Append("/e:ON /v:OFF /d /s /c \"");
         builder.Append('"').Append(script).Append('"');
         if (arguments is not null)
         {

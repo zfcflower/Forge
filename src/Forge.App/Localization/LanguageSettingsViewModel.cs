@@ -21,6 +21,7 @@ namespace Forge.App.Localization;
 internal sealed class LanguageSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly AppPreferences preferences;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool disposed;
 
     public LanguageSettingsViewModel(AppPreferences preferences)
@@ -122,6 +123,13 @@ internal sealed class LanguageSettingsViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): these properties are bound
+        // on the thread that built the section.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(SystemText));
         OnPropertyChanged(nameof(ResolvedLanguage));
         OnPropertyChanged(nameof(SystemResolvedText));

@@ -96,6 +96,11 @@ internal static class StorageDb
     public static string FormatTimestamp(DateTimeOffset value) =>
         value.ToString("O", CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// Lenient read, for a timestamp that is not one of the guarded <c>forge.db</c> columns (the artifact table, a JSONL
+    /// event line). A guarded column is read with <see cref="ParseCanonicalTimestamp"/> instead: it rejects a value
+    /// without an offset by name rather than taking it for local time.
+    /// </summary>
     public static DateTimeOffset ParseTimestamp(string value) =>
         DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 

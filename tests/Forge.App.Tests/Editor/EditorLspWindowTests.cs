@@ -238,6 +238,30 @@ public sealed class EditorLspWindowTests : IDisposable
     });
 
     [Fact]
+    public Task Folding_ranges_from_the_server_are_also_capped_by_the_line_cap() => Ui(async () =>
+    {
+        var lines = new StringBuilder();
+        for (var i = 0; i < global::Forge.Editor.Folding.StructuralFolding.MaxLines + 10; i++)
+        {
+            lines.Append("line ").Append(i).Append('\n');
+        }
+
+        await using var rig = await EditorLspRig.OpenAsync(
+            root,
+            lines.ToString(),
+            new() { ["textDocument/foldingRange"] = """[{"startLine":0,"endLine":2,"kind":"comment"}]""" });
+        var view = rig.Window.Content as FileDocumentView;
+        Assert.NotNull(view);
+        Assert.NotNull(view!.Folding);
+
+        // The cap governs the server's ranges too, not just the local heuristic: a giant document says why it is
+        // not folding instead of applying whatever the server returned.
+        await rig.Until(() => rig.Model.HasFoldingNotice);
+        Assert.False(view.Folding!.HasFoldings);
+        rig.Window.Close();
+    });
+
+    [Fact]
     public Task Published_diagnostics_are_rendered_and_cleared_on_the_real_text_view() => Ui(async () =>
     {
         await using var rig = await EditorLspRig.OpenAsync(root, "class A { }\n");

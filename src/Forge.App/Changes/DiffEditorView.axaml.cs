@@ -65,6 +65,9 @@ internal sealed partial class DiffEditorView : UserControl
     private bool subscribed;
     private bool syncing;
     private bool attached;
+
+    /// <summary>The thread this view was attached on; a language notification from another one is not ours.</summary>
+    private int attachedThread;
     private int lastTopFile = -1;
     private int embedPasses;
     private int calibrations;
@@ -176,6 +179,7 @@ internal sealed partial class DiffEditorView : UserControl
     {
         base.OnAttachedToVisualTree(e);
         attached = true;
+        attachedThread = Environment.CurrentManagedThreadId;
         Subscribe();
         ActualThemeVariantChanged += OnThemeChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
@@ -1153,6 +1157,13 @@ internal sealed partial class DiffEditorView : UserControl
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A control of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // table; recycling its editors from another thread would queue a layout pass on the wrong dispatcher.
+        if (Environment.CurrentManagedThreadId != attachedThread)
+        {
+            return;
+        }
+
         RecycleAll();
         UpdateOverlay();
     }

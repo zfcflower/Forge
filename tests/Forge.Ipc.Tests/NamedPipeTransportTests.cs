@@ -66,6 +66,65 @@ public sealed class NamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Client_connect_timeout_reports_the_timeout_and_the_abandoned_attempt_never_reaches_a_late_server()
+    {
+        var name = TestPipes.NewName();
+        var options = new IpcPipeOptions { ConnectTimeout = TestTimeouts.Short };
+
+        // Nothing listens yet, so the client gives up when ConnectTimeout expires.
+        var timedOut = await Assert.ThrowsAsync<IpcTimeoutException>(() => IpcPipe.CreateClient(name, options).Bounded());
+        Assert.Equal($"connect:{name}", timedOut.Operation);
+        Assert.Equal(TestTimeouts.Short, timedOut.Timeout);
+
+        // The abandoned attempt must really have stopped: a server that only starts listening now would be taken over
+        // by an uncanceled ConnectAsync, which then drops the one pipe instance and leaves the peer nothing to accept.
+        var late = await Assert.ThrowsAsync<IpcTimeoutException>(() => IpcPipe.CreateServer(name, options).Bounded());
+        Assert.Equal($"connect:{name}", late.Operation);
+
+        // The name is still usable afterwards.
+        var serverTask = IpcPipe.CreateServer(name);
+        await using var client = await IpcPipe.CreateClient(name).Bounded();
+        await using var server = await serverTask.Bounded();
+
+        Assert.True(client.IsConnected);
+        Assert.True(server.IsConnected);
+    }
+
+    [Fact]
+    public async Task A_client_connect_the_caller_canceled_is_not_reported_as_a_timeout()
+    {
+        using var cancel = new CancellationTokenSource();
+        await cancel.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => IpcPipe.CreateClient(TestPipes.NewName(), cancel.Token).Bounded());
+    }
+
+    [Fact]
+    public async Task A_used_transport_refuses_to_connect_again_and_reconnecting_needs_a_new_one()
+    {
+        var name = TestPipes.NewName();
+        var serverTask = IpcPipe.CreateServer(name);
+        await using var client = await IpcPipe.CreateClient(name).Bounded();
+        await using var server = await serverTask.Bounded();
+        await client.StopAsync(CancellationToken.None);
+
+        var reused = await Assert.ThrowsAsync<InvalidOperationException>(() => client.StartAsync(CancellationToken.None));
+
+        Assert.Contains("has already been used", reused.Message, StringComparison.Ordinal);
+        Assert.False(client.IsConnected);
+
+        // One transport carries one connection: the reconnect is a new transport on the same name.
+        await server.DisposeAsync();
+        var secondServerTask = IpcPipe.CreateServer(name);
+        await using var secondClient = await IpcPipe.CreateClient(name).Bounded();
+        await using var secondServer = await secondServerTask.Bounded();
+
+        Assert.True(secondClient.IsConnected);
+        Assert.True(secondServer.IsConnected);
+    }
+
+    [Fact]
     public async Task Send_before_connect_throws_connection_closed()
     {
         await using var client = new NamedPipeClientTransport(TestPipes.NewName());

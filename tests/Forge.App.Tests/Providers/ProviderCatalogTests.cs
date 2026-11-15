@@ -269,6 +269,25 @@ public sealed class ProviderCatalogTests : IDisposable
         await enumerator.MoveNextAsync();
     }
 
+    /// <summary>
+    /// A Copilot session token is bound to the client identity it was minted under, so every API call has to repeat that
+    /// identity exactly — including the lowercase plugin slug Core sends on the sign-in calls
+    /// (<see cref="Forge.Core.Providers.CopilotAuthentication"/>), which is not the casing of the editor version.
+    /// </summary>
+    [Fact]
+    public void The_copilot_row_repeats_the_client_identity_its_session_token_is_bound_to()
+    {
+        var catalog = Catalog(("copilot", ProviderCredentialKind.GitHubCopilot));
+
+        var headers = catalog.Find("copilot")!
+            .BuildConfig("ghs_session", "https://api.githubcopilot.com", ProviderAuthStyle.BearerOnly, preamble: null)
+            .Headers!;
+
+        Assert.Equal("copilot-chat", headers["Copilot-Integration-Id"]);
+        Assert.Equal("Forge/1.0", headers["Editor-Version"]);
+        Assert.Equal("forge/1.0", headers["Editor-Plugin-Version"]);
+    }
+
     private ProviderCatalog Catalog(params (string Id, ProviderCredentialKind Kind)[] providers) =>
         Catalog(providers, defaultId: providers[0].Id);
 

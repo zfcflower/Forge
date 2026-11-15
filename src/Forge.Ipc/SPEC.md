@@ -16,7 +16,7 @@ parent: forge-architecture
 - 帧体 = `IpcHeader`(`Version`、`Id`(0 = 通知)、`Operation`、`IsResponse`、`Error`)+ 至多一个 MessagePack 负载值(请求/通知的参数或成功响应的结果;失败响应只有头)。协议版本 2。
 - 负载在 `IpcMessage` 里保持编码状态,由消费者按操作约定的类型 `Read<T>()` 一次解码;不经中间 DOM。无参数/无结果用 `IpcEmpty`。工具参数是模型给出的 JSON,以原始 UTF-8 字节随负载传递,只在交给工具的那一端解析。
 - **负载对编解码器是不透明的,因此也能由调用方自己编码。** `FrameCodec.EncodeRaw` 追加调用方给的负载字节,`IpcPeer.RequestRawAsync`(internal,只对测试程序集可见)用它发出格式化器不会产生的值——缺成员、非空成员上的 nil、类型不符——用来证明对端在负载无法解码时按协议拒绝,而不是崩溃或静默跳过。产品代码一律走类型化的 `RequestAsync`/`NotifyAsync`/`RespondAsync`。
-- 发送帧写入池化的 `IpcFrameBuffer`(`ArrayPool`),传输在 `SendAsync` 完成前复制,调用方随即归还;入站帧缓冲交给消费者后不再复用,负载切片可直接引用。
+- 发送帧写入池化的 `IpcFrameBuffer`(`ArrayPool`),传输在 `SendAsync` 完成前复制,调用方随即归还;入站帧缓冲交给消费者后不再复用,负载切片可直接引用。**入站帧体在解帧时一律复制成私有数组**,不做"帧体恰好占满整个池化段"的零拷贝例外:读循环随即 `AdvanceTo`,BCL 把该段归还 `ArrayPool` 并复用,任何别名都会在消费者手里被静默改写(负载损坏)。
 - 命名管道在 Linux/macOS 上由 .NET 的 Unix 域套接字实现,套接字文件落在 `<临时目录>/CoreFxPipe_<name>`。完整路径上限 `sockaddr_un.sun_path` 为 108 字节(Linux;含结尾 NUL)与 104 字节(macOS),macOS 的用户临时目录本身就很长(CI 上 `/var/folders/<x>/<32 字符>/T/` 占 51 字节),因此 `ValidatePipeName` 的 108 只是名称上限、**不保证**在 macOS 上能 bind。生成名称的调用方改用 `IpcPipe.MaxNameLength`:由当前平台的套接字路径上限减去 `<临时目录>` + `CoreFxPipe_` + 1(NUL)的 UTF-8 字节数算出(取不到临时目录时保守返回 16),Windows 无路径约束、返回 108。超预算的命名在 macOS 上表现为 BCL 抛出的 `ArgumentOutOfRangeException`,不是 IPC 层的协议错误。
 
 ## 关键决策

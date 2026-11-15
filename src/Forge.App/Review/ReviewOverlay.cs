@@ -55,6 +55,13 @@ internal sealed class ReviewOverlay : IDisposable
     private bool disposed;
     private double markerSize = MarkerSize;
 
+    /// <summary>
+    /// The thread this overlay was built on (the UI thread); a language notification from another one is not ours. Deliberately
+    /// not <see cref="Dispatcher.UIThread"/>: reading that property off the UI thread creates a UI dispatcher on the calling
+    /// thread, which then hijacks the platform the next headless session sets up.
+    /// </summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     public ReviewOverlay(TextEditor editor, ReviewOverlayParts parts)
     {
         this.editor = editor;
@@ -169,14 +176,15 @@ internal sealed class ReviewOverlay : IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        if (Dispatcher.UIThread.CheckAccess())
+        // A switch raised on another thread belongs to a window that is gone (a test host): this overlay's markers, composer
+        // and status texts are bound on the thread that built it, so the notification is ignored rather than marshalled onto
+        // a live window's dispatcher (App SPEC 61).
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {
-            Refresh();
+            return;
         }
-        else
-        {
-            Dispatcher.UIThread.Post(Refresh);
-        }
+
+        Refresh();
     }
 
     private void OnViewChanged(object? sender, EventArgs e) => Layout();

@@ -361,6 +361,52 @@ public sealed class ExtensionWorkflowPluginTests
         Assert.True(again.IsError);
     }
 
+    /// <summary>F-EH-12: revoking a workflow package terminates its in-flight run. A workflow has no worker process tree
+    /// to kill, so before the fix a revoke only waited out a bounded drain while the run kept going (and could keep calling
+    /// <c>host.tool_call</c> against the main program). The probe here never returns and ignores cancellation, so the only
+    /// way the in-flight call can end is the revoke cancelling the run's lifetime; the engine then drains within its
+    /// cancellation window and reports the run cancelled, and the revoke returns once the lease is released. The gate is
+    /// released only afterwards, to let the abandoned probe task finish.</summary>
+    [Fact]
+    public async Task Revoke_terminates_an_inflight_workflow_run_that_never_completes()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var probe = new ExtensionAuthoringSupport.ProbeTool(
+            "probe",
+            async (_, _) => new ToolResult(await gate.Task),
+            entered: () => entered.TrySetResult());
+        await using var fx = E2eFixture.AllowingApprovals(probe);
+        await fx.StartAsync();
+        await CommitWorkflowAsync(fx, "wfc", ExtensionAuthoringSupport.SingleStepWorkflow("probe"), "run-it");
+        await fx.WaitForToolsAsync("wfc", 1, "wfc tool");
+
+        try
+        {
+            var running = fx.InvokeAsync("wfc", "run-it", "{}");
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(30), fx.Ct);
+
+            var revoking = fx.Client.RevokePluginAsync("wfc", "1.0.0", fx.Ct);
+            // Observing the empty tool table proves the revoke reached its in-flight wait, so what ends the run below is
+            // the cancellation, not a released gate.
+            await fx.WaitForToolsAsync("wfc", 0, "wfc tools revoked");
+
+            // The gate is deliberately never released before these awaits: the run must end because the revoke cancelled
+            // it, not because the step completed.
+            var result = await running.WaitAsync(TimeSpan.FromSeconds(30), fx.Ct);
+            await revoking.WaitAsync(TimeSpan.FromSeconds(30), fx.Ct);
+
+            Assert.True(result.IsError, $"the revoked in-flight run should have ended as an error: {result.Content}");
+            Assert.Contains("cancel", result.Content, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("Draft", fx.ReadRecord("wfc", "1.0.0")!.Status);
+            Assert.Empty(fx.ToolsOf("wfc"));
+        }
+        finally
+        {
+            gate.TrySetResult("release");
+        }
+    }
+
     private static async Task CommitWorkflowAsync(E2eFixture fx, string id, string workflowJson, string toolName)
     {
         var staged = await fx.Client.StageExtensionAsync(

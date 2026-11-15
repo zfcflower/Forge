@@ -91,17 +91,27 @@ public sealed class FileWireTests
     }
 
     [Fact]
-    public async Task Anthropic_drops_a_file_block_outside_a_user_message()
+    public async Task An_assistant_file_block_becomes_a_placeholder_instead_of_vanishing()
     {
         var (provider, handler) = TestData.AnthropicProvider();
 
         await provider.CollectAsync(TestData.Request(messages:
         [
             ChatMessage.User("hi"),
-            new ChatMessage(MessageRole.Assistant, [new TextBlock("reply"), Pdf]),
+            new ChatMessage(MessageRole.Assistant, [new TextBlock("reply"), Pdf, Wav]),
         ]));
 
+        // The bytes never travel on this wire, but the history still says a file was there — including one whose kind the
+        // wire could never carry, which is a placeholder rather than the refusal a user attachment gets before sending.
         Assert.DoesNotContain(PdfData, handler.Last.Body!, StringComparison.Ordinal);
+        var assistant = handler.Last.Root.GetProperty("messages")[1];
+        Assert.Equal("assistant", assistant.GetProperty("role").GetString());
+        var content = assistant.GetProperty("content");
+        Assert.Equal(3, content.GetArrayLength());
+        Assert.Equal("reply", content[0].GetProperty("text").GetString());
+        Assert.Equal("text", content[1].GetProperty("type").GetString());
+        Assert.Equal("[file: spec.pdf, 1 KB]", content[1].GetProperty("text").GetString());
+        Assert.Equal("[file: voice.wav, 1 KB]", content[2].GetProperty("text").GetString());
     }
 
     [Theory]

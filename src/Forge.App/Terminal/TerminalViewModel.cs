@@ -56,6 +56,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
     private readonly CancellationTokenSource lifetime = new();
     private readonly List<byte[]> pendingReplies = [];
     private readonly int displayIndex;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     private ITerminalSession? session;
     private IClipboard? clipboard;
@@ -660,6 +661,13 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the tab and the close prompt
+        // are bound on the thread that built the terminal.
+        if (Volatile.Read(ref disposed) != 0 || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(TabTitle));
         OnPropertyChanged(nameof(ClosePromptText));
         OnPropertyChanged(nameof(ConfirmCloseText));

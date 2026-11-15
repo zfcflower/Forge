@@ -269,6 +269,57 @@ public sealed class GitCliPullPushTests
     }
 
     [Fact]
+    public async Task Everything_up_to_date_with_a_fresh_lease_reports_success()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var sandbox = new RemoteSandbox();
+        var repo = sandbox.SeedTracked();
+        var tip = OriginTip(sandbox);
+
+        var read = await Cli().LsRemoteAsync(repo, "origin", "main");
+        Assert.True(read.Result.Success);
+
+        var push = await Cli().PushAsync(repo, new GitPushOptions
+        {
+            ForceWithLease = true,
+            ExpectedRemoteCommit = read.Commit,
+        });
+
+        Assert.True(push.Success, push.Message);
+        Assert.Equal(tip, OriginTip(sandbox));
+    }
+
+    [Fact]
+    public async Task Everything_up_to_date_with_an_empty_lease_reports_non_fast_forward()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var sandbox = new RemoteSandbox();
+        var repo = sandbox.SeedTracked();
+        var tip = OriginTip(sandbox);
+
+        var push = await Cli().PushAsync(repo, new GitPushOptions
+        {
+            ForceWithLease = true,
+            ExpectedRemoteCommit = string.Empty,
+        });
+
+        // git skips the lease check when there is nothing to update, so the "branch must not exist" lease is
+        // upgraded here: the remote branch exists, so nothing was pushed and the push must not report success.
+        Assert.False(push.Success);
+        Assert.Equal(GitRemoteFailureKind.NonFastForward, push.Failure);
+        Assert.Contains("lease", push.Message, StringComparison.Ordinal);
+        Assert.Equal(tip, OriginTip(sandbox));
+    }
+
+    [Fact]
     public async Task LsRemote_returns_the_exact_tip_for_an_existing_branch()
     {
         if (!GitProbe.IsAvailable)

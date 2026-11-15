@@ -404,6 +404,58 @@ public sealed class UnifiedDiffParserTests
     }
 
     [Fact]
+    public void Hunk_whose_body_does_not_match_the_declared_counts_is_marked_corrupt()
+    {
+        const string diff = """
+            diff --git a/a.txt b/a.txt
+            index 1111111..2222222 100644
+            --- a/a.txt
+            +++ b/a.txt
+            @@ -1,3 +1,3 @@
+             context line
+            -removed line
+            +added line
+            """;
+
+        var result = UnifiedDiffParser.ParseDetailed(diff);
+
+        var file = Assert.Single(result.Files);
+        var hunk = Assert.Single(file.Hunks);
+        Assert.True(hunk.IsCorrupt);
+        Assert.Equal(3, hunk.OldCount);
+        Assert.Equal(3, hunk.NewCount);
+
+        // The hunk is delivered - its lines kept as read - but reported as corrupt rather than guessed at.
+        Assert.Equal(3, hunk.Lines.Count);
+
+        Assert.False(result.IsClean);
+        var issue = Assert.Single(result.Issues);
+        Assert.Contains("does not match its declared line counts", issue.Message, StringComparison.Ordinal);
+        Assert.Equal("a.txt", issue.Path);
+    }
+
+    [Fact]
+    public void Hunk_whose_body_matches_the_declared_counts_is_not_corrupt()
+    {
+        const string diff = """
+            diff --git a/a.txt b/a.txt
+            --- a/a.txt
+            +++ b/a.txt
+            @@ -1,2 +1,2 @@
+             context line
+            -removed line
+            +added line
+            """;
+
+        var result = UnifiedDiffParser.ParseDetailed(diff);
+
+        var file = Assert.Single(result.Files);
+        var hunk = Assert.Single(file.Hunks);
+        Assert.False(hunk.IsCorrupt);
+        Assert.True(result.IsClean);
+    }
+
+    [Fact]
     public void Null_input_is_rejected()
     {
         Assert.Throws<ArgumentNullException>(() => UnifiedDiffParser.Parse((string)null!));

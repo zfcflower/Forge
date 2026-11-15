@@ -22,7 +22,27 @@ internal readonly record struct ComposerToken(ComposerTokenKind Kind, int Start,
 /// One entry of a slash picker: a command or a skill. <see cref="Path"/> is the skill's <c>SKILL.md</c> (empty for a
 /// command), so the settings page can say where a skill came from without discovering it a second time.
 /// </summary>
-internal sealed record SlashEntry(string Name, string Description, bool IsSkill, string Path = "");
+internal sealed record SlashEntry(string Name, string Description, bool IsSkill, string Path = "", SkillScope Scope = SkillScope.None);
+
+/// <summary>
+/// The folder a discovered skill came from, as the settings page badges it. The three real values are the scope convention
+/// the prompts section already uses (see <c>PromptTemplateScope</c>), so a skill and a template of the same origin read the
+/// same; <see cref="None"/> is a command entry, which has no folder to come from.
+/// </summary>
+internal enum SkillScope
+{
+    /// <summary>Not a discovered skill (a command), or a skill whose folder is not one of the three below.</summary>
+    None,
+
+    /// <summary>The workspace's <c>.github/skills</c>: the skills the repository itself carries.</summary>
+    BuiltIn,
+
+    /// <summary>The user directory's <c>skills</c> folder (<c>~/.forge/skills</c>), shared by every workspace.</summary>
+    Global,
+
+    /// <summary>The workspace's <c>.forge/skills</c>: this project's own skills.</summary>
+    Project,
+}
 
 /// <summary>
 /// The pure logic behind the composer's <c>/</c> and <c>@</c> pickers: finding the token under the caret, filtering
@@ -189,27 +209,29 @@ internal static class ComposerSuggestions
 /// <summary>
 /// Skills the composer's slash picker offers: every <c>SKILL.md</c> one level under <c>.github/skills</c> and
 /// <c>.forge/skills</c> of the workspace and under <c>skills</c> of the user directory. The name comes from the
-/// front matter's <c>name:</c> (else the folder name), the description from <c>description:</c>.
+/// front matter's <c>name:</c> (else the folder name), the description from <c>description:</c>. Each entry carries the
+/// <see cref="SkillScope"/> of the folder it was found in, and the first folder that names a skill keeps it — so the scope
+/// of a shadowed skill is the scope of the copy that wins, exactly like the prompts layering.
 /// </summary>
 internal static class SkillCatalog
 {
     public static IReadOnlyList<SlashEntry> Discover(string? workspace, string? userDirectory)
     {
-        var roots = new List<string>();
+        var roots = new List<(string Path, SkillScope Scope)>();
         if (!string.IsNullOrWhiteSpace(workspace))
         {
-            roots.Add(Path.Combine(workspace, ".github", "skills"));
-            roots.Add(Path.Combine(workspace, ".forge", "skills"));
+            roots.Add((Path.Combine(workspace, ".github", "skills"), SkillScope.BuiltIn));
+            roots.Add((Path.Combine(workspace, ".forge", "skills"), SkillScope.Project));
         }
 
         if (!string.IsNullOrWhiteSpace(userDirectory))
         {
-            roots.Add(Path.Combine(userDirectory, "skills"));
+            roots.Add((Path.Combine(userDirectory, "skills"), SkillScope.Global));
         }
 
         var found = new List<SlashEntry>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var root in roots)
+        foreach (var (root, scope) in roots)
         {
             string[] folders;
             try
@@ -249,7 +271,7 @@ internal static class SkillCatalog
                 name = string.IsNullOrWhiteSpace(name) ? Path.GetFileName(folder) : name;
                 if (names.Add(name))
                 {
-                    found.Add(new SlashEntry(name, description ?? string.Empty, IsSkill: true, file));
+                    found.Add(new SlashEntry(name, description ?? string.Empty, IsSkill: true, file, scope));
                 }
             }
         }

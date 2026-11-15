@@ -322,6 +322,49 @@ public class ClaudeSubscriptionCredentialsTests
     }
 
     [Fact]
+    public async Task Concurrent_reads_of_one_file_share_a_single_refresh()
+    {
+        using var temp = new TempDirectory();
+        var path = temp.WriteFile(
+            ".credentials.json",
+            Credentials(expiresAt: (Now - TimeSpan.FromHours(1)).ToUnixTimeMilliseconds()));
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new RotatingRefreshHandler(started, release);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var firstClient = new HttpClient(handler, disposeHandler: false);
+        using var secondClient = new HttpClient(handler, disposeHandler: false);
+
+        // Two instances over one file, the way two concurrent turns can hold separate credential objects: the gate is
+        // keyed by the file, not by the instance.
+        var time = new ManualTimeProvider(Now);
+        var root = new ClaudeSubscriptionCredentials(path, firstClient, time);
+        var child = new ClaudeSubscriptionCredentials(path, secondClient, time);
+
+        var first = root.ReadAsync(timeout.Token);
+        await started.Task.WaitAsync(timeout.Token);
+        // The second read starts while the first refresh is provably in flight; with a rotating endpoint a second
+        // refresh would spend the already-used token and be refused, failing this reader.
+        var second = child.ReadAsync(timeout.Token);
+        release.SetResult();
+
+        var subscriptions = await Task.WhenAll(first, second).WaitAsync(timeout.Token);
+
+        Assert.Equal(1, handler.Calls);
+        Assert.All(subscriptions, subscription =>
+        {
+            Assert.Equal(RefreshedAccessToken, subscription.AccessToken);
+            Assert.Equal(RefreshedRefreshToken, subscription.RefreshToken);
+        });
+
+        // The write-back is the rotated bundle, not a stale one racing over it.
+        using var written = JsonDocument.Parse(File.ReadAllText(path));
+        var oauth = written.RootElement.GetProperty("claudeAiOauth");
+        Assert.Equal(RefreshedAccessToken, oauth.GetProperty("accessToken").GetString());
+        Assert.Equal(RefreshedRefreshToken, oauth.GetProperty("refreshToken").GetString());
+    }
+
+    [Fact]
     public void Credentials_never_print_their_token()
     {
         var subscription = new ClaudeSubscription(AccessToken, RefreshToken, Now, "max", ["user:inference"]);
@@ -380,5 +423,37 @@ public class ClaudeSubscriptionCredentialsTests
         }
 
         return "{\"claudeAiOauth\":{" + string.Join(',', fields) + "}" + extra + "}";
+    }
+
+    /// <summary>
+    /// A token endpoint that rotates the refresh token exactly once: the first refresh blocks until the test releases it,
+    /// so a concurrent reader provably overlaps an in-flight refresh, and any second refresh is refused with
+    /// <c>invalid_grant</c> — what a rotating endpoint does to a caller that spends the already-used token.
+    /// </summary>
+    private sealed class RotatingRefreshHandler(TaskCompletionSource firstStarted, TaskCompletionSource release) : HttpMessageHandler
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            _ = await request.Content!.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (Interlocked.Increment(ref _calls) > 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent("""{"error":"invalid_grant"}"""),
+                };
+            }
+
+            firstStarted.TrySetResult();
+            await release.Task.ConfigureAwait(false);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $$"""{"access_token":"{{RefreshedAccessToken}}","refresh_token":"{{RefreshedRefreshToken}}","expires_in":28800}"""),
+            };
+        }
     }
 }

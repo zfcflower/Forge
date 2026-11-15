@@ -50,6 +50,9 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
     private int refreshGeneration;
     private bool disposed;
 
+    /// <summary>The thread the palette was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     public PaletteViewModel(IPaletteHost host, AppPreferences preferences)
     {
         this.host = host ?? throw new ArgumentNullException(nameof(host));
@@ -385,6 +388,13 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the strip and its rows are
+        // bound on the thread that built the palette.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         // The strip's labels resolve on read; only the bindings have to be told that they changed.
         OnPropertyChanged(nameof(Sources));
         OnPropertyChanged(nameof(HeaderText));

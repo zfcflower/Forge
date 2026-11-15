@@ -10,12 +10,38 @@ using ZLogger;
 
 namespace Forge.App.ViewModels.Settings;
 
-/// <summary>One read-only row of an instrument section: a heading, a secondary line and a trailing value.</summary>
-internal sealed record InstrumentRow(string Title, string Detail, string Trailing)
+/// <summary>
+/// One read-only row of an instrument section: a heading, a secondary line and a trailing value. A row that was found in one
+/// of several possible folders (a skill) also carries that folder's <see cref="SkillScope"/>, drawn as the source badge the
+/// prompts section shows for the same origin; the approvals section's rows leave it <see cref="SkillScope.None"/>.
+/// </summary>
+internal sealed record InstrumentRow(string Title, string Detail, string Trailing, SkillScope Scope = SkillScope.None)
 {
     public bool HasDetail => Detail.Length > 0;
 
     public bool HasTrailing => Trailing.Length > 0;
+
+    /// <summary>Whether the row carries a source badge at all.</summary>
+    public bool HasScope => Scope != SkillScope.None;
+
+    public bool IsBuiltIn => Scope == SkillScope.BuiltIn;
+
+    public bool IsGlobal => Scope == SkillScope.Global;
+
+    public bool IsProject => Scope == SkillScope.Project;
+
+    /// <summary>
+    /// The badge word, read in the current language: the prompts section's own built-in/global/project words, so a skill and
+    /// a template of the same origin read the same (the shared badge convention of the two sections). Empty for a row with
+    /// no badge, which is never drawn.
+    /// </summary>
+    public string ScopeText => Scope switch
+    {
+        SkillScope.BuiltIn => Loc.Instance[PromptsStrings.ScopeBuiltInKey],
+        SkillScope.Global => Loc.Instance[PromptsStrings.ScopeGlobalKey],
+        SkillScope.Project => Loc.Instance[PromptsStrings.ScopeProjectKey],
+        _ => string.Empty,
+    };
 }
 
 /// <summary>
@@ -135,7 +161,10 @@ internal sealed class ApprovalsSettingsSectionViewModel(AppComposition compositi
     }
 }
 
-/// <summary>The <c>skills</c> section: what the composer's <c>/</c> picker would find, with the file it came from.</summary>
+/// <summary>
+/// The <c>skills</c> section: what the composer's <c>/</c> picker would find, with the file it came from and the source badge
+/// of the folder that file sits in (the same built-in/global/project reading the <c>prompts</c> section gives a template).
+/// </summary>
 internal sealed class SkillsSettingsSectionViewModel(AppComposition composition) : InstrumentSettingsSectionViewModel
 {
     protected override string HintText => InstrumentsStrings.SkillsSectionHint;
@@ -145,6 +174,9 @@ internal sealed class SkillsSettingsSectionViewModel(AppComposition composition)
         var workspace = composition.WorkspaceDirectory;
         _ = LoadAsync(workspace);
     }
+
+    /// <summary>The row of one discovered skill: its name, description, <c>SKILL.md</c> and that file's scope badge.</summary>
+    internal static InstrumentRow Row(SlashEntry skill) => new(skill.Name, skill.Description, skill.Path, skill.Scope);
 
     private async Task LoadAsync(string workspace)
     {
@@ -169,7 +201,7 @@ internal sealed class SkillsSettingsSectionViewModel(AppComposition composition)
         }
 
         Replace(
-            skills.Select(static skill => new InstrumentRow(skill.Name, skill.Description, skill.Path)),
+            skills.Select(Row),
             InstrumentsStrings.SkillsSectionEmpty);
     }
 }

@@ -253,6 +253,9 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
     private int selectedTab;
     private int refreshGeneration;
 
+    /// <summary>The thread the panel was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     public FilesPanelViewModel(GitCli git, Action<string> openFile, Action<string> openFileInNewTab, Action<string> openChanges)
         : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory: null, changeReview: null)
     {
@@ -836,6 +839,13 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the flat tree and the changed
+        // rows are spliced and bound on the thread that built the panel.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         RaiseCounts();
         OnPropertyChanged(nameof(Error));
         OnPropertyChanged(nameof(FoldingToggleText));
@@ -1041,6 +1051,9 @@ internal sealed partial class ChangesViewModel : NotifyingObject, IDisposable
     private bool isLoading;
     private LocText message;
     private int generation;
+
+    /// <summary>The thread the document was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     public ChangesViewModel(GitCli git, ITurnCheckpointStore checkpoints, Action<string>? openFile = null)
     {
@@ -1346,6 +1359,13 @@ internal sealed partial class ChangesViewModel : NotifyingObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the turn entries and diff rows
+        // are bound on the thread that built the document.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Summary));
         OnPropertyChanged(nameof(ScopeLabel));
         OnPropertyChanged(nameof(CompareBranchLabel));
@@ -1775,6 +1795,9 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
     private LocText statusText = new(InspectorStrings.TodoNoSession);
     private int generation;
 
+    /// <summary>The thread the panel was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     /// <param name="store">The checklist the panel reads and edits.</param>
     /// <param name="committer">
     /// Commits a step again when its row's "Retry commit" button runs; null (a unit test) means the panel only reads and
@@ -2014,6 +2037,13 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
     /// <summary>The status line and the rows' derived texts are resolved when they are read; a language switch re-reads them.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the groups and rows are bound on
+        // the thread that built the panel.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(HasStatus));
         foreach (var group in Groups.Concat(DoneGroups))
@@ -2081,6 +2111,9 @@ internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
     private readonly Action<string> openChange;
     private PanelContext context = PanelContext.Empty;
     private LocText summary = new(InspectorStrings.ReviewNoSession);
+
+    /// <summary>The thread the panel was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     public ReviewPanelViewModel(ReviewStore store, Action<string> openChange)
     {
@@ -2160,6 +2193,13 @@ internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the comment rows are bound on the
+        // thread that built the panel.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Summary));
         foreach (var item in Items)
         {
@@ -2300,6 +2340,9 @@ internal sealed class SpecTreeViewModel : ObservableObject, IDisposable
     private PanelContext context = PanelContext.Empty;
     private LocText summary = new(InspectorStrings.SpecNoProject);
 
+    /// <summary>The thread the tree was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     public SpecTreeViewModel(Func<string, SpecGraph> graphFactory, Action<string> openFile)
     {
         this.graphFactory = graphFactory;
@@ -2363,7 +2406,15 @@ internal sealed class SpecTreeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>The rows carry the graph's own titles; only the summary is resolved from the string table.</summary>
-    private void OnLanguageChanged(object? sender, EventArgs e) => OnPropertyChanged(nameof(Summary));
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the summary is bound on the
+        // thread that built the tree.
+        if (Environment.CurrentManagedThreadId == uiThread)
+        {
+            OnPropertyChanged(nameof(Summary));
+        }
+    }
 
     /// <summary>Drops the language subscription; a panel that is gone must not be refreshed by the next language switch.</summary>
     public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;

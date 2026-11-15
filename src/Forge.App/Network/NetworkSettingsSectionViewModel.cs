@@ -22,6 +22,7 @@ internal sealed class NetworkSettingsSectionViewModel : NotifyingObject, IDispos
     private readonly NetworkSettingsStore store;
     private readonly INetworkStack stack;
     private readonly Func<NetworkSettings, string, CancellationToken, Task<IPAddress[]>> probe;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private DnsMode dns;
     private ProxyMode proxy;
     private string serversText;
@@ -371,6 +372,13 @@ internal sealed class NetworkSettingsSectionViewModel : NotifyingObject, IDispos
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the section's labels and
+        // inline errors are bound on the thread that built it.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         Validate();
         OnPropertyChanged(nameof(LoadProblemText));
     }

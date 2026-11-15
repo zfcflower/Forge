@@ -435,7 +435,7 @@ public sealed partial class GitCli
         var report = result.StandardError + result.StandardOutput;
         if (expected is not null
             && report.Contains("Everything up-to-date", StringComparison.OrdinalIgnoreCase)
-            && !await LeaseHoldsAsync(workingDirectory, branch, expected, ct).ConfigureAwait(false))
+            && !await LeaseHoldsAsync(workingDirectory, remote, branch, expected, ct).ConfigureAwait(false))
         {
             // git skips the lease when there is nothing to update, so the lease has to be checked here.
             return new GitRemoteResult(
@@ -799,25 +799,27 @@ public sealed partial class GitCli
     }
 
     /// <summary>
-    /// True when the local branch still matches what the lease expects; the empty expectation only holds when the branch
-    /// has no commit at all, which a local branch that exists never satisfies.
+    /// True when the remote tip still matches what the lease expects: the tip is re-read with
+    /// <see cref="LsRemoteAsync"/>, because git skipped the lease check and only the remote's current tip can say whether
+    /// the read taken just before the push still holds. An empty expectation is the lease "the branch must not exist yet".
+    /// A tip that cannot be read at all never holds, so the push fails closed instead of trusting the stale lease.
     /// </summary>
-    private async Task<bool> LeaseHoldsAsync(string workingDirectory, string branch, string expected, CancellationToken ct)
+    private async Task<bool> LeaseHoldsAsync(string workingDirectory, string remote, string branch, string expected, CancellationToken ct)
     {
-        if (expected.Length == 0)
+        // git skipped the lease check, so the tip is re-read from the remote rather than compared against the local
+        // branch: the remote can move between the read that took the lease and this check, and the local branch can sit
+        // somewhere else entirely when the push is pinned to a commit.
+        var tip = await LsRemoteAsync(workingDirectory, remote, branch, options: null, ct).ConfigureAwait(false);
+        if (!tip.Result.Success)
         {
+            // A tip that cannot be read cannot prove the lease still holds; fail closed instead of trusting the stale read.
             return false;
         }
 
-        var localHead = await RevParseAsync(workingDirectory, "refs/heads/" + branch, ct).ConfigureAwait(false);
-        if (localHead is null)
-        {
-            return false;
-        }
-
-        return string.Equals(expected, localHead, StringComparison.OrdinalIgnoreCase)
-            || (await RevParseAsync(workingDirectory, expected, ct).ConfigureAwait(false) is { } resolved
-                && string.Equals(resolved, localHead, StringComparison.OrdinalIgnoreCase));
+        // An empty expected commit is the lease "the branch must not exist yet".
+        return expected.Length == 0
+            ? tip.Commit is null
+            : tip.Commit is { } commit && string.Equals(expected, commit, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Runs a network command with prompts disabled, an optional SSH batch mode and the network timeout.</summary>

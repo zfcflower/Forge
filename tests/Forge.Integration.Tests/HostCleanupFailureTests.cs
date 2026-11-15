@@ -85,6 +85,53 @@ public sealed class HostCleanupFailureTests
         }
     }
 
+    /// <summary>F-EH-77: a shutdown the host could not verify is never a silent success. The contract - a cleanup failure
+    /// surfaces as a non-zero exit code from <c>RunAsync</c> and a <c>host_shutdown_failed</c> throw from
+    /// <c>DisposeAsync</c> - had zero tests, because a real unverifiable cleanup failure cannot be forced deterministically
+    /// (Windows job containment and POSIX group kills both succeed on a cooperative process). A Debug-only seam injects one
+    /// cleanup failure into the shutdown of a host started as an isolated child process; this proves <c>RunAsync</c> exits
+    /// non-zero and <c>Program.cs</c> surfaces the <c>DisposeAsync</c> host_shutdown_failed throw on stderr instead of
+    /// pretending the stop was clean.</summary>
+    [Fact]
+    public async Task Cleanup_failure_makes_the_host_exit_non_zero_and_report_host_shutdown_failed()
+    {
+        var root = PluginQueueBudgetHost.NewRoot("cleanup-fail");
+        try
+        {
+            using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(120), TimeSpan.FromMinutes(10)));
+            var ct = budget.Token;
+            await using var host = PluginQueueBudgetHost.Start(
+                [],
+                tag: "cleanup-fail",
+                root: root,
+                environment: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["FORGE_HOST_TEST_FAIL_CLEANUP"] = "1",
+                });
+
+            await using var peer = await host.ConnectAsync(ct);
+            await StopAsync(peer, ct, host);
+
+            using var exitBound = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            exitBound.CancelAfter(ExitLimit);
+            var exitCode = await host.WaitForExitAsync(exitBound.Token);
+
+            Assert.True(
+                exitCode != 0,
+                $"the host exited with {exitCode} after a cleanup failure; a shutdown it could not verify must not exit 0. "
+                + Describe(host));
+            // This line is written only by Program.cs catching the DisposeAsync host_shutdown_failed throw, so its presence
+            // proves the throw branch fired, not merely that RunAsync returned non-zero.
+            Assert.Contains(
+                host.Output,
+                line => line.Contains("could not verify a clean shutdown", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            RawHost.TryDeleteDirectory(root);
+        }
+    }
+
     private static async Task StopAsync(IpcPeer peer, CancellationToken ct, PluginQueueBudgetHost host)
     {
         var clock = Stopwatch.StartNew();

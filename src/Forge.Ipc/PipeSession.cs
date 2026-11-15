@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Pipelines;
 using System.IO.Pipes;
-using System.Runtime.InteropServices;
 using System.Threading.Channels;
 
 namespace Forge.Ipc;
@@ -293,27 +292,17 @@ internal sealed class PipeSession : IAsyncDisposable
         }
     }
 
-    private async ValueTask EnqueueAsync(ReadOnlyMemory<byte> body, CancellationToken token)
+    /// <summary>Queues one frame body for delivery. <paramref name="body"></paramref> is the private array the
+    /// extractor copied it into, so it is enqueued as is: no slice of the pipe's pooled buffers is ever handed to a
+    /// consumer.</summary>
+    private async ValueTask EnqueueAsync(byte[] body, CancellationToken token)
     {
         var weight = Weight(body.Length);
         await ReserveBudgetAsync(weight, token).ConfigureAwait(false);
         var queued = false;
         try
         {
-            byte[] copy;
-            if (MemoryMarshal.TryGetArray(body, out var segment) &&
-                segment.Array is { } owned &&
-                segment.Offset == 0 &&
-                segment.Count == owned.Length)
-            {
-                copy = owned;
-            }
-            else
-            {
-                copy = body.ToArray();
-            }
-
-            await frames.Writer.WriteAsync(copy, token).ConfigureAwait(false);
+            await frames.Writer.WriteAsync(body, token).ConfigureAwait(false);
             queued = true;
         }
         finally

@@ -3,6 +3,35 @@
              xmlns:set="using:Forge.App.ViewModels.Settings"
              x:Class="Forge.App.Views.InstrumentSectionView"
              x:DataType="set:InstrumentSettingsSectionViewModel">
+  <UserControl.Styles>
+    <!-- The source badge of a row that came from one of several folders (a skill): the same three readings the prompts
+         section gives a template of the same origin — a neutral pill for built-in, the accent for global, an info outline
+         for the project's own folder. -->
+    <Style Selector="Border.scope-badge">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.scope-badge.global">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.scope-badge.project">
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource InfoBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="TextBlock.scope-badge-text">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="Border.global TextBlock.scope-badge-text">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+    <Style Selector="Border.project TextBlock.scope-badge-text">
+      <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+    </Style>
+  </UserControl.Styles>
   <!-- The body the four instrument sections share: a hint, a read-only row list and the empty state. It is a view rather
        than a keyed DataTemplate so each section's template refers to a type the compiler checks instead of a resource key
        that would only fail the moment a section is selected. -->
@@ -12,7 +41,7 @@
       <ItemsControl ItemsSource="{Binding Rows}" AutomationProperties.AutomationId="instrument-section-rows">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="set:InstrumentRow">
-            <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+            <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,3">
               <StackPanel Spacing="1">
                 <TextBlock Text="{Binding Title}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                 <TextBlock Classes="caption"
@@ -21,7 +50,17 @@
                            TextWrapping="Wrap"
                            MaxWidth="520" />
               </StackPanel>
-              <TextBlock Grid.Column="1"
+              <Border Grid.Column="1"
+                      Classes="scope-badge"
+                      Classes.global="{Binding IsGlobal}"
+                      Classes.project="{Binding IsProject}"
+                      Margin="12,0,0,0"
+                      VerticalAlignment="Top"
+                      IsVisible="{Binding HasScope}"
+                      AutomationProperties.AutomationId="instrument-row-scope">
+                <TextBlock Classes="scope-badge-text" Text="{Binding ScopeText}" />
+              </Border>
+              <TextBlock Grid.Column="2"
                          Classes="caption"
                          Margin="12,0,0,0"
                          VerticalAlignment="Top"

@@ -10,7 +10,8 @@ namespace Forge.App.Tests.ViewModels;
 /// <summary>
 /// The document view model's preview dispatch: classification before the read, one preview view model per kind, the
 /// editor document staying untouched during previews, and the preview released on every switch and release. No UI thread
-/// is involved; bitmap decoding is stubbed through the injectable decoder.
+/// is involved; bitmap decoding is stubbed through the injectable decoder. The two competing loads of one document (where
+/// the loser's release needs a real bitmap to be observable) live in <see cref="FilePreviewRaceTests"/>.
 /// </summary>
 public sealed class FilePreviewDocumentTests : IDisposable
 {
@@ -110,46 +111,6 @@ public sealed class FilePreviewDocumentTests : IDisposable
         Assert.False(model.HasPreview);
         Assert.False(model.HasDocument);
         Assert.False(model.HasError, model.Error);
-    }
-
-    [Fact]
-    public async Task A_preview_that_loses_the_race_is_released_and_the_winner_is_not()
-    {
-        var slow = WriteBytes("slow.png", [0x89, 0x50, 0x4E, 0x47, 0x00]);
-        var fast = Write("fast.csv", "c,d\n3,4\n");
-        var model = FileDocumentViewModel.Create(imageDecoder: StallingDecoder(out var gate, out var entered));
-
-        // Start the image load and wait until its decode is in flight, then let a second load take the document over: the
-        // first one finishes later and must release the preview nobody shows.
-        var losing = model.LoadAsync(slow, CancellationToken.None);
-        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "the image decode never started");
-        await model.LoadAsync(fast, CancellationToken.None);
-        var winner = Assert.IsType<TableFilePreviewViewModel>(model.Preview);
-        gate.Set();
-        await losing;
-
-        Assert.Same(winner, model.Preview);
-        Assert.Equal(0, winner.ReleaseCount);
-
-        await model.ReleaseDocumentAsync();
-        Assert.Equal(1, winner.ReleaseCount);
-    }
-
-    /// <summary>A decoder that blocks until the test releases it, so two loads really overlap.</summary>
-    private static Func<byte[], Avalonia.Media.Imaging.Bitmap?> StallingDecoder(
-        out ManualResetEventSlim gate,
-        out ManualResetEventSlim entered)
-    {
-        var open = new ManualResetEventSlim(false);
-        var started = new ManualResetEventSlim(false);
-        gate = open;
-        entered = started;
-        return _ =>
-        {
-            started.Set();
-            open.Wait(TimeSpan.FromSeconds(30));
-            return null;
-        };
     }
 
     [Fact]

@@ -268,6 +268,21 @@ internal sealed class WorkerSession
                 await RespondErrorAsync(message.Id, "prompt_failed", ex.Message).ConfigureAwait(false);
                 return;
             }
+            catch (BudgetExceededException ex)
+            {
+                // The contributor exhausted its cooperative budget. Answer with the classified prompt_failed code, never
+                // an unclassified handler_error, so the host can charge it against the plugin's failure budget exactly as
+                // it charges a tool/command that ran past its deadline.
+                await RespondErrorAsync(message.Id, "prompt_failed", ex.Message).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex)
+            {
+                // A contributor that threw is a failed evaluation, not a dead worker: answer with a classified error and
+                // keep serving, mirroring how a throwing tool returns an error result instead of escaping as handler_error.
+                await RespondErrorAsync(message.Id, "prompt_failed", $"{ex.GetType().Name}: {ex.Message}").ConfigureAwait(false);
+                return;
+            }
 
             await peer.RespondAsync(message.Id, output, CancellationToken.None).ConfigureAwait(false);
         }

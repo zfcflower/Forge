@@ -1,5 +1,6 @@
 using Forge.Abstractions;
 using Forge.App.Git;
+using Forge.App.Notifications;
 using Forge.Core.Storage;
 using Forge.Workspace;
 using Xunit;
@@ -255,7 +256,7 @@ internal sealed class StepCommitHarness : IAsyncDisposable
 
     private int resolveCalls;
 
-    private StepCommitHarness(StepCommitRepo repo, SqliteTodoStore store, ITodoStore seenByCommitter)
+    private StepCommitHarness(StepCommitRepo repo, SqliteTodoStore store, ITodoStore seenByCommitter, INotifications? notifications)
     {
         Repo = repo;
         Store = store;
@@ -263,7 +264,8 @@ internal sealed class StepCommitHarness : IAsyncDisposable
             StepCommitRepo.Cli,
             seenByCommitter,
             ResolveAsync,
-            () => Enabled);
+            () => Enabled,
+            notifications);
     }
 
     private Task<WorktreeResolution> ResolveAsync(string sessionId, CancellationToken ct)
@@ -318,12 +320,14 @@ internal sealed class StepCommitHarness : IAsyncDisposable
         }
     }
 
-    public static async Task<StepCommitHarness> CreateAsync(Func<SqliteTodoStore, ITodoStore>? wrap = null)
+    public static async Task<StepCommitHarness> CreateAsync(
+        Func<SqliteTodoStore, ITodoStore>? wrap = null,
+        INotifications? notifications = null)
     {
         var repo = await StepCommitRepo.CreateAsync();
         var data = System.IO.Path.Combine(repo.Root, "data");
         var store = new SqliteTodoStore(data);
-        return new StepCommitHarness(repo, store, wrap is null ? store : wrap(store));
+        return new StepCommitHarness(repo, store, wrap is null ? store : wrap(store), notifications);
     }
 
     /// <summary>Adds a done item (status Done, as the caller just marked it) with the given step fields.</summary>

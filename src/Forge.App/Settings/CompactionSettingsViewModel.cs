@@ -13,6 +13,7 @@ namespace Forge.App.Settings;
 internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
 {
     private readonly CompactionSettingsStore store;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool enabled;
     private string triggerText = string.Empty;
     private string targetText = string.Empty;
@@ -176,6 +177,13 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the labels and the inline
+        // errors are bound on the thread that built the block.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(EnabledLabel));
         OnPropertyChanged(nameof(TriggerLabel));

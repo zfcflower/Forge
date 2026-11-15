@@ -31,6 +31,7 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
     /// on the calling thread, which then hijacks the platform the next headless session sets up.
     /// </summary>
     private readonly Dispatcher? dispatcher;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool disposed;
 
     /// <summary>Starts loading <paramref name="catalog"/> in the background; the groups' <see cref="FontGroupViewModel.Families"/> fill in when it completes.</summary>
@@ -169,6 +170,13 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): both groups are bound on the
+        // thread that built the section.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         Ui.RefreshText();
         Code.RefreshText();
     }

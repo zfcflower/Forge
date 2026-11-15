@@ -42,6 +42,9 @@ internal sealed class MermaidBlockView : Border, ICopyableText
     private string info;
     private bool closed;
     private bool attached;
+
+    /// <summary>The thread this block was attached on; a language notification from another one is not ours.</summary>
+    private int attachedThread;
     private bool showingSource;
     private bool handingOff;
     private State state;
@@ -202,6 +205,7 @@ internal sealed class MermaidBlockView : Border, ICopyableText
     {
         base.OnAttachedToVisualTree(e);
         attached = true;
+        attachedThread = Environment.CurrentManagedThreadId;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
         ActualThemeVariantChanged += OnThemeVariantChanged;
         // A block built before it was added to the tree (or one whose render was cancelled on detach) starts here, where the
@@ -504,7 +508,9 @@ internal sealed class MermaidBlockView : Border, ICopyableText
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        if (attached)
+        // A block of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // table; re-applying its state from another thread would touch this control off the dispatcher that owns it.
+        if (attached && Environment.CurrentManagedThreadId == attachedThread)
         {
             ApplyState();
         }

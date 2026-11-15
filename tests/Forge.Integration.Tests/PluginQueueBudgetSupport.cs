@@ -163,8 +163,14 @@ internal sealed class PluginQueueBudgetHost : IAsyncDisposable
         return root;
     }
 
-    /// <summary>Starts a host; a caller-supplied root is shared across hosts and is not deleted on dispose.</summary>
-    public static PluginQueueBudgetHost Start(IReadOnlyList<string> hostArguments, string tag = "queue", string? root = null)
+    /// <summary>Starts a host; a caller-supplied root is shared across hosts and is not deleted on dispose.
+    /// <paramref name="environment"/> sets extra variables on the child process only (never the test process), so a
+    /// Debug-only host seam can be armed for one host without touching concurrently running ones.</summary>
+    public static PluginQueueBudgetHost Start(
+        IReadOnlyList<string> hostArguments,
+        string tag = "queue",
+        string? root = null,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var ownsRoot = root is null;
         root ??= Path.Combine(Path.GetTempPath(), "forge-budget-" + tag + "-" + Guid.NewGuid().ToString("N")[..10]);
@@ -189,6 +195,14 @@ internal sealed class PluginQueueBudgetHost : IAsyncDisposable
         foreach (var argument in hostArguments)
         {
             info.ArgumentList.Add(argument);
+        }
+
+        if (environment is not null)
+        {
+            foreach (var (key, value) in environment)
+            {
+                info.Environment[key] = value;
+            }
         }
 
         var process = Process.Start(info) ?? throw new InvalidOperationException("The Extension Host did not start.");

@@ -18,6 +18,13 @@ internal sealed class ProviderServices
     /// <summary>Advertised client version for Copilot's endpoints; a fixed literal, not the assembly version.</summary>
     internal const string CopilotEditorVersion = "Forge/1.0";
 
+    /// <summary>
+    /// The plugin version Copilot's endpoints expect beside <see cref="CopilotEditorVersion"/>. Lowercase by contract:
+    /// it is the identifier of the CLI the token was minted for, and <see cref="CopilotAuthentication"/> sends the same
+    /// literal on the sign-in calls, so an API call that spelled it differently would not match the token's client.
+    /// </summary>
+    internal const string CopilotEditorPluginVersion = "forge/1.0";
+
     private readonly HttpClient http;
     private ProviderCatalog catalog;
 
@@ -276,7 +283,7 @@ internal sealed class ProviderServices
                 headers["Authorization"] = "Bearer " + session.Token;
                 headers["Copilot-Integration-Id"] = CopilotIntegrationId;
                 headers["Editor-Version"] = CopilotEditorVersion;
-                headers["Editor-Plugin-Version"] = CopilotEditorVersion;
+                headers["Editor-Plugin-Version"] = CopilotEditorPluginVersion;
                 break;
 
             case ProviderCredentialKind.KimiCode:

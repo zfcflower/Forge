@@ -62,6 +62,7 @@ internal abstract class ApprovalCardViewModel : NotifyingObject, IDisposable
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private readonly DateTimeOffset createdAt;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private EventHandler? languageChanged;
     private bool decided;
     private bool detached;
@@ -129,8 +130,20 @@ internal abstract class ApprovalCardViewModel : NotifyingObject, IDisposable
     /// </summary>
     protected void AttachLanguageChanged(EventHandler handler)
     {
+        ArgumentNullException.ThrowIfNull(handler);
         languageChanged = handler;
-        Loc.Instance.LanguageChanged += handler;
+        // The subscription is the guarded method below, not the card's own handler: a switch raised on another thread
+        // belongs to a window that is gone (a test host), and this card's formatted text is bound on the thread that
+        // built it.
+        Loc.Instance.LanguageChanged += OnLanguageChangedOnCreatingThread;
+    }
+
+    private void OnLanguageChangedOnCreatingThread(object? sender, EventArgs e)
+    {
+        if (Environment.CurrentManagedThreadId == uiThread)
+        {
+            languageChanged?.Invoke(sender, e);
+        }
     }
 
     private void Detach()
@@ -141,9 +154,9 @@ internal abstract class ApprovalCardViewModel : NotifyingObject, IDisposable
         }
 
         detached = true;
-        if (languageChanged is { } handler)
+        if (languageChanged is not null)
         {
-            Loc.Instance.LanguageChanged -= handler;
+            Loc.Instance.LanguageChanged -= OnLanguageChangedOnCreatingThread;
             languageChanged = null;
         }
     }

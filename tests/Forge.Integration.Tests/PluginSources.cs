@@ -324,6 +324,41 @@ internal static class PluginSources
         }
         """;
 
+    /// <summary>A plugin with one healthy tool (<c>ping</c>) and one prompt contributor (<c>boom</c>) that always throws.
+    /// The worker must turn the throw into a classified prompt failure rather than letting it escape as an unclassified
+    /// handler_error, and the host must charge it against the plugin's failure budget so a contributor that keeps failing
+    /// is eventually refused (F-PW-13). The healthy <c>ping</c> tool is what makes that refusal observable: it works before
+    /// the budget is exhausted and is refused with <c>worker_disabled</c> afterwards.</summary>
+    public static string ThrowingPrompt(string id) =>
+        $$"""
+        public sealed class TestPlugin : IPlugin
+        {
+            public PluginInfo Info => new("{{id}}", "1.0.0", "throwing prompt contributor test plugin");
+
+            public void Register(IRegistrationContext context)
+            {
+                context.AddTool(new PingTool());
+                context.AddPromptContributor(new BoomContributor());
+            }
+        }
+
+        public sealed class PingTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } = new("ping", "Replies pong", "{}", ToolSideEffect.ReadOnly);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
+                Task.FromResult(new ToolResult("pong"));
+        }
+
+        public sealed class BoomContributor : IPluginPromptContributor
+        {
+            public PromptContributorDeclaration Declaration { get; } = new("boom");
+
+            public Task<string?> GetTextAsync(PromptInvocation invocation, CancellationToken ct) =>
+                throw new InvalidOperationException("the prompt contributor always throws");
+        }
+        """;
+
     /// <summary>A plugin that registers a metadata-only command with no executable body.</summary>
     public static string PlainCommand(string id) =>
         $$"""

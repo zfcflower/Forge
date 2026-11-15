@@ -93,6 +93,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private DateTimeOffset turnStartedAt;
     private bool disposed;
 
+    /// <summary>The thread the session was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     /// <summary>The shell's notification entry; null (a test, a standalone session) means the session says nothing outside its own transcript.</summary>
     private readonly INotifications? notifications;
 
@@ -1482,11 +1485,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                             NotificationsStrings.TurnFailedTitle,
                             SessionStrings.CheckpointFailed(exception.Message),
                             "checkpoint:" + SessionId);
-                    notifications.Notify(
-                        NotificationLevel.Warning,
-                        NotificationsStrings.TurnFailedTitle,
-                        SessionStrings.CheckpointFailed(exception.Message),
-                        "checkpoint:" + SessionId);
                     }
                 }
             }
@@ -2062,6 +2060,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the transcript, the cards and
+        // the sub-agent tabs are all bound on the thread that built the session.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(ReadOnlyBanner));
         OnPropertyChanged(nameof(ContinueLabel));
         OnPropertyChanged(nameof(SubAgentLabel));

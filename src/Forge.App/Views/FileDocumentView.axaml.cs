@@ -26,6 +26,9 @@ public partial class FileDocumentView : UserControl
     private ReviewOverlay? review;
     private bool attached;
 
+    /// <summary>The thread this view was attached on; a language notification from another one is not ours.</summary>
+    private int attachedThread;
+
     public FileDocumentView()
     {
         InitializeComponent();
@@ -54,6 +57,7 @@ public partial class FileDocumentView : UserControl
     {
         base.OnAttachedToVisualTree(e);
         attached = true;
+        attachedThread = Environment.CurrentManagedThreadId;
         Editor.ActualThemeVariantChanged += OnThemeChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
         Connect();
@@ -138,7 +142,16 @@ public partial class FileDocumentView : UserControl
     /// The document's own texts (tab title, open label, notices, preview captions) follow the language. The view holds
     /// the subscription only while it is on screen, so a closed tab is never kept alive by the process-wide table.
     /// </summary>
-    private void OnLanguageChanged(object? sender, EventArgs e) => model?.RefreshText();
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        // A view of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // table; refreshing the document's tab title and notices from another thread would raise them into bindings that
+        // live on the thread that attached this view.
+        if (Environment.CurrentManagedThreadId == attachedThread)
+        {
+            model?.RefreshText();
+        }
+    }
 
     private void Rebind()
     {

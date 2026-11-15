@@ -85,6 +85,9 @@ internal sealed class TimelineGutter : TemplatedControl
     private TurnCardViewModel? turn;
     private bool attached;
     private bool hooked;
+
+    /// <summary>The thread this gutter was hooked on; a language notification from another one is not ours.</summary>
+    private int hookedThread;
     private bool retryScheduled;
     private int placementRetries;
     private int placementGeneration;
@@ -201,6 +204,7 @@ internal sealed class TimelineGutter : TemplatedControl
         }
 
         hooked = true;
+        hookedThread = Environment.CurrentManagedThreadId;
 
         // The motion gate and the language may have changed while this control was detached (and so unsubscribed), so the
         // first apply after an attach is never skipped.
@@ -390,7 +394,16 @@ internal sealed class TimelineGutter : TemplatedControl
 
     private void OnMotionChanged(object? sender, EventArgs e) => ApplyNode(force: true);
 
-    private void OnLanguageChanged(object? sender, EventArgs e) => ApplyName(force: true);
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        // A gutter of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // table; re-applying its read-screen name from another thread would touch this control off the dispatcher that owns
+        // it.
+        if (Environment.CurrentManagedThreadId == hookedThread)
+        {
+            ApplyName(force: true);
+        }
+    }
 
     /// <summary>How many times any gutter recomputed its place (all instances, UI thread only); a test hook for the append cost.</summary>
     internal static long RecomputeCount { get; private set; }

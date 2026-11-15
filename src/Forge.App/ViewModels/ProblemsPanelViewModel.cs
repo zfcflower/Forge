@@ -39,6 +39,9 @@ internal sealed class ProblemsPanelViewModel : ObservableObject, IDisposable
     private int refreshRequested;
     private bool disposed;
 
+    /// <summary>The thread the panel was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     public ProblemsPanelViewModel(IWorkspaceDiagnosticSource? source, Action<WorkspaceDiagnostic> open)
     {
         ArgumentNullException.ThrowIfNull(open);
@@ -287,6 +290,13 @@ internal sealed class ProblemsPanelViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the row cache is read on the
+        // thread that built the panel, so dropping it from anywhere else would race that thread's own refresh.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         rowsByKey = [];
         coalescer?.Enqueue(true);
     }

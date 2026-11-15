@@ -474,22 +474,17 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// The compare page of this branch on its remote host (GitHub only), or empty. It is what a user can always fall back to
-    /// when gh is missing: the page creates the pull request with the branch already selected.
+    /// when gh is missing: the page creates the pull request with the branch already selected. A published branch needs it
+    /// just as much as an unpublished one - "gh cannot answer" and "the branch is not pushed" are different situations, and
+    /// only the second one has another way to open a pull request.
     /// </summary>
     public string CompareUrl
     {
         get
         {
             if (snapshot.Status?.Branch is not { Length: > 0 } branch
-                || snapshot.Status.Upstream is { Length: > 0 }
-                || defaultBranch is not { Length: > 0 } baseBranch)
-            {
-                return string.Empty;
-            }
-
-            var remote = snapshot.Remotes.FirstOrDefault(remote => string.Equals(remote.Name, "origin", StringComparison.Ordinal))
-                ?? snapshot.Remotes.FirstOrDefault();
-            if (remote is null || WebUrlOf(remote.FetchUrl) is not { Length: > 0 } web)
+                || defaultBranch is not { Length: > 0 } baseBranch
+                || WebUrlOf(CompareRemote?.FetchUrl) is not { Length: > 0 } web)
             {
                 return string.Empty;
             }
@@ -499,6 +494,11 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     }
 
     public bool HasCompareUrl => CompareUrl.Length > 0;
+
+    /// <summary>The remote the compare page would be built from: <c>origin</c> when there is one, else the first.</summary>
+    private GitRemote? CompareRemote =>
+        snapshot.Remotes.FirstOrDefault(remote => string.Equals(remote.Name, "origin", StringComparison.Ordinal))
+        ?? snapshot.Remotes.FirstOrDefault();
 
     /// <summary>
     /// Turns a git remote URL into the host's web URL for GitHub ("https://github.com/o/r.git" and "git@github.com:o/r.git"
@@ -521,7 +521,9 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         if (trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
             || trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
         {
-            return trimmed.Contains("github.com/", StringComparison.OrdinalIgnoreCase) ? trimmed : null;
+            // The host decides, never the text: "https://notgithub.com/o/r" and "https://evil.test/github.com/o/r" both
+            // carry the name and neither is a repository this build can build a compare page for.
+            return Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && IsGitHubHost(uri.Host) ? trimmed : null;
         }
 
         // scp-like: git@github.com:owner/repo
@@ -534,10 +536,16 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
         var host = trimmed[(at + 1)..colon];
         var path = trimmed[(colon + 1)..].TrimStart('/');
-        return host.Length > 0 && path.Length > 0 && string.Equals(host, "github.com", StringComparison.OrdinalIgnoreCase)
-            ? "https://" + host + "/" + path
-            : null;
+        return path.Length > 0 && IsGitHubHost(host) ? "https://" + host + "/" + path : null;
     }
+
+    /// <summary>
+    /// True only for <c>github.com</c> itself, the same rule the scp-like form has always used. A host that merely
+    /// contains the name (<c>notgithub.com</c>), a path that carries it (<c>https://evil.test/github.com/o/r</c>) and a
+    /// GitHub subdomain whose pages have another shape (<c>gist.github.com</c>) are all rejected: guessing a compare URL
+    /// for any of them opens a 404.
+    /// </summary>
+    private static bool IsGitHubHost(string host) => string.Equals(host, "github.com", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The pull request's address; the pill opens it in the browser when it is not empty.</summary>
@@ -628,9 +636,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             ComparePageCommand,
             () => HasCompareUrl && !HasPullRequestState,
             () => Loc.Instance[GitStrings.ShipComparePage],
-            () => HasCompareUrl
-                ? CompareUrl
-                : HasPullRequestState ? Loc.Instance[GitStrings.ShipAlreadyExists] : Loc.Instance[GitStrings.ShipNoRemote]));
+            () => HasCompareUrl ? CompareUrl : ShipCompareHint()));
         ShipActions.Add(new ShipActionViewModel(
             "local",
             MergeLocallyCommand,
@@ -681,6 +687,30 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         }
 
         return Loc.Instance.Format(GitStrings.ShipAlreadyOnBranch, DefaultBranchLabel);
+    }
+
+    /// <summary>
+    /// Why 在浏览器打开 compare 页面 is unavailable, in the order the user would hit the reasons. It never says "no remote"
+    /// when there is one: a remote that is not on GitHub is its own answer.
+    /// </summary>
+    private string ShipCompareHint()
+    {
+        if (HasPullRequestState)
+        {
+            return Loc.Instance[GitStrings.ShipAlreadyExists];
+        }
+
+        if (!HasRemote)
+        {
+            return Loc.Instance[GitStrings.ShipNoRemote];
+        }
+
+        if (WebUrlOf(CompareRemote?.FetchUrl) is not { Length: > 0 })
+        {
+            return Loc.Instance[GitStrings.ShipCompareNotGitHub];
+        }
+
+        return defaultBranch is { Length: > 0 } ? string.Empty : Loc.Instance[GitStrings.ShipNoDefaultBranch];
     }
 
     /// <summary>Why 合并 PR is unavailable: nothing open, a draft, or the platform's own mergeability says no.</summary>

@@ -7,6 +7,5 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Forge.Plugin.Sdk\Forge.Plugin.Sdk.csproj" />
-    <ProjectReference Include="..\Forge.Ipc.Protocol\Forge.Ipc.Protocol.csproj" />
   </ItemGroup>
 </Project>

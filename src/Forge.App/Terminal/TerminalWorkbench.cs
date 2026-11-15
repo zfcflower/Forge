@@ -34,6 +34,7 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
     private readonly Dictionary<string, List<TerminalViewModel>> bySession = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TerminalViewModel> byId = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     private string? activeSessionId;
     private string? activeWorkDir;
@@ -344,6 +345,13 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
     /// <summary>A terminal without an OSC title shows "Terminal n", which has to follow a language switch.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): the tabs live on the thread
+        // that built the workbench.
+        if (Volatile.Read(ref disposed) != 0 || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         TerminalViewModel[] known;
         lock (gate)
         {

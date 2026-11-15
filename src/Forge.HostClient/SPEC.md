@@ -132,6 +132,7 @@ depends-on: [forge-ipc]
   审批路径(以 `ToolSideEffect.Execute` 请求),被拒或没有审批路径时返回错误结果且不发 IPC;提示词代理发
   `plugin.prompt`/`PromptExecutionRequest`,携带由 `ToolContext` 绑定的上下文。两者都带随机 `runId` 与自身预算,
   其回调按同一 pending 规则执行。同步阻塞 IPC 不引入。
+- **注册的副作用默认 fail-safe。** `tools.register` 声明的 `SideEffect` 若不是已定义枚举值,一律按 `ToolSideEffect.Execute`(最高权限)处理,从而必走审批——宁可多问,不可把未知副作用当只读放行。每运行内部工具并发上限默认 `MaxConcurrentToolCalls=8`。
 - **提示词的软失败只覆盖可解释的失败,且不掩盖调用方取消。** `GetPluginPromptAsync` 在以下情形返回 `null` 并记诊断:
   未注册/空白标识、客户端未运行、环、工作目录无效、host 业务错误(`IpcRemoteException`)、超时,以及调用中途的
   连接断开或管道 IO 失败(`IpcConnectionClosedException` 本身是 `IOException`,所以只捕 `IOException` 这一具体类型)。

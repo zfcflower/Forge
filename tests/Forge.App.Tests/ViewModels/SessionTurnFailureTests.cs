@@ -5,6 +5,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Providers;
 using Forge.App.ViewModels;
 using Forge.Workspace;
@@ -26,6 +27,7 @@ public sealed class SessionTurnFailureTests
 {
     private const string SessionId = "session-under-test";
     private const string FailureText = "checkpoint store is down";
+    private const string GateFailureText = "the turn gate is down";
     private const string UserText = "please answer";
 
     [Fact]
@@ -69,20 +71,62 @@ public sealed class SessionTurnFailureTests
         Assert.Contains(ScriptedProvider.Answer, text.CopyText, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// One failure is announced once. The centre merges repeats of one key into a count, so a second call for the same
+    /// broken checkpoint would tell the user "×2" about one failure and dilute the notifications that matter.
+    /// </summary>
+    [Theory]
+    [InlineData(CheckpointFailure.Begin)]
+    [InlineData(CheckpointFailure.Complete)]
+    [InlineData(CheckpointFailure.NextTurnNumber)]
+    public async Task A_failing_checkpoint_is_announced_once_as_a_warning(CheckpointFailure failure)
+    {
+        var outcome = await RunTurnAsync(failure);
+
+        var call = Assert.Single(outcome.Notifications.WithKey("checkpoint:" + SessionId));
+        Assert.Equal(NotificationLevel.Warning, call.Level);
+        Assert.Equal(NotificationsStrings.TurnFailedTitleKey, call.TitleKey);
+        // The turn itself ran, so nothing announces a failed turn beside the checkpoint.
+        Assert.Empty(outcome.Notifications.WithKey("turn-failed:" + SessionId));
+    }
+
+    /// <summary>
+    /// A send that fails is announced once, under the session's own key: the transcript line is missed as soon as
+    /// another session or window has the focus, which is what the toast exists for.
+    /// </summary>
+    [Fact]
+    public async Task A_send_that_fails_is_announced_once_as_an_error_keyed_by_the_session()
+    {
+        var outcome = await RunTurnAsync(CheckpointFailure.None, new InvalidOperationException(GateFailureText));
+
+        var call = Assert.Single(outcome.Notifications.WithKey("turn-failed:" + SessionId));
+        Assert.Equal(NotificationLevel.Error, call.Level);
+        Assert.Equal(NotificationsStrings.TurnFailedTitleKey, call.TitleKey);
+        Assert.Empty(outcome.Notifications.WithKey("checkpoint:" + SessionId));
+        // The transcript keeps the reason after the toast is gone.
+        Assert.Contains(outcome.Notices, notice => notice.Contains(GateFailureText, StringComparison.Ordinal));
+    }
+
     private static bool IsCheckpointNotice(string notice) =>
         notice.StartsWith(SessionStrings.CheckpointFailed(string.Empty).Resolve(), StringComparison.Ordinal) &&
         notice.Contains(FailureText, StringComparison.Ordinal);
 
-    private enum CheckpointFailure
+    public enum CheckpointFailure
     {
+        None,
         Begin,
         Complete,
         NextTurnNumber,
     }
 
-    private sealed record Outcome(bool IsRunning, int TurnCompleted, IReadOnlyList<string> Notices, IReadOnlyList<TranscriptItemViewModel> Transcript);
+    private sealed record Outcome(
+        bool IsRunning,
+        int TurnCompleted,
+        IReadOnlyList<string> Notices,
+        IReadOnlyList<TranscriptItemViewModel> Transcript,
+        RecordingNotifications Notifications);
 
-    private static async Task<Outcome> RunTurnAsync(CheckpointFailure failure)
+    private static async Task<Outcome> RunTurnAsync(CheckpointFailure failure, Exception? sendFailure = null)
     {
         var root = NewRoot();
         try
@@ -106,7 +150,7 @@ public sealed class SessionTurnFailureTests
                         case CheckpointFailure.Complete:
                             checkpoints.CompleteFailure = new FakeDbException(FailureText);
                             break;
-                        default:
+                        case CheckpointFailure.NextTurnNumber:
                             checkpoints.ListFailure = new FakeDbException(FailureText);
                             break;
                     }
@@ -122,24 +166,37 @@ public sealed class SessionTurnFailureTests
                             new EmptyTodoStore("t1", DateTimeOffset.UnixEpoch),
                             new ModelSettings("scripted-model")),
                         Info(repository));
+                    var notifications = new RecordingNotifications();
                     var workspace = new SessionWorkspaceViewModel(
                         Info(repository),
                         runtime,
                         new TurnCheckpointService(git, checkpoints),
                         store,
-                        TestProviderServices.Unconfigured(repository));
+                        TestProviderServices.Unconfigured(repository),
+                        notifications: notifications);
+
+                    if (sendFailure is { } gateIsDown)
+                    {
+                        // The shell's own turn gate (the merge-conflict and read-only checks) runs before the turn; when
+                        // it throws, the send fails and nothing of the turn ever starts.
+                        workspace.TurnGate = _ => throw gateIsDown;
+                    }
 
                     var completed = 0;
                     workspace.TurnCompleted += _ => completed++;
                     workspace.Draft = UserText;
                     workspace.SendCommand.Execute(null);
 
-                    Assert.True(await PumpUntilAsync(() => completed > 0), "the turn never completed");
+                    Assert.True(
+                        await PumpUntilAsync(
+                            () => completed > 0 || notifications.WithKey("turn-failed:" + SessionId).Count > 0),
+                        "the turn never finished");
                     return new Outcome(
                         workspace.IsRunning,
                         completed,
                         [.. workspace.Transcript.Items.OfType<NoticeViewModel>().Select(static notice => notice.Text)],
-                        [.. workspace.Transcript.Items]);
+                        [.. workspace.Transcript.Items],
+                        notifications);
                 },
                 CancellationToken.None);
         }

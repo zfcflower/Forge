@@ -73,8 +73,8 @@ public static class AnthropicRateLimits
     }
 
     /// <summary>
-    /// The console rate limits, when reported. Their reset is an RFC 3339 timestamp (not the unix seconds the unified windows
-    /// use), so both shapes are accepted rather than assuming one.
+    /// The console rate limits, when reported. Their resets are RFC 3339 timestamps while the unified windows report unix
+    /// seconds, so each family is read in its own format; a value in the other family's format is dropped, not reinterpreted.
     /// </summary>
     private static ProviderThrottle? ReadThrottle(HttpResponseHeaders headers)
     {
@@ -100,7 +100,10 @@ public static class AnthropicRateLimits
             ? value
             : null;
 
-    /// <summary>Either an RFC 3339 timestamp or unix seconds: the two header families disagree and neither is worth guessing at.</summary>
+    /// <summary>
+    /// An RFC 3339 timestamp — the only format this (console) family sends. The unified windows send unix seconds and have
+    /// their own reader (<c>ReadReset</c>); a unix-seconds value here is dropped rather than guessed at, and vice versa.
+    /// </summary>
     private static DateTimeOffset? ReadTimestamp(HttpResponseHeaders headers, string name)
     {
         if (ProviderHeaders.ReadFirst(headers, name) is not { } text)

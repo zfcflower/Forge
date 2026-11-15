@@ -764,9 +764,99 @@ public sealed class GitSyncViewModelTests
     [InlineData("ssh://git@gitlab.com/acme/forge.git", null)]
     [InlineData("/srv/git/forge.git", null)]
     [InlineData("", null)]
+    // The host decides, never the text: a look-alike host and a path that carries the name are both another host, and a
+    // GitHub subdomain has its own page shape. Guessing any of them opens a 404.
+    [InlineData("https://notgithub.com/acme/forge.git", null)]
+    [InlineData("https://github.com.evil.test/acme/forge.git", null)]
+    [InlineData("https://evil.test/github.com/acme/forge", null)]
+    [InlineData("https://gist.github.com/acme/forge", null)]
+    [InlineData("git@notgithub.com:acme/forge.git", null)]
+    [InlineData("https://GitHub.com/acme/forge", "https://GitHub.com/acme/forge")]
     public void A_remote_url_becomes_a_web_url_only_when_the_page_shape_is_known(string remote, string? expected)
     {
         Assert.Equal(expected, GitSyncViewModel.WebUrlOf(remote));
+    }
+
+    [Fact]
+    public async Task A_published_branch_whose_gh_cannot_answer_keeps_the_compare_page()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("compare-published");
+        GitTestShell.RunChecked(work, "checkout", "-q", "-b", "feature");
+        sandbox.CommitFile(work, "feature.txt", "feature\n", "feature work");
+        GitTestShell.RunChecked(work, "push", "-q", "-u", "origin", "feature");
+        // Everything is pushed; only now does origin become a GitHub address, so no call in this test leaves the machine.
+        GitTestShell.RunChecked(work, "remote", "set-url", "origin", "https://github.com/acme/forge.git");
+
+        var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Fail(
+            GitRemoteFailureKind.Other, "no pull request", reason: PrFailureReason.PullRequestNotFound))
+        {
+            Availability = new PrPlatformAvailability(PrPlatformState.NotAuthenticated, "run gh auth login"),
+        };
+
+        var session = SharedUi.Session;
+        var panel = NewPanel(pullRequests: platform);
+        try
+        {
+            await AttachAndWaitAsync(session, panel, "s1", work);
+
+            var state = await session.Dispatch(
+                () => new
+                {
+                    panel.PullRequestPhase,
+                    panel.HasUpstream,
+                    panel.CompareUrl,
+                    Compare = panel.ShipActions[2],
+                },
+                CancellationToken.None);
+
+            // gh cannot answer and the branch is already published, so the compare page is the only creation path left:
+            // it belongs to "the platform cannot tell us", not to "the branch is not pushed".
+            Assert.Equal(PullRequestPhase.Unavailable, state.PullRequestPhase);
+            Assert.True(state.HasUpstream);
+            Assert.Equal("https://github.com/acme/forge/compare/main...feature?expand=1", state.CompareUrl);
+            Assert.Equal("compare", state.Compare.Key);
+            Assert.True(state.Compare.IsEnabled);
+            Assert.Equal(string.Empty, state.Compare.DisabledReason);
+        }
+        finally
+        {
+            await session.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task The_compare_row_names_the_remote_it_cannot_build_a_page_for_instead_of_a_missing_one()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        // A tracked clone whose origin is a local path: a remote exists, and it is not on GitHub.
+        var work = sandbox.CloneTracked("compare-local");
+
+        var session = SharedUi.Session;
+        var panel = NewPanel();
+        try
+        {
+            await AttachAndWaitAsync(session, panel, "s1", work);
+
+            var state = await session.Dispatch(
+                () => new
+                {
+                    panel.HasRemote,
+                    panel.CompareUrl,
+                    Compare = panel.ShipActions[2],
+                },
+                CancellationToken.None);
+
+            Assert.True(state.HasRemote);
+            Assert.Equal(string.Empty, state.CompareUrl);
+            Assert.False(state.Compare.IsEnabled);
+            Assert.Equal(Loc.Instance[GitStrings.ShipCompareNotGitHub], state.Compare.DisabledReason);
+            Assert.NotEqual(Loc.Instance[GitStrings.ShipNoRemote], state.Compare.DisabledReason);
+        }
+        finally
+        {
+            await session.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
     }
 
     [Fact]

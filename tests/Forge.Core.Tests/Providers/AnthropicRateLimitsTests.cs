@@ -161,6 +161,30 @@ public sealed class AnthropicRateLimitsTests
         Assert.False(throttle.HasTokens);
     }
 
+    [Fact]
+    public void Each_reset_format_is_read_by_its_own_family_and_dropped_by_the_other()
+    {
+        // The subscription windows report unix seconds (pinned above); an RFC 3339 value in that slot is dropped rather
+        // than reinterpreted, because a wrong reset time would hold the automation flow until a moment that never comes.
+        var unified = AnthropicRateLimits.Read(Response(
+            ("anthropic-ratelimit-unified-5h-utilization", "0.5"),
+            ("anthropic-ratelimit-unified-5h-reset", "2026-11-13T05:28:00Z")).Headers);
+
+        Assert.NotNull(unified);
+        Assert.Equal(0.5, unified.FiveHourUtilization);
+        Assert.Null(unified.FiveHourResetAt);
+
+        // The console family reports RFC 3339 (pinned above); bare unix seconds in that slot are dropped, not guessed at.
+        var console = AnthropicRateLimits.Read(Response(
+            ("anthropic-ratelimit-requests-remaining", "7"),
+            ("anthropic-ratelimit-requests-reset", "1794547200")).Headers);
+
+        Assert.NotNull(console);
+        var throttle = Assert.IsType<ProviderThrottle>(console.Throttle);
+        Assert.Equal(7, throttle.RequestRemaining);
+        Assert.Null(throttle.RequestResetAt);
+    }
+
     // ---------------------------------------------------------------- the reading on the wire
 
     [Fact]
