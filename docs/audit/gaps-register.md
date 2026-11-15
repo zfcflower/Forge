@@ -206,5 +206,5 @@ WS-07 工具清单、Core 凭据并发串行、Core FTS 回退、HostClient 安�
 
 ### 收尾后仍剩余
 - MainWindow.axaml.cs:224 startup-failed 兜底站点(窗口 code-behind catch-all)接线测试:需 MainWindow 级夹具+让 InitializeAsync 抛过滤器外异常,成本高。
-- ~~降级构建 purge 无法清 messages_fts(换回 FTS5 索引仍可能命中已清理会话)~~ ✅ 已收口:FTS5 恢复可读时按 messages 反向修剪孤儿索引行(StorageSchema.PruneOrphanedSearchRowsAsync,2 新例+变异验证)。**相邻新缺口(未修)**:降级期 append 的消息只进 messages+messages_text,换回 FTS5 后不补进 messages_fts(EnsureFallbackTableAsync 只做反方向补行),FTS5 全文搜不到降级期写入的消息。
+- ~~降级构建 purge 无法清 messages_fts(换回 FTS5 索引仍可能命中已清理会话)~~ ✅ 已收口:FTS5 恢复可读时按 messages 反向修剪孤儿索引行(StorageSchema.PruneOrphanedSearchRowsAsync,2 新例+变异验证)。**相邻缺口亦收口**:降级期 append 的消息换回 FTS5 后回填进 messages_fts(StorageSchema.BackfillMissingIndexRowsAsync,UnindexedMessagesPredicate NOT EXISTS 去重,messages_text 存在门槛+无缺失即跳过,3 新例+双变异验证),降级期写入恢复可搜。
 - UNVERIFIED 平台项:POSIX 真实残留/不可杀进程(Linux CI)、服务端行为、真实 LSP/PTY/gh 集成。
