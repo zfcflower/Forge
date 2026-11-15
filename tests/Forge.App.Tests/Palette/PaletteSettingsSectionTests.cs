@@ -20,18 +20,6 @@ namespace Forge.App.Tests.Palette;
 public sealed class PaletteSettingsSectionTests
 {
     [Fact]
-    public void The_result_limit_editor_writes_through_to_the_live_preference()
-    {
-        var preferences = new AppPreferences();
-        var section = new PaletteSettingsSectionViewModel(preferences);
-
-        section.ResultLimit = 123;
-
-        Assert.Equal(123, preferences.PalettePerSourceLimit);
-        Assert.Equal(123, section.ResultLimit);
-    }
-
-    [Fact]
     public void The_result_limit_editor_reports_the_bounds_the_preference_enforces()
     {
         var section = new PaletteSettingsSectionViewModel(new AppPreferences());

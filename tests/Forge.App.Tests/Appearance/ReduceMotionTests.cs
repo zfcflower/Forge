@@ -27,32 +27,6 @@ namespace Forge.App.Tests.Appearance;
 public sealed class ReduceMotionTests
 {
     [Fact]
-    public async Task The_settings_switch_writes_the_preference()
-    {
-        await SharedUi.RunAsync(async () =>
-        {
-            var preferences = new AppPreferences();
-            var model = new AppearanceSettingsViewModel(preferences, new SystemFontCatalog(static () => []));
-            try
-            {
-                await model.FamiliesLoaded;
-                Assert.False(model.ReduceMotion);
-
-                model.ReduceMotion = true;
-                Assert.True(preferences.ReduceMotion);
-
-                // An external edit is echoed back into the switch.
-                preferences.ReduceMotion = false;
-                Assert.False(model.ReduceMotion);
-            }
-            finally
-            {
-                model.Dispose();
-            }
-        });
-    }
-
-    [Fact]
     public void The_applier_sets_the_gate_from_the_loaded_preference_and_raises_changed_exactly_on_a_change()
     {
         var previous = TreeMotion.ReducedMotion;

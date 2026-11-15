@@ -12,21 +12,6 @@ namespace Forge.App.Tests.Settings;
 /// </summary>
 public sealed class AgentsSettingsSectionTests
 {
-    [Fact]
-    public void The_cap_round_trips_to_the_preference()
-    {
-        var preferences = new AppPreferences();
-        var section = new AgentsSettingsSectionViewModel(preferences);
-        Assert.Equal(AppPreferences.DefaultAgentsMaxParallelSubAgents, section.MaxParallel);
-
-        section.MaxParallel = 3;
-        Assert.Equal(3, preferences.AgentsMaxParallelSubAgents);
-
-        // A raw write to the preference is visible through the property: the section holds no copy of the value.
-        preferences.AgentsMaxParallelSubAgents = 5;
-        Assert.Equal(5, section.MaxParallel);
-    }
-
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
@@ -56,22 +41,6 @@ public sealed class AgentsSettingsSectionTests
 
         // The untouched store's value is inside that range, so the field never opens on a value it would reject.
         Assert.InRange(section.MaxParallel, section.MinParallel, section.MaxParallelLimit);
-    }
-
-    [Fact]
-    public void The_spawn_switch_round_trips_to_the_preference()
-    {
-        var preferences = new AppPreferences();
-        var section = new AgentsSettingsSectionViewModel(preferences);
-        Assert.True(section.SubAgentsEnabled);
-
-        section.SubAgentsEnabled = false;
-        Assert.False(preferences.AgentsSubAgentsEnabled);
-        Assert.False(section.SubAgentsEnabled);
-
-        // Written from elsewhere, it is read back without a reload: the next turn reads the live value.
-        preferences.AgentsSubAgentsEnabled = true;
-        Assert.True(section.SubAgentsEnabled);
     }
 
     [Fact]

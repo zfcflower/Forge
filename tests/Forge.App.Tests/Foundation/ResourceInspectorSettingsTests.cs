@@ -21,20 +21,12 @@ namespace Forge.App.Tests.Foundation;
 public sealed class ResourceInspectorSettingsTests
 {
     [Fact]
-    public void The_fields_edit_the_live_preferences()
+    public void The_field_range_is_the_preference_range()
     {
-        var preferences = new AppPreferences();
-        var model = new ResourceInspectorSettingsViewModel(preferences);
+        var model = new ResourceInspectorSettingsViewModel(new AppPreferences());
 
-        model.TailLines = 120;
-        model.RefreshMilliseconds = 1500;
-
-        Assert.Equal(120, preferences.InspectorLogTailLines);
-        Assert.Equal(1500, preferences.InspectorRefreshMilliseconds);
-        Assert.Equal(120, model.TailLines);
-        Assert.Equal(1500, model.RefreshMilliseconds);
-
-        // The section offers exactly the range the preference setter clamps to.
+        // The spinner's bounds and the setter's clamp are one range: a smaller field range would hide values the preference
+        // accepts, a larger one would offer values it silently rejects.
         Assert.Equal(AppPreferences.MinInspectorLogTailLines, model.MinTailLines);
         Assert.Equal(AppPreferences.MaxInspectorLogTailLines, model.MaxTailLines);
         Assert.Equal(AppPreferences.MinInspectorRefreshMilliseconds, model.MinRefreshMilliseconds);

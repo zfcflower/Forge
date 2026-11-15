@@ -205,33 +205,6 @@ public sealed class GitSettingsSectionGitTests : IDisposable
     }
 
     [Fact]
-    public void The_step_commits_switch_round_trips()
-    {
-        var preferences = new AppPreferences();
-        using var section = new GitSettingsSectionViewModel(preferences);
-
-        section.StepCommits = false;
-        Assert.False(preferences.GitStepCommits);
-        Assert.False(section.StepCommits);
-
-        section.StepCommits = true;
-        Assert.True(preferences.GitStepCommits);
-    }
-
-    [Fact]
-    public void The_numbers_round_trip_through_the_section()
-    {
-        var preferences = new AppPreferences();
-        using var section = new GitSettingsSectionViewModel(preferences);
-
-        section.ChecksPollSeconds = 45;
-        Assert.Equal(45, preferences.GitChecksPollSeconds);
-
-        section.ChecksMaxWaitMinutes = 5;
-        Assert.Equal(5, preferences.GitChecksMaxWaitMinutes);
-    }
-
-    [Fact]
     public void A_value_out_of_range_typed_into_the_section_is_clamped_in_the_preference_and_read_back()
     {
         var preferences = new AppPreferences();

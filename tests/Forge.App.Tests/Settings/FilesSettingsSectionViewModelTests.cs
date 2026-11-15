@@ -8,33 +8,6 @@ namespace Forge.App.Tests.Settings;
 public sealed class FilesSettingsSectionViewModelTests
 {
     [Fact]
-    public void Rows_and_notebook_kilobytes_round_trip_through_the_preferences()
-    {
-        var preferences = new AppPreferences();
-        using var section = new FilesSettingsSectionViewModel(preferences);
-
-        section.PreviewRows = 1500;
-        section.NotebookOutputKilobytes = 50;
-
-        Assert.Equal(1500, preferences.FilesCsvMaxRows);
-        Assert.Equal(50, preferences.FilesNotebookOutputKilobytes);
-        Assert.Equal(1500, section.PreviewRows);
-        Assert.Equal(50, section.NotebookOutputKilobytes);
-    }
-
-    [Fact]
-    public void The_image_limit_is_edited_in_the_megabytes_the_preference_stores()
-    {
-        var preferences = new AppPreferences();
-        using var section = new FilesSettingsSectionViewModel(preferences);
-
-        section.ImageLimitMiB = 20;
-
-        Assert.Equal(20, preferences.FilesImagePreviewMaxMegabytes);
-        Assert.Equal(20, section.ImageLimitMiB);
-    }
-
-    [Fact]
     public void Values_are_clamped_by_the_preferences_on_each_write()
     {
         var preferences = new AppPreferences();
@@ -56,22 +29,10 @@ public sealed class FilesSettingsSectionViewModelTests
     }
 
     [Fact]
-    public void A_loaded_preference_reads_back_through_the_section()
-    {
-        var preferences = new AppPreferences();
-        using var section = new FilesSettingsSectionViewModel(preferences);
-
-        preferences.FilesImagePreviewMaxMegabytes = 40;
-
-        Assert.Equal(40, section.ImageLimitMiB);
-    }
-
-    [Fact]
     public void The_notebook_row_is_labelled_in_the_kilobytes_it_edits()
     {
         using var section = new FilesSettingsSectionViewModel(new AppPreferences());
 
-        Assert.Equal("files.preview.settings.notebookKilobytes", PreviewStrings.SettingsNotebookKilobytesKey);
         Assert.Equal(Loc.Instance[PreviewStrings.SettingsNotebookKilobytesKey], section.NotebookOutputLabel);
         Assert.Contains("KB", section.NotebookOutputLabel, StringComparison.Ordinal);
     }

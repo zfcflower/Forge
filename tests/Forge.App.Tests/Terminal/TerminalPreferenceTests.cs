@@ -174,10 +174,20 @@ public sealed class TerminalPreferenceTests
                 TimeSpan.FromSeconds(20));
 
             Assert.Equal(3, observed.Count);
-            Assert.Equal("pwsh", observed[0].Shell);
-            Assert.Equal(["-l", "-i", "--title", "my shell"], observed[0].Arguments);
-            Assert.Equal("C:\\work", observed[0].WorkingDirectory);
-            Assert.Equal("bash", observed[2].Shell);
-            Assert.Equal(["--login"], observed[2].Arguments);
+            // The pumps start on background threads, so the recorded order is the order they reached the host, not the order
+            // they were opened in: group by the shell each one asked for.
+            var openedBeforeTheEdit = observed.Where(static start => start.Shell == "pwsh").ToList();
+            Assert.Equal(2, openedBeforeTheEdit.Count);
+            Assert.All(
+                openedBeforeTheEdit,
+                static start =>
+                {
+                    Assert.Equal(["-l", "-i", "--title", "my shell"], start.Arguments);
+                    Assert.Equal("C:\\work", start.WorkingDirectory);
+                });
+
+            var openedAfterTheEdit = Assert.Single(observed, static start => start.Shell == "bash");
+            Assert.Equal(["--login"], openedAfterTheEdit.Arguments);
+            Assert.Equal("C:\\work", openedAfterTheEdit.WorkingDirectory);
     }
 }

@@ -37,6 +37,29 @@ internal static class GitTestShell
 
     public static string RunChecked(string directory, params string[] arguments)
     {
+        for (var attempt = 1; ; attempt++)
+        {
+            var (exitCode, stdout, stderr) = Run(directory, arguments);
+            if (exitCode == 0)
+            {
+                return stdout;
+            }
+
+            // The product's own git process writes index.lock in the same sandbox while a UI test runs, so a setup commit
+            // can collide with it and lose. git keeps a lock only while it runs (a stale one comes from a crash and still
+            // fails below), so a short wait is the difference between a real failure and a scheduling one.
+            if (attempt < 4 && stderr.Contains("index.lock", StringComparison.Ordinal))
+            {
+                Thread.Sleep(TimeSpan.FromMilliseconds(50 * attempt));
+                continue;
+            }
+
+            throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed ({exitCode}): {stderr}");
+        }
+    }
+
+    private static (int ExitCode, string Stdout, string Stderr) Run(string directory, string[] arguments)
+    {
         var startInfo = new ProcessStartInfo("git")
         {
             WorkingDirectory = directory,
@@ -75,12 +98,7 @@ internal static class GitTestShell
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         process.WaitForExit();
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed ({process.ExitCode}): {stderr.Result}");
-        }
-
-        return stdout.Result;
+        return (process.ExitCode, stdout.Result, stderr.Result);
     }
 
     public static IReadOnlyList<string> BranchList(string repository) =>

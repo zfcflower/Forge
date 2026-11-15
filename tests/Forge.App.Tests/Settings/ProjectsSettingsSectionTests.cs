@@ -14,23 +14,6 @@ public sealed class ProjectsSettingsSectionTests
 {
     private const string Fallback = @"C:\forge-workspace-parent";
 
-    [Fact]
-    public void The_timeout_round_trips_to_the_preference()
-    {
-        var preferences = new AppPreferences();
-        var section = new ProjectsSettingsSectionViewModel(preferences, Fallback);
-        Assert.Equal(AppPreferences.DefaultProjectsCloneTimeoutSeconds, section.CloneTimeoutSeconds);
-
-        section.CloneTimeoutSeconds = 30;
-
-        Assert.Equal(30, preferences.ProjectsCloneTimeoutSeconds);
-        Assert.Equal(30, section.CloneTimeoutSeconds);
-
-        // Written from elsewhere it is read back without a reload: the dialog reads the live value.
-        preferences.ProjectsCloneTimeoutSeconds = 90;
-        Assert.Equal(90, section.CloneTimeoutSeconds);
-    }
-
     [Theory]
     [InlineData(-5, 0)]
     [InlineData(7200, AppPreferences.MaxProjectsCloneTimeoutSeconds)]

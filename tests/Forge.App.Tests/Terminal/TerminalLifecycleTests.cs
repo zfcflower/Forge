@@ -100,7 +100,9 @@ public sealed class TerminalLifecycleTests
             var running = await scene.WaitForAsync(() => scene.ViewModel.Status == TerminalStatus.Running);
 
             scene.Host.Session.Emit("\x1b]0;shell-42\x07");
-            var titled = await scene.WaitForAsync(() => scene.ViewModel.Title == "shell-42");
+            // The emulator records the title on the parser thread and the view model announces it on the next flush, so the
+            // event is what has to be awaited: the property is already set when the announcement is still pending.
+            var titled = await scene.WaitForAsync(() => titles.Count > 0);
             return (running, titled, scene.ViewModel.Title, scene.ViewModel.TabTitle, titles);
         });
 
