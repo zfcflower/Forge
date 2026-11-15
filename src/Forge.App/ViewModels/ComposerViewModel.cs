@@ -763,7 +763,8 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         return templates;
     }
 
-    private IReadOnlyList<SlashEntry> DiscoverSkills() => SkillCatalog.Discover(workspace, AgentRuntimeServices.UserDirectory());
+    private IReadOnlyList<SlashEntry> DiscoverSkills() =>
+        SkillCatalog.Discover(workspace, AgentRuntimeServices.UserDirectory(), AgentRuntimeServices.ProductSkillsDirectory);
 
     private IReadOnlyList<SlashEntry> LoadSkills()
     {

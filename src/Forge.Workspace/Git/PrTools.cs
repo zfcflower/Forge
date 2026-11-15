@@ -22,13 +22,19 @@ public sealed class PrTools
     /// The user's override of one <c>pr_workflow</c> phase text (phase name, the call's working directory), or null to
     /// serve the compiled-in <see cref="PrWorkflowText"/>. Asked on every call, so an edit applies to the next read.
     /// </param>
+    /// <param name="gatesEnabled">
+    /// The user's workflow-gates preference, read when <c>pr_create</c> reaches gate 5 (every plan step is done): false
+    /// skips that gate, null keeps it enabled. Asked on every call, so a preference change applies to the next
+    /// <c>pr_create</c>.
+    /// </param>
     public PrTools(
         GitCli git,
         IPrPlatform platform,
         GitToolSettings settings,
         GitReviewLedger ledger,
         ITodoStore todos,
-        Func<string, string, string?>? workflowText = null)
+        Func<string, string, string?>? workflowText = null,
+        Func<bool>? gatesEnabled = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(platform);
@@ -37,7 +43,7 @@ public sealed class PrTools
         ArgumentNullException.ThrowIfNull(todos);
 
         View = new PrViewTool(git, platform);
-        Create = new PrCreateTool(git, platform, settings, ledger, todos);
+        Create = new PrCreateTool(git, platform, settings, ledger, todos, gatesEnabled);
         Sync = new PrSyncTool(git, platform, settings);
         Edit = new PrEditTool(git, platform);
         Workflow = new PrWorkflowTool(git, workflowText);
@@ -52,15 +58,17 @@ public sealed class PrTools
     public ITool View { get; }
 
     /// <summary>
-    /// <c>{"title": string, "body"?: string, "base"?: string, "draft"?: bool}</c> (Write). Four gates in code, in order:
+    /// <c>{"title": string, "body"?: string, "base"?: string, "draft"?: bool}</c> (Write). Five gates in code, in order:
     /// clean tree (untracked included); fresh fetch then <c>origin/&lt;base&gt;</c> is an ancestor of HEAD; the full
     /// <c>git_diff</c> was read at exactly this HEAD (<see cref="GitReviewLedger"/> – code enforces the re-read only,
     /// the cleanup is the agent's judgement); the body's <c>## Testing</c> section is non-empty and not a platitude
-    /// (<see cref="PrTestingEvidence"/>). Then HEAD and the tree are checked again, an existing open pull request for the
-    /// branch is reported instead of creating another, the branch is pushed with <c>-u</c> and a lease from a fresh
-    /// <c>ls-remote</c> – the refspec names the reviewed HEAD, so a commit that lands between the gates and the push is
-    /// refused as a gate-to-push race – and the pull request is created (draft only when asked). <c>body</c> defaults to
-    /// <see cref="PrBodyRenderer.Render"/> of the session's plan summary and steps.
+    /// (<see cref="PrTestingEvidence"/>); every grouped step of the session's plan is done (<see cref="ITodoStore"/> –
+    /// loose items with a null <see cref="TodoItem.GroupId"/> are the user's queued raw input, not steps of this plan, and
+    /// never block; skipped when the gates preference is off). Then HEAD and the tree are checked again, an existing open
+    /// pull request for the branch is reported instead of creating another, the branch is pushed with <c>-u</c> and a
+    /// lease from a fresh <c>ls-remote</c> – the refspec names the reviewed HEAD, so a commit that lands between the gates
+    /// and the push is refused as a gate-to-push race – and the pull request is created (draft only when asked).
+    /// <c>body</c> defaults to <see cref="PrBodyRenderer.Render"/> of the session's plan summary and steps.
     /// </summary>
     public ITool Create { get; }
 

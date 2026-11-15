@@ -32,14 +32,16 @@ internal sealed record InstrumentRow(string Title, string Detail, string Trailin
 
     /// <summary>
     /// The badge word, read in the current language: the prompts section's own built-in/global/project words, so a skill and
-    /// a template of the same origin read the same (the shared badge convention of the two sections). Empty for a row with
-    /// no badge, which is never drawn.
+    /// a template of the same origin read the same (the shared badge convention of the two sections), plus this section's own
+    /// word for the product's built-in skills, which the prompts section has no counterpart for. Empty for a row with no
+    /// badge, which is never drawn.
     /// </summary>
     public string ScopeText => Scope switch
     {
         SkillScope.BuiltIn => Loc.Instance[PromptsStrings.ScopeBuiltInKey],
         SkillScope.Global => Loc.Instance[PromptsStrings.ScopeGlobalKey],
         SkillScope.Project => Loc.Instance[PromptsStrings.ScopeProjectKey],
+        SkillScope.Product => Loc.Instance[InstrumentsStrings.SkillsScopeProductKey],
         _ => string.Empty,
     };
 }
@@ -185,7 +187,10 @@ internal sealed class SkillsSettingsSectionViewModel(AppComposition composition)
         {
             skills = await BackgroundRead
                 .RunAsync(
-                    _ => Task.FromResult(SkillCatalog.Discover(workspace, Agents.AgentRuntimeServices.UserDirectory())),
+                    _ => Task.FromResult(SkillCatalog.Discover(
+                        workspace,
+                        Agents.AgentRuntimeServices.UserDirectory(),
+                        Agents.AgentRuntimeServices.ProductSkillsDirectory)),
                     CancellationToken.None)
                 .ConfigureAwait(true);
         }

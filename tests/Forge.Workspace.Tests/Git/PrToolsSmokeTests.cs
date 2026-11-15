@@ -140,8 +140,8 @@ internal static class PrLifecycleTestHelpers
             new ToolContext(session, workingDirectory),
             CancellationToken.None);
 
-    public static PrTools Tools(IPrPlatform platform, ITodoStore? todos = null, GitReviewLedger? ledger = null) =>
-        new(new GitCli(), platform, new GitToolSettings(), ledger ?? new GitReviewLedger(), todos ?? new PrLifecycleFakeTodos());
+    public static PrTools Tools(IPrPlatform platform, ITodoStore? todos = null, GitReviewLedger? ledger = null, Func<bool>? gatesEnabled = null) =>
+        new(new GitCli(), platform, new GitToolSettings(), ledger ?? new GitReviewLedger(), todos ?? new PrLifecycleFakeTodos(), gatesEnabled: gatesEnabled);
 }
 
 /// <summary>Tool definitions, <c>pr_view</c>, <c>pr_workflow</c>, <c>pr_edit</c> and <see cref="PrBodyEditor"/> against the fake platform.</summary>

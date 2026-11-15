@@ -67,4 +67,6 @@ C# 默认接口方法(DIM)陷阱:替身基类下再声明 DIM 同名公共方法
 
 既有 flake（隔离复跑确认）：`FrameCoalescingTests.Burst`（flushCount 阈值调度抖动）、`MenuShellTests` project_plus（临时沙箱 git index.lock）。
 
+`MenuShellTests` 补充复核（2026-11-15，编排阶段 1–3 收尾）：不只是 `project_plus` 一例——同一类连跑时失败项会漂移（`The_project_plus_creates_the_sparse_workspace_the_dialog_chose` / `The_new_workspace_dialog_lists_top_level_directories_and_needs_one_chosen_for_a_sparse_checkout` / `The_option_turned_on_before_a_start_point_lists_once_one_is_selected` 都出现过），单独跑该用例恒绿，跑整个类约 1/3 概率红。**已用基线自证非回归**：把 `fb4c55e` 干净导出到独立目录，同一命令连跑 3 次得 `38/38、38/38、37/38`，与带改动的工作树一致。判读：`Forge.App.Tests` 全量收据里这类红不是本次改动造成的，需要按"隔离复跑 + 基线对照"两步确认后再判定；根治方向是那些用例自建沙箱仓库时不再依赖共享临时目录/`index.lock`，属独立任务。
+
 判读注意：`forge-test.ps1` 失败项目重建复跑一次，收据只记复跑；首跑失败仅见 `artifacts/logs/l3-run.log`。

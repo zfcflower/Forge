@@ -45,6 +45,19 @@ public sealed record AgentHostOptions
     /// </summary>
     public IStepCommitter? StepCommitter { get; init; }
 
+    /// <summary>
+    /// The git evidence the step completion gate reads (Core has no git, so the app implements this over its own git layer).
+    /// Null = no gate: without a probe the <c>todo</c> tool lets every step be marked done. Only used together with
+    /// <see cref="Todos"/> and <see cref="Reviews"/>: a host that cannot run a review cannot earn a verdict either.
+    /// </summary>
+    public IStepChangeProbe? StepChanges { get; init; }
+
+    /// <summary>
+    /// Reads the <c>workflowGatesEnabled</c> preference before every attempt to mark a step done, so a settings change
+    /// applies to the next attempt. Null means the gate is always on when <see cref="StepChanges"/> is set.
+    /// </summary>
+    public Func<bool>? StepGatesEnabled { get; init; }
+
     /// <summary>Registers the <c>request_review</c> tool when set; the app implements it over its git layer (Core has no git).</summary>
     public IReviewChangeSetSource? Reviews { get; init; }
 
@@ -130,9 +143,18 @@ public sealed class AgentHost
             }
         }
 
+        StepReviewLedger? stepReviews = null;
         if (options.Todos is { } todos)
         {
-            builtIns.Add(new TodoTool(todos, options.StepCommitter));
+            // One ledger per host: request_review writes a step's verdict into it and the gate reads it back, so both tools
+            // must hold the same instance. It is never persisted, so a restarted host asks for new reviews.
+            stepReviews = new StepReviewLedger();
+            // The gate only exists where its own evidence can be obtained: without request_review there is no way to earn
+            // an approving verdict, so gating there would make every code step impossible to finish rather than safer.
+            var gate = options.Reviews is null
+                ? new StepGate(stepReviews)
+                : new StepGate(stepReviews, options.StepChanges, options.StepGatesEnabled);
+            builtIns.Add(new TodoTool(todos, options.StepCommitter, gate));
         }
 
         if (options.QuestionHandler is { } questionHandler)
@@ -148,7 +170,7 @@ public sealed class AgentHost
 
         if (options.Reviews is { } reviews)
         {
-            builtIns.Add(new RequestReviewTool(scheduler, reviews, options.Todos, options.ReviewLimits));
+            builtIns.Add(new RequestReviewTool(scheduler, reviews, options.Todos, options.ReviewLimits, stepReviews));
         }
 
         var compactor = options.Compactor

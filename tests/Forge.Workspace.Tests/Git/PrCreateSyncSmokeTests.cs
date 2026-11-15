@@ -482,6 +482,134 @@ public sealed class PrCreateSyncSmokeTests
         AssertNothingPublished(fixture);
     }
 
+    // ------------------------------------------------------------------------------------------- pr_create: gate 5
+
+    /// <summary>One plan step: grouped (a step of the session's plan) or loose (the user's queued raw input).</summary>
+    private static TodoItem StepItem(string id, string title, TodoStatus status, bool grouped = true) =>
+        new(id, PrLifecycleTestHelpers.Session, title, status, null, 0, DateTimeOffset.UnixEpoch, GroupId: grouped ? "g1" : null);
+
+    [Fact]
+    public async Task Gate_5_refuses_undone_grouped_steps_by_id_and_title_and_ignores_loose_items()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var fixture = new PrLifecycleFixture();
+        fixture.MarkReviewed();
+        fixture.Todos.Items.AddRange(
+        [
+            StepItem("s1", "Done step", TodoStatus.Done),
+            StepItem("s2", "Fix the parser", TodoStatus.Pending),
+            StepItem("s3", "Wire the probe", TodoStatus.InProgress),
+            StepItem("q1", "the user's queued item", TodoStatus.Pending, grouped: false),
+        ]);
+
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "pr_create refused (gate 5: every plan step is done)",
+            "2 plan step(s) are not done",
+            "s2: Fix the parser",
+            "s3: Wire the probe");
+        Assert.DoesNotContain("q1", result.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("the user's queued item", result.Content, StringComparison.Ordinal);
+        AssertNothingPublished(fixture);
+    }
+
+    [Fact]
+    public async Task Gate_5_lists_at_most_ten_undone_steps_and_counts_the_rest()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var fixture = new PrLifecycleFixture();
+        fixture.MarkReviewed();
+        for (var i = 1; i <= 12; i++)
+        {
+            fixture.Todos.Items.Add(StepItem("s" + i, "Step " + i + " of the plan", TodoStatus.Pending));
+        }
+
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "gate 5",
+            "12 plan step(s) are not done",
+            "s10: Step 10 of the plan",
+            "... and 2 more");
+        Assert.DoesNotContain("Step 11 of the plan", result.Content, StringComparison.Ordinal);
+        AssertNothingPublished(fixture);
+    }
+
+    [Fact]
+    public async Task Gate_5_puts_each_step_on_one_line_and_cuts_overlong_titles()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var fixture = new PrLifecycleFixture();
+        fixture.MarkReviewed();
+        var longTitle = new string('x', 130);
+        fixture.Todos.Items.AddRange(
+        [
+            StepItem("s1", "first line\nsecond line", TodoStatus.Pending),
+            StepItem("s2", longTitle, TodoStatus.Pending),
+        ]);
+
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "gate 5",
+            "s1: first line second line");
+        Assert.DoesNotContain("first line\nsecond line", result.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("s2: " + longTitle, result.Content, StringComparison.Ordinal);
+        Assert.Contains("s2: " + new string('x', 117) + "...", result.Content, StringComparison.Ordinal);
+        AssertNothingPublished(fixture);
+    }
+
+    [Fact]
+    public async Task Gate_5_passes_when_every_grouped_step_is_done_even_with_loose_items_open()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var fixture = new PrLifecycleFixture();
+        fixture.MarkReviewed();
+        fixture.Todos.Items.AddRange(
+        [
+            StepItem("s1", "Done step", TodoStatus.Done),
+            StepItem("q1", "the user's queued item", TodoStatus.Pending, grouped: false),
+        ]);
+
+        var result = await fixture.CreateAsync(Args());
+
+        Assert.False(result.IsError, result.Content);
+        Assert.Contains("Created pull request #7", result.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Gate_5_is_skipped_when_the_gates_preference_is_off()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var fixture = new PrLifecycleFixture();
+        fixture.MarkReviewed();
+        fixture.Todos.Items.Add(StepItem("s1", "Undone step", TodoStatus.Pending));
+        var ungated = PrLifecycleTestHelpers.Tools(fixture.Platform, fixture.Todos, fixture.Ledger, gatesEnabled: () => false);
+
+        var result = await PrLifecycleTestHelpers.InvokeAsync(ungated.Create, Args(), fixture.Work);
+
+        Assert.False(result.IsError, result.Content);
+        Assert.Contains("Created pull request #7", result.Content, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Create_refuses_a_body_longer_than_the_platform_accepts()
     {

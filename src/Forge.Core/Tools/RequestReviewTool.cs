@@ -26,6 +26,7 @@ public sealed class RequestReviewTool : ITool
         + "With step_id the change set is exactly that checklist step's own commit; without it the change set is base (default: the repository's default branch) plus the uncommitted tree, and intent is then required. "
         + "paths narrows the change set and focus says what to concentrate on. "
         + "A request changes verdict must be acted on: fix the findings, commit, and call request_review again at the new HEAD. "
+        + "The verdict of a step review (step_id) is what the step completion gate reads: only an approve verdict lets that step be marked done. "
         + "This tool blocks nothing by itself, and an approving review does not replace the session's own git_diff read before pr_create. "
         + "The reviewer is read-only and never edits files.";
 
@@ -33,8 +34,19 @@ public sealed class RequestReviewTool : ITool
     private readonly IReviewChangeSetSource changeSets;
     private readonly ITodoStore? todos;
     private readonly Func<ReviewPackageLimits>? limits;
+    private readonly StepReviewLedger? ledger;
 
-    public RequestReviewTool(SubAgentScheduler scheduler, IReviewChangeSetSource changeSets, ITodoStore? todos = null, Func<ReviewPackageLimits>? limits = null)
+    /// <param name="scheduler">Runs the read-only Reviewer sub-agent.</param>
+    /// <param name="changeSets">The git side of the review (Core has no git).</param>
+    /// <param name="todos">The checklist, when the host has one; a step review needs it.</param>
+    /// <param name="limits">Reads how much of a change set the package carries.</param>
+    /// <param name="ledger">Where a step review's verdict is recorded for the step completion gate; null = nothing records verdicts.</param>
+    public RequestReviewTool(
+        SubAgentScheduler scheduler,
+        IReviewChangeSetSource changeSets,
+        ITodoStore? todos = null,
+        Func<ReviewPackageLimits>? limits = null,
+        StepReviewLedger? ledger = null)
     {
         ArgumentNullException.ThrowIfNull(scheduler);
         ArgumentNullException.ThrowIfNull(changeSets);
@@ -42,6 +54,7 @@ public sealed class RequestReviewTool : ITool
         this.changeSets = changeSets;
         this.todos = todos;
         this.limits = limits;
+        this.ledger = ledger;
         Definition = new ToolDefinition(Name, Description, SchemaJson);
     }
 
@@ -179,6 +192,14 @@ public sealed class RequestReviewTool : ITool
         }
 
         var verdict = RequestReviewVerdict.Parse(outcome.Text);
+
+        // Only a finished step review is recorded, under the step it reviewed: the empty change set returned above started no
+        // review, and a stopped one has no verdict, so neither may overwrite an earlier verdict with a weaker one.
+        if (arguments.StepId is not null)
+        {
+            ledger?.Record(context.SessionId, arguments.StepId, verdict, changeSet.HeadCommit);
+        }
+
         var builder = new StringBuilder(384 + Math.Min(outcome.Text.Length, RequestReviewVerdict.MaxReviewChars));
         builder.Append(RequestReviewVerdict.VerdictLine(verdict)).Append('\n');
         if (string.IsNullOrWhiteSpace(changeSet.HeadCommit))

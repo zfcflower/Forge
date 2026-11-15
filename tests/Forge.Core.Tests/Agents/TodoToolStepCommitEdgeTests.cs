@@ -3,6 +3,7 @@ using Forge.Abstractions;
 using Forge.Core.Agents;
 using Forge.Core.Storage;
 using Forge.Core.Tests.Storage;
+using Forge.Core.Tools;
 using Xunit;
 
 namespace Forge.Core.Tests.Agents;
@@ -96,16 +97,34 @@ public sealed class TodoToolStepCommitEdgeTests
         }
     }
 
+    /// <summary>The gate's git evidence as the tool sees it: one state, and every call counted.</summary>
+    private sealed class ScriptedGateProbe : IStepChangeProbe
+    {
+        private int calls;
+
+        public StepChangeState State { get; set; } = StepChangeState.Dirty;
+
+        public int Calls => Volatile.Read(ref calls);
+
+        public Task<StepChangeProbe> ProbeAsync(string sessionId, string workingDirectory, CancellationToken ct)
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromResult(new StepChangeProbe(State));
+        }
+    }
+
     private sealed class Rig : IAsyncDisposable
     {
         private readonly TempDirectory directory = new();
 
-        public Rig(bool withCommitter = true)
+        public Rig(bool withCommitter = true, IStepChangeProbe? gateProbe = null)
         {
             Sqlite = new SqliteTodoStore(directory.Path);
             Store = new FaultableStore(Sqlite);
             Committer = new ScriptedCommitter(Store);
-            Tool = new TodoTool(Store, withCommitter ? Committer : null);
+            Ledger = new StepReviewLedger();
+            Gate = gateProbe is null ? null : new StepGate(Ledger, gateProbe);
+            Tool = new TodoTool(Store, withCommitter ? Committer : null, Gate);
         }
 
         public SqliteTodoStore Sqlite { get; }
@@ -113,6 +132,12 @@ public sealed class TodoToolStepCommitEdgeTests
         public FaultableStore Store { get; }
 
         public ScriptedCommitter Committer { get; }
+
+        /// <summary>The verdict ledger the gate reads; also what the host hands to <c>request_review</c>.</summary>
+        public StepReviewLedger Ledger { get; }
+
+        /// <summary>The gate wired into the tool; null = the pre-gate behaviour the other tests cover.</summary>
+        public StepGate? Gate { get; }
 
         public TodoTool Tool { get; }
 
@@ -1094,6 +1119,91 @@ public sealed class TodoToolStepCommitEdgeTests
         var result = await rig.InvokeAsync(UpdateJson(id, "\"note\":\"n\"", "\"summary\":\"long summary\"", "\"verification\":\"proof\""));
 
         Assert.Equal($"Updated #{id}: [ ] #{id} Step — n", result.Content);
+    }
+
+    // ---------------------------------------------------------------- the step completion gate
+
+    [Fact]
+    public async Task A_refused_step_keeps_its_state_and_never_reaches_the_committer()
+    {
+        var probe = new ScriptedGateProbe { State = StepChangeState.Dirty };
+        await using var rig = new Rig(gateProbe: probe);
+        var id = await rig.AddAsync("Step");
+
+        var result = await rig.InvokeAsync(UpdateJson(id, "\"status\":\"done\""));
+
+        Assert.True(result.IsError);
+        Assert.Contains("cannot be marked done yet", result.Content, StringComparison.Ordinal);
+        Assert.Contains("uncommitted changes", result.Content, StringComparison.Ordinal);
+        Assert.Contains("request_review", result.Content, StringComparison.Ordinal);
+        Assert.Equal(TodoStatus.Pending, (await rig.GetAsync(id)).Status);
+        Assert.Null((await rig.GetAsync(id)).CommitId);
+        Assert.Empty(rig.Committer.Items);
+        Assert.Equal(1, probe.Calls);
+    }
+
+    [Fact]
+    public async Task A_done_that_does_not_finish_the_step_is_not_gated_but_a_retry_after_a_failed_commit_is()
+    {
+        var probe = new ScriptedGateProbe { State = StepChangeState.Dirty };
+        await using var rig = new Rig(gateProbe: probe);
+        var id = await rig.AddAsync("Step");
+        await rig.Sqlite.UpdateAsync(id, null, TodoStatus.Done, null, default);
+
+        // Already done with no commit error: saying done again neither commits nor asks the gate.
+        var again = await rig.InvokeAsync(UpdateJson(id, "\"status\":\"done\""));
+        Assert.False(again.IsError);
+        Assert.Empty(rig.Committer.Items);
+        Assert.Equal(0, probe.Calls);
+
+        // The last commit failed: this retry finishes the step anew, so the gate is consulted and refuses it.
+        await rig.Sqlite.SetCommitResultAsync(id, null, "hook rejected", default);
+        var retry = await rig.InvokeAsync(UpdateJson(id, "\"status\":\"done\""));
+        Assert.True(retry.IsError);
+        Assert.Contains("cannot be marked done yet", retry.Content, StringComparison.Ordinal);
+        Assert.Equal(1, probe.Calls);
+        Assert.Empty(rig.Committer.Items);
+        var stored = await rig.GetAsync(id);
+        Assert.Equal(TodoStatus.Done, stored.Status);
+        Assert.Equal("hook rejected", stored.CommitError);
+    }
+
+    [Fact]
+    public async Task The_gate_judges_the_stored_verification_when_the_update_sets_none()
+    {
+        var probe = new ScriptedGateProbe { State = StepChangeState.Dirty };
+        await using var rig = new Rig(gateProbe: probe);
+        var id = await rig.AddAsync("Step");
+        await rig.InvokeAsync(UpdateJson(id, "\"verification\":\"dotnet test: 12 passed\""));
+        rig.Ledger.Record(Session, id, ReviewVerdict.Approve, "abcdef1234567890");
+
+        var result = await rig.InvokeAsync(UpdateJson(id, "\"status\":\"done\""));
+
+        Assert.False(result.IsError, result.Content);
+        Assert.Contains("Step commit: committed abc1234", result.Content, StringComparison.Ordinal);
+        Assert.Single(rig.Committer.Items);
+    }
+
+    [Fact]
+    public async Task A_step_that_leaves_done_loses_its_verdict_and_needs_a_new_review()
+    {
+        var probe = new ScriptedGateProbe { State = StepChangeState.Dirty };
+        await using var rig = new Rig(gateProbe: probe);
+        var id = await rig.AddAsync("Step");
+        await rig.Sqlite.UpdateAsync(id, null, TodoStatus.Done, null, new TodoStepFields(null, null, "dotnet test: 12 passed"), default);
+        rig.Ledger.Record(Session, id, ReviewVerdict.Approve, "abcdef1234567890");
+
+        var reopened = await rig.InvokeAsync(UpdateJson(id, "\"status\":\"pending\""));
+        Assert.False(reopened.IsError);
+        Assert.Null(rig.Ledger.Find(Session, id));
+
+        // The fix after the reopen leaves uncommitted changes, and the old approval is gone: the gate refuses anew.
+        var redone = await rig.InvokeAsync(UpdateJson(id, "\"status\":\"done\""));
+        Assert.True(redone.IsError);
+        Assert.Contains("uncommitted changes", redone.Content, StringComparison.Ordinal);
+        Assert.Contains("cannot be marked done yet", redone.Content, StringComparison.Ordinal);
+        Assert.Empty(rig.Committer.Items);
+        Assert.Equal(1, probe.Calls);
     }
 
     // ---------------------------------------------------------------- the advertised surface

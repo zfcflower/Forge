@@ -57,6 +57,33 @@ internal sealed record AgentRuntimeServices(
     /// <summary>The git side of <c>request_review</c> (handed to <c>AgentHostOptions.Reviews</c>, which registers the tool). Null in a unit test: the session then has no review tool.</summary>
     public IReviewChangeSetSource? Reviews { get; set; }
 
+    /// <summary>
+    /// The git side of the step-completion gate (handed to <c>AgentHostOptions.StepChanges</c>): whether the session's
+    /// worktree holds changes a step has to answer for. Null in a unit test, or in a runtime assembled without git: the
+    /// gate then does not exist and marking a step done behaves as it did before the gate.
+    /// </summary>
+    public IStepChangeProbe? StepChanges { get; set; }
+
+    /// <summary>
+    /// Whether the mechanical workflow gates hold (<c>preferences.workflowGatesEnabled</c>), read on every gated call by
+    /// the step gate and by <c>pr_create</c>. Null = on.
+    /// </summary>
+    public Func<bool>? WorkflowGatesEnabled { get; set; }
+
+    /// <summary>
+    /// Whether the default orchestration is injected into the root agent (<c>preferences.orchestrationEnabled</c>). Read
+    /// when a host is built, like the prompt templates: a change applies to the next host, never to a cached prefix
+    /// mid-turn. Null = on.
+    /// </summary>
+    public Func<bool>? OrchestrationEnabled { get; set; }
+
+    /// <summary>
+    /// The directory the product's own skills were materialized into (<c>&lt;UserData&gt;/builtin-skills/&lt;version&gt;</c>),
+    /// published once by the composition root at startup; null when they could not be written. Process-wide because an
+    /// installation has one data root. The lowest-priority skill source: a same-named workspace or user skill wins.
+    /// </summary>
+    public static string? ProductSkillsDirectory { get; set; }
+
     /// <summary>How much of a change set the review package carries, read per review from the settings (handed to <c>AgentHostOptions.ReviewLimits</c>). Null: the package defaults.</summary>
     public Func<ReviewPackageLimits>? ReviewLimits { get; set; }
 
@@ -202,6 +229,15 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private AgentInstance? root;
     private AgentInstance? activeRoot;
     private AgentDefinition? rootDefinition;
+
+    /// <summary>The orchestration block of the host being built; empty when the default orchestration is off or has no router.</summary>
+    private string orchestration = string.Empty;
+
+    /// <summary>The model a default root runs on, kept so the decorated root definition is the same agent as the undecorated one.</summary>
+    private ModelSettings rootModel;
+
+    /// <summary>The <c>skill</c> tool of this session; one instance, its catalog is read per call.</summary>
+    private SkillTool? skillTool;
     private bool rootStale;
     private List<Interjection>? undelivered;
     private SessionApprovalHandler? approvalHandler;
@@ -226,6 +262,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         this.services = services;
         Session = session;
+        rootModel = services.Model;
         if (services.CompactionChanges is { } changes)
         {
             changes.Changed += OnCompactionChanged;
@@ -419,6 +456,32 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
               ReferenceEquals(left.ToolNames, right.ToolNames);
 
     /// <summary>
+    /// The root definition with the orchestration block appended to its role text. Only the root gets it: a sub-agent is
+    /// handed one scoped task by its parent and must not route or interview. The decoration is applied on the way into
+    /// the host, never stored in <see cref="rootDefinition"/>, so <see cref="SameDefinition"/> keeps comparing what the
+    /// user chose and a decorated root does not look changed on every turn.
+    /// </summary>
+    private AgentDefinition? WithOrchestration(AgentDefinition? definition)
+    {
+        if (orchestration.Length == 0 || !OrchestrationPrompt.CanLoadSkills(definition))
+        {
+            return definition;
+        }
+
+        // The same agent AgentHost.CreateRoot would build by default, with the block as its role text.
+        return definition is null
+            ? new AgentDefinition("Root", "Main coding agent.", orchestration, rootModel)
+            : definition with
+            {
+                Prompt = definition.Prompt.Length == 0 ? orchestration : definition.Prompt + "\n\n" + orchestration,
+            };
+    }
+
+    /// <summary>The skills this session can load: the workspace's, the user's, then the product's own (lowest priority).</summary>
+    private IReadOnlyList<Services.SlashEntry> DiscoverSkills() =>
+        Services.SkillCatalog.Discover(Session.WorkspacePath, AgentRuntimeServices.UserDirectory(), AgentRuntimeServices.ProductSkillsDirectory);
+
+    /// <summary>
     /// Hands a user message to the running root turn; the loop delivers it at the next tool-batch boundary. False when no
     /// turn is running, in which case the caller should queue the message instead.
     /// </summary>
@@ -587,7 +650,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             definition = rootDefinition;
         }
 
-        agent = await built.ResumeRootAsync(SessionId, Session.WorkspacePath, CancellationToken.None, definition).ConfigureAwait(false);
+        agent = await built.ResumeRootAsync(SessionId, Session.WorkspacePath, CancellationToken.None, WithOrchestration(definition)).ConfigureAwait(false);
         lock (gate)
         {
             host ??= built;
@@ -622,19 +685,36 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// switched off: the model then has no way to start a child, while the control tools a parent already needs stay
     /// available, so the children a session started before the switch can still be steered and stopped. Publishes a new tool
     /// set only when a switch moved.
+    /// <para><c>request_review</c> stays available while the workflow gates are on: the step-completion gate demands an
+    /// approving review for every step that changed code, so taking the tool away would leave such a step impossible to
+    /// finish (and <c>pr_create</c>'s gate 5 then refuses forever). One setting must not silently disable another's only
+    /// way forward.</para>
     /// </summary>
     private void ApplyDisabledTools(AgentHost target)
     {
         var subAgents = CurrentSubAgentLimits();
+        var spawning = subAgents.Enabled ? [] : GateAwareSpawningTools();
         if (services.DisabledTools is not { } disabled)
         {
             // A runtime without the tools store (a unit test) still honours the sub-agent switch, in both directions.
-            target.SetDisabledTools(subAgents.Enabled ? [] : SpawningTools);
+            target.SetDisabledTools(spawning);
             return;
         }
 
         var stored = ToolCatalog.EffectiveDisabled(disabled());
-        target.SetDisabledTools(subAgents.Enabled ? stored : stored.Concat(SpawningTools));
+        target.SetDisabledTools(stored.Concat(spawning));
+    }
+
+    /// <summary>
+    /// The spawning tools to take out while sub-agents are switched off, minus <c>request_review</c> when the workflow gates
+    /// are on: the gate cannot be satisfied without it, so the two settings must not add up to a dead end.
+    /// </summary>
+    private string[] GateAwareSpawningTools()
+    {
+        var gates = services.WorkflowGatesEnabled?.Invoke() ?? true;
+        return gates
+            ? [SpawnAgentTool.Name]
+            : SpawningTools;
     }
 
     /// <summary>
@@ -977,6 +1057,14 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         var mainModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model;
         var subAgents = CurrentSubAgentLimits();
         var layers = LayerSources.Resolve(systemSlot, AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
+
+        // One orchestration snapshot per host, like the templates above: the skill index and the routing rule are bytes
+        // in the root's cached prefix, so they must not move under a running turn. The product's own skills are the
+        // lowest-priority source, so a workspace or user skill of the same name is the one the index lists.
+        rootModel = mainModel;
+        orchestration = services.OrchestrationEnabled is { } orchestrationEnabled && !orchestrationEnabled()
+            ? string.Empty
+            : OrchestrationPrompt.Build(DiscoverSkills());
         var compaction = services.CurrentCompaction();
         var built = new AgentHost(
             new AgentHostOptions
@@ -992,6 +1080,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
                 Reviews = services.Reviews,
+                StepChanges = services.StepChanges,
+                StepGatesEnabled = services.WorkflowGatesEnabled,
                 ReviewLimits = services.ReviewLimits,
                 Artifacts = services.Artifacts,
                 Templates = templates,
@@ -1154,6 +1244,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.Files));
         }
 
+        into.Add(new ToolDescriptor(SkillTool.Name, ToolOrigin.BuiltIn, ToolGroups.Session));
+
         foreach (var tool in services.PullRequestTools)
         {
             into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.PullRequests));
@@ -1234,6 +1326,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
 
         tools.AddRange(services.FileTools);
+        tools.Add(skillTool ??= new SkillTool(DiscoverSkills));
         tools.AddRange(services.PullRequestTools);
         if (services.WebTools is { } webTools)
         {
@@ -1291,6 +1384,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         reserved.UnionWith(ToolCatalog.CoreNames);
         reserved.UnionWith([ExtensionToolNames.List, ExtensionToolNames.Create, ExtensionToolNames.Update, ExtensionToolNames.Disable, ExtensionToolNames.Delete]);
         AddNames(reserved, services.FileTools);
+        reserved.Add(SkillTool.Name);
         AddNames(reserved, services.PullRequestTools);
         AddNames(reserved, web);
         if (services.Git is { } git)

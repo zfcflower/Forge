@@ -7,6 +7,20 @@ Forge 测试执行入口 —— 测试范围治理的唯一执行面。
 副本(无 .git):按派活文本给的过滤器显式执行,例如
   scripts/forge-test.ps1 -Level L1 -Project Forge.App.Tests -Ns Workbench [-Gates]
 L3 全量必须显式 --why merge|release|interface|infra|cross-module,缺省直接拒绝。
+
+细粒度选择器(自己知道要跑哪几条时用它;给了选择器就不用 -Ns,也不必给 -Level——过滤器运行按 L1 算):
+  指定测试类    -Project Forge.Core.Tests -Class WorkflowEngineTests
+  指定测试方法  -Project Forge.Core.Tests -Method Forge.Core.Tests.WorkflowEngineTests.ExecuteAsync
+  指定 Trait    -Project Forge.Core.Tests -Trait Category=Unit
+  多个值用逗号(OR 关系);-Class/-Method/-Trait 可混用,拼成一条 --filter。可加 -Gates 附源码扫描门槛
+  (目标项目不是 Forge.App.Tests 时门槛另开一条运行)。选择器与 -Auto、-Ns、-Level L2/L3 互斥
+  (它们都是"全量/另一个范围"的声明);过滤器 0 命中判红,不判绿。
+
+并行:
+  -Parallel                多个测试项目并发跑(每个项目一个 dotnet test 进程)
+  -Parallelism <1-16>      并发进程数上限;缺省 = min(运行数, CPU/2 向下取整)
+  -MaxParallelThreads <n>  单个项目内 xunit 并行线程上限(临时 .runsettings,经 --settings 传入)
+  首跑失败的项目回到串行路径再跑一次(仍失败才 Rebuild 重跑),并行不会掩掉“旧 bin 假红”。
 #>
 [CmdletBinding()]
 param(
@@ -17,7 +31,23 @@ param(
     [switch]$Gates,
     [ValidateSet('merge', 'release', 'interface', 'infra', 'cross-module')][string]$Why,
     [switch]$SkipBuild,
-    [switch]$ListOnly
+    [switch]$ListOnly,
+
+    # ---- 细粒度选择器(收窄到具体用例;给了它们就不必再给 -Ns) ----
+    # -Class:类名或其一段(FullyQualifiedName~),多个用逗号,OR 关系
+    [string[]]$Class,
+    # -Method:完全限定方法名(FullyQualifiedName=),大小写与命名空间必须精确,多个用逗号,OR 关系
+    [string[]]$Method,
+    # -Trait:VSTest trait 值,写成 Name=Value(如 Category=Unit),多个用逗号,OR 关系;xunit 的 [Trait("Category","Unit")] 即为 Category=Unit
+    [string[]]$Trait,
+
+    # ---- 并行 ----
+    # -Parallel:把本次选中的多个测试项目并发跑(每个项目一个 dotnet test 进程)
+    [switch]$Parallel,
+    # -Parallelism:并发进程数上限,默认取"运行数"与"CPU 数/2 向下取整"的较小者(至少 1)
+    [ValidateRange(1, 16)][int]$Parallelism = 0,
+    # -MaxParallelThreads:单个项目内 xunit 的并行线程数上限;0=不动(xunit 默认按 CPU);写临时 .runsettings 经 --settings 传入
+    [ValidateRange(0, 64)][int]$MaxParallelThreads = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +65,57 @@ if ($env:FORGE_RUN -eq '1') {
 }
 
 if ($Auto -and $Level) { Write-Fail "-Auto 与 -Level 二选一:-Auto 自己推导落点。" }
+
+# ---- 细粒度选择器:给了 -Class/-Method/-Trait 就必须指定一个 -Project ----
+$Selectors = @()
+foreach ($c in @($Class)) {
+    if ([string]::IsNullOrWhiteSpace($c)) { continue }
+    foreach ($part in ($c -split ',')) {
+        $v = $part.Trim()
+        if ($v) { $Selectors += "FullyQualifiedName~$v" }
+    }
+}
+foreach ($m in @($Method)) {
+    if ([string]::IsNullOrWhiteSpace($m)) { continue }
+    foreach ($part in ($m -split ',')) {
+        $v = $part.Trim()
+        # 精确匹配:用户写全名就原样,写 "." 开头的相对名也要求全名,不做模糊猜测
+        if ($v) { $Selectors += "FullyQualifiedName=$v" }
+    }
+}
+foreach ($t in @($Trait)) {
+    if ([string]::IsNullOrWhiteSpace($t)) { continue }
+    foreach ($part in ($t -split ',')) {
+        $v = $part.Trim()
+        if (-not $v) { continue }
+        if ($v -notmatch '=') { Write-Fail "-Trait 需要写成 Name=Value,例如 -Trait Category=Unit;收到 '$v'" }
+        $Selectors += $v
+    }
+}
+$HasSelectors = $Selectors.Count -gt 0
+
+# 给了选择器但解析为空(`-Class " "` / `-Class ,`)是错误输入,不能静默落回 -Auto
+if (-not $HasSelectors -and ([bool]$Class -or [bool]$Method -or [bool]$Trait)) {
+    Write-Fail "-Class/-Method/-Trait 解析后为空:给了参数但没有可用的值。"
+}
+
+if ($HasSelectors) {
+    if ($Auto) {
+        # 选择器是“我自己知道要跑哪几条”的声明,和落点推导冲突(推导会追加别的项目/门槛)
+        Write-Fail "-Class/-Method/-Trait 与 -Auto 不能合用:选择器本身就是范围声明。去掉 -Auto(选择器默认按 L1 跑)。"
+    }
+    if (-not $Project) {
+        Write-Fail "-Class/-Method/-Trait 需要 -Project <测试项目> 指明在哪个项目里跑,例如 -Project Forge.Core.Tests -Class WorkflowEngineTests。"
+    }
+    if ($Level -in @('L2', 'L3')) {
+        # 选择器跑的是子集:L2 的合约定是项目全量,L3 是全仓全量,两者与“只要这几条”矛盾
+        Write-Fail "-Class/-Method/-Trait 与 -Level $Level 互斥:L2 是项目全量、L3 是全仓全量,而选择器只要子集。去掉 -Level(选择器按 L1 跑)或去掉选择器。"
+    }
+
+    # 过滤运行就是 L1(AGENTS.md §4.3 的定义);不给 -Level 时默认到这里,而不是落到 -Auto 推导
+    $Level = 'L1'
+}
+
 if (-not $Auto -and -not $Level) { $Auto = $true }
 
 # ---- 落点映射(scripts/test-map.json,最长前缀匹配;改表须与 testing.md 落点表同步) ----
@@ -189,8 +270,28 @@ L3 触发条件(testing.md):合并/发布;Abstractions/Plugin.Sdk/Ipc/存储 sch
 确属触发:scripts/forge-test.ps1 -Level L3 --why merge|release|interface|infra|cross-module
 "@
     }
-    if ($Level -eq 'L1') {
-        if (-not $Project -or -not $Ns) { Write-Fail "L1 需要 -Project <测试项目> 与 -Ns <命名空间段>(副本无 .git,不能用 -Auto)。示例:scripts/forge-test.ps1 -Level L1 -Project Forge.App.Tests -Ns Workbench" }
+    # 细粒度选择器:它就是范围声明,一个项目一条过滤器;不再叠加项目全量
+    if ($HasSelectors) {
+        # -Ns 与选择器都是范围声明,同时给含义不明(不论 -Level 写不写)
+        if ($Ns) { Write-Fail "-Ns 与 -Class/-Method/-Trait 选一个:两者都是范围声明,同时给会让过滤器含义歧义。" }
+        if (-not (Test-Path (Join-Path $RepoRoot "tests/$Project"))) { Write-Fail "tests/$Project 不存在;项目名取 tests/ 下的目录,例如 Forge.Core.Tests。" }
+        $f = ($Selectors -join '|')
+        $Runs.Add(@{ Project = $Project; Filter = $f; Reason = '细粒度选择器' })
+        # 源码扫描门槛的五个类只存在于 Forge.App.Tests:目标项目不是它时另开一条运行,
+        # 不能把门槛过滤器 OR 进别的项目(那会是 0 命中的假覆盖)。
+        if ($Gates) {
+            if ($Project -eq 'Forge.App.Tests') {
+                $Runs[0].Filter = $f + '|' + $GatesFilter
+            }
+            else {
+                $Runs.Add(@{ Project = 'Forge.App.Tests'; Filter = $GatesFilter; Reason = '显式源码扫描门槛' })
+            }
+        }
+
+        $Derivation.Add("选择器: $($Runs[0].Filter)")
+    }
+    elseif ($Level -eq 'L1') {
+        if (-not $Project -or -not $Ns) { Write-Fail "L1 需要 -Project <测试项目> 与 -Ns <命名空间段>,或者 -Project 加 -Class/-Method/-Trait 选择器(副本无 .git,不能用 -Auto)。示例:scripts/forge-test.ps1 -Level L1 -Project Forge.App.Tests -Ns Workbench" }
         if (-not (Test-Path (Join-Path $RepoRoot "tests/$Project"))) { Write-Fail "tests/$Project 不存在;项目名取 tests/ 下的目录,例如 Forge.App.Tests。" }
         $segs = @()
         foreach ($n in ($Ns -split ',')) {
@@ -202,7 +303,7 @@ L3 触发条件(testing.md):合并/发布;Abstractions/Plugin.Sdk/Ipc/存储 sch
         if ($Gates) { $segs += ($GatesFilter -split '\|') }
         $Runs.Add(@{ Project = $Project; Filter = ($segs -join '|'); Reason = '显式 L1' })
     }
-    if ($Level -eq 'L2') {
+    elseif ($Level -eq 'L2') {
         if (-not $Project) { Write-Fail "L2 需要 -Project <测试项目>,例如 -Project Forge.Core.Tests。" }
         if (-not (Test-Path (Join-Path $RepoRoot "tests/$Project"))) { Write-Fail "tests/$Project 不存在;项目名取 tests/ 下的目录,例如 Forge.Core.Tests。" }
         $Runs.Add(@{ Project = $Project; Filter = ''; Reason = '显式 L2(项目全量)' })
@@ -248,8 +349,14 @@ if ($ListOnly) {
     foreach ($r in $Runs) {
         $cmd = "dotnet test tests/$($r.Project) --no-build"
         if ($r.Filter) { $cmd += " --filter `"$($r.Filter)`"" }
+        if ($MaxParallelThreads -gt 0) { $cmd += " --settings artifacts/testruns/forge-test.runsettings" }
         if ($PlanLevel -eq 'L3') { $cmd += " --logger `"trx;LogFileName=$($r.Project).trx`" --results-directory artifacts/testresults/$($r.Project) --blame-hang --blame-hang-timeout 10min --blame-crash" }
         Write-Host "  [计划] $cmd"
+    }
+    if ($Parallel -and $Runs.Count -gt 1) {
+        $d = $Parallelism
+        if ($d -le 0) { $d = [math]::Max(1, [math]::Min($Runs.Count, [int][math]::Floor([Environment]::ProcessorCount / 2))) }
+        Write-Host "  [计划] 并行: 并发上限 $([math]::Min($d, $Runs.Count))($($Runs.Count) 个项目)"
     }
     exit 0
 }
@@ -268,6 +375,12 @@ function Invoke-Dotnet([string[]]$ArgList) {
 }
 
 function Get-Counts([string]$Text) {
+    # 过滤器 0 命中时 dotnet test 退出码是 0 且**不打印摘要行**,只打一句 "No test matches the given testcase filter"。
+    # 不把它译成 0/0/0 就会被当成“退出码 0 = 绿”,于是类名手误、Trait 写错都变成假绿(0 用例本该判红)。
+    if ($Text -match 'No test matches the given testcase filter') {
+        return @{ Failed = 0; Passed = 0; Skipped = 0 }
+    }
+
     # 摘要可能是英文(VSTest 英文资源)或 zh-CN 本地化("失败: 0，通过: 110，已跳过: 0",全角逗号);取最后一条匹配(最终摘要)
     $patterns = @(
         'Failed:\s*(\d+)\s*[,，]\s*Passed:\s*(\d+)\s*[,，]\s*Skipped:\s*(\d+)',
@@ -288,6 +401,101 @@ function Invoke-TestOnce([string[]]$ArgList) {
     $res = Invoke-Dotnet $ArgList
     $sw.Stop()
     return @{ Res = $res; Counts = (Get-Counts $res.Text); Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+}
+
+# 并行跑一批项目:每个项目一个 dotnet test 进程,输出各自落文件(不交错),跑完再收计数。
+# 并发上限 Degree;首跑失败的项目交给串行重跑路径(重建 → 重跑),那是唯一能治旧 bin 假红的路。
+# 同步等待整批结束,不用 Start-Job(需序列化参数、看不到本脚本的函数)。
+function Invoke-ParallelRuns {
+    param($Items, [int]$Degree, $Receipt)
+
+    $dir = Join-Path $RepoRoot 'artifacts/testruns/parallel'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+    $pending = [System.Collections.Generic.Queue[object]]::new()
+    foreach ($item in $Items) { $pending.Enqueue($item) }
+    $running = New-Object System.Collections.Generic.List[object]
+    $records = @{}
+
+    while ($pending.Count -gt 0 -or $running.Count -gt 0) {
+        while ($running.Count -lt $Degree -and $pending.Count -gt 0) {
+            $run = $pending.Dequeue()
+            $argList = New-TestArgs $run
+            # Start-Process 的 -ArgumentList 不替我们加引号:带空白的值(含空格的工作区路径、--settings 的绝对路径)
+            # 会被拆成两个 argv,而 & dotnet 的串行路径不会。手动包一层引号。
+            $quotedArgs = @($argList | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } })
+            $tag = ($run.Project + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 6)))
+            $outFile = Join-Path $dir "$tag.out"
+            $errFile = Join-Path $dir "$tag.err"
+            Write-Host "[forge-test] 启动 tests/$($run.Project)$(if ($run.Filter) { '  filter: ' + $run.Filter })" -ForegroundColor Cyan
+            $psi = @{
+                FilePath               = 'dotnet'
+                ArgumentList           = $quotedArgs
+                NoNewWindow            = $true
+                PassThru               = $true
+                RedirectStandardOutput = $outFile
+                RedirectStandardError  = $errFile
+            }
+            $proc = Start-Process @psi
+            $running.Add([pscustomobject]@{ Run = $run; Proc = $proc; Out = $outFile; Err = $errFile; Args = $argList; Started = [DateTime]::UtcNow })
+        }
+
+        $finished = @($running | Where-Object { $_.Proc.HasExited })
+        if ($finished.Count -eq 0) { Start-Sleep -Milliseconds 250; continue }
+
+        foreach ($f in $finished) {
+            [void]$running.Remove($f)
+            $text = ''
+            foreach ($file in @($f.Out, $f.Err)) {
+                if (Test-Path -LiteralPath $file) {
+                    # 重定向出来的文件是 dotnet 的 UTF-8 字节,而 Windows PowerShell 5.1 的 Get-Content 默认按 ANSI/GBK 解,
+                    # 不指定编码会让中文摘要变成乱码 -> 计数解析不出来 -> 收据缺用例数。
+                    try { $text += (Get-Content -Raw -Encoding UTF8 -LiteralPath $file) + "`n" } catch { }
+                    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            Write-Host "`n===== tests/$($f.Run.Project)$(if ($f.Run.Filter) { '  filter: ' + $f.Run.Filter }) =====" -ForegroundColor Cyan
+            Write-Host $text
+
+            $seconds = [math]::Round(([DateTime]::UtcNow - $f.Started).TotalSeconds, 1)
+            $counts = Get-Counts $text
+            $exit = $f.Proc.ExitCode
+            $records[$f.Run.Project] = [ordered]@{
+                project = $f.Run.Project
+                filter  = $f.Run.Filter
+                reason  = $f.Run.Reason
+                command = ($f.Args -join ' ')
+                exit    = $exit
+                passed  = $(if ($counts) { $counts.Passed } else { $null })
+                failed  = $(if ($counts) { $counts.Failed } else { $null })
+                skipped = $(if ($counts) { $counts.Skipped } else { $null })
+                retried = $false
+                seconds = $seconds
+            }
+        }
+    }
+
+    # 首跑失败的项目回到串行路径:重建 → 重跑一次(治旧 bin 假红),结果覆盖并行那次
+    $anyFailed = $false
+    foreach ($run in $Items) {
+        $rec = $records[$run.Project]
+        if ($null -eq $rec) { continue }
+        $zeroCounts = ($null -ne $rec.passed) -and (($rec.passed + $rec.failed + $rec.skipped) -eq 0)
+        $isFail = ($rec.exit -ne 0) -or ($null -ne $rec.failed -and $rec.failed -gt 0) -or $zeroCounts
+        if ($isFail) {
+            Write-Host "[forge-test] tests/$($run.Project) 并行首跑失败 -> 回到串行重跑(再失败才重建重跑)..." -ForegroundColor Yellow
+            $out = Invoke-Run $run
+            $Receipt.Add($out.record)
+            if ($out.failed) { $anyFailed = $true }
+        }
+        else {
+            if ($null -eq $rec.passed) { Write-Host "[forge-test] 警告: tests/$($run.Project) 未能解析用例计数,以退出码 $($rec.exit) 为准。" -ForegroundColor Yellow }
+            $Receipt.Add($rec)
+        }
+    }
+
+    return $anyFailed
 }
 
 $totalSw = [Diagnostics.Stopwatch]::StartNew()
@@ -311,16 +519,19 @@ try {
             $lvlVal = $PlanLevel
             if (-not $lvlVal) { $lvlVal = 'none' }
             [ordered]@{
-                timestamp        = $ts
-                level            = $lvlVal
-                why              = $PlanWhy
-                auto             = [bool]$Auto
-                changedFiles     = $ChangedCount
-                derivation       = $Derivation.ToArray()
-                build            = @{ failed = $true; skipped = $false; seconds = $buildSeconds }
-                runs             = @()
-                totals           = @{ passed = 0; failed = 0; skipped = 0; countsKnown = $true }
-                wallClockSeconds = [math]::Round($totalSw.Elapsed.TotalSeconds, 1)
+                timestamp          = $ts
+                level              = $lvlVal
+                why                = $PlanWhy
+                auto               = [bool]$Auto
+                selectors          = @($Selectors)
+                parallel           = @{ enabled = [bool]$Parallel; degree = $(if ($Parallel -and $Parallelism -gt 0) { $Parallelism } elseif ($Parallel) { 'auto' } else { 0 }) }
+                maxParallelThreads = $MaxParallelThreads
+                changedFiles       = $ChangedCount
+                derivation         = $Derivation.ToArray()
+                build              = @{ failed = $true; skipped = $false; seconds = $buildSeconds }
+                runs               = @()
+                totals             = @{ passed = 0; failed = 0; skipped = 0; countsKnown = $true }
+                wallClockSeconds   = [math]::Round($totalSw.Elapsed.TotalSeconds, 1)
             } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $receiptDir "forge-test-$ts.json")
             Write-Host "收据文件: artifacts/testruns/forge-test-$ts.json(build.failed=true)"
             Write-Fail "构建失败(退出码 $($b.Exit)),测试未执行;失败收据已落盘。"
@@ -329,17 +540,40 @@ try {
 
     $receiptRuns = New-Object System.Collections.Generic.List[object]
     $anyFailed = $false
-    $i = 0
-    foreach ($r in $Runs) {
-        $i++
-        $argList = @('test', "tests/$($r.Project)", '--no-build')
-        if ($r.Filter) { $argList += @('--filter', $r.Filter) }
+
+    # 单项目内 xunit 并行线程数:0 = 不动(xunit 自己按 CPU 数)。写成临时 .runsettings,经 --settings 传入一个项目一份
+    # (不碰各项目自己的 xunit 配置);文件放在 artifacts/,跑完就删。
+    $runSettingsPath = $null
+    if ($MaxParallelThreads -gt 0 -and $Runs.Count -gt 0) {
+        $rsDir = Join-Path $RepoRoot 'artifacts/testruns'
+        New-Item -ItemType Directory -Force -Path $rsDir | Out-Null
+        $runSettingsPath = Join-Path $rsDir 'forge-test.runsettings'
+        @"
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <xUnit>
+    <MaxParallelThreads>$MaxParallelThreads</MaxParallelThreads>
+  </xUnit>
+</RunSettings>
+"@ | Set-Content -Encoding UTF8 $runSettingsPath
+    }
+
+    function New-TestArgs($Run) {
+        $argList = @('test', "tests/$($Run.Project)", '--no-build')
+        if ($Run.Filter) { $argList += @('--filter', $Run.Filter) }
+        if ($runSettingsPath) { $argList += @('--settings', $runSettingsPath) }
         if ($PlanLevel -eq 'L3') {
-            $argList += @('--logger', "trx;LogFileName=$($r.Project).trx")
-            $argList += @('--results-directory', "artifacts/testresults/$($r.Project)")
+            $argList += @('--logger', "trx;LogFileName=$($Run.Project).trx")
+            $argList += @('--results-directory', "artifacts/testresults/$($Run.Project)")
             $argList += @('--blame-hang', '--blame-hang-timeout', '10min', '--blame-crash')
         }
-        Write-Host "`n[forge-test] ($i/$($Runs.Count)) tests/$($r.Project)$(if ($r.Filter) { '  filter: ' + $r.Filter })" -ForegroundColor Cyan
+        return $argList
+    }
+
+    # 一个项目一次运行的全部步骤:跑 → 失败先重建再重跑(治旧 bin 假红)→ 出记录。
+    function Invoke-Run($Run) {
+        $argList = New-TestArgs $Run
+        Write-Host "`n[forge-test] tests/$($Run.Project)$(if ($Run.Filter) { '  filter: ' + $Run.Filter })" -ForegroundColor Cyan
         $t = Invoke-TestOnce $argList
         $counts = $t.Counts
         $retried = $false
@@ -348,8 +582,9 @@ try {
         if (-not $isFail -and $counts -and (($counts.Passed + $counts.Failed + $counts.Skipped) -eq 0)) { $isFail = $true }
 
         if ($isFail -and ($counts -eq $null -or $counts.Failed -gt 0 -or $t.Res.Exit -ne 0)) {
-            Write-Host "[forge-test] 首跑失败 -> 先 dotnet build tests/$($r.Project) 再重跑一次(治旧 bin 假红)..." -ForegroundColor Yellow
-            $rb = Invoke-Dotnet @('build', "tests/$($r.Project)", '-c', 'Debug')
+            Write-Host "[forge-test] tests/$($Run.Project) 首跑失败 -> 先 Rebuild 该项目再重跑一次(治旧 bin 假红)..." -ForegroundColor Yellow
+            # 必须 -t:Rebuild：普通增量 build 在“源码改回原样/时间戳比产物旧”时不会重编,治不了这一类假红。
+            $rb = Invoke-Dotnet @('build', "tests/$($Run.Project)", '-c', 'Debug', '-t:Rebuild')
             if ($rb.Exit -eq 0) {
                 $t = Invoke-TestOnce $argList
                 $counts = $t.Counts
@@ -359,24 +594,47 @@ try {
         }
 
         $finalFail = ($t.Res.Exit -ne 0) -or (($counts -and $counts.Failed -gt 0)) -or ($counts -and (($counts.Passed + $counts.Failed + $counts.Skipped) -eq 0))
-        if ($finalFail) { $anyFailed = $true }
-        if (-not $counts) { Write-Host "[forge-test] 警告:未能解析用例计数(输出格式变化?),以退出码 $($t.Res.Exit) 为准。" -ForegroundColor Yellow }
+        if (-not $counts) { Write-Host "[forge-test] 警告: tests/$($Run.Project) 未能解析用例计数(输出格式变化?),以退出码 $($t.Res.Exit) 为准。" -ForegroundColor Yellow }
 
         $p = $null; $f = $null; $s = $null
         if ($counts) { $p = $counts.Passed; $f = $counts.Failed; $s = $counts.Skipped }
-        $receiptRuns.Add([ordered]@{
-            project  = $r.Project
-            filter   = $r.Filter
-            reason   = $r.Reason
-            command  = ($argList -join ' ')
-            exit     = $t.Res.Exit
-            passed   = $p
-            failed   = $f
-            skipped  = $s
-            retried  = $retried
-            seconds  = $t.Seconds
-        })
+        return [ordered]@{
+            record = [ordered]@{
+                project = $Run.Project
+                filter  = $Run.Filter
+                reason  = $Run.Reason
+                command = ($argList -join ' ')
+                exit    = $t.Res.Exit
+                passed  = $p
+                failed  = $f
+                skipped = $s
+                retried = $retried
+                seconds = $t.Seconds
+            }
+            failed  = $finalFail
+        }
     }
+
+    if ($Parallel -and $Runs.Count -gt 1) {
+        $degree = $Parallelism
+        if ($degree -le 0) {
+            $cpu = [Environment]::ProcessorCount
+            $degree = [math]::Max(1, [math]::Min($Runs.Count, [int][math]::Floor($cpu / 2)))
+        }
+
+        $degree = [math]::Min($degree, $Runs.Count)
+        Write-Host "[forge-test] 并行执行:$($Runs.Count) 个项目,并发上限 $degree。" -ForegroundColor Cyan
+        $anyFailed = Invoke-ParallelRuns -Items $Runs -Degree $degree -Receipt $receiptRuns
+    }
+    else {
+        foreach ($r in $Runs) {
+            $out = Invoke-Run $r
+            $receiptRuns.Add($out.record)
+            if ($out.failed) { $anyFailed = $true }
+        }
+    }
+
+    if ($runSettingsPath -and (Test-Path $runSettingsPath)) { Remove-Item -LiteralPath $runSettingsPath -Force -ErrorAction SilentlyContinue }
 
     # ---- 3. 收据 ----
     $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -394,6 +652,9 @@ try {
         level            = $levelVal
         why              = $PlanWhy
         auto             = [bool]$Auto
+        selectors        = @($Selectors)
+        parallel         = @{ enabled = [bool]$Parallel; degree = $(if ($Parallel -and $Parallelism -gt 0) { $Parallelism } elseif ($Parallel) { 'auto' } else { 0 }) }
+        maxParallelThreads = $MaxParallelThreads
         changedFiles     = $ChangedCount
         derivation       = $Derivation.ToArray()
         build            = @{ failed = $false; skipped = [bool]$SkipBuild; seconds = $buildSeconds }
@@ -404,7 +665,7 @@ try {
     $receipt | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 $receiptPath
 
     Write-Host "`n== Forge 测试收据(粘贴进完工报告)==" -ForegroundColor Green
-    Write-Host "level: $(if ($PlanLevel) { $PlanLevel } else { 'none' })$(if ($PlanLevel -eq 'L3') { "(why=$PlanWhy)" } else { '' })$(if ($Auto) { ' auto' } else { '' })  改动文件: $ChangedCount"
+    Write-Host "level: $(if ($PlanLevel) { $PlanLevel } else { 'none' })$(if ($PlanLevel -eq 'L3') { "(why=$PlanWhy)" } else { '' })$(if ($Auto) { ' auto' } else { '' })$(if ($Parallel) { " parallel($(if ($Parallelism -gt 0) { $Parallelism } else { 'auto' }))" } else { '' })$(if ($MaxParallelThreads -gt 0) { " maxThreads=$MaxParallelThreads" } else { '' })  改动文件: $ChangedCount"
     if ($Derivation.Count -gt 0) { foreach ($d in $Derivation) { Write-Host "推导: $d" } }
     if ($buildSeconds) { Write-Host "构建: $buildSeconds s$(if ($SkipBuild) { '(跳过)' } else { '' })" }
     foreach ($rr in $receiptRuns) {
