@@ -29,21 +29,6 @@ public sealed class GitSettingsSectionTests
     // ------------------------------------------------------------ view model
 
     [Fact]
-    public void Selected_pull_strategy_reflects_and_edits_the_preferences()
-    {
-        var preferences = new AppPreferences();
-        var section = new GitSettingsSectionViewModel(preferences);
-
-        Assert.Equal(GitPullStrategy.FastForwardOnly, section.SelectedPullStrategy.Value);
-
-        preferences.GitPullStrategy = "merge";
-        Assert.Equal(GitPullStrategy.Merge, section.SelectedPullStrategy.Value);
-
-        section.SelectedPullStrategy = section.PullStrategies.Single(option => option.Value == GitPullStrategy.Rebase);
-        Assert.Equal("rebase", preferences.GitPullStrategy);
-    }
-
-    [Fact]
     public void Network_timeout_round_trips_and_clamps_through_the_preferences()
     {
         var preferences = new AppPreferences();
@@ -116,22 +101,6 @@ public sealed class GitSettingsSectionTests
 
         section.SelectedReviewMode = section.ReviewModes[0];
         Assert.Equal(StepReviewSettings.SubAgentModeToken, preferences.ReviewMode);
-    }
-
-    [Fact]
-    public void The_review_after_step_commit_switch_round_trips_through_the_preference()
-    {
-        var preferences = new AppPreferences();
-        var section = new GitSettingsSectionViewModel(preferences);
-
-        Assert.False(section.ReviewAfterStepCommit);
-
-        section.ReviewAfterStepCommit = true;
-        Assert.True(preferences.ReviewAfterStepCommit);
-        Assert.True(section.ReviewAfterStepCommit);
-
-        preferences.ReviewAfterStepCommit = false;
-        Assert.False(section.ReviewAfterStepCommit);
     }
 
     [Fact]

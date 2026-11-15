@@ -52,13 +52,6 @@ internal sealed class TerminalControl : Control
     private const byte MatchTintAlpha = 55;
     private const byte CurrentMatchTintAlpha = 135;
 
-    private static readonly TextDecorationCollection Underline = TextDecorations.Underline;
-    private static readonly TextDecorationCollection Strikethrough = TextDecorations.Strikethrough;
-    private static readonly TextDecorationCollection UnderlineAndStrikethrough =
-    [
-        new TextDecoration { Location = TextDecorationLocation.Underline },
-        new TextDecoration { Location = TextDecorationLocation.Strikethrough },
-    ];
 
     private readonly Dictionary<uint, IBrush> brushes = [];
     private readonly DispatcherTimer resizeTimer;
@@ -777,17 +770,24 @@ internal sealed class TerminalControl : Control
             brush);
         var underline = (flags & (CellFlags.Underline | CellFlags.DoubleUnderline)) != 0;
         var strike = (flags & CellFlags.Strikethrough) != 0;
-        if (underline && strike)
+        if (underline || strike)
         {
-            text.SetTextDecorations(UnderlineAndStrikethrough);
-        }
-        else if (underline)
-        {
-            text.SetTextDecorations(Underline);
-        }
-        else if (strike)
-        {
-            text.SetTextDecorations(Strikethrough);
+            // Built per cell rather than cached in a static: Avalonia's TextDecoration/TextDecorations.Underline are
+            // AvaloniaObjects with thread affinity fixed at first read, and this control can be touched from a test
+            // host's background thread before any UI thread exists - which then poisons the process-wide underline for
+            // AvaloniaEdit's links. Same reasoning as MarkdownRenderer's decorations.
+            TextDecorationCollection decorations = [];
+            if (underline)
+            {
+                decorations.Add(new TextDecoration { Location = TextDecorationLocation.Underline });
+            }
+
+            if (strike)
+            {
+                decorations.Add(new TextDecoration { Location = TextDecorationLocation.Strikethrough });
+            }
+
+            text.SetTextDecorations(decorations);
         }
 
         return text;
