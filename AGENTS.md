@@ -1,97 +1,260 @@
-# Forge 开发约定(本仓库)
+# Forge 开发约定
 
-这些规则约束**开发 Forge 这个产品时的 Agent 分工**,不是 Forge 自身的运行时行为。
+本文件约束开发 Forge 产品时的 Agent 行为，不约束 Forge 自身的运行时行为。本文件是本仓库 Agent 开发规范的唯一事实源（根目录 `CLAUDE.md` 经 `@AGENTS.md` 导入，勿在任何入口粘贴全文副本）。
 
-## 评审标准
+## 1. 规则优先级与评审标准
 
-评审不止于找代码 Bug,三项按优先级排序:
-1. **实现是否符合架构约束**——对照 `architecture.md`/`goal-and-requirements.md`/模块 SPEC 检查边界、依赖方向、性能第一、Native AOT 兼容、扩展点契约等是否被遵守,偏差是否已记录或征得同意。
-2. **测试是否足以证明实现正确**——测试是否覆盖关键路径、边界、失败/取消/并发、错误状态,而非只测 happy path;Skip 是否都在记录真实缺陷;测试范围是否与改动落点匹配(`forge-test.ps1` 收据为判据),无 `--why` 的全量视为未完成测试义务。
-3. **代码质量**——正确性、资源、并发、性能陷阱。
+### 1.1 规则优先级
 
-第 1、2 项比第 3 项更重要。
+1. `architecture.md`、`goal-and-requirements.md`、模块 SPEC。
+2. 本文件 `AGENTS.md`。
+3. `.github/skills/`。
 
-## 派活规则
+架构和需求以 SPEC 为准；实现偏差必须记录或征得用户同意。skill 里的建议不得据以修改 SPEC，也不构成扩张 NuGet 白名单的理由。
 
-- **先问能不能并行,再决定派不派活**:只有当拆出的多个任务互不依赖、可以同时交给多个子 Agent 时,才用子 Agent 并行做;拆不出并行(单任务、有先后依赖、上下文紧密耦合)时,主 Agent 自己完成,不要为了“守分工”把单个任务外包给一个 Worker 再等它回来。
-- 测试与评审必须使用彼此独立的会话，模型不能与Worker模型相同。
-- 实现与测试 Agent 都在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),跑完与本次任务相关的测试且全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。副本不存在须先创建,复制失败须报告阻塞,不得回退到共享主仓原地修改。创建副本用 `robocopy <主仓> <副本> /E /XD bin obj .git .vs artifacts /R:1 /W:1 /NFL /NDL /NJH /NJS`,或 `scripts/new-copy.ps1 <副本路径>`(同参数封装):`.vs` 里有 IDE 锁住的文件,不排除、不限重试时 robocopy 默认每 30 秒重试、最多 100 万次,会无限挂起。子 Agent 只在自己的副本内搜索,搜索排除 `bin`/`obj`;禁止在 `D:/FORGE` 根下递归搜索(那里有大量副本,曾导致单条 grep 跑了一小时)。NuGet 包里的类型搜源码搜不到,参考仓内现有用法。副本用完即可删除。
-- 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节在能并行时交给 Worker,不能并行时自己写。
-- 无论自己实现还是复核子 Agent 的产出,都要**构建**、**只跑与本次改动相关的测试**(见下节)、并检查是否越界改动,再决定是否采纳。
-- **进程锁(`MSB3027`/`MSB3026`)的处理:让长驻进程换目录,而不是让每次构建/测试换目录。** 锁的来源只有两类,都不是代码问题:(a) 人在开着 `Forge.App`;(b) 上一次被中断的测试留下的 `testhost`/`ExtensionHost` 孤儿进程(也会让源码扫描类测试出现假红)。
-  1. **默认不要给 `dotnet build`/`dotnet test` 加 `-p:BaseOutputPath=...`**,测试用默认 `bin/`,不新建逐任务的 `artifacts/<name>/`(不会被清理,会堆积)。万一必须重定向,输出放哪都行:源码扫描类测试的仓库根在构建时由 `Forge.App.Tests.csproj` 写进程序集元数据(`ForgeRepoRoot`,由 `tests/Forge.App.Tests/RepoRoot.cs` 读取),不再依赖输出目录位置。
-  2. **开 App 时设 `FORGE_RUN=1`**:`FORGE_RUN=1 dotnet run --project src/Forge.App`(PowerShell:`$env:FORGE_RUN=1`)。`Directory.Build.props` 会把 `Forge.App` 的输出固定到 `artifacts/run/`,整个仓库只有这一个目录,反复覆盖;`artifacts/` 已在 `.gitignore`,删除即清理。`src/Forge.App/bin/` 因此不会被运行中的 App 锁住。**跑测试的 shell 里不要设 `FORGE_RUN`**(否则测试项目会引用到 `artifacts/run/` 的 Forge.App)。
-  3. **遇到锁先排查再动手**:构建入口已挂 `scripts/build-hygiene.ps1`(经 `Directory.Build.props` 的 `BeforeTargets=Build`,仅本地 Windows、CI 跳过)——孤儿 `testhost`/`ExtensionHost` 自动结束并记 `artifacts/hygiene/` 日志,活锁报 PID 与处置指引;仍需人工时用 `tasklist`/`Get-Process Forge.App,testhost,ExtensionHost` 找占用者,是孤儿就结束,是用户正在用的 `Forge.App` 就报告阻塞并请用户关闭或改用 `artifacts/run/` 启动,不要自行绕开。
-- 派活文本里写明该任务适用的 `.github/skills/...` 路径与预期测试过滤器(副本无 `.git`,Worker 用 `scripts/forge-test.ps1 -Level L1 -Project <测试项目> -Ns <命名空间> [-Gates]` 显式执行;模板见 `.github/skills/forge-dispatch/SKILL.md`),并要求完工报告附 `forge-test.ps1` 收据。Worker 的上下文是干净的,不会自己去找 skill,不带路径等于没这份约束。
+### 1.2 评审标准
 
-## 测试分层与执行
+评审按以下优先级执行：
 
-判定依据、落点映射与新增/删除测试的规则见 `testing.md`(id `forge-testing`)。本节只写操作口径。
+1. **架构合规**：模块边界、依赖方向、性能优先、Native AOT 兼容、扩展点契约及 SPEC 一致性。
+2. **测试充分性**：关键路径、边界、失败、取消、并发及错误状态，而非只测 happy path；Skip 须记录真实缺陷。测试范围与执行细则见 §4。
+3. **代码质量**：正确性、资源生命周期、并发安全及性能陷阱。
 
-- **L1(每次任务)**:一律 `scripts/forge-test.ps1 -Auto`——按 git 改动推导落点过滤器(映射在 `scripts/test-map.json`),改了任何 `.cs`/`.axaml` 自动追加源码扫描门槛,失败先重建一次再判红,收据落 `artifacts/testruns/` 并须粘贴进完工报告。手工等价:先 `dotnet build Forge.slnx -c Debug` 一次,之后所有 `dotnet test` 都带 `--no-build`,只跑改动落点对应的命名空间,例如 `dotnet test tests/Forge.App.Tests --no-build --filter "FullyQualifiedName~Forge.App.Tests.Workbench"`,改了 `.cs`/`.axaml` 时追加 `--filter "FullyQualifiedName~Localization|FullyQualifiedName~MinorRegressionTests|FullyQualifiedName~KeyRegistry|FullyQualifiedName~StringTable|FullyQualifiedName~NoHardcodedChinese"`。只改文档/spec 时无需跑测试。
-- **L2(模块完成、接口变化、较大重构)**:跑承载改动的那个测试项目全量,例如 `dotnet test tests/Forge.Core.Tests --no-build`。
-- **L3(合并前、发布、跨模块、公共协议变化)**:13 个测试项目全量。触发条件按 `testing.md`;`Forge.Integration.Tests` 与 `Forge.App.LiveSwitch.Tests` 只在 L3 跑。L3 经 `forge-test.ps1 -Level L3 --why merge|release|interface|infra|cross-module` 执行(缺 `--why` 直接拒绝);`-Auto` 命中 L3 落点时自动升级并代填。
-- 不跑与本次改动无关的测试,也不为“保险”跑全量;全量混着与本次改动无关的偶发失败,判不出真伪。
-- 报告里写清:实际执行的命令、用例数、耗时、结果,收据直接粘贴 `forge-test.ps1` 的运行清单(无收据的全量视为未完成测试义务);没跑的部分说明原因与未验证范围。
-- 新增或删除测试前先读 `testing.md` 的准入与清理规则;删除测试必须在报告里逐条说明理由。
-- 源码扫描类门槛(`StringTableTests`/`NoHardcodedChineseTests`/`KeyRegistryTests`/`MinorRegressionTests`)报“源码里明明已注册/已存在”的错误时,先 `dotnet build`(必要时加 `-t:Rebuild`)再跑一次:复用旧 `bin` 的 `--no-build` 会报假红。
+前两项优先于一般代码质量。不得以代码评审通过代替测试义务。
 
-## 开发 Skills
+### 1.3 规格维护
 
-- 筛选后的第三方技能文件在 `.github/skills/`,只约束**开发实践**,不参与构建、不随产品发布。适用清单、裁剪内容、上游提交与再同步方式见 `.github/skills/README.md`。
-- 优先级:spec(`architecture.md`、`goal-and-requirements.md`)>`AGENTS.md`> `.github/skills/`。skill 里的建议不得据以修改 spec,也不构成扩张 NuGet 白名单的理由。
-- 写实现、写测试、排查构建或性能问题前,先读 `.github/skills/<skill-name>/SKILL.md`;涉及性能或分配时同时读 `.github/skills/blazing-fast-dotnet/SKILL.md`。目录是一层的,名字即目录名。
-- Avalonia 的 skill 在 `.github/skills/avalonia-*`(34 份,包括路由器 `avalonia` 与 `avalonia-pro-max-*` 子能力)。`Forge.App` 落地前先把 `Avalonia` 版本钉进 `Directory.Packages.props` 或 csproj——该套 skill 的第一条规则是读项目版本,没版本它只会按 12.1.x 猜。
+规格是事实依据。索引与更新机制遵循 spec-graph skill（系统已加载，不在此重复）：用 `spec_search`/`spec_grep`/`spec_get` 定位治理当前工作的规格并对齐；改动变更边界/契约/不变量/决策时，在同一改动中更新所属 SPEC（`spec_update`/`spec_create`/`spec_validate`）。
 
-## NuGet 白名单
+本仓库附加约束：**实现缺陷保留规格并记代码缺口，不得改规格掩盖问题；业务变更须用户确认。**
 
-官方 .NET 库(dotnet 组织发布的 `Microsoft.*`/`System.*` 包)一律在白名单内(2026-11-14 用户确认),无需逐个问,但仍要钉版本并满足 Native AOT。`architecture.md`「NuGet 引用规则」表里的三方库按表中范围与约束使用;新增任何**三方**包须先问用户。
+## 2. Agent 分工与仓库隔离
 
-## 性能测试
+### 2.1 并行原则
 
-性能基准用仓内现成的 `tools/Forge.Bench`(无包依赖;场景注册表、预热 + 定次计时、延迟分位/吞吐/分配/GC/峰值内存、与 BCL 基线的语义签名对账、验收检查,`dotnet run -c Release --project tools/Forge.Bench -- [filter] [--quick]`)。新增热路径基准就是往它加 `*Scenarios.cs` 场景,需要时给它加 `ProjectReference`;指标口径与场景设计参照 [aspnet/Benchmarks](https://github.com/aspnet/Benchmarks)。不另起 BenchmarkDotNet 项目,基准不进 L1/L2。热路径改动须给出改前改后的分配与耗时数字。
+先判断任务能否拆成至少两个互不依赖、可同时执行的子任务：
 
-## 并行与串行
+- 可以并行：派给多个 Worker。
+- 存在先后依赖、上下文紧密耦合或只有一个任务：主 Agent 自己完成。
+- 不得为了遵守分工而将单一任务外包给一个 Worker。
 
-后续模块里没有相互依赖的部分并行派给多个 Worker(各自副本、各自归属路径);有依赖的串行,串行部分由主 Agent 自己写。接口契约先由主 Agent 定稿,再并行实现。
+接口契约由主 Agent 先行定义，再并行实现。
 
-判断标准很简单:能同时开出两个以上互不阻塞的任务 → 派子 Agent 并行;否则 → 自己写。不要为了并行而硬拆任务。
+主 Agent 负责：`Forge.Abstractions` 接口契约、任务调度与模块集成、SPEC 修改及架构决策、最终构建/测试/改动检查/结果验收。实现细节只有在存在真正可并行任务时才交给 Worker。
 
-## 重复代码与抽象(Deslop)
+写新代码前先查仓内有无同类实现，优先复用，不写重复副本。
 
-本机通过 MCP 服务 `deslop`(工具名 `mcp__deslop__*`)接入 Deslop Live:它把编辑器里的实时重复代码分析暴露成工具。**预防优于治疗**——不写重复比事后抽取便宜。服务配在用户级 `~/.pi/agent/mcp.json`,指向 VS Code 扩展自带的 `deslop-mcp.exe`(路径含扩展版本号,升级扩展后要改),`--root` 绑 `D:/FORGE/forge`。
+测试和评审必须使用彼此独立的会话，且测试、评审所用模型均不得与 Worker 模型相同。
 
-> **适用范围:读 `AGENTS.md` 的 Agent(pi、Codex 系)与经 `CLAUDE.md` 桩导入的 Claude Code。** 根目录 `CLAUDE.md` 只含一行 `@AGENTS.md` 导入;Claude Code(2025-09 起无 `CLAUDE.md` 时原生读 `AGENTS.md`)、VS Code 的 Copilot/Codex/Local harness 与 Copilot coding agent 均能读到本文件——单一事实源在 `AGENTS.md`,勿在任何入口粘贴全文副本。
+### 2.2 Worker 仓库副本
 
-### 定律:写新代码前先调 `find-similar`
+每个实现或测试 Worker 必须在独立仓库副本中工作：`D:/FORGE/workN/<part>`。
 
-在写任何超过几行的新函数/方法/类/helper/测试夹具/解析分支/错误类型/路由处理器/视图模型之前,先用拟定代码(`snippet` + `language`)或草稿的字节区间(`path`、`start_byte`、`end_byte`)调 `find-similar`,并读回结果:
+强制规则：
 
-- 命中 `identical` 或 `nearly_identical` → 不要写新副本,复用返回的规范实现;需要时抽公共函数。
-- `clusters` 为空但 `existing` 有位置 → 这段代码已经存在一份,复用它或抽取它。
-- `loosely_similar` / `same_behavior` → 读规范实现再判断是否真的不同,倾向复用。
-- `structural_only` 只表示形状相同,不是克隆,读完再决定。
-- 两者都空 → 可以写。
+- 副本不存在时必须先创建；创建或复制失败必须报告阻塞，不得回退到主仓库原地修改。
+- Worker 只能修改分配给自己的归属路径；禁止修改其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`。
+- 禁止执行任何 Git 命令。
+- 完成相关测试且全部通过后，只将归属路径复制回主仓库。
+- 副本使用完毕即可删除。
 
-### 各工具的用法
+创建副本使用：
 
-- 合并已有重复 → `duplicates`(`detail:"summary"` 小页起,用 `path`/`kinds` 收窄,按 `next_offset` 翻页)→ `cluster-by-id` 取全部成员 → 可选 `merge-plan`(只读,`ai_or_human` 判定不可执行)。
-- 想弄清两处为何被判成克隆 → `compare-pair`;字段含义 → 每个会话调一次 `schema-doc`,不要每次都带。
-- 改完复检 → 同一 `path` 再查 `duplicates`,或用 `rescan` 带 `paths`;编辑后旧的字节偏移失效,须重新分析再复用。
+```powershell
+robocopy <主仓> <副本> /E /XD bin obj .git .vs artifacts /R:1 /W:1 /NFL /NDL /NJH /NJS
+```
 
-### 硬规则
+或等价封装 `scripts/new-copy.ps1 <副本路径>`。
 
-- 不许因为“这看起来是新的”跳过 `find-similar`——绝大多数克隆正是由真的以为它是新代码的人引入的。
-- 不许写完再调一次“确认”,那是治疗不是预防。
-- 不许为了让告警消失而放宽阈值、加 `exclude`/`report_hide`、调 `--min-nodes`、改 `[total] include`。判定为故意重复就保留并写明原因。
-- 移动重复代码时选**所有调用者都能依赖的最通用模块**,不是先打开的那个文件;移完改所有调用者,不留旧副本、不加第三份,并跑本项目相关测试。
-- `mass`/`rank` 是影响面,不是置信度也不是合并安全度;`kind` 也不证明合并保行为,必须逐个读源码。
-- 工具报错或空结果**不等于没有重复**:先读 `.deslop/cache/live-report.json`,再跑扩展自带 CLI(见下)生成报告;两者都不行就报告阻塞,不许猜。
-- 不要为了重复率百分比好看去弱化断言、缩短消息或重排代码——它只是“复制行/分析行”。
+**必须排除 `.vs`**：其中可能有 IDE 锁定文件；不排除且不限制重试时，robocopy 默认每 30 秒重试、最多 100 万次，可能无限挂起。
 
-前置条件与降级:`deslop-mcp` 自己没有引擎,每次调用都转发给 VS Code 里为该仓库运行的 `deslop-lsp`。**VS Code 没开这个仓库时报 `LspNotRunning`**,此时用扩展自带 CLI:`"C:/Users/zfcfl/.vscode/extensions/nimblesite.deslop-live-0.42.0-win32-x64/bin/win32-x64/deslop.exe" . --notext --nohtml --no-color`,然后读 `.deslop/deslop-report.json`(缓存默认开启,不要加 `--no-incremental`)。工具是 `deferred` 暴露的,调用前先 `tool_search`;子 Agent 不能调用 MCP 工具,需要重复检查时由主 Agent 查完把结论写进派活文本。完整规则见 https://deslop.live/docs/for-ai/。
+搜索规则：Worker 只在自己副本内搜索，排除 `bin`/`obj`；禁止在 `D:/FORGE` 根目录递归搜索（含大量副本）；NuGet 包中的类型可能搜不到源码，参考仓库现有用法。
 
-## 换行约定
+### 2.3 派活要求
 
-- 换行由 `.gitattributes`(`* text=auto eol=lf`)统一为 LF:仓库与工作树都是 LF,三平台检出一致。不要再用 `core.autocrlf=true` 让 Windows 检出变 CRLF——这正是此前 CI 换行失败与测试侧逐处归一化(`PromptSourceText`、`SpecFrontmatterTests` 的 `ReplaceLineEndings`)的根源,现已移除。`.gitattributes` 的 `eol=lf` 优先于 `core.autocrlf`,所以本机 system 级 `core.autocrlf=true` 不再影响本仓库。
-- 若本地工作树仍是旧 CRLF 检出,一次性重归一化:`git add --renormalize .` 后 `git checkout -- .`(或 `git rm -r --cached . && git reset --hard`)。新克隆无需任何设置。
+每项派活必须明确：
+
+- 任务目标及验收条件。
+- 允许修改的归属路径。
+- 必须遵守的架构和接口约束。
+- 该任务适用的 `.github/skills/...` 路径（Worker 上下文干净，不会自己找 skill，不带路径等于没那份约束）。
+- 预期测试项目、命名空间及过滤器（副本测试执行见 §4.3）。
+- 完工报告要求（含 `forge-test.ps1` 收据，见 §5.5）。
+
+主 Agent 必须将测试要求、收据要求及验收标准写入派活内容，不得假设 Worker 知道主仓库的测试规则。
+
+## 3. 构建与进程锁
+
+处理 `MSB3027`/`MSB3026` 时，优先调整长驻进程的输出目录，不要让每次构建和测试使用不同输出目录。锁的来源主要有两类，都不应直接判定为代码问题：① 用户正在运行 `Forge.App`；② 上一次中断的测试遗留 `testhost`/`ExtensionHost` 孤儿进程。
+
+### 3.1 默认构建输出
+
+- `dotnet build`/`dotnet test` 默认使用 `bin/`；不得默认添加 `-p:BaseOutputPath=...`；不得创建逐任务的 `artifacts/<name>/` 输出目录（无法自动清理）。
+- 确实必须重定向输出时，源码扫描测试仍通过程序集元数据 `ForgeRepoRoot` 定位仓库根，不依赖输出目录位置（由 `Forge.App.Tests.csproj` 构建时写入，读取在 `tests/Forge.App.Tests/RepoRoot.cs`）。
+
+### 3.2 Forge.App 运行目录
+
+启动 App 必须设置 `FORGE_RUN=1`：
+
+```powershell
+$env:FORGE_RUN=1
+dotnet run --project src/Forge.App
+```
+
+`Directory.Build.props` 将 `Forge.App` 输出固定到 `artifacts/run/`（整个仓库唯一运行输出目录，可反复覆盖，已被 `.gitignore` 忽略），避免运行中的 App 锁住 `src/Forge.App/bin/`。
+
+**运行测试的 shell 禁止设置 `FORGE_RUN`**，否则测试项目可能引用 `artifacts/run/` 中的 Forge.App。
+
+### 3.3 进程锁排查
+
+构建入口已通过 `Directory.Build.props` 的 `BeforeTargets=Build` 集成 `scripts/build-hygiene.ps1`（仅本地 Windows、CI 跳过）：自动结束遗留 `testhost`/`ExtensionHost` 孤儿，日志写 `artifacts/hygiene/`，活锁报 PID 与处置指引。
+
+遇到锁先排查：`tasklist` / `Get-Process Forge.App,testhost,ExtensionHost`。
+
+- 确认孤儿进程：结束它。
+- 确认用户正在使用的 `Forge.App`：报告阻塞，请用户关闭或改用 `artifacts/run/` 启动。
+- 不得擅自绕过活锁或靠改每次构建输出目录掩盖问题。
+
+## 4. 测试策略与执行
+
+### 4.1 核心原则
+
+**只运行与本次改动相关的测试，不得为保险运行全量测试。** 全量混入与本次无关的偶发失败，无法准确判断回归。测试范围必须与改动落点匹配，以 `scripts/forge-test.ps1` 收据为判据；无 `--why` 的全量视为未完成测试义务。
+
+历史基线、夹具明细及测试债务见 `docs/analysis/testing-notes.md`。
+
+### 4.2 唯一测试入口
+
+统一使用 `scripts/forge-test.ps1`，收据落 `artifacts/testruns/`。
+
+### 4.3 测试等级
+
+| 等级 | 适用场景 | 执行要求 |
+|---|---|---|
+| L1 | 每次代码任务 | `forge-test.ps1 -Auto` |
+| L2 | 模块完成、接口变化、较大重构 | 承载改动的测试项目全量 |
+| L3 | 合并、发布、跨模块架构、公共协议、核心基础设施变化 | 13 个测试项目全量，必须 `--why` |
+
+**L1**：`scripts/forge-test.ps1 -Auto`——按 Git 改动推导落点过滤器（映射 `scripts/test-map.json`），改 `.cs`/`.axaml` 自动追加源码扫描门槛，失败先重建一次再判红。
+
+**副本没有 `.git`，必须用显式过滤器**：
+
+```powershell
+scripts/forge-test.ps1 -Level L1 -Project <测试项目> -Ns <命名空间> [-Gates]
+```
+
+**L2**：`scripts/forge-test.ps1 -Level L2 -Project <测试项目>`——承载改动的测试项目全量，不跑无关项目。
+
+**L3**：`scripts/forge-test.ps1 -Level L3 --why <原因>`——`--why` 必须是 `merge`/`release`/`interface`/`infra`/`cross-module` 之一，缺少直接拒绝执行；`-Auto` 命中 L3 落点自动升级代填。`Forge.Integration.Tests` 和 `Forge.App.LiveSwitch.Tests` 只在 L3 执行。
+
+### 4.4 测试落点映射
+
+权威映射 `scripts/test-map.json`，最长前缀匹配，改规则须同步该文件。映射原则：
+
+- App 按子目录→对应测试命名空间：`Workbench`/`Resources`→Workbench；`Views`→Views|Workbench；`Providers`/`Git`/`Terminal`/`Settings`/`Changes`/`Editing`/`ViewModels`→各自命名空间；`Localization`→源码扫描门槛。
+- Core/Workspace/IO/Editor/Mcp/Approval/Workflows/Scripting/HostClient→对应测试项目（L2）。
+- Abstractions/Plugin.Sdk/Ipc 相关/存储 Schema/根级构建及 CI 配置→L3。
+- csproj 的 AOT/发布属性→L3，必须 `--why infra`。
+- 文档/SPEC/Markdown→不跑测试。
+- 涉及多个落点用 `|` 组合过滤器，不得降级为 L2。
+
+### 4.5 手工等价执行
+
+仅在测试脚本不可用时允许。先 `dotnet build Forge.slnx -c Debug` 一次，再 `dotnet test --no-build --filter "FullyQualifiedName~Forge.App.Tests.Workbench"` 跑落点命名空间；改 `.cs`/`.axaml` 追加源码扫描门槛过滤器。手工执行不能替代唯一测试入口及收据要求。
+
+## 5. 测试准入、删除与报告
+
+### 5.1 新增测试
+
+1. 优先修改现有测试文件。
+2. 同一行为一个测试文件、一个主测试；多组输入用 `[Theory]`/`[InlineData]`，不写 `Foo_case1`/`Foo_case2`。
+3. 不测框架自身、生成代码或简单属性转发；不为测私有实现放宽可见性。
+4. 不为提高覆盖率数字新增测试（覆盖率升降都不是增删理由）。
+5. 修 Bug 必配复现回归测试，测试名说明保护的行为。
+6. 每个新增测试必须能回答：保护哪条可能被误改的契约？答不上不新增。
+
+### 5.2 测试删除
+
+删除前确认：是否已有别处覆盖、是否守边界或历史回归、是否依赖外部环境、对应功能是否仍存在。
+
+允许删除：完全重复/功能已删/无实际断言/只测第三方库自身/被更完整测试替代。
+
+禁止删除：核心业务规则/权限安全数据一致性/历史 Bug 回归/关键协议兼容/难以其他方式发现的边界。
+
+暂不能修的不稳定测试：记录原因并隔离（跳过+跟踪点），不直接删也不永久 Skip。删除测试必须在完工报告逐条说明理由。
+
+### 5.3 测试夹具
+
+同一项目新增测试优先复用现有替身和夹具，不允许私有同名副本。夹具登记见 `docs/analysis/testing-notes.md`。
+
+注意 C# 默认接口方法（DIM）陷阱：替身基类声明同名 DIM 公共方法不等于重新实现接口；需要重实现时必须在类上重新声明接口。
+
+### 5.4 源码扫描测试假红
+
+`StringTableTests`/`NoHardcodedChineseTests`/`KeyRegistryTests`/`MinorRegressionTests` 可能因复用旧构建产物假红。若报「源码里明明已注册/已存在」的内容缺失，先 `dotnet build`（必要时 `dotnet build -t:Rebuild`）再重跑。不得据复用旧 `bin` 的 `--no-build` 结果判定源码扫描失败。
+
+### 5.5 完工报告
+
+报告必须包含：① 实际执行的构建和测试命令；② 用例数、耗时及结果；③ `forge-test.ps1` 测试收据；④ 本次全部改动文件（与 `git diff --name-only` 一致）；⑤ 未执行的测试及原因；⑥ 尚未验证的范围；⑦ 删除测试的逐条理由。
+
+不得只报告部分改动路径；未列出全部文件视为报告未完成。无收据的全量视为未完成测试义务。
+
+## 6. NuGet 白名单
+
+- 官方 .NET 库（`dotnet` 组织发布的 `Microsoft.*`/`System.*`）自动允许，无需逐个询问；仍须固定版本并满足 Native AOT。
+- 第三方库仅允许 `architecture.md`「NuGet 引用规则」规定的库，遵守对应范围和约束。
+- 新增任何第三方 NuGet 包必须事先征得用户同意。
+
+## 7. 性能基准
+
+统一使用仓内 `tools/Forge.Bench`，不得另建 BenchmarkDotNet 项目。执行：
+
+```powershell
+dotnet run -c Release --project tools/Forge.Bench -- [filter] [--quick]
+```
+
+无额外 NuGet 依赖，支持场景注册、预热定次计时、延迟分位/吞吐、分配/GC/峰值内存、与 BCL 基线语义签名对账、性能验收。新增热路径基准注册到现有 `*Scenarios.cs`，必要时加 `ProjectReference`。
+
+热路径改动必须提供改前改后的耗时和分配数据；没有实测数据不得宣称性能提升。基准不属于 L1/L2 测试义务。指标口径与场景设计参考 https://github.com/aspnet/Benchmarks。
+
+## 8. 换行约定
+
+`.gitattributes` 的 `* text=auto eol=lf` 是统一换行规范：仓库和工作树统一 LF；不得用 `core.autocrlf=true` 把 Windows 工作树转 CRLF；`eol=lf` 优先于 `core.autocrlf`，本机 system 级 `core.autocrlf=true` 不影响本仓库；新克隆无需额外配置。
+
+旧 CRLF 工作树一次性重归一化：
+
+```powershell
+git add --renormalize .
+git checkout -- .
+```
+
+或：
+
+```powershell
+git rm -r --cached .
+git reset --hard
+```
+
+**执行前必须检查工作区状态，确认不会丢失用户修改；第二种会重置工作树，不得在存在未保护修改时执行。**
+
+## 9. 开发 Skills
+
+- 筛选后的第三方技能在 `.github/skills/`，只约束开发实践，不参与构建、不随产品发布；适用清单见 `.github/skills/README.md`。
+- 写实现、写测试、排查构建或性能问题前，先读 `.github/skills/<skill-name>/SKILL.md`；涉及性能或分配时同时读 `.github/skills/blazing-fast-dotnet/SKILL.md`。目录一层，名字即目录名。
+- Avalonia skill 在 `.github/skills/avalonia-*`（34 份，含路由器 `avalonia` 与 `avalonia-pro-max-*` 子能力）。`Forge.App` 落地前先把 Avalonia 版本钉进 `Directory.Packages.props` 或 csproj——该套 skill 第一条规则是读项目版本，没版本它只按 12.1.x 猜。
+
+## 10. 最终验收
+
+每项任务完成前，主 Agent 必须确认（无论实现由谁完成，不得仅凭 Worker 声称完成就接受）：
+
+- [ ] 实现符合架构、需求及 SPEC。
+- [ ] 没有未经同意的架构偏差或第三方 NuGet 依赖。
+- [ ] 修改范围符合分工，没有越界改动。
+- [ ] 构建成功。
+- [ ] 与改动相关的测试已按正确等级执行。
+- [ ] 测试结果、收据和完整文件清单已提供。
+- [ ] 测试删除均有明确理由。
+- [ ] 热路径改动提供前后性能数据。
+- [ ] 未验证范围、阻塞和遗留问题已明确报告。
+
+未满足的项目必须明确说明原因和影响，不得将未完成事项报告为已完成。
