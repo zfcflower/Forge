@@ -351,7 +351,14 @@ public sealed class SessionViewAttachmentTests
             Assert.True(await UntilAsync(() => rig.Composer.HasAttachmentError || rig.Composer.Attachments.Count == 1));
             Assert.True(string.IsNullOrEmpty(rig.Input.Text));
             Assert.True(string.IsNullOrEmpty(rig.Workspace.Draft));
-            Assert.Empty(rig.Refusals);
+
+            // Empty bytes are no readable format, so this is an image refusal: inline under the input and announced as a
+            // warning like every other one, otherwise a paste that produced nothing would look like it was never handled.
+            var refusal = Assert.Single(rig.Refusals);
+            Assert.Equal(NotificationLevel.Warning, refusal.Level);
+            Assert.Equal(AttachmentStrings.RefusedTitleKey, refusal.TitleKey);
+            Assert.Equal(ImageStrings.UnsupportedKey, refusal.BodyKey);
+            Assert.Equal("attachment-refused:" + SessionId + ":Unsupported", refusal.Key);
         });
     }
     [Fact]

@@ -202,8 +202,9 @@ public partial class SessionView
         new(title) { Patterns = [.. extensions.Select(static extension => "*" + extension)] };
 
     /// <summary>
-    /// Attaches each file in turn through the composer's classifier; refusals show inline (and as a toast where the model or
-    /// provider refuses). Stops at the per-message limit, since every further file would be refused for the same reason.
+    /// Attaches each file in turn through the composer's classifier; refusals show inline and as a Warning toast (image
+    /// rejections, read-file failures and model/provider refusals); file-level count/size limits stay inline-only. Stops at
+    /// the per-message limit, since every further file would be refused for the same reason.
     /// </summary>
     private static async Task AttachFilesAsync(ComposerViewModel composer, IReadOnlyList<string> paths)
     {

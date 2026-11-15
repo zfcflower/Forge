@@ -41,14 +41,15 @@ internal static class ImageStrings
 
     public static string ModelRejects => Loc.Instance[ModelRejectsKey];
 
-    public static string TooMany => Loc.Instance.Format(TooManyKey, ImagesMax());
+    // The four refusal bodies are LocText, not resolved strings: the same text is the inline reason under the input and the
+    // body of the warning toast, and the toast re-renders on a language switch.
+    public static LocText TooMany => new(TooManyKey, ImagesMax());
 
-    public static string TooLarge(string name) =>
-        Loc.Instance.Format(TooLargeKey, name, (Forge.App.ViewModels.ImageAttachmentRules.MaxEncodedBytes / (1024 * 1024)).ToString(System.Globalization.CultureInfo.InvariantCulture));
+    public static LocText TooLarge(string name) => new(TooLargeKey, name, ImagesMaxMegabytes());
 
-    public static string Unsupported(string name) => Loc.Instance.Format(UnsupportedKey, name);
+    public static LocText Unsupported(string name) => new(UnsupportedKey, name);
 
-    public static string ReadFailed(string name, string reason) => Loc.Instance.Format(ReadFailedKey, name, reason);
+    public static LocText ReadFailed(string name, string reason) => new(ReadFailedKey, name, reason);
 
     public static string PickerTitle => Loc.Instance[PickerTitleKey];
 
@@ -67,4 +68,7 @@ internal static class ImageStrings
     }
 
     private static string ImagesMax() => TextFormat.Number(Forge.App.ViewModels.ImageAttachmentRules.MaxImagesPerMessage);
+
+    private static string ImagesMaxMegabytes() =>
+        TextFormat.Number(Forge.App.ViewModels.ImageAttachmentRules.MaxEncodedBytes / (1024 * 1024));
 }

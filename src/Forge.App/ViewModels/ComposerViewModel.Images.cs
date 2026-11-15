@@ -11,8 +11,9 @@ namespace Forge.App.ViewModels;
 /// The composer's attachments: images (thumbnails, <see cref="Attachments"/>) and files - PDF, audio, video, text and
 /// source files (chips, <see cref="Files"/>) - pasted, dropped or picked, waiting until the message is sent, queued or
 /// interjected, which takes them all (<see cref="TakeAttachments"/>). Every way in goes through one classifier
-/// (<see cref="FileAttachmentRules"/>) and one gate: a kind the current model is known not to take, or a file the current
-/// provider's wire format cannot carry, is refused with a warning toast; an unknown capability allows it. When the model
+/// (<see cref="FileAttachmentRules"/>) and one gate: a kind the current model is known not to take, a file the current
+/// provider's wire format cannot carry, an image of a format or size the composer does not take, or a file that cannot be
+/// read is refused with a warning toast and the same sentence under the input; an unknown capability allows it. When the model
 /// changes under attachments it no longer takes, they stay, sending is blocked and the composer says why, until the user
 /// removes them. Reading, decoding and encoding run off the UI thread; the lists are only touched on the UI thread.
 /// </summary>
@@ -81,7 +82,7 @@ internal sealed partial class ComposerViewModel
     /// <summary>
     /// Attaches an encoded image (a dropped or picked file's bytes, or a pasted bitmap encoded as PNG). The format is read
     /// from the bytes, not from the name. Returns why it was refused, or <see cref="AttachmentRejection.None"/>; a refusal
-    /// also sets <see cref="AttachmentError"/>.
+    /// also sets <see cref="AttachmentError"/> and is raised as a warning toast, like every other refusal.
     /// </summary>
     public async Task<AttachmentRejection> AddImageAsync(byte[] data, string displayName)
     {
@@ -94,13 +95,13 @@ internal sealed partial class ComposerViewModel
 
         if (Attachments.Count + preparing >= ImageAttachmentRules.MaxImagesPerMessage)
         {
-            return Reject(AttachmentRejection.TooMany, ImageStrings.TooMany);
+            return RefuseWithToast(AttachmentRejection.TooMany, ImageStrings.TooMany);
         }
 
         var mediaType = ImageAttachmentRules.SniffMediaType(data);
         if (mediaType is null)
         {
-            return Reject(AttachmentRejection.Unsupported, ImageStrings.Unsupported(displayName));
+            return RefuseWithToast(AttachmentRejection.Unsupported, ImageStrings.Unsupported(displayName));
         }
 
         if (!WireCarries(mediaType))
@@ -140,13 +141,13 @@ internal sealed partial class ComposerViewModel
 
         if (prepared is null)
         {
-            return Reject(AttachmentRejection.Unsupported, ImageStrings.Unsupported(displayName));
+            return RefuseWithToast(AttachmentRejection.Unsupported, ImageStrings.Unsupported(displayName));
         }
 
         if (base64 is null)
         {
             prepared.Thumbnail?.Dispose();
-            return Reject(AttachmentRejection.TooLarge, ImageStrings.TooLarge(displayName));
+            return RefuseWithToast(AttachmentRejection.TooLarge, ImageStrings.TooLarge(displayName));
         }
 
         Attachments.Add(new PendingImageViewModel(
@@ -172,7 +173,7 @@ internal sealed partial class ComposerViewModel
         if (!ImageAttachmentRules.HasImageExtension(path))
         {
             // Not read at all: a dropped archive or document is refused by its name before any bytes are loaded.
-            return Reject(AttachmentRejection.Unsupported, ImageStrings.Unsupported(name));
+            return RefuseWithToast(AttachmentRejection.Unsupported, ImageStrings.Unsupported(name));
         }
 
         byte[] data;
@@ -183,14 +184,14 @@ internal sealed partial class ComposerViewModel
             var info = new FileInfo(path);
             if (info.Exists && info.Length > FileAttachmentRules.MaxBytes(AttachmentKind.Image))
             {
-                return Reject(AttachmentRejection.TooLarge, ImageStrings.TooLarge(name));
+                return RefuseWithToast(AttachmentRejection.TooLarge, ImageStrings.TooLarge(name));
             }
 
             data = await File.ReadAllBytesAsync(path).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            return Reject(AttachmentRejection.Unsupported, ImageStrings.ReadFailed(name, exception.Message));
+            return RefuseWithToast(AttachmentRejection.Unsupported, ImageStrings.ReadFailed(name, exception.Message));
         }
 
         return await AddImageAsync(data, name).ConfigureAwait(true);
@@ -238,7 +239,9 @@ internal sealed partial class ComposerViewModel
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            return Reject(AttachmentRejection.Unsupported, ImageStrings.ReadFailed(name, exception.Message));
+            // The bytes never arrived, so there is nothing to classify: the read failure itself is the refusal, and it is
+            // announced like the ones the classifier makes.
+            return RefuseWithToast(AttachmentRejection.Unsupported, ImageStrings.ReadFailed(name, exception.Message));
         }
         finally
         {
@@ -439,6 +442,10 @@ internal sealed partial class ComposerViewModel
         }
     }
 
+    /// <summary>
+    /// A refusal the composer only says under the input: the per-message count limit and the size limit of an already
+    /// classified file, both of which the user caused by attaching too much on purpose and sees where the file is listed.
+    /// </summary>
     private AttachmentRejection Reject(AttachmentRejection reason, string message)
     {
         AttachmentError = message;
@@ -446,9 +453,9 @@ internal sealed partial class ComposerViewModel
     }
 
     /// <summary>
-    /// A refusal the user may not have caused on purpose (the model or provider cannot take it, the file is not text): it is
-    /// shown under the input and raised as a warning toast. The key is stable per session and reason, so repeated drops of
-    /// refused files count up on one toast instead of stacking.
+    /// A refusal that is reported twice: the sentence stays under the input (with the file it is about), and the same text is
+    /// raised as a warning toast so a drop that happened out of sight is not missed. The key is stable per session and reason,
+    /// so repeated drops of refused files count up on one toast instead of stacking.
     /// </summary>
     private AttachmentRejection RefuseWithToast(AttachmentRejection reason, LocText message)
     {

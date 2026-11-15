@@ -1,5 +1,6 @@
 using System.Text;
 using Avalonia.Headless;
+using Avalonia.Media.Imaging;
 using AvaloniaEdit.Document;
 using Forge.Abstractions;
 using Forge.App.Approval;
@@ -18,7 +19,9 @@ using Forge.App.Tests.Approval;
 using Forge.App.Tests.Changes;
 using Forge.App.Tests.Git;
 using Forge.App.Tests.Terminal;
+using Forge.App.Tests.ViewModels;
 using Forge.App.ViewModels;
+using Forge.Core.Prompts.Templates;
 using Forge.HostClient;
 using Forge.Mcp;
 using Forge.Workspace;
@@ -31,7 +34,9 @@ namespace Forge.App.Tests.Notifications;
 /// which level and under which deduplication key, so a drifted key or a silently downgraded level fails here. Covered:
 /// an approval card that starts waiting, a session that opens without a provider, a git operation that fails, a step
 /// commit the platform refuses, and the fire-and-forget helper that never lets a notification failure reach the work
-/// that wanted to notify. The session's turn and checkpoint failures are pinned beside their own harness
+/// that wanted to notify. The composer's attachment refusals follow: a kind the model or the provider refuses, an image
+/// of a format, size or count it does not take, and a file that cannot be read - each stays inline and is announced too.
+/// The session's turn and checkpoint failures are pinned beside their own harness
 /// (<c>SessionTurnFailureTests</c>); the notification centre itself is covered by <see cref="NotificationCenterTests"/>.
 /// <para>The environment-side half of the same list follows: an MCP server that never comes up, a terminal that exits
 /// non-zero (and one that exits cleanly, which must stay silent), an editor language service that cannot apply, a file
@@ -431,6 +436,134 @@ public sealed class NotificationWiringTests : IDisposable
     }
 
     [Fact]
+    public async Task An_image_of_an_unreadable_format_is_reported_inline_and_announced_as_a_warning()
+    {
+        await WithComposerAsync(
+            async (composer, notifications) =>
+            {
+                // Two drops of the same kind: the reason stays under the input, and both land on one key so the toast counts
+                // up instead of stacking.
+                Assert.Equal(AttachmentRejection.Unsupported, await composer.AddImageAsync("%PDF-1.7"u8.ToArray(), "doc.png"));
+                Assert.Equal(AttachmentRejection.Unsupported, await composer.AddImageAsync([0x50, 0x4B, 3, 4], "sheet.png"));
+
+                Assert.Empty(composer.Attachments);
+                Assert.Contains("sheet.png", composer.AttachmentError, StringComparison.Ordinal);
+                var calls = notifications.WithKey("attachment-refused:scope:Unsupported");
+                Assert.Equal(2, calls.Count);
+                Assert.All(calls, call =>
+                {
+                    Assert.Equal(NotificationLevel.Warning, call.Level);
+                    Assert.Equal(AttachmentStrings.RefusedTitleKey, call.TitleKey);
+                    Assert.Equal(ImageStrings.UnsupportedKey, call.BodyKey);
+                });
+            },
+            codec: new StubCodec());
+    }
+
+    [Fact]
+    public async Task An_image_over_the_encoded_limit_is_reported_inline_and_announced_as_a_warning()
+    {
+        await WithComposerAsync(
+            async (composer, notifications) =>
+            {
+                Assert.Equal(
+                    AttachmentRejection.TooLarge,
+                    await composer.AddImageAsync([0xFF, 0xD8, 0xFF, 0xE0, 0, 16], "huge.jpg"));
+
+                Assert.Empty(composer.Attachments);
+                Assert.Contains("huge.jpg", composer.AttachmentError, StringComparison.Ordinal);
+                var call = Assert.Single(notifications.Calls);
+                Assert.Equal(NotificationLevel.Warning, call.Level);
+                Assert.Equal(AttachmentStrings.RefusedTitleKey, call.TitleKey);
+                Assert.Equal(ImageStrings.TooLargeKey, call.BodyKey);
+                Assert.Equal("attachment-refused:scope:TooLarge", call.Key);
+            },
+            codec: new StubCodec(ImageAttachmentRules.MaxEncodedBytes + 1));
+    }
+
+    [Fact]
+    public async Task The_eleventh_image_is_reported_inline_and_announced_as_a_warning()
+    {
+        await WithComposerAsync(
+            async (composer, notifications) =>
+            {
+                for (var i = 0; i < ImageAttachmentRules.MaxImagesPerMessage; i++)
+                {
+                    Assert.Equal(AttachmentRejection.None, await composer.AddImageAsync(PngBytes, $"{i}.png"));
+                }
+
+                Assert.Equal(AttachmentRejection.TooMany, await composer.AddImageAsync(PngBytes, "extra.png"));
+
+                Assert.Equal(ImageAttachmentRules.MaxImagesPerMessage, composer.Attachments.Count);
+                Assert.Equal(ImageStrings.TooMany.Resolve(), composer.AttachmentError);
+                var call = Assert.Single(notifications.Calls);
+                Assert.Equal(NotificationLevel.Warning, call.Level);
+                Assert.Equal(AttachmentStrings.RefusedTitleKey, call.TitleKey);
+                Assert.Equal(ImageStrings.TooManyKey, call.BodyKey);
+                Assert.Equal("attachment-refused:scope:TooMany", call.Key);
+            },
+            codec: new StubCodec());
+    }
+
+    [Fact]
+    public async Task An_image_the_provider_wire_cannot_carry_is_reported_inline_and_announced_as_a_warning()
+    {
+        await WithComposerAsync(
+            async (composer, notifications) =>
+            {
+                Assert.Equal(AttachmentRejection.WireUnsupported, await composer.AddImageAsync(PngBytes, "shot.png"));
+
+                Assert.Empty(composer.Attachments);
+                Assert.Contains("shot.png", composer.AttachmentError, StringComparison.Ordinal);
+                var call = Assert.Single(notifications.Calls);
+                Assert.Equal(NotificationLevel.Warning, call.Level);
+                Assert.Equal(AttachmentStrings.RefusedTitleKey, call.TitleKey);
+                Assert.Equal(AttachmentStrings.WireUnsupportedKey, call.BodyKey);
+                Assert.Equal("attachment-refused:scope:WireUnsupported", call.Key);
+            },
+            wire: static (_, _) => false,
+            codec: new StubCodec());
+    }
+
+    [Fact]
+    public async Task An_image_file_that_cannot_be_read_is_reported_inline_and_announced_as_a_warning()
+    {
+        await WithComposerAsync(
+            async (composer, notifications) =>
+            {
+                Assert.Equal(AttachmentRejection.Unsupported, await composer.AddImageFileAsync(Path.Combine(root, "gone.png")));
+
+                Assert.Empty(composer.Attachments);
+                Assert.Contains("gone.png", composer.AttachmentError, StringComparison.Ordinal);
+                var call = Assert.Single(notifications.Calls);
+                Assert.Equal(NotificationLevel.Warning, call.Level);
+                Assert.Equal(AttachmentStrings.RefusedTitleKey, call.TitleKey);
+                // The body is the reader's own sentence about the file, not the generic "not supported" one.
+                Assert.Equal(ImageStrings.ReadFailedKey, call.BodyKey);
+                Assert.Equal("attachment-refused:scope:Unsupported", call.Key);
+            },
+            codec: new StubCodec());
+    }
+
+    [Fact]
+    public async Task A_file_that_cannot_be_read_is_reported_inline_and_announced_as_a_warning()
+    {
+        await WithComposerAsync(
+            async (composer, notifications) =>
+            {
+                Assert.Equal(AttachmentRejection.Unsupported, await composer.AddFileAsync(Path.Combine(root, "gone.md")));
+
+                Assert.Empty(composer.Files);
+                Assert.Contains("gone.md", composer.AttachmentError, StringComparison.Ordinal);
+                var call = Assert.Single(notifications.Calls);
+                Assert.Equal(NotificationLevel.Warning, call.Level);
+                Assert.Equal(AttachmentStrings.RefusedTitleKey, call.TitleKey);
+                Assert.Equal(ImageStrings.ReadFailedKey, call.BodyKey);
+                Assert.Equal("attachment-refused:scope:Unsupported", call.Key);
+            });
+    }
+
+    [Fact]
     public async Task A_review_store_the_file_surface_cannot_write_is_announced_as_an_error_keyed_by_the_surface()
     {
         var post = new QueuedPost();
@@ -639,6 +772,62 @@ public sealed class NotificationWiringTests : IDisposable
                 Assert.Contains("s1", toast.Body, StringComparison.Ordinal);
                 Assert.Equal(toast.Body, shell.Status.HostDetail);
             });
+
+    /// <summary>
+    /// The PNG signature the composer sniffs a format from; the pixels behind it never have to decode, because
+    /// <see cref="StubCodec"/> stands in for the encoder the headless session lacks.
+    /// </summary>
+    private static readonly byte[] PngBytes = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+
+    /// <summary>
+    /// Runs one composer over a throwaway data root: attachments are a session-level seam, so the composer takes its
+    /// <see cref="INotifications"/> as an argument and the double records exactly what a real session would raise.
+    /// </summary>
+    private async Task WithComposerAsync(
+        Func<ComposerViewModel, RecordingNotifications, Task> body,
+        Func<string?, string, bool>? wire = null,
+        IImageCodec? codec = null)
+    {
+        var dir = TestTempFiles.NewDirectory("forge-notify-attachments-");
+        try
+        {
+            await SharedUi.RunAsync(
+                async () =>
+                {
+                    using var services = ComposerSuggestionTests.TestServices.Create(dir);
+                    var notifications = new RecordingNotifications();
+                    using var composer = new ComposerViewModel(
+                        services.Services,
+                        _ => { },
+                        new ComposerPreferences(),
+                        dir,
+                        skillSource: static () => [],
+                        thinkingLevels: static (_, _) => ComposerSuggestionTests.EveryStep,
+                        templateSource: static () => PromptTemplateSet.BuiltIn(),
+                        imageCodec: codec,
+                        wireCarries: wire,
+                        notifications: notifications,
+                        notificationScope: "scope");
+                    await body(composer, notifications);
+                });
+        }
+        finally
+        {
+            TestTempFiles.DeleteTree(dir);
+        }
+    }
+
+    /// <summary>
+    /// The encoder the headless session has no decoder for: it hands back bytes of a chosen size, so the encoded-size limit
+    /// is reachable without a multi-megabyte fixture.
+    /// </summary>
+    private sealed class StubCodec(long size = -1) : IImageCodec
+    {
+        public PreparedImage Prepare(byte[] data, string mediaType) =>
+            new(mediaType, new byte[size < 0 ? data.Length : size], null);
+
+        public Bitmap? Thumbnail(byte[] data) => null;
+    }
 
     /// <summary>A desktop notifier that shows nothing: these cases are about the in-window toast, never the platform.</summary>
     private sealed class SilentNotifier : ISystemNotifier
