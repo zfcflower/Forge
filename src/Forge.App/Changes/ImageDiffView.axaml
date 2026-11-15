@@ -1,0 +1,76 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:changes="using:Forge.App.Changes"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Changes.ImageDiffView"
+             x:DataType="changes:ImageDiffViewModel">
+  <!-- The two versions of one image (wave W17a): same box, same fit, so a change reads as a difference and not as two cards. -->
+  <Grid ColumnDefinitions="*,*" Margin="0,6,0,8" MinHeight="200">
+    <StackPanel Grid.Column="0" Margin="0,0,4,0" Spacing="4">
+      <TextBlock Classes="caption"
+                 FontWeight="SemiBold"
+                 Text="{Binding [changes.diff.image.before], Source={x:Static loc:Loc.Instance}}" />
+      <Border MinHeight="160"
+              MaxHeight="260"
+              Padding="6"
+              CornerRadius="4"
+              BorderThickness="1"
+              BorderBrush="{DynamicResource BorderBrush}"
+              Background="{DynamicResource SurfaceSunkenBrush}">
+        <Panel>
+          <Image Source="{Binding Before.Image}"
+                 Stretch="Uniform"
+                 IsVisible="{Binding HasBefore}"
+                 AutomationProperties.AutomationId="diff-image-before" />
+          <TextBlock Classes="caption"
+                     MaxWidth="260"
+                     TextWrapping="Wrap"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     TextAlignment="Center"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     IsVisible="{Binding !HasBefore}"
+                     Text="{Binding [changes.diff.image.nothing], Source={x:Static loc:Loc.Instance}}" />
+        </Panel>
+      </Border>
+      <TextBlock Classes="caption"
+                 TextTrimming="CharacterEllipsis"
+                 Foreground="{DynamicResource TextMutedBrush}"
+                 Text="{Binding Before.Caption}"
+                 IsVisible="{Binding HasBefore}" />
+    </StackPanel>
+    <StackPanel Grid.Column="1" Margin="4,0,0,0" Spacing="4">
+      <TextBlock Classes="caption"
+                 FontWeight="SemiBold"
+                 Text="{Binding [changes.diff.image.after], Source={x:Static loc:Loc.Instance}}" />
+      <Border MinHeight="160"
+              MaxHeight="260"
+              Padding="6"
+              CornerRadius="4"
+              BorderThickness="1"
+              BorderBrush="{DynamicResource BorderBrush}"
+              Background="{DynamicResource SurfaceSunkenBrush}">
+        <Panel>
+          <Image Source="{Binding After.Image}"
+                 Stretch="Uniform"
+                 IsVisible="{Binding HasAfter}"
+                 AutomationProperties.AutomationId="diff-image-after" />
+          <TextBlock Classes="caption"
+                     MaxWidth="260"
+                     TextWrapping="Wrap"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     TextAlignment="Center"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     IsVisible="{Binding !HasAfter}"
+                     Text="{Binding [changes.diff.image.nothing], Source={x:Static loc:Loc.Instance}}" />
+        </Panel>
+      </Border>
+      <TextBlock Classes="caption"
+                 TextTrimming="CharacterEllipsis"
+                 Foreground="{DynamicResource TextMutedBrush}"
+                 Text="{Binding After.Caption}"
+                 IsVisible="{Binding HasAfter}" />
+    </StackPanel>
+  </Grid>
+</UserControl>

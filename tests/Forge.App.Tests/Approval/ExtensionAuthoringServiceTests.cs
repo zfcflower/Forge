@@ -656,4 +656,70 @@ public sealed class ExtensionAuthoringServiceTests
             harness.DisposeDir();
         }
     }
+
+    [Fact]
+    public async Task Install_hands_the_extracted_directory_and_the_origin_to_the_host_unchanged()
+    {
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+
+            await harness.Service.InstallAsync("/data/host/install/plug-1a2b3c4d", ExtensionOrigins.Installed, CancellationToken.None);
+
+            // The host is the single owner of "where did this come from" and "is this directory acceptable", so the app
+            // must forward both verbatim and never rewrite the path it extracted into.
+            var request = Assert.Single(harness.Authoring.InstallCalls);
+            Assert.Equal("/data/host/install/plug-1a2b3c4d", request.SourceDir);
+            Assert.Equal(ExtensionOrigins.Installed, request.Origin);
+        }
+        finally
+        {
+            harness.DisposeDir();
+        }
+    }
+
+    [Theory]
+    [InlineData("", ExtensionOrigins.Installed)]
+    [InlineData("   ", ExtensionOrigins.Installed)]
+    [InlineData("/data/host/install/x", "")]
+    [InlineData("/data/host/install/x", "   ")]
+    public async Task Install_rejects_blank_arguments_before_touching_the_host(string sourceDir, string origin)
+    {
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+
+            await Assert.ThrowsAnyAsync<ArgumentException>(
+                () => harness.Service.InstallAsync(sourceDir, origin, CancellationToken.None));
+
+            Assert.Empty(harness.Authoring.InstallCalls);
+        }
+        finally
+        {
+            harness.DisposeDir();
+        }
+    }
+
+    [Fact]
+    public async Task Install_propagates_the_host_failure_instead_of_reporting_success()
+    {
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+            harness.Authoring.InstallError = new IpcRemoteException(ExtensionProtocol.ExtensionsInstall, "invalid_extension", "the package manifest is unusable");
+
+            var error = await Assert.ThrowsAsync<IpcRemoteException>(
+                () => harness.Service.InstallAsync("/data/host/install/plug-1a2b3c4d", ExtensionOrigins.Installed, CancellationToken.None));
+
+            Assert.Equal("invalid_extension", error.Code);
+            Assert.Single(harness.Authoring.InstallCalls);
+        }
+        finally
+        {
+            harness.DisposeDir();
+        }
+    }
 }

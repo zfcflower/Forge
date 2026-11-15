@@ -1,0 +1,107 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:settings="using:Forge.App.Settings"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Views.KeymapSettingsSectionView"
+             x:DataType="settings:KeymapSettingsSectionViewModel">
+  <UserControl.Resources>
+    <!-- One row template for all three scope groups: the action name, its current gesture as the rebind target, the default
+         (only while overridden) and the reset button (also only while overridden). -->
+    <DataTemplate x:Key="KeymapRow" x:DataType="settings:KeymapRowViewModel">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" Margin="0,3">
+        <TextBlock Grid.Column="0"
+                   Text="{Binding DisplayName}"
+                   VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis"
+                   AutomationProperties.AutomationId="{Binding Id, StringFormat=keymap-action-{0}}" />
+        <Button Grid.Column="1"
+                Classes="ghost"
+                MinWidth="110"
+                Click="OnRebindClick"
+                ToolTip.Tip="{Binding [keymap.rebind], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="{Binding Id, StringFormat=keymap-rebind-{0}}"
+                AutomationProperties.Name="{Binding DisplayName}">
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <TextBlock Classes="mono" Text="{Binding CurrentGestureText}" VerticalAlignment="Center" />
+            <Border IsVisible="{Binding IsOverridden}" Background="{DynamicResource BorderBrush}" Width="1" Height="14" />
+            <TextBlock Classes="caption"
+                       Text="{Binding DefaultGestureLabel}"
+                       VerticalAlignment="Center"
+                       IsVisible="{Binding IsOverridden}"
+                       Foreground="{DynamicResource TextMutedBrush}" />
+          </StackPanel>
+        </Button>
+        <Button Grid.Column="2"
+                Classes="ghost"
+                Content="{Binding [keymap.reset], Source={x:Static loc:Loc.Instance}}"
+                Command="{Binding ResetCommand}"
+                IsVisible="{Binding IsOverridden}"
+                AutomationProperties.AutomationId="{Binding Id, StringFormat=keymap-reset-{0}}" />
+      </Grid>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <StackPanel Spacing="8">
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding Hint}"
+               AutomationProperties.AutomationId="keymap-hint" />
+
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <TextBox Grid.Column="0"
+               Text="{Binding SearchText, Mode=TwoWay}"
+               PlaceholderText="{Binding SearchPlaceholder}"
+               AutomationProperties.Name="{Binding SearchPlaceholder}"
+               AutomationProperties.AutomationId="keymap-search" />
+      <Button Grid.Column="1"
+              Content="{Binding ResetAllText}"
+              Command="{Binding ResetAllCommand}"
+              AutomationProperties.AutomationId="keymap-reset-all" />
+    </Grid>
+
+    <!-- The capture surface: focusable so a key press goes to it; the row's rebind button focuses it. -->
+    <Border x:Name="CaptureSurface"
+            Focusable="True"
+            IsVisible="{Binding HasCapture}"
+            Background="{DynamicResource SurfaceElevatedBrush}"
+            BorderBrush="{DynamicResource BorderStrongBrush}"
+            BorderThickness="1"
+            CornerRadius="6"
+            Padding="10"
+            KeyDown="OnCaptureKeyDown"
+            AutomationProperties.AutomationId="keymap-capture">
+      <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+        <TextBlock Classes="caption" Text="{Binding CapturePrompt}" />
+        <StackPanel Grid.Row="1" Spacing="4">
+          <TextBlock Classes="mono"
+                     Text="{Binding CaptureGestureText}"
+                     IsVisible="{Binding HasCapturedGesture}"
+                     AutomationProperties.AutomationId="keymap-capture-gesture" />
+          <TextBlock Classes="caption"
+                     Text="{Binding CaptureConflictText}"
+                     IsVisible="{Binding HasConflict}"
+                     Foreground="{DynamicResource DangerBrush}"
+                     AutomationProperties.AutomationId="keymap-capture-conflict" />
+        </StackPanel>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+          <Button Content="{Binding CancelText}"
+                  Command="{Binding CancelCaptureCommand}"
+                  AutomationProperties.AutomationId="keymap-capture-cancel" />
+          <Button Classes="primary"
+                  Content="{Binding ConfirmText}"
+                  Command="{Binding ConfirmCaptureCommand}"
+                  AutomationProperties.AutomationId="keymap-capture-confirm" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <TextBlock Classes="caption" Text="{Binding WindowScopeHeading}" AutomationProperties.AutomationId="keymap-scope-window" />
+    <ItemsControl ItemsSource="{Binding WindowRows}" ItemTemplate="{StaticResource KeymapRow}" />
+
+    <TextBlock Classes="caption" Text="{Binding EditorScopeHeading}" Margin="0,8,0,0" AutomationProperties.AutomationId="keymap-scope-editor" />
+    <ItemsControl ItemsSource="{Binding EditorRows}" ItemTemplate="{StaticResource KeymapRow}" />
+
+    <TextBlock Classes="caption" Text="{Binding ViewScopeHeading}" Margin="0,8,0,0" AutomationProperties.AutomationId="keymap-scope-view" />
+    <ItemsControl ItemsSource="{Binding ViewRows}" ItemTemplate="{StaticResource KeymapRow}" />
+  </StackPanel>
+</UserControl>

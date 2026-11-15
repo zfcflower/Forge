@@ -144,6 +144,18 @@
                             AutomationProperties.AutomationId="mcp-server-restart"
                             AutomationProperties.Name="{Binding [settings.mcp.row.restart], Source={x:Static loc:Loc.Instance}}" />
                     <Button Classes="ghost"
+                            Command="{Binding SignInCommand}"
+                            Content="{Binding [settings.mcp.row.signIn], Source={x:Static loc:Loc.Instance}}"
+                            IsVisible="{Binding NeedsSignIn}"
+                            AutomationProperties.AutomationId="mcp-server-signin"
+                            AutomationProperties.Name="{Binding Name}" />
+                    <Button Classes="ghost"
+                            Command="{Binding SignOutCommand}"
+                            Content="{Binding [settings.mcp.row.signOut], Source={x:Static loc:Loc.Instance}}"
+                            IsVisible="{Binding IsSignedIn}"
+                            AutomationProperties.AutomationId="mcp-server-signout"
+                            AutomationProperties.Name="{Binding Name}" />
+                    <Button Classes="ghost"
                             Command="{Binding TestCommand}"
                             Content="{Binding [settings.mcp.row.test], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="mcp-server-test"
@@ -214,6 +226,51 @@
                     <TextBlock Classes="caption"
                                IsVisible="{Binding ToolsEmpty}"
                                Text="{Binding [settings.mcp.row.toolsEmpty], Source={x:Static loc:Loc.Instance}}" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="2" IsVisible="{Binding IsHttp}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Classes="label" Text="{Binding [settings.mcp.resource.title], Source={x:Static loc:Loc.Instance}}" />
+                      <Button Classes="link"
+                              Command="{Binding RefreshResourcesCommand}"
+                              Content="{Binding [settings.mcp.resource.refresh], Source={x:Static loc:Loc.Instance}}"
+                              AutomationProperties.AutomationId="mcp-server-refresh-resources"
+                              AutomationProperties.Name="{Binding [settings.mcp.resource.refresh], Source={x:Static loc:Loc.Instance}}" />
+                    </StackPanel>
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding HasResourceUpdated}"
+                               Text="{Binding ResourceUpdatedText}"
+                               TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding Resources}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="set:McpResourceRowViewModel">
+                          <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,2">
+                            <TextBlock Classes="mono"
+                                       Text="{Binding Name}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <Border Grid.Column="1" Classes="mcp-badge" IsVisible="{Binding IsSubscribed}">
+                              <TextBlock Classes="caption" Text="{Binding [settings.mcp.resource.subscribed], Source={x:Static loc:Loc.Instance}}" />
+                            </Border>
+                            <Button Grid.Column="2"
+                                    Classes="link"
+                                    Command="{Binding ReadCommand}"
+                                    Content="{Binding [settings.mcp.resource.read], Source={x:Static loc:Loc.Instance}}" />
+                            <Button Grid.Column="3"
+                                    Classes="link"
+                                    Command="{Binding SubscribeCommand}"
+                                    Content="{Binding SubscribeText}" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding ResourcesEmpty}"
+                               Text="{Binding [settings.mcp.resource.empty], Source={x:Static loc:Loc.Instance}}" />
+                    <SelectableTextBlock Classes="mono"
+                                         IsVisible="{Binding HasResourceReadResult}"
+                                         Text="{Binding ResourceReadResultText}"
+                                         TextWrapping="Wrap"
+                                         Foreground="{DynamicResource TextSecondaryBrush}" />
                   </StackPanel>
 
                   <TextBlock Classes="caption"

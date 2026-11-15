@@ -69,6 +69,33 @@ public sealed class ScreenshotToolsTests
     }
 
     [Fact]
+    public async Task The_published_pictures_come_back_as_image_blocks_next_to_the_text_report()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var fixture = new ScreenshotFixture();
+        OpenPullRequest(fixture);
+        fixture.WriteConfig(ScreenshotTestData.CaptureCommand, "screenshots");
+
+        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
+
+        Assert.False(result.IsError, result.Content);
+        Assert.True(result.HasImages, "the four published pictures must come back as image blocks");
+        var text = Assert.IsType<TextBlock>(result.Blocks[0]);
+        Assert.Contains("Pushed 3 screen(s)", text.Text, StringComparison.Ordinal);
+        var images = result.Blocks.OfType<ImageBlock>().ToList();
+        Assert.Equal(4, images.Count);
+        Assert.All(images, static image => Assert.Equal("image/png", image.MediaType));
+        // Each block is the exact file that was pushed: PNG signature first, non-empty payload.
+        var decoded = images.Select(static image => Convert.FromBase64String(image.Data)).ToList();
+        Assert.All(decoded, static bytes => Assert.Equal(0x89, bytes[0]));
+        Assert.All(decoded, static bytes => Assert.True(bytes.Length > 8));
+    }
+
+    [Fact]
     public async Task Without_a_declaration_or_a_command_it_says_it_cannot_capture_and_runs_nothing()
     {
         if (!GitProbe.IsAvailable)

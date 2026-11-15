@@ -21,6 +21,14 @@ public interface IExtensionAuthoringClient
     /// <summary>Swaps the staged draft in and approves exactly these hashes; the live version keeps running until then.</summary>
     Task<ExtensionCommitResult> CommitExtensionAsync(ExtensionCommitRequest request, CancellationToken ct);
 
+    /// <summary>
+    /// Installs an extracted package (wave W10a). <paramref name="sourceDir"/> must be a directory under the agreed
+    /// installation temp root whose root holds a <c>manifest.json</c>; the host validates the manifest, swaps the
+    /// directory in with the trash rollback and records the entry with <paramref name="origin"/>. The new version starts
+    /// Draft and never runs until approved.
+    /// </summary>
+    Task<ExtensionInstallResult> InstallExtensionAsync(ExtensionInstallRequest request, CancellationToken ct);
+
     /// <summary>Drops a staged draft; the live version (if any) is untouched.</summary>
     Task DiscardExtensionAsync(string pluginId, CancellationToken ct);
 

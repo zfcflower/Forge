@@ -6,7 +6,7 @@ namespace Forge.Approval;
 /// <summary>Connection, pragma, schema and row mapping of the approval database.</summary>
 internal static class ApprovalDatabase
 {
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
     public const string WalJournalMode = "wal";
     public const string RollbackJournalMode = "delete";
 
@@ -15,6 +15,7 @@ internal static class ApprovalDatabase
             plugin_id         TEXT NOT NULL,
             version           TEXT NOT NULL,
             status            TEXT NOT NULL CHECK (status IN ('Draft','Approved','Disabled','Uninstalled')),
+            origin            TEXT NOT NULL DEFAULT 'Installed' CHECK (origin IN ('Installed','Bundled','BuiltIn')),
             source_hash       TEXT NOT NULL,
             dependency_hash   TEXT NOT NULL,
             sdk_version       TEXT NOT NULL,
@@ -31,8 +32,15 @@ internal static class ApprovalDatabase
         ) WITHOUT ROWID;
         """;
 
+    /// <summary>Upgrade step from schema 1: every row written before the origin dimension existed is Installed. The CHECK
+    /// repeats <see cref="SchemaSql"/> so an upgraded database refuses an unknown origin in SQL too; the column is added
+    /// with a DEFAULT, so existing rows already satisfy it.</summary>
+    public const string AddOriginColumnSql =
+        "ALTER TABLE plugin_approval ADD COLUMN origin TEXT NOT NULL DEFAULT 'Installed' "
+        + "CHECK (origin IN ('Installed','Bundled','BuiltIn'));";
+
     private const string Columns =
-        "plugin_id, version, status, source_hash, dependency_hash, sdk_version, approved_hash, created_at, updated_at";
+        "plugin_id, version, status, source_hash, dependency_hash, sdk_version, approved_hash, created_at, updated_at, origin";
 
     private const string SelectAllSql = "SELECT " + Columns + " FROM plugin_approval";
 
@@ -40,11 +48,12 @@ internal static class ApprovalDatabase
 
     private const string UpsertSql = """
         INSERT INTO plugin_approval
-            (plugin_id, version, status, source_hash, dependency_hash, sdk_version, approved_hash, created_at, updated_at, updated_utc_ticks)
+            (plugin_id, version, status, origin, source_hash, dependency_hash, sdk_version, approved_hash, created_at, updated_at, updated_utc_ticks)
         VALUES
-            ($pluginId, $version, $status, $sourceHash, $dependencyHash, $sdkVersion, $approvedHash, $createdAt, $updatedAt, $updatedTicks)
+            ($pluginId, $version, $status, $origin, $sourceHash, $dependencyHash, $sdkVersion, $approvedHash, $createdAt, $updatedAt, $updatedTicks)
         ON CONFLICT (plugin_id, version) DO UPDATE SET
             status = excluded.status,
+            origin = excluded.origin,
             source_hash = excluded.source_hash,
             dependency_hash = excluded.dependency_hash,
             sdk_version = excluded.sdk_version,
@@ -158,6 +167,7 @@ internal static class ApprovalDatabase
         command.Parameters.AddWithValue("$pluginId", record.PluginId);
         command.Parameters.AddWithValue("$version", record.Version);
         command.Parameters.AddWithValue("$status", record.Status.ToString());
+        command.Parameters.AddWithValue("$origin", record.Origin.ToString());
         command.Parameters.AddWithValue("$sourceHash", record.SourceHash);
         command.Parameters.AddWithValue("$dependencyHash", record.DependencyHash);
         command.Parameters.AddWithValue("$sdkVersion", record.SdkVersion);
@@ -253,8 +263,27 @@ internal static class ApprovalDatabase
                 pluginId,
                 version,
                 databasePath),
+            Origin = ParseOrigin(
+                Text(reader, 9, "origin", databasePath, pluginId, version),
+                pluginId,
+                version,
+                databasePath),
         };
     }
+
+    private static PluginOrigin ParseOrigin(string value, string pluginId, string version, string databasePath) => value switch
+    {
+        nameof(PluginOrigin.Installed) => PluginOrigin.Installed,
+        nameof(PluginOrigin.Bundled) => PluginOrigin.Bundled,
+        nameof(PluginOrigin.BuiltIn) => PluginOrigin.BuiltIn,
+        _ => throw Malformed(
+            databasePath,
+            "origin",
+            pluginId,
+            version,
+            $"'{value}' is not one of Installed, Bundled, BuiltIn",
+            null),
+    };
 
     private static PluginStatus ParseStatus(string value, string pluginId, string version, string databasePath) => value switch
     {

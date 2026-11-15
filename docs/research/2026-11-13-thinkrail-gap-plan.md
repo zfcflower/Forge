@@ -241,6 +241,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | keymap 覆盖表(actionId\|gesture) | W10e | 空(=全部默认键位;完整改绑,2026-11-15 拍板) | keymap |
 | 评审方式(subagent/manual)、步骤提交后自动评审 | W17b | subagent、关 | git |
 | 终端字体族、字号覆盖 | W17a | 空(=跟随代码字体)、0(=跟随代码字号,否则钳 [8,32]) | tools |
+| 编辑器内联提示开关 | W17c | 开(菜单切换写穿,2026-11-15 补登记) | editor(菜单) |
 | 减少动画(全局动效闸门,树与时间轴共用) | W13 | 关(动画开) | appearance |
 | 脚本内部调用并发上限、返回结果字符上限、单次内部结果字符上限、脚本可见工具名单 | W14 | 8、40000、20000、空白(=全部候选) | tools |
 
@@ -416,3 +417,52 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 ### 手测清单
 
 见 `docs/research/2026-11-15-visual-checklist.md`(W11/W13/W14/W15 的真实 App 视觉复核项,跨波一次过)。
+
+## 十二、W10 与遗留波次交付记录(2026-11-15)
+
+本节是 W10(原「需要先定契约或要拍板」的串行大件)与盘点出的其它未完成项的交付记录。方案、被否备选与四判据见 `2026-11-15-w10-implementation.md`(含 9 项用户拍板)。
+
+### 一、交付面
+
+| 波 | 内容 | 关键落点 |
+|---|---|---|
+| 契约 | 包格式、更新 manifest、MCP 注入接口、keymap 形状、偏好追加、预接线 | `PluginOrigin`/`extensions.install`(Plugin.Sdk)、`IMcpTokenStore`/`IMcpOAuthUi`(Mcp)、`AppPreferences` 8 新项、`FeatureComposition` 三模块、第六覆盖层 `Comments` |
+| W10a | 扩展包仓库 | ApprovalStore v2(origin 列+迁移阶梯+fail-closed)、Host `extensions.install`(trash 回滚/越界拒绝/Draft 起步)、BuiltIn 拒删拒禁、Bundled 首启复制、App 仓库区(索引/本地 zip/来源徽标/取消)、zip 安全边界 |
+| W10b | 自动更新阶段 A | `UpdateService`(调度/渠道/版本比较/流式下载/进度/取消/SHA-256/暂存/说明/打开位置)、`updates` 分区、`make-update-manifest.ps1`、CI 追加(含滚动 `manifest` release 解决 beta 新鲜度) |
+| W10c | 自动更新阶段 B | `UpdateApply` 五件套(协议/进程接缝/zip+tar 解包/状态机/启动确认)、`--apply-update` 无 UI 分支、中性 `.applier-*` 运行目录、原子 claim、看门狗回滚、`install.log`、半截交换 UI 前修复 |
+| W10d | MCP OAuth / resources / progress | `McpOAuth`(9728→8414→7591→PKCE+loopback)、401 钩子+单次重试+single-flight、NeedsSignIn 状态、订阅与管理器重放、progressToken→`ToolContext.Progress`、资源浏览器、`EncryptedSidecarFile` 公共件 |
+| W10e | keymap 设置页 | `Input/Keymap`(21 动作目录)、`KeymapApplier`(字典化热路径)、完整改绑(XAML 键位收敛、8 编辑器动作接管执行+内建键吞键)、冲突组、设置页(搜索/捕获/重置) |
+| W16a | PR 评论线程 + 会话用量 | `PrCommentsViewModel/View`(过滤/过期/回复/解决/交接)、`SessionTurnHistory`+用量汇总 |
+| W16b | breadcrumbs + 终端搜索/重启 | 转录区上方可点路径(项目/工作区聚焦树)、Ctrl+F 搜索条(防抖/世代/宽字符/scrollback 锚定)、已退出终端重启(保留画面) |
+| W17a | 思考节点 + 图片 diff + 终端设置 | `AgentThinkingDelta`→折叠思考行(不落库)、`ImageDiffView`(并排/解码失败无图/Release)、`GitCli.GetFileBytesAtRevisionAsync`(超限即杀)、终端五项偏好进 `tools` 分区 |
+| W17b | 评审可配置 + 结论持久化 | `IReviewConclusionStore`(五态)、`review_conclusions` 表、StepCommitter 提交后自动评审(门释放后/忙进草稿)、git 分区两行 |
+| W17c | LSP code action / rename / inlay hints | 后端六请求+能力解析、灯泡 margin/动作菜单/F2/零长度 inlay 元素、WorkspaceEdit 应用器(单撤销步/全有或全无/跨标签跳过)、`EditorShowInlayHints` 偏好 |
+| W17d | 测试债务 | 第 6 条关闭;1/2/4 因禁全量未动、3/5 宜独立任务(均记 testing.md) |
+
+### 二、用户拍板(2026-11-15)
+
+扩展仓库源=可配索引 URL+本地 zip;更新源=本仓 Releases+每日检查;阶段 B 仅 SHA-256 零签名;keymap 完整改绑;MCP=资源浏览器+进度接检查器;L2/L3/L4/L6 四项全做;W17 四项全纳;L8 维持待定;视觉手测=自动+人工。
+
+### 三、执行口径与偏差
+
+- **模型分工**:Worker 与测试/评审必须不同模型且独立会话。期间遇到三次配额事故(deepseek 402、qwen 429),按用户指定切换到 opencode-go 池(muse-spark 测试 / deepseek-v4.1-flash worker / MiMo review),最终全部波次完成四类会话里的至少三类。
+- **禁全量**:2026-11-15 用户指令禁止 Agent 跑全量,最终全量由用户手动执行。本记录中的验证全部是落点过滤 + 构建。
+- **Worker 越界事故(4 次)**:W16b/W10c/W17b/W10a 修复轮的 Worker 直接把改动写进主工作树(违反副本规则)。成果就地接收并验证,但有两波(拷贝回时)用旧快照覆盖了主树数文件,已按「主树为基线、只取独有文件」重建并逐一确认既往修复在位。
+- **假红三次**:robocopy 保留源时间戳导致 MSBuild/XamlIl 增量判断失误(`Forge.Approval.dll` 旧版、`TerminalView` 命名控件缺生成代码、`ToolsSettingsSectionViewModel` 绑定属性缺失使 XAML 编译失败后静默跳过)。处置:强制 `-t:Rebuild`、删除 `bin/obj`、修正缺失属性。
+- **pr_screenshots 改图片返回**在收尾波补齐(见 §十二.五),不再延后。
+
+### 四、验证(落点,非全量)
+
+`dotnet build Forge.slnx -c Debug` 0 警告 0 错误;各波落点过滤全绿(最终批:PrComments/Usage/Thinking/ImageDiff/TerminalFont/Binary 共 16+52+3 例;双波批 269 例;Editor LSP 14 例;Workspace ~Git 内 Binary 3 例)。**全量测试待用户手动执行**。
+
+### 五、收尾波补齐(2026-11-15 当天全部关闭)
+
+用户要求「不要有任何遗留」,下列五项在收尾波内完成,不再作为缺口移交:
+
+1. **pr_screenshots 返回图片块** —— 已交付:`ScreenshotImages` 在删捕获目录前读字节,工具返回 `[TextBlock, ImageBlock…]`(单图 5 MiB、PNG 签名校验)。
+2. **W16b/W17c/W17a 的补充测试** —— 已补齐:`ProjectTreeMainCheckoutTests` 的 FocusNode 命中/未命中两例、`EditorCodeActionRenameTests` 的跨标签跳过、`EditorInlayHintGeneratorTests` 四例(含向后重建)、`TerminalFontFallbackTests` 六例、`GitCliBinaryTests` 三例、`ThinkingRowTests`/`TurnThinkingTests`(后者来自 W17a 测试会话的产出,已收货)。
+3. **终端设置两份实现** —— 已收:删除从未接线的 `TerminalSettingsViewModel` 与它的 `DataTemplate`,`tools` 分区为唯一入口,相关用例迁移。
+4. **视觉清单** —— 22 项压到 6 项:`VisualSurfacesTests` 八例钉住主题四态色、三处内边距同源、空轮次节点、节点双语、减少动画闸门;其余由既有自动化证据认领并在清单里逐项附用例名。剩余 6 项全部依赖真实模型/网络会话或纯审美,清单里已列明原因。
+5. **真机更新冒烟** —— 已做:`UpdateApplyRealProcessTests` 用真实子进程从 install 目录启动、等它退出、完成 `.old` 改名与暂存换入、新版本未确认时回滚,断言终态与 `install.log`;连跑三次稳定。
+
+仍未做且**只能由人**做的:全量测试(用户禁令,由用户手动跑)、6 项真实会话/审美复核。

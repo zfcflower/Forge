@@ -349,6 +349,15 @@ jobs:
       contents: write
       actions: read
     steps:
+      # 后面的 updates.json 由 scripts/make-update-manifest.ps1 生成,runner 上必须有这个脚本,
+      # 所以 release job 也要 checkout(只取 scripts/,省掉整份源码)。缺了它 manifest 永远不产生,
+      # 而 App 的默认地址 releases/latest/download/updates.json 会对所有用户 404。
+      - name: Checkout (scripts only)
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            scripts
+
       - name: Download packages
         uses: actions/download-artifact@v8
         with:
@@ -359,11 +368,86 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          set -euo pipefail
+          args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes)
+          # x.y.z-beta.* 是预发布:标成 prerelease,GitHub 的 latest 才不会指到它(与 App 的渠道规则一致)。
+          if [[ "$GITHUB_REF_NAME" == *-beta.* ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* "${args[@]}"
+
+      # 阶段 A 的自动更新清单:逐产物算 SHA-256 生成 updates.json,再作为 release asset 上传。
+      # 不预发布后缀 → stable;含 -beta.* → beta(与 App 的渠道偏好同一套规则)。
+      # 一份 manifest 必须能回答每个渠道,所以先取上一份 release 的 updates.json 作为合并基底:
+      # 否则 beta 发布只写 beta 键,stable 用户的默认地址就查不到自己的渠道(反过来的情况同理)。
+      - name: Generate and upload update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" == *-beta.* ]]; then
+            CHANNEL=beta
+          else
+            CHANNEL=stable
+          fi
+
+          NOTES="Forge $VERSION"
+          # 优先用 release 步骤生成的说明;取不到就回退到上面的纯文本行。
+          if BODY="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body -q .body 2>/dev/null)"; then
+            NOTES="$BODY"
+          fi
+
+          # 合并基底优先取固定的 manifest release(每次发布都刷新,恒为最新双渠道);它还不存在时
+          # 回退到最近一个非本次 tag 的 release。首次发布或旧 release 还没有 updates.json 时容忍缺失。
+          merge_args=()
+          if mkdir -p previous-manifest && \
+             gh release download manifest --repo "$GITHUB_REPOSITORY" --pattern updates.json \
+               --dir previous-manifest --clobber 2>/dev/null; then
+            merge_args=(-MergeFrom previous-manifest/updates.json)
+            echo "merging the channels of the rolling manifest release"
+          else
+            PREVIOUS_TAG=""
+            while read -r tag; do
+              if [[ -n "$tag" && "$tag" != "$GITHUB_REF_NAME" && "$tag" != "manifest" ]]; then
+                PREVIOUS_TAG="$tag"
+                break
+              fi
+            done < <(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 30 --json tagName -q '.[].tagName' 2>/dev/null || true)
+            if [[ -n "$PREVIOUS_TAG" ]] && mkdir -p previous-manifest && \
+               gh release download "$PREVIOUS_TAG" --repo "$GITHUB_REPOSITORY" --pattern updates.json \
+                 --dir previous-manifest --clobber 2>/dev/null; then
+              merge_args=(-MergeFrom previous-manifest/updates.json)
+              echo "merging the channels of $PREVIOUS_TAG"
+            else
+              echo "::warning title=No previous updates.json::没有可合并的上一份 manifest(首次发布或旧 release 未产出),本次只写 $CHANNEL 渠道。"
+            fi
+          fi
+
+          BASE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          pwsh scripts/make-update-manifest.ps1 \
+            -ArtifactsDir dist \
+            -Version "$VERSION" \
+            -Channel "$CHANNEL" \
+            -BaseUrl "$BASE_URL" \
+            -Notes "$NOTES" \
+            -Output updates.json \
+            "${merge_args[@]}"
+
+          gh release upload "$GITHUB_REF_NAME" updates.json \
             --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+            --clobber
+
+          # 固定的非 prerelease manifest release:App 的默认更新地址指向它。beta release 标了 --prerelease,
+          # releases/latest/download 会排除它——只有这个滚动 release 能保证 beta 键的新鲜度。
+          # --latest=false 让 GitHub 页面的 Latest 徽标仍留在真正的 stable release 上。
+          gh release view manifest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create manifest --repo "$GITHUB_REPOSITORY" \
+              --title "Update manifest" --notes "Rolling updates.json for the stable and beta channels." --latest=false
+          gh release upload manifest updates.json --repo "$GITHUB_REPOSITORY" --clobber
 
   docs-guard:
     # 入口接线守卫:CLAUDE.md 必须只是 @AGENTS.md 导入桩,AGENTS.md/testing.md/overlay 必须接到 forge-test.ps1。

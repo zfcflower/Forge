@@ -210,11 +210,15 @@ internal sealed record DiffDocumentModel(string Text, DiffRowMap Map);
 /// <summary>Inline: only <see cref="Primary"/>. Split: <see cref="Primary"/> is the old side, <see cref="Secondary"/> the new side.</summary>
 internal sealed record DiffBuildResult(DiffDocumentModel Primary, DiffDocumentModel? Secondary);
 
-/// <summary>What the builder needs to know about one file; independent of the view model so it can be tested alone.</summary>
+/// <summary>
+/// What the builder needs to know about one file; independent of the view model so it can be tested alone.
+/// <see cref="Embed"/> covers every row whose content is a control instead of text: a rendered Markdown preview or the two
+/// pictures of an image change.
+/// </summary>
 internal sealed record DiffFileSpec(
     FileDiff Diff,
     bool Collapsed,
-    bool MarkdownPreview,
+    bool Embed,
     bool FullContext,
     IReadOnlySet<int>? ExpandedFolds = null,
     bool CanLoadContext = false);
@@ -345,7 +349,7 @@ internal static class DiffDocumentBuilder
             return;
         }
 
-        if (spec.MarkdownPreview)
+        if (spec.Embed)
         {
             AddBoth(left, right, new DiffRow(DiffRowKind.Embed, file), PlaceholderText);
             return;

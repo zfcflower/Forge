@@ -87,6 +87,38 @@
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
+  <!-- Session breadcrumbs (W16b): flat text buttons on the transcript header, muted until hovered; the separator and
+       the current session segment are plain text. Shared by SessionView and SubAgentView. -->
+  <Style Selector="Button.breadcrumb">
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="Padding" Value="4,2" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.breadcrumb:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="TextBlock.breadcrumb-separator">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="2,0" />
+  </Style>
+
+  <Style Selector="TextBlock.breadcrumb-current">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
   <Style Selector="Button.primary /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource PrimaryButtonBackgroundBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />

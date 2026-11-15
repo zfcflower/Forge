@@ -8,6 +8,7 @@ using Avalonia.Interactivity;
 using AvaloniaEdit;
 using AvaloniaEdit.Editing;
 using Forge.App.Editing;
+using Forge.App.Input;
 using Forge.App.Localization;
 using Forge.App.Review;
 using Forge.App.ViewModels;
@@ -18,6 +19,23 @@ namespace Forge.App.Views;
 
 public partial class FileDocumentView : UserControl
 {
+    /// <summary>
+    /// The combinations AvaloniaEdit binds to its own commands (its copy, paste, undo, find, … handlers). They are the keys
+    /// a rebind has to kill: once an action moves off one of them, the library would otherwise still do the action, or the
+    /// replacement key would sit beside a live old one.
+    /// </summary>
+    private static readonly KeyGesture[] EditorBuiltInGestures =
+    [
+        new(Key.Z, KeyModifiers.Control),
+        new(Key.Y, KeyModifiers.Control),
+        new(Key.X, KeyModifiers.Control),
+        new(Key.C, KeyModifiers.Control),
+        new(Key.V, KeyModifiers.Control),
+        new(Key.A, KeyModifiers.Control),
+        new(Key.F, KeyModifiers.Control),
+        new(Key.H, KeyModifiers.Control),
+    ];
+
     private FileDocumentViewModel? model;
     private ForgeEditorBridge? bridge;
     private EditorMenuBuilder? builder;
@@ -56,6 +74,7 @@ public partial class FileDocumentView : UserControl
         attached = true;
         Editor.ActualThemeVariantChanged += OnThemeChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        KeymapApplier.Changed += OnKeymapChanged;
         Connect();
 
         // A switch made while this tab was off screen was not seen: catch up on the way back.
@@ -67,6 +86,7 @@ public partial class FileDocumentView : UserControl
         attached = false;
         Editor.ActualThemeVariantChanged -= OnThemeChanged;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        KeymapApplier.Changed -= OnKeymapChanged;
         Disconnect();
         base.OnDetachedFromVisualTree(e);
     }
@@ -108,10 +128,12 @@ public partial class FileDocumentView : UserControl
 
         review?.Bind(model.ReviewController);
         Rebind();
+        ApplyKeymap();
     }
 
     private void Disconnect()
     {
+        KeyBindings.Clear();
         DetachEditorLsp();
         if (model is not null)
         {
@@ -133,6 +155,22 @@ public partial class FileDocumentView : UserControl
     }
 
     private void OnThemeChanged(object? sender, EventArgs e) => bridge?.ApplyTheme();
+
+    /// <summary>Rebuilds the save key binding from the catalog and the live overrides; the save command is lazy but never null.</summary>
+    private void ApplyKeymap()
+    {
+        KeyBindings.Clear();
+        if (model is not null)
+        {
+            KeyBindings.Add(new KeyBinding
+            {
+                Gesture = KeymapApplier.Gesture(KeymapActionIds.SaveDocument),
+                Command = model.SaveCommand,
+            });
+        }
+    }
+
+    private void OnKeymapChanged() => ApplyKeymap();
 
     /// <summary>
     /// The document's own texts (tab title, open label, notices, preview captions) follow the language. The view holds
@@ -294,30 +332,117 @@ public partial class FileDocumentView : UserControl
 
     private void OnEditorKeyDown(object? sender, KeyEventArgs e)
     {
-        var copy = e.Key == Key.C && e.KeyModifiers is KeyModifiers.Control or KeyModifiers.Meta
-            || e.Key == Key.Insert && e.KeyModifiers == KeyModifiers.Control;
-        if (copy && Editor.TextArea.Selection is SimpleSelection { IsEmpty: false })
+        // The search box lives inside this control and is a text input of its own: a key pressed there (paste, undo, select
+        // all) belongs to the box, not to the document the panel sits over.
+        if (e.Source is TextBox)
         {
-            e.Handled = true;
-            _ = CopyAsync();
             return;
         }
 
-        if (e.Key == Key.OemOpenBrackets && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift))
+        if (RunCatalogAction(e))
+        {
+            return;
+        }
+
+        // AvaloniaEdit's own combinations stay wired to its command bindings, and this tunnel handler runs before them. The
+        // action branches above would have taken a key the catalog still owns, so a key reaching this point is a library
+        // default whose action the catalog has moved elsewhere: swallow it, or the old combination keeps working next to
+        // the new one and the settings page is a lie.
+        foreach (var builtIn in EditorBuiltInGestures)
+        {
+            if (builtIn.Matches(e))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorToggleFold).Matches(e))
         {
             e.Handled = true;
             Folding?.ToggleAtCaret();
         }
-        else if (e.Key == Key.OemOpenBrackets && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Alt))
+        else if (KeymapApplier.Gesture(KeymapActionIds.EditorFoldAll).Matches(e))
         {
             e.Handled = true;
             Folding?.FoldAll();
         }
-        else if (e.Key == Key.OemCloseBrackets && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Alt))
+        else if (KeymapApplier.Gesture(KeymapActionIds.EditorUnfoldAll).Matches(e))
         {
             e.Handled = true;
             Folding?.UnfoldAll();
         }
+    }
+
+    /// <summary>
+    /// Runs one of the eight editor-scope actions the catalog owns when the pressed key is the gesture it currently
+    /// resolves to, through the same <c>*FromMenu</c> method the menu item calls. Copy keeps the view's own clipboard
+    /// write (it reports a failure into the document instead of losing an exception); with nothing selected it hands the
+    /// key back, which is what this view did before the catalog took the key.
+    /// </summary>
+    private bool RunCatalogAction(KeyEventArgs e)
+    {
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorUndo).Matches(e))
+        {
+            e.Handled = true;
+            UndoFromMenu();
+            return true;
+        }
+
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorRedo).Matches(e))
+        {
+            e.Handled = true;
+            RedoFromMenu();
+            return true;
+        }
+
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorCut).Matches(e))
+        {
+            e.Handled = true;
+            CutFromMenu();
+            return true;
+        }
+
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorCopy).Matches(e))
+        {
+            if (Editor.TextArea.Selection is SimpleSelection { IsEmpty: false })
+            {
+                e.Handled = true;
+                CopyFromMenu();
+            }
+
+            return true;
+        }
+
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorPaste).Matches(e))
+        {
+            e.Handled = true;
+            PasteFromMenu();
+            return true;
+        }
+
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorSelectAll).Matches(e))
+        {
+            e.Handled = true;
+            SelectAllFromMenu();
+            return true;
+        }
+
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorFind).Matches(e))
+        {
+            e.Handled = true;
+            FindFromMenu();
+            return true;
+        }
+
+        if (KeymapApplier.Gesture(KeymapActionIds.EditorReplace).Matches(e))
+        {
+            e.Handled = true;
+            ReplaceFromMenu();
+            return true;
+        }
+
+        return false;
     }
 
     private void OnCopyClick(object? sender, RoutedEventArgs e) => _ = CopyAsync();

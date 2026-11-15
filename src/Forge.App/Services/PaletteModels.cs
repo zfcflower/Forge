@@ -1,3 +1,4 @@
+using Forge.App.Input;
 using Forge.Editor.Lsp;
 using Forge.IO;
 
@@ -80,10 +81,13 @@ internal sealed record PaletteItem
         new() { Source = source, Kind = PaletteItemKind.Notice, Title = text };
 }
 
-/// <summary>One entry of the source strip: the source, the localization key of its word and its opening gesture.</summary>
-internal sealed record PaletteSourceOption(PaletteSource Source, string LabelKey, string Gesture)
+/// <summary>One entry of the source strip: the source, the localization key of its word and the id of its opening gesture (null when none).</summary>
+internal sealed record PaletteSourceOption(PaletteSource Source, string LabelKey, string? GestureActionId)
 {
     public string Label => Localization.Loc.Instance[LabelKey];
+
+    /// <summary>The opening gesture, resolved from the keymap so a rebind follows the strip.</summary>
+    public string Gesture => GestureActionId is null ? string.Empty : KeymapApplier.DisplayGesture(GestureActionId);
 
     public bool HasGesture => Gesture.Length > 0;
 

@@ -16,11 +16,15 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     private readonly HostOptions options;
     private readonly ApprovalStore approvals;
     private readonly PluginCatalog catalog;
+    private readonly PluginCatalog? builtInCatalog;
     private readonly ExtensionStagingArea staging;
     private readonly Dictionary<string, PluginEntry> plugins = new(StringComparer.Ordinal);
     private readonly Dictionary<string, WorkerSlot> workers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PluginState> states = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Publication> publications = new(StringComparer.Ordinal);
+
+    /// <summary>Plugin ids copied in from the bundled directory on this run; their first approval record is Bundled.</summary>
+    private readonly HashSet<string> bundledIds = new(StringComparer.Ordinal);
 
     /// <summary>Runs of workflow plugins in flight. A workflow has no worker session, but its steps still call the main
     /// program through <c>host.tool_call</c>, so they travel under the same active-run binding a worker callback uses.</summary>
@@ -56,7 +60,11 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         Directory.CreateDirectory(options.DataDirectory);
         approvals = new ApprovalStore(options.DataDirectory);
         catalog = new PluginCatalog(options.PluginsDirectory);
+        builtInCatalog = options.BuiltInPluginsDirectory is { Length: > 0 } builtIn
+            ? new PluginCatalog(builtIn)
+            : null;
         staging = new ExtensionStagingArea(options.PluginsDirectory);
+        CopyBundledPlugins();
         scriptExecutors = new ScriptExecutorSupervisor(options, scriptCompiler, ForwardToolCallAsync, stop, cleanup);
         terminals = new TerminalManager(stop, cleanup, new TerminalNotifier(this));
 #if DEBUG
@@ -336,6 +344,8 @@ public sealed partial class ExtensionHost : IAsyncDisposable
                 return HostReply.From(EnablePluginAsync(HostArguments.Read<PluginVersionRequest>(message), ct));
             case ExtensionProtocol.PluginDelete:
                 return HostReply.From(DeletePluginAsync(HostArguments.Read<PluginVersionRequest>(message), ct));
+            case ExtensionProtocol.ExtensionsInstall:
+                return HostReply.From(InstallExtensionAsync(HostArguments.Read<ExtensionInstallRequest>(message), ct));
             default:
                 throw new HostOperationException("unsupported_operation", $"The extension host does not serve '{message.Operation}'.");
         }
@@ -1103,34 +1113,25 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         try
         {
             var scan = await catalog.DiscoverAsync(ct).ConfigureAwait(false);
+            var builtInScan = builtInCatalog is null
+                ? new PluginScanResult([], [])
+                : await builtInCatalog.DiscoverAsync(ct).ConfigureAwait(false);
             var present = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entry in scan.Plugins)
             {
                 present.Add(entry.Id);
-                var state = StateOf(entry.Id);
-                await state.EnterAsync(ct).ConfigureAwait(false);
-                try
-                {
-                    SyncRecord(entry);
-                    lock (sync)
-                    {
-                        plugins[entry.Id] = entry;
-                    }
+                await ApplyDiscoveredAsync(entry, ct).ConfigureAwait(false);
+            }
 
-                    await ApplyLockedAsync(entry, ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
+            foreach (var entry in builtInScan.Plugins)
+            {
+                // A user plugin with the same id wins over the read-only built-in copy; the built-in one is not loaded.
+                if (!present.Add(entry.Id))
                 {
-                    throw;
+                    continue;
                 }
-                catch (Exception exception)
-                {
-                    entry.Issues.Add(new PluginIssue(entry.Id, PluginIssueKind.InvalidPackage, exception.Message, entry.Directory));
-                }
-                finally
-                {
-                    state.Exit();
-                }
+
+                await ApplyDiscoveredAsync(entry, ct).ConfigureAwait(false);
             }
 
             foreach (var id in KnownPluginIds())
@@ -1170,7 +1171,26 @@ public sealed partial class ExtensionHost : IAsyncDisposable
                     }
                 }
 
+                foreach (var issue in builtInScan.Issues)
+                {
+                    if (reported.Add(issue))
+                    {
+                        issues.Add(issue);
+                    }
+                }
+
                 foreach (var entry in scan.Plugins)
+                {
+                    foreach (var issue in entry.Issues)
+                    {
+                        if (reported.Add(issue))
+                        {
+                            issues.Add(issue);
+                        }
+                    }
+                }
+
+                foreach (var entry in builtInScan.Plugins)
                 {
                     foreach (var issue in entry.Issues)
                     {
@@ -1192,6 +1212,36 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         finally
         {
             refreshGate.Release();
+        }
+    }
+
+    /// <summary>Applies one discovered entry under its own gate: sync the record, replace the entry and bring its worker
+    /// and tool registration in line with the result. Used for both the plugins root and the read-only built-in root.</summary>
+    private async Task ApplyDiscoveredAsync(PluginEntry entry, CancellationToken ct)
+    {
+        var state = StateOf(entry.Id);
+        await state.EnterAsync(ct).ConfigureAwait(false);
+        try
+        {
+            SyncRecord(entry);
+            lock (sync)
+            {
+                plugins[entry.Id] = entry;
+            }
+
+            await ApplyLockedAsync(entry, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            entry.Issues.Add(new PluginIssue(entry.Id, PluginIssueKind.InvalidPackage, exception.Message, entry.Directory));
+        }
+        finally
+        {
+            state.Exit();
         }
     }
 
@@ -1357,6 +1407,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
                 DependencyHash = entry.DependencyHash,
                 SdkVersion = entry.SdkVersion,
                 Status = PluginStatus.Draft,
+                Origin = OriginOf(entry),
             });
             return;
         }

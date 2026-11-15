@@ -5,8 +5,10 @@ using Microsoft.Data.Sqlite;
 namespace Forge.Workspace;
 
 /// <summary>
-/// Review comments for every workspace in one SQLite database (WAL, outside the repository). Writes are short
-/// transactions on pooled connections, so concurrent sessions do not serialize on a shared writer.
+/// Review comments, review marks and review conclusions for every workspace in one SQLite database (WAL, outside the
+/// repository). Writes are short transactions on pooled connections, so concurrent sessions do not serialize on a shared
+/// writer. The schema is one idempotent script (<c>CREATE TABLE IF NOT EXISTS</c>), so a table added by a later wave appears
+/// on the next open of an existing database and no version number has to be bumped; nothing here drops or rewrites a column.
 /// </summary>
 public sealed partial class ReviewStore
 {
@@ -45,6 +47,18 @@ public sealed partial class ReviewStore
             created_at TEXT NOT NULL,
             PRIMARY KEY (workspace_path, session_id, kind, file_path, item_hash)
         );
+        CREATE TABLE IF NOT EXISTS review_conclusions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_path TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            step_id TEXT NULL,
+            base_commit TEXT NULL,
+            head_commit TEXT NULL,
+            outcome INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_review_conclusions_session ON review_conclusions (session_id, created_at);
         """;
 
     private readonly string dataDirectory;
@@ -320,9 +334,10 @@ public sealed partial class ReviewStore
     }
 
     /// <summary>
-    /// Copies every comment and mark of <paramref name="fromSessionId"/> in the workspace to <paramref name="toSessionId"/>
-    /// in one transaction. Only <c>session_id</c> changes: <c>workspace_path</c> and all other columns stay as they were,
-    /// copied comments get new ids, and the source rows are left in place. Returns the number of comments copied.
+    /// Copies every comment, mark and conclusion of <paramref name="fromSessionId"/> in the workspace to
+    /// <paramref name="toSessionId"/> in one transaction. Only <c>session_id</c> changes: <c>workspace_path</c> and all other
+    /// columns stay as they were, copied rows get new ids, and the source rows are left in place. Returns the number of
+    /// comments copied (conclusions are copied as well and are not in that count, like marks).
     /// </summary>
     public async Task<int> CopySessionAsync(string workspacePath, string fromSessionId, string toSessionId, CancellationToken ct = default)
     {
@@ -357,11 +372,12 @@ public sealed partial class ReviewStore
             FROM review_marks WHERE workspace_path = $workspace AND session_id = $from;
             """;
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        await CopyConclusionsAsync(connection, transaction, fromSessionId, toSessionId, ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return copied;
     }
 
-    /// <summary>Deletes every comment and mark of a session across all workspaces; returns the number of comments removed.</summary>
+    /// <summary>Deletes every comment, mark and conclusion of a session across all workspaces; returns the number of comments removed.</summary>
     public async Task<int> DeleteSessionAsync(string sessionId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -373,6 +389,8 @@ public sealed partial class ReviewStore
         command.CommandText = "DELETE FROM review_comments WHERE session_id = $session";
         var removed = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         command.CommandText = "DELETE FROM review_marks WHERE session_id = $session";
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        command.CommandText = "DELETE FROM review_conclusions WHERE session_id = $session";
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return removed;

@@ -1,8 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using Forge.Abstractions;
+using Forge.App.Automations;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.ViewModels;
 using Forge.Workspace;
 using Forge.App.Logging;
 using ZLogger;
@@ -39,6 +42,11 @@ namespace Forge.App.Git;
 /// (the second one then sees <c>NoChanges</c>). Expected failures are results, never exceptions; only cancellation
 /// throws, except the late cancellation above that is recovered into a result. Every git call is asynchronous and runs on
 /// whatever thread the caller is on, so callers off the UI thread keep the UI free.</para>
+/// <para>Automatic review (wave W17b): a step that was just committed is handed to the session's own agent as a
+/// <c>request_review</c> request when the user switched <c>reviewAfterStepCommit</c> on and the review mode is the sub-agent
+/// (<c>reviewMode</c> = <c>subagent</c>). The hand-off happens after the per-worktree gate is released and never changes the
+/// commit result: an idle session runs the review as a turn at once, and a step commit inside that turn must not wait for a
+/// gate this call had already released.</para>
 /// </summary>
 internal sealed class StepCommitter : IStepCommitter
 {
@@ -58,18 +66,28 @@ internal sealed class StepCommitter : IStepCommitter
     private readonly Func<string, CancellationToken, Task<WorktreeResolution>> resolveWorktree;
     private readonly Func<bool> isEnabled;
     private readonly INotifications? notifications;
+    private readonly Func<StepReviewSettings>? reviewSettings;
+    private readonly IStepReviewMessenger? messenger;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> gates = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="git">The git wrapper every command goes through.</param>
     /// <param name="store">Where the outcome is recorded.</param>
     /// <param name="resolveWorktree">Session id to the worktree the session may commit into; see <see cref="WorktreeResolution"/>.</param>
     /// <param name="isEnabled">Reads the <c>gitStepCommits</c> preference at the start of every commit.</param>
+    /// <param name="notifications">Where a refused commit and a review hand-off that could not be delivered are announced.</param>
+    /// <param name="reviewSettings">
+    /// Reads the two review preferences at each commit, so a change in the settings section applies to the next one; null
+    /// (or <see cref="StepReviewSettings.WantsReview"/> false) means no automatic review.
+    /// </param>
+    /// <param name="messenger">Hands the review request to the session's agent; null means no automatic review at all.</param>
     public StepCommitter(
         GitCli git,
         ITodoStore store,
         Func<string, CancellationToken, Task<WorktreeResolution>> resolveWorktree,
         Func<bool> isEnabled,
-        INotifications? notifications = null)
+        INotifications? notifications = null,
+        Func<StepReviewSettings>? reviewSettings = null,
+        IStepReviewMessenger? messenger = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(store);
@@ -80,6 +98,8 @@ internal sealed class StepCommitter : IStepCommitter
         this.resolveWorktree = resolveWorktree;
         this.isEnabled = isEnabled;
         this.notifications = notifications;
+        this.reviewSettings = reviewSettings;
+        this.messenger = messenger;
     }
 
     /// <summary>
@@ -158,16 +178,21 @@ internal sealed class StepCommitter : IStepCommitter
             return await NothingToCommitAsync(item, StepCommitOutcome.Skipped, "The session's worktree no longer exists.", ct).ConfigureAwait(false);
         }
 
+        StepCommitResult result;
         var gate = gates.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await CommitLockedAsync(item, directory, ct).ConfigureAwait(false);
+            result = await CommitLockedAsync(item, directory, ct).ConfigureAwait(false);
         }
         finally
         {
             gate.Release();
         }
+
+        // Deliberately outside the gate: an idle session runs the review as a turn at once, and that turn may commit its own
+        // steps, which would wait for a gate this call still held.
+        return await WithReviewRequestAsync(item, result).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -400,6 +425,69 @@ internal sealed class StepCommitter : IStepCommitter
         }
     }
 
+    /// <summary>
+    /// Asks the session's own agent to review a step that was just committed, when the user switched
+    /// <c>reviewAfterStepCommit</c> on and the review mode is the sub-agent (wave W17b). The message is handed over through
+    /// the same W11 contract the checks panel and a failed Mermaid block use: a turn when the session is idle, the composer's
+    /// draft when it is busy, never a second turn behind the user's back.
+    /// <para>Nothing here can change the commit result. A hand-off that throws is traced and announced once and the commit
+    /// still returns as committed; a session that cannot take the message (its tab closed) is silently skipped, because that
+    /// is not an error of the commit.</para>
+    /// </summary>
+    private async Task<StepCommitResult> WithReviewRequestAsync(TodoItem item, StepCommitResult result)
+    {
+        if (result.Outcome != StepCommitOutcome.Committed
+            || messenger is null
+            || reviewSettings is null
+            || string.IsNullOrWhiteSpace(item.SessionId)
+            || !reviewSettings().WantsReview)
+        {
+            return result;
+        }
+
+        try
+        {
+            // No cancellation token: the commit is already recorded, and a turn that is cancelled a moment later must not be
+            // the reason the review it asked for never arrives.
+            await messenger
+                .HandAsync(item.SessionId, BuildReviewRequest(item), new LocText(GitStrings.HandOffReviewOrigin))
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsExpected(exception))
+        {
+            AppLogs.StepCommit.ZLogWarning($"could not hand the review of step '{item.Id}' to its session: {exception.Message}");
+            notifications.Notify(
+                NotificationLevel.Warning,
+                new LocText(GitStrings.NotificationReviewHandOffFailed),
+                LocText.Literal(exception.Message),
+                "step-review:" + item.Id);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The message that asks the session's agent for the step's review. Model input, not UI text, so it is English and lives
+    /// here beside the trigger (the same rule as <c>MermaidFixMessage</c> and <c>PrChecksFixMessage</c>): it names the step
+    /// id, because that is what makes <c>request_review</c> read exactly that step's own commit, and the one instruction that
+    /// must not get lost - a request changes verdict is not a finished step.
+    /// </summary>
+    internal static string BuildReviewRequest(TodoItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var title = FirstLine(item.CommitSubject) ?? FirstLine(item.Title);
+        return new StringBuilder(320)
+            .Append("A checklist step was just committed. Call request_review with step_id \"")
+            .Append(item.Id)
+            .Append('"')
+            .Append(title is null ? string.Empty : " (step: " + title + ")")
+            .Append(
+                " to review that commit, then act on the verdict before you go on: while it is request changes, fix the " +
+                "findings, commit the fix, and call request_review again at the new HEAD; do not report the step as done " +
+                "while a blocking finding stands.")
+            .ToString();
+    }
+
     /// <summary>The result text of a commit: short sha and the subject (the item title when git's subject was not read).</summary>
     private static string CommittedMessage(TodoItem item, string commitId, string? subject)
     {
@@ -531,6 +619,66 @@ internal sealed class StepCommitter : IStepCommitter
     /// <summary>Everything except cancellation and process-fatal errors is an expected failure of the environment.</summary>
     private static bool IsExpected(Exception exception) =>
         exception is not (OperationCanceledException or OutOfMemoryException);
+}
+
+/// <summary>
+/// The two review preferences of wave W17b, read at each step commit (the composition root hands in
+/// <see cref="Live"/>, so a change in the <c>git</c> settings section applies to the next commit without a restart).
+/// </summary>
+/// <param name="AfterStepCommit">The <c>reviewAfterStepCommit</c> switch; off by default.</param>
+/// <param name="SubAgentMode">
+/// The <c>reviewMode</c> is <c>subagent</c> (<paramref name="AfterStepCommit"/> is the only switch that can make a
+/// commit ask for a review); the <c>manual</c> mode never triggers one.
+/// </param>
+internal readonly record struct StepReviewSettings(bool AfterStepCommit, bool SubAgentMode)
+{
+    /// <summary>The <c>reviewMode</c> token of the default mode: one read-only Reviewer pass per review.</summary>
+    internal const string SubAgentModeToken = "subagent";
+
+    /// <summary>The <c>reviewMode</c> token of the mode that only reviews by hand.</summary>
+    internal const string ManualModeToken = "manual";
+
+    /// <summary>A committed step should be handed to a review: the switch is on and the mode is the sub-agent.</summary>
+    public bool WantsReview => AfterStepCommit && SubAgentMode;
+
+    /// <summary>The live reader the composition root hands to <see cref="StepCommitter"/>.</summary>
+    public static Func<StepReviewSettings> Live(Forge.App.Preferences.AppPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        return () => new StepReviewSettings(
+            preferences.ReviewAfterStepCommit,
+            !string.Equals(preferences.ReviewMode, ManualModeToken, StringComparison.Ordinal));
+    }
+}
+
+/// <summary>
+/// Delivers one prepared message to one session's own agent (the W11 hand-off contract). The implementation is the window's,
+/// because it needs the live session view; <see cref="StepCommitter"/> only sees this seam.
+/// </summary>
+internal interface IStepReviewMessenger
+{
+    /// <summary>
+    /// True when a turn ran, false when the message was queued in the session's composer or the session cannot take it.
+    /// </summary>
+    Task<bool> HandAsync(string sessionId, string message, LocText origin);
+}
+
+/// <summary>
+/// The product <see cref="IStepReviewMessenger"/>: the live session view comes from the composition's hook and the hand-off
+/// runs on the UI thread, because a session view model touches bound state. A session that is not open (its tab was closed)
+/// or that can no longer take messages is skipped with false.
+/// </summary>
+internal sealed class StepReviewMessenger(Func<string, IAgentMessageHost?> sessions, IUiThread ui) : IStepReviewMessenger
+{
+    public Task<bool> HandAsync(string sessionId, string message, LocText origin)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        return ui.InvokeAsync(() =>
+            sessions(sessionId) is { CanHandOff: true } host
+                ? host.HandMessageAsync(message, origin)
+                : Task.FromResult(false));
+    }
 }
 
 /// <summary>

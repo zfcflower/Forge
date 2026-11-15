@@ -470,6 +470,70 @@ public sealed class ProjectTreeMainCheckoutTests
         }
     }
 
+    [Fact]
+    public async Task Focus_node_expands_the_collapsed_groups_and_fires_once_for_a_known_key()
+    {
+        var root = GitTestFiles.NewTempDir("forge-focus-known-");
+        try
+        {
+            var session = SharedUi.Session;
+            var outcome = await session.Dispatch(
+                async () =>
+                {
+                    using var world = World.Create(root, [], _ => new GitHead(GitHeadKind.Branch, "main"));
+                    await world.Tree.RefreshAsync(CancellationToken.None);
+                    var main = world.Tree.Sections.Single(static node => node.Kind == TreeNodeKind.Project).Children[0];
+                    var project = world.Tree.Sections.Single(static node => node.Kind == TreeNodeKind.Project);
+                    // Collapse the project so the row is not in the flat list: FocusNode must expand it first.
+                    project.IsExpanded = false;
+                    var fired = new List<string>();
+                    world.Tree.NodeFocusRequested += (_, node) => fired.Add(node.Key);
+
+                    var found = world.Tree.FocusNode(main.Key);
+
+                    return new { Found = found, Fired = fired, InRows = world.Tree.Rows.Any(row => row.Key == main.Key) };
+                },
+                CancellationToken.None);
+
+            Assert.True(outcome.Found);
+            Assert.Equal([outcome.Fired[0]], outcome.Fired.Distinct().ToList());
+            Assert.Single(outcome.Fired);
+            Assert.True(outcome.InRows, "the focused row must be part of the flat list the view scrolls");
+        }
+        finally
+        {
+            GitTestFiles.DeleteTree(root);
+        }
+    }
+
+    [Fact]
+    public async Task Focus_node_answers_false_and_fires_nothing_for_a_key_this_tree_does_not_hold()
+    {
+        var root = GitTestFiles.NewTempDir("forge-focus-unknown-");
+        try
+        {
+            var session = SharedUi.Session;
+            var outcome = await session.Dispatch(
+                async () =>
+                {
+                    using var world = World.Create(root, [], _ => new GitHead(GitHeadKind.Branch, "main"));
+                    await world.Tree.RefreshAsync(CancellationToken.None);
+                    var fired = 0;
+                    world.Tree.NodeFocusRequested += (_, _) => fired++;
+                    // The shell asks both trees in turn, so an unknown key must be a quiet false, not an exception.
+                    return (Found: world.Tree.FocusNode("worktree:other|C:\elsewhere"), Fired: fired);
+                },
+                CancellationToken.None);
+
+            Assert.False(outcome.Found);
+            Assert.Equal(0, outcome.Fired);
+        }
+        finally
+        {
+            GitTestFiles.DeleteTree(root);
+        }
+    }
+
     private sealed class World : IDisposable
     {
         private int headCalls;

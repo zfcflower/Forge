@@ -3,6 +3,7 @@ using Forge.Abstractions;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.Preferences;
 using Forge.HostClient;
 using Forge.App.Logging;
 using ZLogger;
@@ -42,7 +43,8 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
     private bool disposed;
     private int restoring;
 
-    private ApprovalServices(AppPaths paths, ExtensionHostSupervisor? host, LocText hostProblem, INotifications? notifications)
+    private ApprovalServices(AppPaths paths, ExtensionHostSupervisor? host, LocText hostProblem, INotifications? notifications,
+        AppPreferences? preferences = null, HttpClient? repositoryHttp = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         Rules = new ApprovalRules(Path.Combine(paths.UserDataDirectory, ApprovalRules.FileName));
@@ -71,7 +73,9 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
             this,
             Rules,
             OpenPendingCardAsync,
-            Queue.Dispatcher);
+            Queue.Dispatcher,
+            preferences,
+            repositoryHttp);
 
         // The rules are read once in the background at startup; a handler that needs them awaits the same task.
         _ = Rules.LoadAsync(CancellationToken.None);
@@ -128,8 +132,10 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
         AppPaths paths,
         ExtensionHostSupervisor? host,
         LocText hostProblem,
-        INotifications? notifications = null) =>
-        new(paths, host, hostProblem, notifications);
+        INotifications? notifications = null,
+        AppPreferences? preferences = null,
+        HttpClient? repositoryHttp = null) =>
+        new(paths, host, hostProblem, notifications, preferences, repositoryHttp);
 
     /// <summary>Registers the session title and returns the handler the session's host injects.</summary>
     public SessionApprovalHandler CreateHandler(SessionInfo session)

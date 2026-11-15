@@ -67,7 +67,6 @@ internal static class PaletteStrings
     public const string HintOpen = "palette.hint.open";
     public const string HintClose = "palette.hint.close";
     public const string HintSources = "palette.hint.sources";
-    public const string Shortcut = "palette.shortcut";
     public const string AutomationName = "palette.automation.name";
 
     // ---- symbol kind badges ----
@@ -175,7 +174,6 @@ internal static class PaletteStrings
         Loc.Register(HintOpen, "Enter 打开", "Enter to open");
         Loc.Register(HintClose, "Esc 关闭", "Esc to close");
         Loc.Register(HintSources, "> 命令 · # 内容 · : 会话 · @ 符号", "> commands · # text · : sessions · @ symbols");
-        Loc.Register(Shortcut, "搜索文件（Ctrl+P）", "Search files (Ctrl+P)");
         Loc.Register(AutomationName, "命令面板", "Command palette");
 
         Loc.Register(SymbolKindType, "类型", "type");

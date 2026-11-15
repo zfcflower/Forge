@@ -33,8 +33,18 @@ public sealed class RequestReviewTool : ITool
     private readonly IReviewChangeSetSource changeSets;
     private readonly ITodoStore? todos;
     private readonly Func<ReviewPackageLimits>? limits;
+    private readonly IReviewConclusionStore? conclusions;
 
-    public RequestReviewTool(SubAgentScheduler scheduler, IReviewChangeSetSource changeSets, ITodoStore? todos = null, Func<ReviewPackageLimits>? limits = null)
+    /// <param name="conclusions">
+    /// Where each finished review is recorded (wave W17b). Null records nothing: the tool behaves exactly as it did before
+    /// conclusions were stored, which is what a host without a store and every unit test gets.
+    /// </param>
+    public RequestReviewTool(
+        SubAgentScheduler scheduler,
+        IReviewChangeSetSource changeSets,
+        ITodoStore? todos = null,
+        Func<ReviewPackageLimits>? limits = null,
+        IReviewConclusionStore? conclusions = null)
     {
         ArgumentNullException.ThrowIfNull(scheduler);
         ArgumentNullException.ThrowIfNull(changeSets);
@@ -42,6 +52,7 @@ public sealed class RequestReviewTool : ITool
         this.changeSets = changeSets;
         this.todos = todos;
         this.limits = limits;
+        this.conclusions = conclusions;
         Definition = new ToolDefinition(Name, Description, SchemaJson);
     }
 
@@ -156,6 +167,8 @@ public sealed class RequestReviewTool : ITool
         if (outcome.IsError)
         {
             // The scheduler's refusals (depth limit, unknown kind, a stopped child) name the mechanism, not this call.
+            await RecordAsync(context, step, changeSet, ReviewConclusionOutcome.Failed, "The review could not be started: " + outcome.Text)
+                .ConfigureAwait(false);
             return new ToolResult("The review could not be started: " + outcome.Text, IsError: true);
         }
 
@@ -163,6 +176,7 @@ public sealed class RequestReviewTool : ITool
         {
             // A stopped reviewer's partial text can already hold a verdict line it wrote before it read everything (or one
             // quoted from its instructions); reading it would turn an unfinished review into an approval.
+            await RecordAsync(context, step, changeSet, ReviewConclusionOutcome.Stopped, outcome.Text).ConfigureAwait(false);
             return new ToolResult(
                 new StringBuilder(160 + Math.Min(outcome.Text.Length, RequestReviewVerdict.MaxReviewChars))
                     .Append("The review was stopped before it finished, so it has no verdict and is not an approval: ask for another review before relying on it.")
@@ -175,10 +189,13 @@ public sealed class RequestReviewTool : ITool
 
         if (string.IsNullOrWhiteSpace(outcome.Text))
         {
+            await RecordAsync(context, step, changeSet, ReviewConclusionOutcome.Failed, "The reviewer returned no text; nothing was reviewed.")
+                .ConfigureAwait(false);
             return new ToolResult("The reviewer returned no text; nothing was reviewed.", IsError: true);
         }
 
         var verdict = RequestReviewVerdict.Parse(outcome.Text);
+        await RecordAsync(context, step, changeSet, OutcomeOf(verdict), outcome.Text).ConfigureAwait(false);
         var builder = new StringBuilder(384 + Math.Min(outcome.Text.Length, RequestReviewVerdict.MaxReviewChars));
         builder.Append(RequestReviewVerdict.VerdictLine(verdict)).Append('\n');
         if (string.IsNullOrWhiteSpace(changeSet.HeadCommit))
@@ -210,6 +227,55 @@ public sealed class RequestReviewTool : ITool
 
         return new ToolResult(builder.ToString());
     }
+
+    /// <summary>
+    /// Records what the review ended with, so the verdict outlives the turn (wave W17b). Best effort by contract: a store
+    /// that fails leaves the tool result exactly as it is, because a review that ran must reach the caller even when the
+    /// row cannot be written - and a review that did not run (bad arguments, an unreadable change set, an empty one) is not
+    /// recorded at all: no row is better than a row that reads like a review.
+    /// <para>The write ignores the caller's cancellation: the review is already over, and cancelling the turn a moment later
+    /// must not be the reason a verdict disappears from the history.</para>
+    /// </summary>
+    private async ValueTask RecordAsync(
+        ToolContext context,
+        TodoItem? step,
+        ReviewChangeSet changeSet,
+        ReviewConclusionOutcome conclusion,
+        string text)
+    {
+        if (conclusions is null)
+        {
+            return;
+        }
+
+        var record = new NewReviewConclusion
+        {
+            WorkspacePath = context.WorkingDirectory,
+            SessionId = context.SessionId,
+            StepId = step?.Id,
+            Base = changeSet.Base,
+            HeadCommit = changeSet.HeadCommit,
+            Outcome = conclusion,
+            Text = RequestReviewVerdict.Clamp(text),
+        };
+
+        try
+        {
+            await conclusions.AddAsync(record, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Deliberately swallowed: Core has no logger of its own, and the review result is what the caller asked for.
+        }
+    }
+
+    /// <summary>The stored outcome of a parsed verdict: the three states a finished review can have.</summary>
+    private static ReviewConclusionOutcome OutcomeOf(ReviewVerdict verdict) => verdict switch
+    {
+        ReviewVerdict.Approve => ReviewConclusionOutcome.Approve,
+        ReviewVerdict.RequestChanges => ReviewConclusionOutcome.RequestChanges,
+        _ => ReviewConclusionOutcome.Unstructured,
+    };
 
     /// <summary>The one checklist item with this id, or null when the store has none or there is no store at all.</summary>
     private async ValueTask<TodoItem?> FindStepAsync(string sessionId, string id, CancellationToken ct)

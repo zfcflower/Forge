@@ -17,6 +17,13 @@ public sealed record ScreenshotPair(string Name, string? BeforePath, string? Aft
     public bool HasAfter => AfterPath is not null;
 }
 
+/// <summary>
+/// One captured image handed back to the caller as bytes (wave W17a): the runner reads it before the capture directory is
+/// removed, so a tool can return it as an <c>ImageBlock</c> instead of only naming it in text. <see cref="MediaType"/> is the
+/// MIME type the extension maps to (png only today, the format every capture produces).
+/// </summary>
+public sealed record ScreenshotImage(string FileName, string MediaType, byte[] Data);
+
 /// <summary>How one run of the screenshot command went: which side, the exit code, whether the timeout killed it, and the end of its output.</summary>
 public sealed record ScreenshotRunReport(string Side, int ExitCode, bool TimedOut, TimeSpan Duration, string OutputTail)
 {

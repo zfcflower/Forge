@@ -183,6 +183,8 @@ L1 只跑一个命名空间时,若改动跨了两个落点(例如同时改了 `W
 
 ## 已知债务(未处理,按收益排序)
 
+> **2026-11-15 收尾波状态**:第 6 条已消失(目录不存在,slnx/test-map 无引用)。第 1/2/4 条的安全验证需要全量跑——用户指令禁止 Agent 跑全量(最终全量由用户手动),故本轮不动;第 3/5 条是大重构,宜独立任务带专项验证。以下保留原描述供后续立项。
+
 1. **放开 `Forge.App.Tests` 的并行。** 前置条件是把数据根从进程级环境变量改成可注入的实例(或把所有读写 `AppPaths` 的测试类收进同一个串行 collection),再逐个命名空间验证;放开后需连续跑 3 轮全量确认无偶发。收益最大、风险也最大,必须单独一个任务做。
 2. **测试进程清理。** 中断的测试留下 `testhost`/`ExtensionHost` 孤儿,锁住构建输出。需要在测试侧加全局超时与退出清理。(过渡措施已落地:`Directory.Build.props` 挂 `scripts/build-hygiene.ps1`,构建时自动结束孤儿并报活锁;测试侧全局超时仍待做。)
 3. **把 5 家供应商的认证测试合成参数化套件。** 自重复率:`XAiAuthenticationTests` 56%、`MetaAuthenticationTests` 51%、`KimiAuthenticationTests` 47%、`ChatGptAuthenticationTests` 36%(合计 2,757 行里 1,305 行重复);4 个 `Scripted*Handler` 除记录类型外逐行相同。做法:抽 `ScriptedAuthHandler<T>` 基类,再按供应商把公共用例参数化,保留各家协议特有的用例。

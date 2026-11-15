@@ -162,6 +162,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly FinishedSubAgentsViewModel emptyFinishedMenu = new();
     private readonly Dictionary<string, string> projectRoots = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> projectNames = new(StringComparer.Ordinal);
+
+    /// <summary>Which projects are the general workspace: its sessions get no project segment in the breadcrumb.</summary>
+    private readonly HashSet<string> generalProjects = new(StringComparer.Ordinal);
     private readonly SessionInstrumentSources instruments;
     private readonly DispatcherTimer clock;
     private readonly DispatcherTimer layoutSaveTimer;
@@ -717,10 +720,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                     {
                         projectRoots.Clear();
                         projectNames.Clear();
+                        generalProjects.Clear();
                         foreach (var project in projects)
                         {
                             projectRoots[project.Id] = project.RootPath;
                             projectNames[project.Id] = project.Name;
+                            if (project.Kind == ProjectKind.General)
+                            {
+                                generalProjects.Add(project.Id);
+                            }
                         }
 
                         // Restored tabs are built before this read lands, so their strips get the project here instead of
@@ -975,7 +983,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             OnSubAgentToolRequested,
             instrumentSources: instruments,
             preferences: composition.Preferences,
-            openInspector: OpenInspector)
+            openInspector: OpenInspector,
+            focusTree: key => _ = FocusProjectTreeNodeAsync(key),
+            openSession: () => ActivateSessionTab(info.Id))
         {
             ChildQuery = readOnly
                 ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)
@@ -2541,6 +2551,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         var document = FileDocumentViewModel.Create(composition.Editor?.Grammars, composition.Editor?.Sessions);
         document.Workspace = workspace;
+        document.FindOpenDocument = path => FindFileTab(path)?.Content as FileDocumentViewModel;
         ConfigureReview(document, reviewOwnerOverride, hasReviewOwnerOverride);
         var opened = false;
         try
@@ -2978,7 +2989,27 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         var projectId = session.Info.ProjectId;
         var name = projectId is { } named && projectNames.TryGetValue(named, out var foundName) ? foundName : null;
         var root = projectId is { } rooted && projectRoots.TryGetValue(rooted, out var foundRoot) ? foundRoot : null;
-        session.Instruments.SetProject(name, root);
+        var isGeneral = projectId is { } general && generalProjects.Contains(general);
+        session.Instruments.SetProject(name, root, isGeneral);
+    }
+
+    /// <summary>
+    /// Selects a row of the left column by node key - the breadcrumb's project and workspace segments are the only callers.
+    /// Both trees are asked, because the general chats and the registered projects are two panels over the same sessions; a
+    /// key neither has yet (a row a pending refresh has not produced) is retried once after the trees reload.
+    /// </summary>
+    private async Task FocusProjectTreeNodeAsync(string key)
+    {
+        if (Projects.FocusNode(key) || GeneralChats.FocusNode(key))
+        {
+            return;
+        }
+
+        await RefreshTreesAsync(CancellationToken.None).ConfigureAwait(true);
+        if (!Projects.FocusNode(key))
+        {
+            GeneralChats.FocusNode(key);
+        }
     }
 
     /// <summary>Hands the active session's strip the Git panel's live branch, ahead/behind and CI marker.</summary>

@@ -1,5 +1,8 @@
 using Forge.App.Localization;
+using Forge.App.Preferences;
+using Forge.App.Services;
 using Forge.App.ViewModels;
+using Forge.Approval;
 using Forge.HostClient;
 using Forge.Plugin.Sdk;
 
@@ -19,10 +22,15 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
     private readonly ApprovalRules rules;
     private readonly Func<string, CancellationToken, Task<bool>> openPendingCard;
     private readonly IApprovalDispatcher dispatcher;
+    private readonly ExtensionRepositoryService repository;
     private ExtensionSnapshot? snapshot;
     private string? problem;
     private string? actionProblem;
+    private string? repositoryProblem;
+    private string repositoryUrl = string.Empty;
+    private readonly AppPreferences? preferences;
     private bool isRefreshing;
+    private bool isBrowsingRepository;
     private bool disposed;
     private int generation;
 
@@ -31,15 +39,25 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
         IExtensionHostState host,
         ApprovalRules rules,
         Func<string, CancellationToken, Task<bool>> openPendingCard,
-        IApprovalDispatcher dispatcher)
+        IApprovalDispatcher dispatcher,
+        AppPreferences? preferences = null,
+        HttpClient? repositoryHttp = null)
     {
         this.admin = admin;
         this.host = host ?? throw new ArgumentNullException(nameof(host));
         this.rules = rules ?? throw new ArgumentNullException(nameof(rules));
         this.openPendingCard = openPendingCard ?? throw new ArgumentNullException(nameof(openPendingCard));
         this.dispatcher = dispatcher ?? UiThreadDispatcher.Instance;
+        this.preferences = preferences;
+        repositoryUrl = preferences?.ExtensionRepositoryUrl ?? string.Empty;
+        repository = new ExtensionRepositoryService(repositoryHttp);
+
+        // A run that was killed mid-download leaves extractions under the host data directory that no host will ever
+        // accept; the root is transient by contract, so it is emptied once here (startup) instead of being trusted.
+        ExtensionRepositoryService.ClearInstallTempRoot();
 
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !isRefreshing, OnCommandFailed);
+        BrowseRepositoryCommand = new AsyncRelayCommand(BrowseRepositoryAsync, () => !IsBrowsingRepository && admin is not null, OnCommandFailed);
 
         rules.Changed += OnRulesChanged;
         host.Changed += OnHostChanged;
@@ -54,13 +72,19 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
 
     public RangeObservableCollection<RememberedRuleGroupViewModel> RuleGroups { get; } = [];
 
+    public RangeObservableCollection<RepositoryPackageViewModel> Repository { get; } = [];
+
     public AsyncRelayCommand RefreshCommand { get; }
+
+    public AsyncRelayCommand BrowseRepositoryCommand { get; }
 
     public string InstalledTitle => Loc.Instance[ExtensionsStrings.SettingsInstalled];
 
     public string PendingTitle => Loc.Instance[ExtensionsStrings.SettingsPending];
 
     public string RulesTitle => Loc.Instance[ExtensionsStrings.SettingsRules];
+
+    public string RepositoryTitle => Loc.Instance[ExtensionsStrings.SettingsRepository];
 
     public string RefreshText => Loc.Instance[IsRefreshing ? ExtensionsStrings.SettingsLoading : ExtensionsStrings.SettingsRefresh];
 
@@ -80,6 +104,54 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
             RefreshCommand.NotifyCanExecuteChanged();
         }
     }
+
+    /// <summary>The repository index URL the user wants to browse; empty means "no remote repository". Persisted through
+    /// <see cref="AppPreferences.ExtensionRepositoryUrl"/> when the shell injected preferences (wave W10a integration).</summary>
+    public string RepositoryUrl
+    {
+        get => repositoryUrl;
+        set
+        {
+            if (Set(ref repositoryUrl, value ?? string.Empty))
+            {
+                if (preferences is not null)
+                {
+                    preferences.ExtensionRepositoryUrl = repositoryUrl;
+                }
+
+                OnPropertyChanged(nameof(HasRepositoryUrl));
+            }
+        }
+    }
+
+    public bool HasRepositoryUrl => !string.IsNullOrWhiteSpace(RepositoryUrl);
+
+    public bool IsBrowsingRepository
+    {
+        get => isBrowsingRepository;
+        private set
+        {
+            if (!Set(ref isBrowsingRepository, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(ShowRepositoryEmpty));
+            OnPropertyChanged(nameof(RepositoryBrowseText));
+            BrowseRepositoryCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public string RepositoryBrowseText => Loc.Instance[IsBrowsingRepository
+        ? ExtensionsStrings.SettingsRepositoryLoading
+        : ExtensionsStrings.SettingsRepositoryBrowse];
+
+    /// <summary>Why the repository index could not be shown; null while browsing or after a successful read.</summary>
+    public string? RepositoryProblem => repositoryProblem;
+
+    public bool HasRepositoryProblem => repositoryProblem is not null;
+
+    public bool ShowRepositoryEmpty => !IsBrowsingRepository && repositoryProblem is null && Repository.Count == 0;
 
     /// <summary>
     /// Why the extension blocks cannot be shown: no host at all, a host that is not running, or a failed read. Null while
@@ -188,6 +260,178 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
         }
     }
 
+    /// <summary>Fetches the repository index from <see cref="RepositoryUrl"/> and rebuilds the package rows, each one
+    /// compared against the installed version. Runs in the background; the UI only receives the finished snapshot.</summary>
+    private async Task BrowseRepositoryAsync(CancellationToken ct)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        var url = RepositoryUrl.Trim();
+        await dispatcher.InvokeAsync(
+                () =>
+                {
+                    repositoryProblem = null;
+                    IsBrowsingRepository = true;
+                    NotifyRepositoryState();
+                })
+            .ConfigureAwait(false);
+        try
+        {
+            var index = await repository.FetchIndexAsync(url, ct).ConfigureAwait(false);
+            var installed = InstalledVersions();
+            var rows = new List<RepositoryPackageViewModel>(index.Packages.Count);
+            foreach (var package in index.Packages)
+            {
+                var installedVersion = installed.TryGetValue(package.Id, out var version) ? version : null;
+                rows.Add(new RepositoryPackageViewModel(package, installedVersion, InstallPackageAsync));
+            }
+
+            await dispatcher.InvokeAsync(
+                    () =>
+                    {
+                        Repository.ReplaceAll(rows);
+                        repositoryProblem = null;
+                    })
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            await dispatcher.InvokeAsync(
+                    () =>
+                    {
+                        repositoryProblem = Loc.Instance.Format(ExtensionsStrings.SettingsRepositoryFailed, exception.Message);
+                        Repository.Clear();
+                    })
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            await dispatcher.InvokeAsync(
+                    () =>
+                    {
+                        IsBrowsingRepository = false;
+                        NotifyRepositoryState();
+                    })
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Downloads, verifies and installs one package; progress is reported as a text snapshot on the row and the
+    /// host install runs in the background. Cancellation aborts the download and removes its temporary files.</summary>
+    private async Task InstallPackageAsync(RepositoryPackageViewModel row, CancellationToken ct)
+    {
+        if (admin is null)
+        {
+            return;
+        }
+
+        await dispatcher.InvokeAsync(
+                () =>
+                {
+                    row.BeginInstall();
+                    actionProblem = null;
+                    OnPropertyChanged(nameof(ActionProblem));
+                    OnPropertyChanged(nameof(HasActionProblem));
+                })
+            .ConfigureAwait(false);
+        string? sourceDir = null;
+        try
+        {
+            sourceDir = await repository.DownloadAndExtractAsync(
+                    row.Package,
+                    ExtensionRepositoryService.DefaultInstallTempRoot(),
+                    new Progress<RepositoryDownloadProgress>(snapshot => dispatcher.Post(() => row.ReportProgress(snapshot))),
+                    ct)
+                .ConfigureAwait(false);
+            await admin.InstallAsync(sourceDir, ExtensionOrigins.Installed, ct).ConfigureAwait(false);
+            sourceDir = null; // the host moved it into place
+            await RefreshAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            SetActionProblem(exception.Message);
+        }
+        finally
+        {
+            if (sourceDir is not null)
+            {
+                ExtensionRepositoryService.TryDeleteDirectory(sourceDir);
+            }
+
+            await dispatcher.InvokeAsync(row.EndInstall).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Installs a local zip file the user picked: extract with the zip-safety bounds into the install temp root,
+    /// then hand the extracted directory to the host. The file itself is never moved.</summary>
+    public async Task InstallLocalZipAsync(string zipPath, CancellationToken ct)
+    {
+        if (admin is null)
+        {
+            return;
+        }
+
+        string? sourceDir = null;
+        try
+        {
+            sourceDir = await repository.ExtractLocalZipAsync(
+                    zipPath,
+                    ExtensionRepositoryService.DefaultInstallTempRoot(),
+                    ct)
+                .ConfigureAwait(false);
+            await admin.InstallAsync(sourceDir, ExtensionOrigins.Installed, ct).ConfigureAwait(false);
+            sourceDir = null;
+            await RefreshAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            SetActionProblem(exception.Message);
+        }
+        finally
+        {
+            if (sourceDir is not null)
+            {
+                ExtensionRepositoryService.TryDeleteDirectory(sourceDir);
+            }
+        }
+    }
+
+    private Dictionary<string, string> InstalledVersions()
+    {
+        var versions = new Dictionary<string, string>(StringComparer.Ordinal);
+        var rows = snapshot?.Rows ?? [];
+        foreach (var row in rows)
+        {
+            if (!versions.TryGetValue(row.Status.PluginId, out var existing) ||
+                ExtensionRepositoryService.CompareVersions(existing, row.Status.Version) == VersionComparison.Older)
+            {
+                versions[row.Status.PluginId] = row.Status.Version;
+            }
+        }
+
+        return versions;
+    }
+
+    private void NotifyRepositoryState()
+    {
+        OnPropertyChanged(nameof(RepositoryProblem));
+        OnPropertyChanged(nameof(HasRepositoryProblem));
+        OnPropertyChanged(nameof(ShowRepositoryEmpty));
+        OnPropertyChanged(nameof(RepositoryBrowseText));
+    }
+
     public void Dispose()
     {
         if (disposed)
@@ -199,6 +443,14 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
         rules.Changed -= OnRulesChanged;
         host.Changed -= OnHostChanged;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        foreach (var row in Repository)
+        {
+            // The section is going away (the shell is closing): an install still running must not finish into a
+            // disposed graph, so its own token is cancelled here.
+            row.Dispose();
+        }
+
+        repository.Dispose();
     }
 
     /// <summary>Applies one read on the UI thread; the generation guard drops a result a newer refresh superseded.</summary>
@@ -437,7 +689,9 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
                 OnPropertyChanged(nameof(InstalledTitle));
                 OnPropertyChanged(nameof(PendingTitle));
                 OnPropertyChanged(nameof(RulesTitle));
+                OnPropertyChanged(nameof(RepositoryTitle));
                 OnPropertyChanged(nameof(RefreshText));
+                OnPropertyChanged(nameof(RepositoryBrowseText));
                 OnPropertyChanged(nameof(UnavailableText));
                 RebuildInstalled();
                 RebuildPending();
@@ -481,6 +735,16 @@ internal sealed class InstalledExtensionViewModel : NotifyingObject
 
     public string StatusText => ApprovalText.Status(row.Status.Status);
 
+    /// <summary>Where this extension came from (Installed, Bundled, BuiltIn), shown as a badge.</summary>
+    public string OriginText => Loc.Instance[row.Origin switch
+    {
+        PluginOrigin.Bundled => ExtensionsStrings.SettingsOriginBundled,
+        PluginOrigin.BuiltIn => ExtensionsStrings.SettingsOriginBuiltIn,
+        _ => ExtensionsStrings.SettingsOriginInstalled,
+    }];
+
+    public bool IsBuiltIn => row.Origin == PluginOrigin.BuiltIn;
+
     public string ToolsText => row.ToolNames.Count == 0
         ? string.Empty
         : Loc.Instance.Format(ExtensionsStrings.SettingsToolsLine, string.Join(", ", row.ToolNames));
@@ -491,14 +755,14 @@ internal sealed class InstalledExtensionViewModel : NotifyingObject
 
     public bool HasError => !string.IsNullOrWhiteSpace(row.Status.Error);
 
-    /// <summary>Only an approved version runs, so only it can be disabled.</summary>
-    public bool CanDisable => string.Equals(row.Status.Status, "Approved", StringComparison.Ordinal);
+    /// <summary>Only an approved version runs, so only it can be disabled; a built-in plugin never offers it.</summary>
+    public bool CanDisable => string.Equals(row.Status.Status, "Approved", StringComparison.Ordinal) && !IsBuiltIn;
 
     /// <summary>A disabled version can be re-enabled; the host re-checks the approved hashes when it runs.</summary>
     public bool CanEnable => string.Equals(row.Status.Status, "Disabled", StringComparison.Ordinal);
 
-    /// <summary>An uninstalled version has nothing left to delete.</summary>
-    public bool CanDelete => !string.Equals(row.Status.Status, "Uninstalled", StringComparison.Ordinal);
+    /// <summary>An uninstalled version has nothing left to delete, and a built-in plugin is part of the app payload.</summary>
+    public bool CanDelete => !string.Equals(row.Status.Status, "Uninstalled", StringComparison.Ordinal) && !IsBuiltIn;
 
     public bool IsConfirmingDelete
     {
@@ -592,4 +856,151 @@ internal sealed class RememberedRuleViewModel
     public RelayCommand RevokeCommand { get; }
 
     private static string ShortScope(string scopeId) => scopeId.Length <= 8 ? scopeId : scopeId[..8];
+}
+
+/// <summary>One package of the browsed repository index, compared against the installed version. The row owns the
+/// lifetime of its own install: the install command gets a token only that row can cancel (<see cref="CancelCommand"/>),
+/// and disposing the row cancels an install that is still running.</summary>
+internal sealed class RepositoryPackageViewModel : ObservableObject, IDisposable
+{
+    private readonly Func<RepositoryPackageViewModel, CancellationToken, Task> install;
+    private CancellationTokenSource? installCancellation;
+    private bool isInstalling;
+    private long receivedBytes;
+    private long? totalBytes;
+
+    public RepositoryPackageViewModel(
+        RepositoryPackage package,
+        string? installedVersion,
+        Func<RepositoryPackageViewModel, CancellationToken, Task> install)
+    {
+        Package = package ?? throw new ArgumentNullException(nameof(package));
+        InstalledVersion = installedVersion;
+        this.install = install ?? throw new ArgumentNullException(nameof(install));
+        Comparison = ExtensionRepositoryService.CompareVersions(installedVersion, package.Version);
+        InstallCommand = new AsyncRelayCommand(_ => RunInstallAsync(), () => CanInstall && !isInstalling);
+        CancelCommand = new RelayCommand(CancelInstall, () => isInstalling);
+    }
+
+    public RepositoryPackage Package { get; }
+
+    public string? InstalledVersion { get; }
+
+    public VersionComparison Comparison { get; }
+
+    public string Id => Package.Id;
+
+    public string Title => string.IsNullOrWhiteSpace(Package.Title) ? Package.Id : Package.Title;
+
+    public string Version => Package.Version;
+
+    public string Description => Package.Description;
+
+    public bool HasDescription => !string.IsNullOrWhiteSpace(Package.Description);
+
+    public string KindText => ApprovalText.Kind(Package.Kind);
+
+    public bool IsUpdate => Comparison == VersionComparison.Older;
+
+    public bool IsInstalled => Comparison is VersionComparison.Same or VersionComparison.Newer;
+
+    public string InstalledText => InstalledVersion is null
+        ? string.Empty
+        : Loc.Instance.Format(ExtensionsStrings.SettingsRepositoryInstalled, InstalledVersion);
+
+    public bool CanInstall => Comparison is VersionComparison.Older or VersionComparison.Incomparable;
+
+    public string InstallText => Loc.Instance[IsUpdate
+        ? ExtensionsStrings.SettingsRepositoryUpdate
+        : ExtensionsStrings.SettingsRepositoryInstall];
+
+    public bool IsInstalling => isInstalling;
+
+    /// <summary>The download progress line, empty unless a download is running.</summary>
+    public string ProgressText
+    {
+        get
+        {
+            if (!isInstalling)
+            {
+                return string.Empty;
+            }
+
+            return totalBytes is { } total
+                ? Loc.Instance.Format(ExtensionsStrings.SettingsRepositoryProgress, receivedBytes, total)
+                : Loc.Instance.Format(ExtensionsStrings.SettingsRepositoryProgressBytes, receivedBytes);
+        }
+    }
+
+    public AsyncRelayCommand InstallCommand { get; }
+
+    /// <summary>Cancels this row's install (download, extraction and the host call): separate from
+    /// <see cref="InstallCommand"/> because <see cref="AsyncRelayCommand"/> has no token of its own to cancel.</summary>
+    public RelayCommand CancelCommand { get; }
+
+    public void BeginInstall()
+    {
+        isInstalling = true;
+        receivedBytes = 0;
+        totalBytes = null;
+        OnPropertyChanged(nameof(IsInstalling));
+        OnPropertyChanged(nameof(ProgressText));
+        InstallCommand.NotifyCanExecuteChanged();
+        CancelCommand.NotifyCanExecuteChanged();
+    }
+
+    public void ReportProgress(RepositoryDownloadProgress snapshot)
+    {
+        if (!isInstalling)
+        {
+            return;
+        }
+
+        receivedBytes = snapshot.BytesReceived;
+        totalBytes = snapshot.TotalBytes;
+        OnPropertyChanged(nameof(ProgressText));
+    }
+
+    public void EndInstall()
+    {
+        isInstalling = false;
+        OnPropertyChanged(nameof(IsInstalling));
+        OnPropertyChanged(nameof(ProgressText));
+        InstallCommand.NotifyCanExecuteChanged();
+        CancelCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Stops an install that is still running; a no-op when the row is idle or the install already finished.
+    /// The cancellation itself is reported through the <see cref="OperationCanceledException"/> the install path already
+    /// handles, not as a problem on the row.</summary>
+    public void CancelInstall()
+    {
+        try
+        {
+            Volatile.Read(ref installCancellation)?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The install completed between reading the field and cancelling: there is nothing left to stop.
+        }
+    }
+
+    public void Dispose() => CancelInstall();
+
+    /// <summary>Runs the install with a token that ties the caller's token to this row's cancel command, and drops the
+    /// source when the install is over so a late cancel cannot reach a later install.</summary>
+    private async Task RunInstallAsync()
+    {
+        var cancellation = new CancellationTokenSource();
+        Volatile.Write(ref installCancellation, cancellation);
+        try
+        {
+            await install(this, cancellation.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref installCancellation, null, cancellation);
+            cancellation.Dispose();
+        }
+    }
 }

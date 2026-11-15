@@ -56,6 +56,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private readonly TurnCheckpointService? checkpoints;
     private readonly ISessionStore? store;
     private readonly Action<SubAgentViewModel>? subAgentOpened;
+    private readonly Action<string>? focusTree;
+    private readonly Action? openSession;
     private readonly string providerModel;
 
     /// <summary>The live preferences this session reads values from (the inspector's line limit); null lists the defaults.</summary>
@@ -69,6 +71,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     /// <summary>Text of a child agent that arrived before its <c>AgentSubAgentStarted</c> reached the dispatcher.</summary>
     private readonly ConcurrentDictionary<string, StringBuilder> earlyDeltas = new(StringComparer.Ordinal);
+
+    /// <summary>Reasoning of a child agent parked for the same reason as <see cref="earlyDeltas"/>.</summary>
+    private readonly ConcurrentDictionary<string, StringBuilder> earlyThinking = new(StringComparer.Ordinal);
     private readonly ObservableCollection<QueuedMessageViewModel> queued = [];
     private string draft = string.Empty;
     private bool isRunning;
@@ -127,6 +132,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// output-tail limit from; <see langword="null"/> (a test, a standalone view) lists every model and uses the defaults.</param>
     /// <param name="openInspector">Opens the window's resource inspector; the strip's resources menu carries the row, and
     /// <see langword="null"/> (a test, a standalone view) leaves that row out instead of offering a dead entry.</param>
+    /// <param name="focusTree">Selects a row of the shell's project tree by node key (the breadcrumb's project and workspace
+    /// segments); <see langword="null"/> (a test, a standalone view) leaves those segments as plain text.</param>
+    /// <param name="openSession">Brings this session's own tab to the front; the sub-agent breadcrumb's way back to its
+    /// parent, and <see langword="null"/> hides that action.</param>
     public SessionWorkspaceViewModel(
         SessionInfo session,
         SessionRuntime? runtime,
@@ -140,7 +149,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         ISessionInstrumentSources? instrumentSources = null,
         INotifications? notifications = null,
         AppPreferences? preferences = null,
-        Action? openInspector = null)
+        Action? openInspector = null,
+        Action<string>? focusTree = null,
+        Action? openSession = null)
     {
         Info = session;
         this.runtime = runtime;
@@ -149,6 +160,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         this.store = store;
         this.notifications = notifications;
         this.subAgentOpened = subAgentOpened;
+        this.focusTree = focusTree;
+        this.openSession = openSession;
         appPreferences = preferences;
         providerModel = providers.Catalog.Default?.DefaultModel ?? string.Empty;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
@@ -180,6 +193,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             () => Composer.Model,
             () => Composer.ProviderId,
             openInspector);
+        Instruments.PropertyChanged += OnInstrumentsChanged;
+        FocusProjectCommand = new RelayCommand(FocusProjectInTree, () => HasBreadcrumbProject);
+        FocusWorkspaceCommand = new RelayCommand(FocusWorkspaceInTree, () => focusTree is not null && WorkspaceNodeKey.Length > 0);
         if (!providers.IsConfigured)
         {
             var missing = SessionStrings.ProviderMissing(providers.StatusText.Resolve());
@@ -209,6 +225,105 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public string WorkDir => Info.WorkspacePath;
 
     public string BranchText => string.IsNullOrEmpty(Info.Branch) ? string.Empty : Info.Branch;
+
+    // ---------------------------------------------------------------- breadcrumb
+
+    /// <summary>
+    /// True when the session belongs to a registered repository: the breadcrumb then starts with the project. The general
+    /// workspace is not a project the user names, so its sessions read "workspace › title" only.
+    /// </summary>
+    public bool HasBreadcrumbProject => Instruments.HasRepositoryProject;
+
+    /// <summary>The breadcrumb's first segment: the repository's own name.</summary>
+    public string BreadcrumbProject => Instruments.ProjectName;
+
+    /// <summary>
+    /// The breadcrumb's middle segment: the workspace folder, plus the branch when it is a repository checkout. Derived on
+    /// every read, so a language switch re-renders it like every other text of this session.
+    /// </summary>
+    public string BreadcrumbWorkspace => string.IsNullOrEmpty(Info.Branch)
+        ? Instruments.WorkspaceName
+        : SessionStrings.BreadcrumbWorkspace(Instruments.WorkspaceName, Info.Branch);
+
+    /// <summary>Clicking the project segment selects that row of the shell's project tree.</summary>
+    public RelayCommand FocusProjectCommand { get; }
+
+    /// <summary>Clicking the workspace segment selects that worktree row of the shell's project tree.</summary>
+    public RelayCommand FocusWorkspaceCommand { get; }
+
+    /// <summary>The project segment's tooltip (and accessible name): "show this project in the tree".</summary>
+    public string BreadcrumbProjectHint => SessionStrings.BreadcrumbProjectHint(Instruments.ProjectName);
+
+    /// <summary>The workspace segment's tooltip (and accessible name).</summary>
+    public string BreadcrumbWorkspaceHint => SessionStrings.BreadcrumbWorkspaceHint(Instruments.WorkspaceName);
+
+    /// <summary>The key of the project row: a repository row, or the general section for the general workspace.</summary>
+    private string ProjectNodeKey => Info.ProjectId is { Length: > 0 } project
+        ? (Instruments.IsGeneralProject ? "general:" + project : "project:" + project)
+        : string.Empty;
+
+    /// <summary>
+    /// The key of the workspace row: the worktree the session runs in. A session without one falls back to its project row,
+    /// so the segment never points at a row that does not exist.
+    /// </summary>
+    private string WorkspaceNodeKey
+    {
+        get
+        {
+            var path = Info.WorktreePath is { Length: > 0 } worktree ? worktree : Info.WorkspacePath;
+            return Info.ProjectId is { Length: > 0 } project && !Instruments.IsGeneralProject && path.Length > 0
+                ? "worktree:" + project + "|" + path
+                : ProjectNodeKey;
+        }
+    }
+
+    private void FocusProjectInTree()
+    {
+        if (!HasBreadcrumbProject || ProjectNodeKey.Length == 0)
+        {
+            return;
+        }
+
+        focusTree?.Invoke(ProjectNodeKey);
+    }
+
+    private void FocusWorkspaceInTree()
+    {
+        if (WorkspaceNodeKey.Length == 0)
+        {
+            return;
+        }
+
+        focusTree?.Invoke(WorkspaceNodeKey);
+    }
+
+    /// <summary>The project cache landed (or the language changed): the tree the breadcrumb points at may have changed too.</summary>
+    private void OnInstrumentsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (nameof(SessionInstrumentsViewModel.HasRepositoryProject)
+            or nameof(SessionInstrumentsViewModel.ProjectName)
+            or nameof(SessionInstrumentsViewModel.WorkspaceName)
+            or nameof(SessionInstrumentsViewModel.IsGeneralProject)))
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(HasBreadcrumbProject));
+        OnPropertyChanged(nameof(BreadcrumbProject));
+        OnPropertyChanged(nameof(BreadcrumbWorkspace));
+        OnPropertyChanged(nameof(BreadcrumbProjectHint));
+        OnPropertyChanged(nameof(BreadcrumbWorkspaceHint));
+        FocusProjectCommand.NotifyCanExecuteChanged();
+        FocusWorkspaceCommand.NotifyCanExecuteChanged();
+    }
+
+    private void RefreshBreadcrumbText()
+    {
+        OnPropertyChanged(nameof(BreadcrumbProject));
+        OnPropertyChanged(nameof(BreadcrumbWorkspace));
+        OnPropertyChanged(nameof(BreadcrumbProjectHint));
+        OnPropertyChanged(nameof(BreadcrumbWorkspaceHint));
+    }
 
     public TranscriptViewModel Transcript { get; }
 
@@ -654,7 +769,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         {
             var status = await BackgroundRead.RunAsync(token => DeriveStoredStatusAsync(child.Id, token), ct)
                 .ConfigureAwait(true);
-            finished.Add(SubAgentViewModel.FromStored(SessionId, child, parentAgentId, status));
+            finished.Add(SubAgentViewModel.FromStored(SessionId, child, parentAgentId, status, Title, openSession));
             await RestoreSubAgentsAsync(child.Id, child.Id, ct).ConfigureAwait(true);
         }
     }
@@ -1630,9 +1745,15 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
                 break;
             case AgentTextDelta delta:
-                RouteDelta(delta);
+                RouteDelta(delta.AgentId, delta.Text, earlyDeltas, static (transcript, text) => transcript.QueueDelta(text));
                 break;
-            case AgentThinkingDelta:
+            case AgentThinkingDelta thinking:
+                // Reasoning is content of the agent's own turn (wave W17a), routed and parked exactly like its reply text.
+                RouteDelta(
+                    thinking.AgentId,
+                    thinking.Text,
+                    earlyThinking,
+                    static (transcript, text) => transcript.QueueThinkingDelta(text));
                 break;
             case AgentToolProgress progress:
                 // Not queued: a snapshot supersedes the one before it, the producer already throttles, and the UI reads the
@@ -1646,42 +1767,53 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     }
 
     /// <summary>
-    /// Text of an agent whose tab does not exist yet is parked here: a child's first deltas can overtake the
-    /// <c>AgentSubAgentStarted</c> that is still queued for the dispatcher, and dropping them loses the start of the answer.
+    /// One delta of an agent whose tab may not exist yet: it is parked in <paramref name="early"/> when the tab is missing,
+    /// because a child's first deltas can overtake the <c>AgentSubAgentStarted</c> that is still queued for the dispatcher,
+    /// and dropping them loses the start of the answer or of the reasoning.
     /// </summary>
-    private void RouteDelta(AgentTextDelta delta)
+    private void RouteDelta(
+        string agentId,
+        string text,
+        ConcurrentDictionary<string, StringBuilder> early,
+        Action<TranscriptViewModel, string> merge)
     {
-        if (Target(delta.AgentId) is { } target)
+        if (Target(agentId) is { } target)
         {
-            target.QueueDelta(delta.Text);
+            merge(target, text);
             coalescer.RequestFlush();
             return;
         }
 
-        var buffer = earlyDeltas.GetOrAdd(delta.AgentId, static _ => new StringBuilder());
+        var buffer = early.GetOrAdd(agentId, static _ => new StringBuilder());
         lock (buffer)
         {
             if (buffer.Length < EarlyDeltaLimit)
             {
-                buffer.Append(delta.Text, 0, Math.Min(delta.Text.Length, EarlyDeltaLimit - buffer.Length));
+                buffer.Append(text, 0, Math.Min(text.Length, EarlyDeltaLimit - buffer.Length));
             }
         }
     }
 
-    /// <summary>Moves the parked text of a starting agent into its transcript.</summary>
+    /// <summary>Moves the parked text and reasoning of a starting agent into its transcript, oldest first.</summary>
     private void DrainEarlyDeltas(SubAgentViewModel agent)
     {
-        if (!earlyDeltas.TryRemove(agent.AgentId, out var buffer))
-        {
-            return;
-        }
+        Drain(agent, earlyDeltas, static (transcript, text) => transcript.QueueDelta(text));
+        Drain(agent, earlyThinking, static (transcript, text) => transcript.QueueThinkingDelta(text));
+        agent.Transcript.FlushPending();
 
-        lock (buffer)
+        static void Drain(SubAgentViewModel agent, ConcurrentDictionary<string, StringBuilder> early, Action<TranscriptViewModel, string> merge)
         {
-            if (buffer.Length > 0)
+            if (!early.TryRemove(agent.AgentId, out var buffer))
             {
-                agent.Transcript.QueueDelta(buffer.ToString());
-                agent.Transcript.FlushPending();
+                return;
+            }
+
+            lock (buffer)
+            {
+                if (buffer.Length > 0)
+                {
+                    merge(agent.Transcript, buffer.ToString());
+                }
             }
         }
     }
@@ -1963,7 +2095,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             started.Task,
             model,
             StartSubAgentStop,
-            started.AgentId);
+            started.AgentId,
+            Title,
+            openSession);
         subAgentById[started.ChildId] = agent;
         subAgents.Add(agent);
         DrainEarlyDeltas(agent);
@@ -2041,6 +2175,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         ClearLiveTools();
         ReleaseInspectorListeners();
+        Instruments.PropertyChanged -= OnInstrumentsChanged;
         Instruments.Dispose();
         Composer.Dispose();
         foreach (var message in queued.ToArray())
@@ -2064,6 +2199,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     {
         OnPropertyChanged(nameof(ReadOnlyBanner));
         OnPropertyChanged(nameof(ContinueLabel));
+        RefreshBreadcrumbText();
         OnPropertyChanged(nameof(SubAgentLabel));
         OnPropertyChanged(nameof(SubAgentToggleName));
         OnPropertyChanged(nameof(SubAgentToggleTooltip));
@@ -2100,6 +2236,8 @@ internal sealed class SubAgentViewModel : NotifyingObject
 
     private readonly Action<string>? stopRequested;
     private readonly string kind;
+    private readonly string parentTitle;
+    private readonly Action? backToParent;
     private SubAgentStatus status = SubAgentStatus.Queued;
     private DateTimeOffset startedAt;
     private TimeSpan elapsed;
@@ -2111,6 +2249,10 @@ internal sealed class SubAgentViewModel : NotifyingObject
     private bool isStopRequested;
     private bool outcomeUnknown;
 
+    /// <param name="stopRequested">Asks the host to stop this run; null when the row has nothing to stop (a replay).</param>
+    /// <param name="parentAgentId">The agent that spawned this one; null for a direct child of the main session.</param>
+    /// <param name="parentTitle">The title of the session (or agent) this tab hangs under; the breadcrumb's first segment.</param>
+    /// <param name="backToParent">Switch the shell back to the parent's tab; null hides the breadcrumb's way back.</param>
     public SubAgentViewModel(
         string sessionId,
         string agentId,
@@ -2119,18 +2261,25 @@ internal sealed class SubAgentViewModel : NotifyingObject
         string task,
         string model,
         Action<string>? stopRequested,
-        string? parentAgentId = null)
+        string? parentAgentId = null,
+        string? parentTitle = null,
+        Action? backToParent = null)
     {
         SessionId = sessionId;
         AgentId = agentId;
         ChildSessionId = childSessionId;
         ParentAgentId = parentAgentId;
         this.kind = kind;
+        this.parentTitle = parentTitle ?? string.Empty;
+        this.backToParent = backToParent;
         Task = task;
         Model = model;
         this.stopRequested = stopRequested;
         Transcript = new TranscriptViewModel(collapseOlderTurns: true);
         StopCommand = new RelayCommand(RequestStop, () => CanStop);
+        BackToParentCommand = new RelayCommand(
+            () => this.backToParent?.Invoke(),
+            () => HasBackToParent);
     }
 
     /// <summary>The main session this sub-agent belongs to; its tab never shows under another session.</summary>
@@ -2166,6 +2315,23 @@ internal sealed class SubAgentViewModel : NotifyingObject
     public bool CanStop => status == SubAgentStatus.Running && !isStopRequested;
 
     public string TabTitle => (IsReadOnly ? "○ " : "▸ ") + Kind + " · " + ToolRowViewModel.Compact(Task, TabTaskLimit);
+
+    // ---------------------------------------------------------------- breadcrumb
+
+    /// <summary>The session this sub-agent runs under, as its tab title reads it: the breadcrumb's first segment.</summary>
+    public string ParentSessionTitle => parentTitle;
+
+    /// <summary>The sub-agent's own short name (its kind, or "sub-agent" when the store recorded none).</summary>
+    public string BreadcrumbName => Kind;
+
+    /// <summary>True when there is a parent tab to switch back to and the shell wired the way there.</summary>
+    public bool HasBackToParent => backToParent is not null && parentTitle.Length > 0;
+
+    /// <summary>"Back to &lt;parent title&gt;": the parent segment's tooltip and accessible name.</summary>
+    public string BackToParentText => SessionStrings.BreadcrumbBackToParent(ParentSessionTitle);
+
+    /// <summary>Selects the parent's tab again; the sub-agent tab stays where it is.</summary>
+    public RelayCommand BackToParentCommand { get; }
 
     public bool IsReadOnly
     {
@@ -2330,6 +2496,8 @@ internal sealed class SubAgentViewModel : NotifyingObject
         OnPropertyChanged(nameof(UsageText));
         OnPropertyChanged(nameof(ElapsedText));
         OnPropertyChanged(nameof(ReadOnlyBadgeText));
+        OnPropertyChanged(nameof(BreadcrumbName));
+        OnPropertyChanged(nameof(BackToParentText));
         Transcript.RefreshText();
     }
 
@@ -2338,7 +2506,13 @@ internal sealed class SubAgentViewModel : NotifyingObject
     /// of the main session, otherwise the id of the ancestor's session). A status the store cannot prove is left unknown,
     /// which reads as a neutral "ended" instead of an invented "completed".
     /// </summary>
-    public static SubAgentViewModel FromStored(string sessionId, SessionInfo session, string parentAgentId, SubAgentStatus? status)
+    public static SubAgentViewModel FromStored(
+        string sessionId,
+        SessionInfo session,
+        string parentAgentId,
+        SubAgentStatus? status,
+        string? parentTitle = null,
+        Action? backToParent = null)
     {
         var agent = new SubAgentViewModel(
             sessionId,
@@ -2348,7 +2522,9 @@ internal sealed class SubAgentViewModel : NotifyingObject
             session.Task ?? session.Title,
             string.Empty,
             stopRequested: null,
-            parentAgentId)
+            parentAgentId,
+            parentTitle,
+            backToParent)
         {
             IsReadOnly = true,
         };

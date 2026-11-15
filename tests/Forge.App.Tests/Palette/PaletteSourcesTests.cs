@@ -279,7 +279,7 @@ public sealed class PaletteSourcesTests
     {
         PaletteCommand[] commands =
         [
-            new("palette.files", PaletteStrings.CommandFiles, PaletteStrings.CategoryNavigate, PaletteCommandCatalog.FilesGesture),
+            new("palette.files", PaletteStrings.CommandFiles, PaletteStrings.CategoryNavigate),
         ];
 
         var items = PaletteSources.Commands(commands, string.Empty, 10);
@@ -289,8 +289,10 @@ public sealed class PaletteSourcesTests
         Assert.Equal(PaletteItemKind.Command, item.Kind);
         Assert.Equal(Loc.Instance[PaletteStrings.CommandFiles], item.Title);
         Assert.Equal(Loc.Instance[PaletteStrings.CategoryNavigate], item.Detail);
-        Assert.Equal(PaletteCommandCatalog.FilesGesture, item.Badge);
-        Assert.Equal(PaletteCommandCatalog.FilesGesture, item.Gesture);
+        // The shipped gesture of the file palette, spelled out: asserting the catalog's own lookup against the row would only
+        // prove that two calls of the same table agree.
+        Assert.Equal("Ctrl+P", item.Badge);
+        Assert.Equal("Ctrl+P", item.Gesture);
         Assert.True(item.HasGesture);
         Assert.Equal("palette.files", item.CommandId);
     }
@@ -325,8 +327,8 @@ public sealed class PaletteSourcesTests
         {
             PaletteCommand[] commands =
             [
-                new("settings.open", PaletteStrings.CommandOpenSettings, PaletteStrings.CategorySettings, string.Empty),
-                new("project.add", PaletteStrings.CommandAddProject, PaletteStrings.CategoryProject, string.Empty),
+                new("settings.open", PaletteStrings.CommandOpenSettings, PaletteStrings.CategorySettings),
+                new("project.add", PaletteStrings.CommandAddProject, PaletteStrings.CategoryProject),
             ];
 
             var items = PaletteSources.Commands(commands, string.Empty, 10);

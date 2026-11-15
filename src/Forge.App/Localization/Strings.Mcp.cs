@@ -74,6 +74,20 @@ internal static class McpSettingsStrings
     public const string RowCapLoggingKey = "settings.mcp.row.cap.logging";
     public const string RowCapCompletionsKey = "settings.mcp.row.cap.completions";
 
+    // ------------------------------------------------------------------ sign-in / resources
+    public const string RowNeedsSignInKey = "settings.mcp.row.needsSignIn";
+    public const string RowSignInKey = "settings.mcp.row.signIn";
+    public const string RowSignOutKey = "settings.mcp.row.signOut";
+    public const string ResourceTitleKey = "settings.mcp.resource.title";
+    public const string ResourceRefreshKey = "settings.mcp.resource.refresh";
+    public const string ResourceEmptyKey = "settings.mcp.resource.empty";
+    public const string ResourceReadKey = "settings.mcp.resource.read";
+    public const string ResourceSubscribeKey = "settings.mcp.resource.subscribe";
+    public const string ResourceUnsubscribeKey = "settings.mcp.resource.unsubscribe";
+    public const string ResourceSubscribedKey = "settings.mcp.resource.subscribed";
+    public const string ResourceUpdatedKey = "settings.mcp.resource.updated";
+    public const string ResourceReadResultKey = "settings.mcp.resource.readResult";
+
     // ------------------------------------------------------------------ editor
     public const string EditorTitleAddKey = "settings.mcp.editor.title.add";
     public const string EditorTitleEditKey = "settings.mcp.editor.title.edit";
@@ -277,6 +291,29 @@ internal static class McpSettingsStrings
         return parts.Count == 0 ? Loc.Instance[RowCapsNoneKey] : string.Join(" · ", parts);
     }
 
+    // ------------------------------------------------------------------ sign-in / resources
+    public static string NeedsSignIn => Loc.Instance[RowNeedsSignInKey];
+
+    public static string RowSignIn => Loc.Instance[RowSignInKey];
+
+    public static string RowSignOut => Loc.Instance[RowSignOutKey];
+
+    public static string ResourceTitle => Loc.Instance[ResourceTitleKey];
+
+    public static string ResourceRefresh => Loc.Instance[ResourceRefreshKey];
+
+    public static string ResourceRead => Loc.Instance[ResourceReadKey];
+
+    public static string ResourceSubscribe => Loc.Instance[ResourceSubscribeKey];
+
+    public static string ResourceUnsubscribe => Loc.Instance[ResourceUnsubscribeKey];
+
+    public static string ResourceSubscribed => Loc.Instance[ResourceSubscribedKey];
+
+    public static string ResourceUpdated(string uri) => Loc.Instance.Format(ResourceUpdatedKey, uri);
+
+    public static string ResourceReadResult(string uri, string text) => Loc.Instance.Format(ResourceReadResultKey, uri, text);
+
     // ------------------------------------------------------------------ editor
     public static string EditorTitleAdd => Loc.Instance[EditorTitleAddKey];
 
@@ -431,6 +468,19 @@ internal static class McpSettingsStrings
         Loc.Register(RowCapResourcesKey, "resources", "resources");
         Loc.Register(RowCapLoggingKey, "logging", "logging");
         Loc.Register(RowCapCompletionsKey, "completions", "completions");
+
+        Loc.Register(RowNeedsSignInKey, "需要登录", "Sign-in required");
+        Loc.Register(RowSignInKey, "登录", "Sign in");
+        Loc.Register(RowSignOutKey, "退出", "Sign out");
+        Loc.Register(ResourceTitleKey, "资源", "Resources");
+        Loc.Register(ResourceRefreshKey, "刷新资源", "Refresh resources");
+        Loc.Register(ResourceEmptyKey, "服务器没有运行、没有资源，或不支持 resources。", "The server is not running, has no resources, or does not support resources.");
+        Loc.Register(ResourceReadKey, "读取", "Read");
+        Loc.Register(ResourceSubscribeKey, "订阅", "Subscribe");
+        Loc.Register(ResourceUnsubscribeKey, "退订", "Unsubscribe");
+        Loc.Register(ResourceSubscribedKey, "已订阅", "Subscribed");
+        Loc.Register(ResourceUpdatedKey, "已更新：{0}", "updated: {0}");
+        Loc.Register(ResourceReadResultKey, "{0}\n{1}", "{0}\n{1}");
 
         Loc.Register(EditorTitleAddKey, "添加 MCP 服务器", "Add MCP server");
         Loc.Register(EditorTitleEditKey, "编辑 {0}", "Edit {0}");

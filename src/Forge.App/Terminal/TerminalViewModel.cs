@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Threading.Channels;
 using Avalonia.Input.Platform;
 using Avalonia.Threading;
@@ -82,6 +83,20 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
     private TerminalColor defaultForeground;
     private TerminalColor defaultBackground;
 
+    // Buffer search: the query, the last result set and the cursor into it. A scan runs off the UI thread after a short
+    // debounce; the generation counter makes every result that a later keystroke already superseded a no-op.
+    private string searchText = string.Empty;
+    private bool searchCaseSensitive;
+    private bool isSearchVisible;
+    private TerminalSearchMatch[] searchMatches = [];
+    private int searchIndex = -1;
+    private int searchGeneration;
+    private bool searchPending;
+    private CancellationTokenSource? searchDebounce;
+
+    /// <summary>How long the query box waits after a keystroke before the buffer is scanned.</summary>
+    private static readonly TimeSpan SearchDebounceDelay = TimeSpan.FromMilliseconds(150);
+
     /// <param name="sessionId">The session whose working directory the terminal runs in.</param>
     /// <param name="displayIndex">1-based number used for the fallback tab title ("Terminal n").</param>
     /// <param name="host">The terminal host, or null when the extension host is not available.</param>
@@ -122,6 +137,10 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
 
         ConfirmCloseCommand = new RelayCommand(ConfirmClose);
         CancelCloseCommand = new RelayCommand(CancelClose);
+        SearchNextCommand = new RelayCommand(() => StepSearch(1));
+        SearchPreviousCommand = new RelayCommand(() => StepSearch(-1));
+        CloseSearchCommand = new RelayCommand(CloseSearch);
+        RestartCommand = new RelayCommand(Restart, () => CanRestart);
     }
 
     /// <summary>Stable id of the terminal; the tab id is <c>terminal:</c> plus this.</summary>
@@ -150,7 +169,14 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
     public TerminalStatus Status
     {
         get => status;
-        private set => SetAndNotify(ref status, value, nameof(ShowStatus));
+        private set
+        {
+            if (SetAndNotify(ref status, value, nameof(ShowStatus)))
+            {
+                OnPropertyChanged(nameof(CanRestart));
+                RestartCommand.NotifyCanExecuteChanged();
+            }
+        }
     }
 
     /// <summary>The line under the screen: starting, the exit code, or why the terminal stopped. Empty while running.</summary>
@@ -184,6 +210,348 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
     public RelayCommand ConfirmCloseCommand { get; }
 
     public RelayCommand CancelCloseCommand { get; }
+
+    // ---------------------------------------------------------------- restart
+
+    /// <summary>
+    /// True once the process is over: a terminal that exited or failed can be restarted in place, and the tab, its screen and
+    /// its scrollback stay where they are (forge-app spec, "TerminalViewModel": a finished tab is kept).
+    /// </summary>
+    public bool CanRestart => status is TerminalStatus.Exited or TerminalStatus.Failed;
+
+    /// <summary>Restarts an exited or failed terminal; the command is disabled while the terminal is starting or running.</summary>
+    public RelayCommand RestartCommand { get; }
+
+    public string RestartText => Loc.Instance[TerminalStrings.Restart];
+
+    /// <summary>
+    /// Starts a fresh process over the same request (working directory, shell, arguments) in this same view model: the
+    /// emulator is never reset, so the tab keeps the old screen and its scrollback, and the new output continues underneath.
+    /// A restart that cannot start reports the same localized failure as the first attempt instead of throwing.
+    /// </summary>
+    public void Restart()
+    {
+        if (!CanRestart || Volatile.Read(ref disposed) != 0 || pump is { IsCompleted: false })
+        {
+            return;
+        }
+
+        ITerminalSession? previous;
+        lock (gate)
+        {
+            previous = session;
+            session = null;
+            pendingStatus = null;
+            pendingTitleChanged = false;
+            exitCode = 0;
+            problemKey = null;
+            problemDetail = null;
+        }
+
+        // The old writer belongs to the process that just ended; the new pump publishes its own before it reports Running.
+        Volatile.Read(ref inputWriter)?.TryComplete();
+        Volatile.Write(ref inputWriter, null);
+        inputTask = null;
+        pump = null;
+
+        Status = TerminalStatus.Starting;
+        StatusText = Loc.Instance[TerminalStrings.StatusStarting];
+        if (previous is not null)
+        {
+            _ = DisposeSessionAsync(previous);
+        }
+
+        pump = Task.Run(PumpAsync);
+        Invalidate();
+    }
+
+    // ---------------------------------------------------------------- buffer search
+
+    /// <summary>Raised on the UI thread when the search bar opens, so the view can focus and select the query box.</summary>
+    public event EventHandler? SearchOpened;
+
+    /// <summary>Raised on the UI thread when the current match changed, so the surface can scroll it into view.</summary>
+    public event EventHandler? SearchMatchChanged;
+
+    /// <summary>True while the search bar is part of the view.</summary>
+    public bool IsSearchVisible
+    {
+        get => isSearchVisible;
+        private set => Set(ref isSearchVisible, value);
+    }
+
+    /// <summary>The query. Typing schedules a debounced scan; clearing the box drops the highlights immediately.</summary>
+    public string SearchText
+    {
+        get => searchText;
+        set
+        {
+            if (!Set(ref searchText, value ?? string.Empty))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(SearchPlaceholder));
+            if (searchText.Length == 0)
+            {
+                CancelPendingSearch();
+                ApplySearchResults([]);
+                return;
+            }
+
+            ScheduleSearch();
+        }
+    }
+
+    /// <summary>Case sensitivity of the scan; flipping it re-runs the search.</summary>
+    public bool SearchCaseSensitive
+    {
+        get => searchCaseSensitive;
+        set
+        {
+            if (Set(ref searchCaseSensitive, value) && searchText.Length > 0)
+            {
+                ScheduleSearch();
+            }
+        }
+    }
+
+    /// <summary>The result set of the last completed scan (empty when there is no query).</summary>
+    public IReadOnlyList<TerminalSearchMatch> SearchMatches => searchMatches;
+
+    public int SearchMatchCount => searchMatches.Length;
+
+    /// <summary>The match the next/previous buttons walk; null while there is no result.</summary>
+    public TerminalSearchMatch? CurrentSearchMatch =>
+        searchIndex >= 0 && searchIndex < searchMatches.Length ? searchMatches[searchIndex] : null;
+
+    /// <summary>"2/7" for the current position; "0/0" while nothing matched.</summary>
+    public string SearchMatchLabel => searchMatches.Length == 0
+        ? "0/0"
+        : (searchIndex + 1).ToString(CultureInfo.InvariantCulture) + "/" +
+          searchMatches.Length.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>True while a query is typed but the buffer holds no match: the bar says so instead of showing "0/0".</summary>
+    public bool ShowSearchNoMatches => searchText.Length > 0 && searchMatches.Length == 0 && !searchPending;
+
+    public string SearchPlaceholder => Loc.Instance[TerminalStrings.SearchPlaceholder];
+
+    public string SearchCaseText => Loc.Instance[TerminalStrings.SearchCase];
+
+    public string SearchPreviousText => Loc.Instance[TerminalStrings.SearchPrevious];
+
+    public string SearchNextText => Loc.Instance[TerminalStrings.SearchNext];
+
+    public string SearchCloseText => Loc.Instance[TerminalStrings.SearchClose];
+
+    public string SearchNoMatchesText => Loc.Instance[TerminalStrings.SearchNoMatches];
+
+    public RelayCommand SearchNextCommand { get; }
+
+    public RelayCommand SearchPreviousCommand { get; }
+
+    public RelayCommand CloseSearchCommand { get; }
+
+    /// <summary>Shows the search bar; the query and its matches are kept, so reopening it continues where the user left off.</summary>
+    public void OpenSearch()
+    {
+        if (Volatile.Read(ref disposed) != 0)
+        {
+            return;
+        }
+
+        IsSearchVisible = true;
+        SearchOpened?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Hides the bar and drops the highlights; the screen itself is untouched.</summary>
+    public void CloseSearch()
+    {
+        IsSearchVisible = false;
+        CancelPendingSearch();
+        ApplySearchResults([]);
+    }
+
+    /// <summary>
+    /// Scans the buffer now for the current query and applies the result before it returns. The debounced path calls the same
+    /// scan; this entry point is what the view and the tests use when they need the result synchronously.
+    /// </summary>
+    public Task RunSearchAsync() => RunSearchCoreAsync();
+
+    /// <summary>Moves to the next match, wrapping at the end.</summary>
+    public void SearchNext() => StepSearch(1);
+
+    /// <summary>Moves to the previous match, wrapping at the start.</summary>
+    public void SearchPrevious() => StepSearch(-1);
+
+    private void StepSearch(int delta)
+    {
+        if (searchMatches.Length == 0)
+        {
+            return;
+        }
+
+        searchIndex = ((searchIndex + delta) % searchMatches.Length + searchMatches.Length) % searchMatches.Length;
+        RaiseSearchState();
+        SearchMatchChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>One pending debounce at a time; the newer keystroke cancels the older scan and invalidates its result.</summary>
+    private void ScheduleSearch()
+    {
+        CancelPendingSearch();
+        searchPending = true;
+        OnPropertyChanged(nameof(ShowSearchNoMatches));
+        var generation = Volatile.Read(ref searchGeneration);
+        var pending = new CancellationTokenSource();
+        searchDebounce = pending;
+        _ = DebouncedSearchAsync(generation, pending);
+    }
+
+    private async Task DebouncedSearchAsync(int generation, CancellationTokenSource pending)
+    {
+        try
+        {
+            await Task.Delay(SearchDebounceDelay, pending.Token).ConfigureAwait(false);
+            var matches = await Task.Run(() => FindMatches(searchText, searchCaseSensitive), pending.Token)
+                .ConfigureAwait(false);
+            PostToUi(() =>
+            {
+                if (generation == Volatile.Read(ref searchGeneration) && isSearchVisible)
+                {
+                    ApplySearchResults(matches);
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer keystroke, a closed bar or a disposed tab: this result is stale by definition.
+        }
+    }
+
+    private async Task RunSearchCoreAsync()
+    {
+        CancelPendingSearch();
+        var generation = Volatile.Read(ref searchGeneration);
+        var query = searchText;
+        if (query.Length == 0)
+        {
+            ApplySearchResults([]);
+            return;
+        }
+
+        searchPending = true;
+        TerminalSearchMatch[] matches;
+        try
+        {
+            matches = await Task.Run(() => FindMatches(query, searchCaseSensitive), lifetime.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        // The caller is the UI thread (or a test): applying here keeps the result of an awaited scan observable.
+        if (generation == Volatile.Read(ref searchGeneration) && Volatile.Read(ref disposed) == 0)
+        {
+            ApplySearchResults(matches);
+        }
+    }
+
+    /// <summary>
+    /// Extracts the buffer and matches it. The emulator is only read under <see cref="Gate"/>; blank rows are left as the
+    /// default line, which the matcher skips, so a mostly empty screen costs no allocations.
+    /// </summary>
+    private TerminalSearchMatch[] FindMatches(string query, bool caseSensitive)
+    {
+        TerminalSearchLine[] lines;
+        long dropped;
+        lock (gate)
+        {
+            dropped = emulator.ScrollbackDropped;
+            var total = emulator.TotalLines;
+            lines = new TerminalSearchLine[total];
+            for (var line = 0; line < total; line++)
+            {
+                var row = emulator.GetLine(line);
+                if (IsBlank(row))
+                {
+                    continue;
+                }
+
+                lines[line] = TerminalSearch.SnapshotLine(row);
+            }
+        }
+
+        return [.. TerminalSearch.Find(lines, query, caseSensitive, dropped)];
+    }
+
+    private static bool IsBlank(TerminalLine line)
+    {
+        for (var column = 0; column < line.Count; column++)
+        {
+            if (line[column].Rune != 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void ApplySearchResults(TerminalSearchMatch[] matches)
+    {
+        searchMatches = matches;
+        searchIndex = matches.Length > 0 ? 0 : -1;
+        searchPending = false;
+        RaiseSearchState();
+        // Unconditional: an empty result set must reach the control too, or the previous highlights stay on screen until
+        // the next output/scroll happens to redraw it.
+        SearchMatchChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RaiseSearchState()
+    {
+        OnPropertyChanged(nameof(SearchMatches));
+        OnPropertyChanged(nameof(SearchMatchCount));
+        OnPropertyChanged(nameof(CurrentSearchMatch));
+        OnPropertyChanged(nameof(SearchMatchLabel));
+        OnPropertyChanged(nameof(ShowSearchNoMatches));
+    }
+
+    /// <summary>Drops the pending debounce and invalidates every scan already on its way.</summary>
+    private void CancelPendingSearch()
+    {
+        Interlocked.Increment(ref searchGeneration);
+        var pending = Interlocked.Exchange(ref searchDebounce, null);
+        if (pending is null)
+        {
+            return;
+        }
+
+        try
+        {
+            pending.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already cancelled and disposed by a concurrent close; nothing is waiting on it any more.
+        }
+
+        pending.Dispose();
+    }
+
+    /// <summary>Runs the action on the UI thread when it is not already there: the debounced scan finishes on the pool.</summary>
+    private static void PostToUi(Action action)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        Dispatcher.UIThread.Post(action);
+    }
 
     /// <summary>
     /// Starts the pseudo-terminal and the output pump. A missing host, an unavailable working directory or a host refusal
@@ -664,6 +1032,13 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
         OnPropertyChanged(nameof(ClosePromptText));
         OnPropertyChanged(nameof(ConfirmCloseText));
         OnPropertyChanged(nameof(CancelCloseText));
+        OnPropertyChanged(nameof(RestartText));
+        OnPropertyChanged(nameof(SearchPlaceholder));
+        OnPropertyChanged(nameof(SearchCaseText));
+        OnPropertyChanged(nameof(SearchPreviousText));
+        OnPropertyChanged(nameof(SearchNextText));
+        OnPropertyChanged(nameof(SearchCloseText));
+        OnPropertyChanged(nameof(SearchNoMatchesText));
 
         TerminalStatus value;
         int code;
@@ -689,6 +1064,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
 
         preferences.PropertyChanged -= OnPreferencesChanged;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        CancelPendingSearch();
         lifetime.Cancel();
         Volatile.Read(ref inputWriter)?.TryComplete();
 

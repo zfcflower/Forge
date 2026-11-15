@@ -44,7 +44,7 @@
       "title": "…", "description": "…", "url": "https://…/pkg.zip",
       "sha256": "…", "sizeBytes": 123, "sdkVersion": "3.0.0", "publishedAt": "…" } ] }
   ```
-- **来源维度**:`PluginOrigin { Installed=0, Bundled=1, BuiltIn=2 }`;`PluginRecord.Origin` 追加字段(默认 Installed,旧行兼容);ApprovalStore schema v1→v2 加 `origin` 列(`ApprovalMigration` 已有升版机制)。BuiltIn 不可删除/禁用;Bundled 随应用分发、首启复制到插件目录、可删;Installed 用户/仓库安装。**当前不附带任何捆绑插件**,机制先行、目录为空(诚实记录)。
+- **来源维度**:`PluginOrigin { Installed=0, Bundled=1, BuiltIn=2 }`;`PluginRecord.Origin` 追加字段(默认 Installed,旧行兼容)。**持久化分工**:契约步只定枚举与字段;ApprovalStore schema v1→v2(origin 列、迁移阶梯、行映射、fail-closed)与 SPEC 记录由 W10a 交付(已在 work24a 副本实现,随波合入)。BuiltIn 不可删除/禁用;Bundled 随应用分发、首启复制到插件目录、可删;Installed 用户/仓库安装。**当前不附带任何捆绑插件**,机制先行、目录为空(诚实记录)。
 - **安装 IPC**:新 op `extensions.install { sourceDir, origin }`——App 下载/解包/校验到临时目录,Host 在刷新级闸门内验证 manifest、trash 回滚式落位(复用 `RollBackCommitAsync` 机制)、同步审批记录(Origin 入 record)、`plugins.refresh` 语义。卸载/禁用走现有 op。
 
 ### 1.2 更新 manifest(`updates.json`,schema 1)
@@ -93,7 +93,7 @@ W0 已冻结的 `UpdatesCheckFrequency`(daily/weekly/never)、`UpdatesChannel`(s
 
 ### 1.6 契约步预接线清单
 
-`PluginOrigin` + ApprovalStore v2 迁移、`extensions.install` 协议契约、MCP 两个注入接口、`AppPreferences` 全部新属性、`FeatureComposition` 空模块挂线、`MainWindow.axaml` 第六覆盖层(Comments)+ `MainWindowViewModel.Comments.cs` 槽、gap-plan §6.2 登记更新。构建全绿 + 相关测试全绿后冻结,派活文本引用本节。
+`PluginOrigin` 枚举与 `PluginRecord.Origin` 字段(ApprovalStore v2 持久化归 W10a,见 §1.1)、`extensions.install` 协议契约、MCP 两个注入接口、`AppPreferences` 全部新属性、`FeatureComposition` 空模块挂线、`MainWindow.axaml` 第六覆盖层(Comments)+ `MainWindowViewModel.Comments.cs` 槽、gap-plan §6.2 登记更新。构建全绿 + 相关测试全绿后冻结,派活文本引用本节。
 
 ## 二、W10a 扩展包仓库
 
@@ -105,7 +105,7 @@ W0 已冻结的 `UpdatesCheckFrequency`(daily/weekly/never)、`UpdatesChannel`(s
 
 **被否备选**:①GitHub Releases 专用源——把仓库绑死在 GitHub,自建索引更通用且零依赖;②App 直接写插件目录——绕过 Host 的闸门与审批记录所有权,破坏「审批库归 Host」契约;③安装即批准——破坏 fail-closed 审批链,新包必须 Draft 起步。
 
-**四判据**:性能——下载流式、解包后台、索引按需拉取不轮询;依赖——BCL `System.IO.Compression`,零新包;契约——PluginRecord/ApprovalStore 升版由主 Agent 定稿,install op 单一所有者 Host;回滚——单独 revert 干净(schema v2 列可留,旧代码忽略)。
+**四判据**:性能——下载流式、解包后台、索引按需拉取不轮询;依赖——BCL `System.IO.Compression`,零新包;契约——PluginRecord/ApprovalStore 升版由主 Agent 定稿,install op 单一所有者 Host;回滚——**不干净**:schema 阶梯不前向容忍,`user_version = 2` 的库在旧程序(上限 1)构造期 fail-closed,所以 revert W10a 必须先删 `<data>/approvals.db`(审批记录清空、插件回 Draft 重新审批);`origin` 列可留,拦住 revert 的是版本号,记录见 `src/Forge.Approval/SPEC.md` 破坏面。
 
 **验收**:Worker 副本 `forge-test.ps1 -Level L1 -Project Forge.Approval.Tests -Ns Forge.Approval.Tests -Gates` + `Forge.App.Tests` 的 `Extensions|Approval` 落点;测试会话覆盖:zip-slip/炸弹/坏哈希/坏 manifest/取消/并发安装/Origin 迁移/版本比较/卸载后重装;评审按架构>测试>质量。
 
@@ -126,6 +126,9 @@ W0 已冻结的 `UpdatesCheckFrequency`(daily/weekly/never)、`UpdatesChannel`(s
 2. updater 等旧 pid 退出(超时兜底)→ 现安装目录改名 `.old-<版本>` → 暂存内容移入 → 写 `install.log` → 起新 exe。
 3. 新 exe 主窗口显示后写 `<data>/updates/ok-<版本>` 标记;updater 限时(60 s)等标记,超时/进程早退 → 回滚 `.old` 并重启旧版、日志记因。
 4. 成功后下次启动清 `.old`;启动时检测到半截交换(有 `.old` 无 ok)→ 修复回滚。
+- **applier 的运行位置(评审修复轮补记)**:applier 的源树(前向 = staging、恢复向 = `.old-<版本>` 备份)先复制到 `<data>/updates/.applier-<guid>/` 再从那里启动,工作目录同样是这个中性目录。Windows 不允许 rename 一个装着运行中进程映像的目录:从 staging 起会让前向每次都退化成整树 CopyTree(且遗留 staging),从 `.old` 起会让恢复向的 claim 必失败 —— 启动修复永远修不成、用户每次启动都只得到进程退出。中性目录由下次启动的 Maintain 清理(applier 删不了自己在跑的目录)。
+- **恢复向的 claim 名带版本**:`.restoring-<版本>-<guid>`。崩溃落在 claim 与最终 move 之间时,启动修复在缺 `.old-<版本>` 而存在 `.restoring-<版本>-*` 时先改名回 `.old-<版本>` 再走既有修复;Maintain 仍不匹配 `.restoring-*`(不误删唯一好副本)。
+- **回滚先撤确认标记**:kill 掉未确认的新进程后尽力删 `ok-<版本>`,否则晚到标记 + 回滚失败会让下次启动把 `.old` 当“已确认”而删掉唯一备份。
 - Windows:等进程退出后无文件锁;rename 而非覆盖运行中文件。Unix:tar.gz 用 BCL `System.Formats.Tar` 解包(保执行权限);zip 仅 Windows。
 - **签名策略已拍板**:沿用阶段 A 零签名,HTTPS + manifest SHA-256,威胁模型写入 SPEC。
 - 安装日志:`<data>/updates/install.log`,有界追加;失败恢复全程留痕。
@@ -179,6 +182,7 @@ W0 已冻结的 `UpdatesCheckFrequency`(daily/weekly/never)、`UpdatesChannel`(s
 ## 八、W17 遗留包(已拍板:四项全纳)
 
 1. **W17a 小件包**:W13 思考节点(消费 `AgentThinkingDelta`,时间轴加思考节点)、W4 图片 diff(diff 视图图片并排)+ `pr_screenshots` 改图片返回(管道已就绪)、终端工具设置分区(字体族/字号/shell 路径,从手改 settings.json 进 UI)。
+   **实施记录(2026-11-15)**:思考节点与图片 diff 已交付;终端字体/shell/参数/scrollback 五项已进 `tools` 分区 UI。**`pr_screenshots` 已改为返回图片块**(收尾波补齐,不再延后):`ScreenshotRunner` 在 `DeleteCaptureDirectory` **之前**用 `ScreenshotImages.Read` 把 before/after 两侧读进 `ScreenshotImage(FileName, MediaType, Data)`(单图 5 MiB、PNG 签名校验、读不到或超限就跳过,文本报告仍列全部文件名),工具由此构造 `[TextBlock, ImageBlock…]`。用例:`ScreenshotToolsTests.The_published_pictures_come_back_as_image_blocks_next_to_the_text_report`。
 2. **W17b 评审可配置 + 结论持久化**:设置(评审方式:子 Agent 一次/人工)+ 步骤提交后自动评审触发(默认关)+ `request_review` 结论落 `reviews.db`(ReviewStore 已在)。
 3. **W17c LSP code action / rename / inlay hints**:后端请求 + 编辑器 UI(灯泡菜单/重命名对话框/内联提示)。**排在 W10e 合入后**(同碰 FileDocumentView 键位文件)。
 4. **W17d 测试债务 6 条**(testing.md):**排在全部产品波合入后**(App.Tests 并行化要动 22 个测试文件的 TempDataRoot.Redirect,与任何新增测试冲突)。

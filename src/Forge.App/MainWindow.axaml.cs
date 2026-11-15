@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Forge.App.Localization;
+using Forge.App.Input;
 using Forge.App.Notifications;
 using Forge.App.ViewModels;
 using Forge.App.Views;
@@ -176,11 +177,14 @@ public partial class MainWindow : Window
         }
 
         viewModel.AttachDialogs(new ShellDialogs(this, viewModel.GitClient));
+        KeymapApplier.Changed += OnKeymapChanged;
+        ApplyKeymap();
         _ = InitializeAsync(viewModel);
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        KeymapApplier.Changed -= OnKeymapChanged;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         base.OnClosed(e);
     }
@@ -197,11 +201,36 @@ public partial class MainWindow : Window
         }
     }
 
-    private static async Task InitializeAsync(MainWindowViewModel model)
+    /// <summary>Rebuilds the window's four key bindings from the catalog and the live overrides; cheap, idempotent.</summary>
+    private void ApplyKeymap()
+    {
+        KeyBindings.Clear();
+        if (viewModel is null)
+        {
+            return;
+        }
+
+        foreach (var binding in KeymapApplier.WindowKeyBindings(
+                     viewModel.NewTerminalCommand,
+                     viewModel.OpenFilePaletteCommand,
+                     viewModel.OpenCommandPaletteCommand,
+                     viewModel.OpenSearchPaletteCommand))
+        {
+            KeyBindings.Add(binding);
+        }
+    }
+
+    private void OnKeymapChanged() => ApplyKeymap();
+
+    private async Task InitializeAsync(MainWindowViewModel model)
     {
         try
         {
             await model.InitializeAsync().ConfigureAwait(true);
+
+            // The initial settings load fills the overrides without raising PropertyChanged, so the keymap snapshot the
+            // applier took at composition time is still the default; catch up once the load has landed.
+            KeymapApplier.Reload();
 
             // The first-run wizard is the real application's business (App sets the flag) and comes after the restore, so
             // its "is this install already in use" answer counts the projects the restore just loaded. A host that built

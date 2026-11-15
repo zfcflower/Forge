@@ -5,6 +5,9 @@ namespace Forge.Mcp;
 /// through <see cref="IMcpTokenStore"/> so the app can keep them in its encrypted secret store (AES-GCM with a sidecar
 /// key, the <c>ProviderSecretStore</c> pattern). <see cref="Resource"/> is the RFC 8707 resource indicator the tokens were
 /// issued for; <see cref="ExpiresAt"/> is null when the authorization server did not state a lifetime.
+/// <see cref="ClientId"/> and <see cref="TokenEndpoint"/> persist the RFC 7591 dynamic registration alongside the tokens,
+/// so a refresh after an app restart reuses the original client instead of registering a new one (servers that bind
+/// refresh tokens to the issuing client would otherwise reject it).
 /// </summary>
 public sealed record McpTokenSet(
     string AccessToken,
@@ -12,7 +15,9 @@ public sealed record McpTokenSet(
     DateTimeOffset? ExpiresAt,
     string? TokenType,
     string? Scope,
-    string? Resource);
+    string? Resource,
+    string? ClientId = null,
+    string? TokenEndpoint = null);
 
 /// <summary>
 /// Encrypted token persistence for MCP OAuth (wave W10d), injected by the app. The key is a stable identifier derived

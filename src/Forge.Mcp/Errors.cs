@@ -16,6 +16,21 @@ public class McpTransportException(string message, Exception? inner = null) : Mc
 
 public sealed class McpSessionExpiredException(string message, Exception? inner = null) : McpTransportException(message, inner);
 
+/// <summary>
+/// A streamable HTTP server answered 401 with an RFC 9728 OAuth challenge and no (refreshable) token was available. The
+/// server must be marked as needing sign-in; the interactive flow starts only when the user presses the sign-in action.
+/// </summary>
+public sealed class McpOAuthRequiredException : McpTransportException
+{
+    public McpOAuthRequiredException(string message, McpOAuthChallenge? challenge = null, Exception? inner = null)
+        : base(message, inner)
+    {
+        Challenge = challenge;
+    }
+
+    public McpOAuthChallenge? Challenge { get; }
+}
+
 public sealed class McpConnectionClosedException : McpTransportException
 {
     public McpConnectionClosedException(string message, Exception? inner = null) : base(message, inner)

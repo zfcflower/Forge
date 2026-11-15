@@ -24,6 +24,15 @@ public sealed class McpHttpOptions
 
     /// <summary>Deadline for the session-terminating DELETE and for waiting out a cancelled reader.</summary>
     public TimeSpan SessionShutdownTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>The initial bearer token for the Authorization header; null when the server needs no OAuth token.</summary>
+    public string? BearerToken { get; init; }
+
+    /// <summary>
+    /// Called when a request is answered 401 with an RFC 9728 challenge. Returning a token retries the request once with it;
+    /// returning null means "no usable token" and raises <see cref="McpOAuthRequiredException"/> instead of a generic 401.
+    /// </summary>
+    public Func<McpOAuthChallenge, CancellationToken, ValueTask<string?>>? OAuthTokenProvider { get; init; }
 }
 
 /// <summary>Streamable HTTP transport: JSON-RPC over POST, optional SSE responses and an optional GET stream.</summary>
@@ -34,6 +43,7 @@ public sealed class StreamableHttpTransport : IMcpTransport
 
     private readonly Uri endpoint;
     private readonly IReadOnlyDictionary<string, string>? headers;
+    private readonly Func<McpOAuthChallenge, CancellationToken, ValueTask<string?>>? oauthTokenProvider;
     private readonly HttpClient http;
     private readonly bool openServerStream;
     private readonly TimeSpan serverStreamRetryDelay;
@@ -50,6 +60,7 @@ public sealed class StreamableHttpTransport : IMcpTransport
     private string? protocolVersion;
     private string? serverStreamLastEventId;
     private string? postStreamLastEventId;
+    private string? bearerToken;
     private Task streamTask = Task.CompletedTask;
     private CancellationTokenSource? streamCts;
     private long nextStreamId;
@@ -62,6 +73,8 @@ public sealed class StreamableHttpTransport : IMcpTransport
         ArgumentNullException.ThrowIfNull(options);
         endpoint = options.Endpoint;
         headers = options.Headers;
+        oauthTokenProvider = options.OAuthTokenProvider;
+        bearerToken = options.BearerToken;
         openServerStream = options.OpenServerStream;
         serverStreamRetryDelay = options.ServerStreamRetryDelay;
         maxServerStreamRetries = Math.Max(0, options.MaxServerStreamRetries);
@@ -145,7 +158,16 @@ public sealed class StreamableHttpTransport : IMcpTransport
         }
 
         var generationAtSend = Volatile.Read(ref generation);
+        await SendOnceAsync(payload, ct, requestId, generationAtSend, allowOAuthRetry: true).ConfigureAwait(false);
+    }
 
+    private async ValueTask SendOnceAsync(
+        ReadOnlyMemory<byte> payload,
+        CancellationToken ct,
+        long? requestId,
+        int generationAtSend,
+        bool allowOAuthRetry)
+    {
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = new ReadOnlyMemoryContent(payload),
@@ -178,6 +200,41 @@ public sealed class StreamableHttpTransport : IMcpTransport
         {
             response.Dispose();
             return;
+        }
+
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            var challenge = OAuthChallengeOf(response);
+            if (allowOAuthRetry && oauthTokenProvider is not null && challenge is { IsEmpty: false })
+            {
+                string? token;
+                try
+                {
+                    token = await oauthTokenProvider(challenge, ct).ConfigureAwait(false);
+                }
+                catch (McpOAuthRequiredException)
+                {
+                    response.Dispose();
+                    throw;
+                }
+
+                if (token is { Length: > 0 })
+                {
+                    bearerToken = token;
+                    response.Dispose();
+                    await SendOnceAsync(payload, ct, requestId, generationAtSend, allowOAuthRetry: false).ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            var body = await ReadSnippetAsync(response, ct).ConfigureAwait(false);
+            response.Dispose();
+            if (challenge is { IsEmpty: false })
+            {
+                throw new McpOAuthRequiredException($"MCP endpoint '{endpoint}' requires OAuth sign-in.", challenge);
+            }
+
+            throw new McpTransportException($"MCP endpoint '{endpoint}' returned HTTP 401: {body}");
         }
 
         if (!response.IsSuccessStatusCode)
@@ -368,24 +425,30 @@ public sealed class StreamableHttpTransport : IMcpTransport
         {
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
-                ApplyHeaders(request, eventStreamOnly: true);
-                string? resume;
-                lock (gate)
-                {
-                    resume = serverStreamLastEventId ?? postStreamLastEventId;
-                }
-
-                if (resume is not null)
-                {
-                    request.Headers.TryAddWithoutValidation("Last-Event-ID", resume);
-                }
-
-                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-                CaptureSession(response);
+                var opened = await OpenServerStreamAsync(ct).ConfigureAwait(false);
+                var oauthRetried = opened.Retried;
+                using var response = opened.Response;
                 if (response.StatusCode is HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotFound or HttpStatusCode.NotAcceptable)
                 {
                     return;
+                }
+
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    var challenge = OAuthChallengeOf(response);
+                    var oauthError = challenge is { IsEmpty: false }
+                        ? new McpOAuthRequiredException($"MCP endpoint '{endpoint}' requires OAuth sign-in.", challenge)
+                        : new McpTransportException($"GET on MCP endpoint '{endpoint}' returned HTTP 401.");
+                    if (!oauthRetried)
+                    {
+                        // No token was available: the server has to be signed in to, and retrying the stream cannot help.
+                        RaiseClosed(generationAtStart, oauthError);
+                        return;
+                    }
+
+                    // A token that was just minted was rejected too. That is a stream failure like any other, so it goes
+                    // through the attempt counter and the backoff below instead of looping at full speed.
+                    throw oauthError;
                 }
 
                 if (!response.IsSuccessStatusCode)
@@ -430,6 +493,12 @@ public sealed class StreamableHttpTransport : IMcpTransport
             {
                 return;
             }
+            catch (McpOAuthRequiredException ex)
+            {
+                // The provider itself refused to mint a token (the user has to sign in): stop the stream, do not retry it.
+                RaiseClosed(generationAtStart, ex);
+                return;
+            }
             catch (Exception ex) when (ex is HttpRequestException or IOException or McpTransportException)
             {
                 if (++failures > maxServerStreamRetries)
@@ -447,6 +516,63 @@ public sealed class StreamableHttpTransport : IMcpTransport
             {
                 return;
             }
+        }
+    }
+
+    /// <summary>
+    /// One GET of the server stream, with the same OAuth bound a POST has: a 401 whose challenge mints a token is retried
+    /// exactly once, and <c>Retried</c> tells the caller the response it got is that retry. Without the bound, a server that
+    /// keeps answering the stream with 401 while the manager keeps handing back its cached token turns this loop into an
+    /// unbounded request storm (the defect this method was split out for).
+    /// </summary>
+    private async ValueTask<(HttpResponseMessage Response, bool Retried)> OpenServerStreamAsync(CancellationToken ct)
+    {
+        var retried = false;
+        while (true)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            ApplyHeaders(request, eventStreamOnly: true);
+            string? resume;
+            lock (gate)
+            {
+                resume = serverStreamLastEventId ?? postStreamLastEventId;
+            }
+
+            if (resume is not null)
+            {
+                request.Headers.TryAddWithoutValidation("Last-Event-ID", resume);
+            }
+
+            var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            CaptureSession(response);
+            if (retried || response.StatusCode != HttpStatusCode.Unauthorized || oauthTokenProvider is null)
+            {
+                return (response, retried);
+            }
+
+            var challenge = OAuthChallengeOf(response);
+            string? token = null;
+            if (challenge is { IsEmpty: false })
+            {
+                try
+                {
+                    token = await oauthTokenProvider(challenge, ct).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    response.Dispose();
+                    throw;
+                }
+            }
+
+            if (token is not { Length: > 0 })
+            {
+                return (response, retried);
+            }
+
+            bearerToken = token;
+            response.Dispose();
+            retried = true;
         }
     }
 
@@ -525,6 +651,12 @@ public sealed class StreamableHttpTransport : IMcpTransport
             }
         }
 
+        if (bearerToken is { Length: > 0 } token)
+        {
+            request.Headers.Remove("Authorization");
+            request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
+        }
+
         request.Headers.Remove("Accept");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
@@ -587,6 +719,23 @@ public sealed class StreamableHttpTransport : IMcpTransport
             serverStreamLastEventId = null;
             postStreamLastEventId = null;
         }
+    }
+
+    private static McpOAuthChallenge? OAuthChallengeOf(HttpResponseMessage response)
+    {
+        foreach (var challenge in response.Headers.WwwAuthenticate)
+        {
+            if (challenge.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase))
+            {
+                var parsed = McpOAuth.ParseChallengeParameter(challenge.Parameter);
+                if (parsed is { IsEmpty: false })
+                {
+                    return parsed;
+                }
+            }
+        }
+
+        return null;
     }
 
     private bool IsCurrentGeneration(int generationAtMessage) =>

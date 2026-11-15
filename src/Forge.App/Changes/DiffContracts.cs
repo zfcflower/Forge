@@ -65,6 +65,18 @@ internal interface IDiffFileItem : INotifyPropertyChanged
     bool IsMarkdownPreview { get; set; }
 
     /// <summary>
+    /// The file is an image (by extension), so its change is shown as the two pictures side by side instead of hunks: git's
+    /// binary patch carries no pixels to draw.
+    /// </summary>
+    bool IsImage { get; }
+
+    /// <summary>
+    /// Reads both sides of an image change - the base blob and the working-tree or newer-tree file - once the picture is
+    /// actually shown. A side outside the preview size limit, or missing because the file was added or deleted, is null.
+    /// </summary>
+    Task<ImageDiffSides> ReadImageSidesAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// The diff carries the whole file (one full-context hunk), so the folds inside it open in place. When false only git's
     /// 3-line hunk context is loaded and the stretches between hunks are "N unmodified lines" bars.
     /// </summary>
@@ -88,6 +100,16 @@ internal interface IDiffFileItem : INotifyPropertyChanged
     ICommand CopyPathCommand { get; }
 
     ICommand ToggleCollapsedCommand { get; }
+}
+
+/// <summary>
+/// The two pictures of one image change: <see cref="Before"/> is the old side (a blob at the change set's base) and
+/// <see cref="After"/> the new one (the working-tree file, or the newer tree of a historical change set). A null side is
+/// "there is nothing to show here" - the file did not exist, or it is larger than the image preview limit.
+/// </summary>
+internal sealed record ImageDiffSides(byte[]? Before, byte[]? After)
+{
+    public static ImageDiffSides None { get; } = new(null, null);
 }
 
 /// <summary>Everything the diff editor needs to create review comments; null disables commenting.</summary>

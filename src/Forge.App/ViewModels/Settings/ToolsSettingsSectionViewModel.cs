@@ -55,11 +55,14 @@ internal sealed record ToolGroupViewModel(string Title, IReadOnlyList<ToolRowVie
 
 /// <summary>
 /// The <c>tools</c> section: the active session's tool catalog grouped by origin, preceded by the <c>run_code</c> script
-/// block (wave W14). Built-in groups come first, in a fixed order, each tool with a switch unless another feature needs it;
-/// extension and MCP tools follow, read-only, because their plugin or server is where they are switched. Switches write
+/// block (wave W14) and the terminal block (wave W17a). Built-in groups come first, in a fixed order, each tool with a switch
+/// unless another feature needs it; extension and MCP tools follow, read-only, because their plugin or server is where they
+/// are switched. Switches write
 /// <see cref="AppPreferences.ToolsDisabled"/>; every session applies it before its next turn. The script block edits
 /// <see cref="AppPreferences.CodeScriptMaxConcurrentCalls"/>, <see cref="AppPreferences.CodeScriptResultChars"/>,
-/// <see cref="AppPreferences.CodeScriptInnerResultChars"/> and <see cref="AppPreferences.CodeScriptTools"/> live.
+/// <see cref="AppPreferences.CodeScriptInnerResultChars"/> and <see cref="AppPreferences.CodeScriptTools"/> live, and the
+/// terminal block edits the five terminal preferences (font family, font size, shell, arguments, scrollback) live, so a
+/// change applies to the next terminal without a restart.
 /// </summary>
 internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposable, IReloadableSettingsSection
 {
@@ -188,11 +191,92 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
         OnPropertyChanged(nameof(Hint));
         OnPropertyChanged(nameof(HasGroups));
 
-        // The script block reads the live preferences, so a settings.json change picked up by the reload re-fills the fields.
+        // The script and terminal blocks read the live preferences, so a settings.json change picked up by the reload
+        // re-fills the fields.
         OnPropertyChanged(nameof(CodeScriptMaxConcurrentCalls));
         OnPropertyChanged(nameof(CodeScriptResultChars));
         OnPropertyChanged(nameof(CodeScriptInnerResultChars));
         OnPropertyChanged(nameof(CodeScriptTools));
+        OnPropertyChanged(nameof(TerminalFontFamily));
+        OnPropertyChanged(nameof(TerminalFontSize));
+        OnPropertyChanged(nameof(TerminalShell));
+        OnPropertyChanged(nameof(TerminalArguments));
+        OnPropertyChanged(nameof(TerminalScrollbackLines));
+    }
+
+    // ---------------------------------------------------------------- the terminal block, wave W17a
+
+    /// <summary>Font family of the terminal; empty follows the code font of the appearance section.</summary>
+    public string TerminalFontFamily
+    {
+        get => composition.Preferences.TerminalFontFamily;
+        set
+        {
+            composition.Preferences.TerminalFontFamily = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// Largest font size the field offers. The field starts at 0 ("follow the code font") and the preference setter clamps
+    /// everything between 1 and 7 up to the smallest real size, so the range it offers is 0 or 8-32.
+    /// </summary>
+    public decimal MaxTerminalFontSize => (decimal)AppPreferences.MaxTerminalFontSize;
+
+    /// <summary>
+    /// Font size of the terminal: 0 follows the code font, anything else is clamped to [8, 32] by the preference setter.
+    /// The field re-reads the stored value, so it shows the clamped number rather than what was typed.
+    /// </summary>
+    public decimal TerminalFontSize
+    {
+        get => (decimal)composition.Preferences.TerminalFontSize;
+        set
+        {
+            composition.Preferences.TerminalFontSize = (double)value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Shell executable of a new terminal; empty means the platform default.</summary>
+    public string TerminalShell
+    {
+        get => composition.Preferences.TerminalShell;
+        set
+        {
+            composition.Preferences.TerminalShell = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Arguments of the shell, space separated with double quotes for grouping.</summary>
+    public string TerminalArguments
+    {
+        get => composition.Preferences.TerminalArguments;
+        set
+        {
+            composition.Preferences.TerminalArguments = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Smallest scrollback the field offers; it is the range the preference setter clamps to.</summary>
+    public decimal MinTerminalScrollbackLines => AppPreferences.MinScrollbackLines;
+
+    /// <summary>Largest scrollback the field offers.</summary>
+    public decimal MaxTerminalScrollbackLines => AppPreferences.MaxScrollbackLines;
+
+    /// <summary>Scrollback lines a terminal keeps (the preference setter clamps it to 1000–100000).</summary>
+    public decimal TerminalScrollbackLines
+    {
+        get => composition.Preferences.TerminalScrollbackLines;
+        set
+        {
+            composition.Preferences.TerminalScrollbackLines = (int)Math.Clamp(
+                Math.Round(value, MidpointRounding.AwayFromZero),
+                AppPreferences.MinScrollbackLines,
+                AppPreferences.MaxScrollbackLines);
+            OnPropertyChanged();
+        }
     }
 
     /// <summary>Groups the catalog: built-in groups in <see cref="BuiltInOrder"/> (unknown ones after), then extension, then MCP.</summary>

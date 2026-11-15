@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Forge.App.Changes;
 using Forge.App.Localization;
+using Forge.App.ViewModels.Preview;
 using Forge.App.Review;
 using Forge.Workspace;
 using Forge.App.Logging;
@@ -164,6 +165,55 @@ internal sealed partial class ChangesViewModel
         if (layout == DiffLayout.Single)
         {
             UpdateVisibleFiles();
+        }
+    }
+
+    /// <summary>
+    /// Both pictures of one image change: the old side is the base blob (<see cref="DiffSource.From"/>) at the file's old path,
+    /// the new side the working-tree file when the change set ends in the working tree, otherwise the blob at
+    /// <see cref="DiffSource.To"/>. Reads run off the UI thread; a side that is missing or above the image preview limit is null,
+    /// which the side-by-side view shows as "nothing on this side" instead of failing the whole row.
+    /// </summary>
+    internal async Task<ImageDiffSides> ReadImageSidesAsync(FileDiffViewModel file, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        var root = repositoryRoot;
+        if (diffSource is not { } refs || root.Length == 0 || !file.IsImage)
+        {
+            return ImageDiffSides.None;
+        }
+
+        var diff = file.Diff;
+        var limit = FilePreviewSettings.Current.PreviewImageBytes;
+        try
+        {
+            var before = diff.Status == FileDiffStatus.Added || diff.OldPath is not { Length: > 0 } oldPath || refs.From is not { Length: > 0 } from
+                ? null
+                : await git.GetFileBytesAtRevisionAsync(root, from, oldPath, limit, ct).ConfigureAwait(false);
+            var after = diff.Status == FileDiffStatus.Deleted || diff.NewPath is not { Length: > 0 } newPath
+                ? null
+                : refs.To is { Length: > 0 } to
+                    ? await git.GetFileBytesAtRevisionAsync(root, to, newPath, limit, ct).ConfigureAwait(false)
+                    : await Task.Run(() => ReadWorkingFile(System.IO.Path.Combine(root, newPath), limit), ct).ConfigureAwait(false);
+            return new ImageDiffSides(before, after);
+        }
+        catch (Exception exception) when (exception is GitException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            AppLogs.Changes.ZLogWarning($"reading the two sides of {file.Path} failed: {exception.Message}");
+            return ImageDiffSides.None;
+        }
+    }
+
+    /// <summary>The new side of a change set that ends in the working tree: the file on disk, read up to the preview limit.</summary>
+    private static byte[]? ReadWorkingFile(string path, int limit)
+    {
+        try
+        {
+            return new FileInfo(path) is { Exists: true } info && info.Length <= limit ? File.ReadAllBytes(path) : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
         }
     }
 

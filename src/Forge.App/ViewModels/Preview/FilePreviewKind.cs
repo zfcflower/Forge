@@ -42,15 +42,26 @@ internal static class FilePreviewClassifier
             return FilePreviewKind.Lfs;
         }
 
+        if (IsImageExtension(path))
+        {
+            return FilePreviewKind.Image;
+        }
+
         return ExtensionOf(path) switch
         {
-            ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" => FilePreviewKind.Image,
             ".csv" or ".tsv" => FilePreviewKind.Table,
             ".ipynb" => FilePreviewKind.Notebook,
             ".pdf" => FilePreviewKind.Pdf,
             _ => FilePreviewKind.Text,
         };
     }
+
+    /// <summary>
+    /// Whether the path's extension is one of the image formats the preview decodes. The extension is all this needs, so a
+    /// caller that has no bytes yet (an image diff, before it reads anything) classifies by path alone.
+    /// </summary>
+    public static bool IsImageExtension(string path) =>
+        ExtensionOf(path) is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp";
 
     /// <summary>The field separator a table preview parses: tab for TSV (no quoting), comma otherwise.</summary>
     public static char TableSeparator(string path) =>

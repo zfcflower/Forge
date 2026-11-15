@@ -410,6 +410,7 @@ public sealed partial class ExtensionHost
         try
         {
             var entry = Current(captured);
+            RequireNotBuiltIn(entry);
             var version = RequireVersion(entry, request.Version);
             SyncRecord(entry);
             approvals.Disable(entry.Id, version);
@@ -465,6 +466,7 @@ public sealed partial class ExtensionHost
         try
         {
             var entry = Current(captured);
+            RequireNotBuiltIn(entry);
             var version = RequireVersion(entry, request.Version);
             await StopPluginAsync(entry, state, ct).ConfigureAwait(false);
 

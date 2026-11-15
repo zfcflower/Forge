@@ -28,6 +28,12 @@ internal sealed record ContextSegment(bool IsFilled)
     public bool IsEmpty => !IsFilled;
 }
 
+/// <summary>
+/// One line of the session usage summary: a label and the number behind it. Both are already formatted by the strip (token
+/// scaling, price, elapsed time), so the row holds no formula and a language switch rebuilds the list.
+/// </summary>
+internal sealed record UsageStatRow(string Label, string Value);
+
 /// <summary>How close the root context is to the automatic-compaction trigger line; the gauge is coloured by it.</summary>
 internal enum ContextLevel
 {
@@ -76,11 +82,23 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private string aheadBehind = string.Empty;
     private string projectName = string.Empty;
     private string? projectRoot;
+    private bool projectIsGeneral;
     private string latestDraft = string.Empty;
     private bool skillsLoaded;
     private bool skillsLoading;
     private int refreshToken;
     private bool disposed;
+
+    /// <summary>The turns the session already recorded, read from <c>turn_checkpoints</c> once per strip.</summary>
+    private SessionTurnHistory turnHistory = SessionTurnHistory.Empty;
+
+    /// <summary>How many turns this window watched complete; added to <see cref="turnHistory"/>.</summary>
+    private int liveTurns;
+
+    /// <summary>Guards the one background turn-history read against a strip that was disposed while it ran.</summary>
+    private int turnHistoryToken;
+
+    private bool turnHistoryLoaded;
 
     public SessionInstrumentsViewModel(
         SessionInfo session,
@@ -123,6 +141,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         // read-only query). The workspace's skills are scanned when a turn starts or when the settings page shows them.
         RefreshCounters();
         _ = RefreshApprovalsAsync(++refreshToken);
+        RefreshTurnHistory();
     }
 
     // ---------------------------------------------------------------- workspace and project
@@ -151,6 +170,18 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     public bool HasProject => projectName.Length > 0;
 
+    /// <summary>
+    /// True when the session's project is the general (scratch) workspace rather than a registered repository: the general
+    /// area is not a project the user picks, so the breadcrumb leaves that segment out instead of inventing one.
+    /// </summary>
+    public bool IsGeneralProject => projectIsGeneral;
+
+    /// <summary>A project the user can point at in the tree: a registered repository, not the general workspace.</summary>
+    public bool HasRepositoryProject => HasProject && !projectIsGeneral;
+
+    /// <summary>The repository root checkout path, when the session belongs to a repository project (wave W16b).</summary>
+    public string? ProjectRoot => projectRoot;
+
     /// <summary>The menu item is only offered when a VS Code shim was resolved, so it can never be a dead entry.</summary>
     public bool CanOpenWorkspaceInVsCode => sources.HasVsCode;
 
@@ -172,19 +203,24 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// The project the session belongs to. The window pushes it, because the project registry is read in the background and
     /// a session opened from a restored tab can exist before that read lands.
     /// </summary>
-    public void SetProject(string? name, string? root)
+    public void SetProject(string? name, string? root, bool isGeneral = false)
     {
         var nextName = name ?? string.Empty;
         var nextRoot = string.IsNullOrWhiteSpace(root) ? null : root;
-        if (string.Equals(projectName, nextName, StringComparison.Ordinal) && string.Equals(projectRoot, nextRoot, StringComparison.Ordinal))
+        if (string.Equals(projectName, nextName, StringComparison.Ordinal) &&
+            string.Equals(projectRoot, nextRoot, StringComparison.Ordinal) &&
+            projectIsGeneral == isGeneral)
         {
             return;
         }
 
         projectName = nextName;
         projectRoot = nextRoot;
+        projectIsGeneral = isGeneral;
         OnPropertyChanged(nameof(ProjectName));
         OnPropertyChanged(nameof(HasProject));
+        OnPropertyChanged(nameof(IsGeneralProject));
+        OnPropertyChanged(nameof(HasRepositoryProject));
         RaiseOpenTargets();
     }
 
@@ -549,9 +585,11 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         }
 
         usage += delta;
+        liveTurns++;
         OnPropertyChanged(nameof(HasUsage));
         OnPropertyChanged(nameof(CacheReadText));
         OnPropertyChanged(nameof(UsageTooltip));
+        RaiseUsageSummary();
     }
 
     /// <summary>
@@ -634,9 +672,165 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(HasUsage));
         OnPropertyChanged(nameof(UsageTooltip));
         OnPropertyChanged(nameof(CacheReadText));
+        RaiseUsageSummary();
     }
 
-    // ---------------------------------------------------------------- right half: the counters
+// ---------------------------------------------------------------- the session usage summary
+
+    /// <summary>
+    /// The session's own totals in one place: what the strip's hover line sums up, plus the two numbers only the session's
+    /// stored history knows — how many turns it ran and how long they took. The tokens are the strip's own <c>usage</c> (the
+    /// stored message usage seeded when the history was replayed, plus every turn this window watched), so there is one total
+    /// and not two that can disagree.
+    /// <para>The turn count and the time come from <c>turn_checkpoints</c>, read once off the UI thread when the strip is
+    /// built; a session without a git worktree records no checkpoints, and then only the turns this window watched count.</para>
+    /// </summary>
+    public bool HasUsageSummary => usage.InputTokens > 0 || usage.OutputTokens > 0 || UsageTurnCount > 0;
+
+    /// <summary>
+    /// The rows of the summary popover, in the order it draws them. The list is rebuilt on every read, so a language switch
+    /// and a finished turn both come through the same one notification.
+    /// </summary>
+    public IReadOnlyList<UsageStatRow> UsageSummaryRows =>
+    [
+        new(UsageStrings.InputLabel, UsageInputText),
+        new(UsageStrings.OutputLabel, UsageOutputText),
+        new(UsageStrings.CacheReadLabel, UsageCacheReadText),
+        new(UsageStrings.CacheWriteLabel, UsageCacheWriteText),
+        new(UsageStrings.CacheHitLabel, UsageCacheHitText),
+        new(UsageStrings.CostLabel, UsageCostText),
+        new(UsageStrings.TurnsLabel, UsageTurnsText),
+        new(UsageStrings.DurationLabel, UsageDurationText),
+        new(UsageStrings.AverageInputLabel, UsageAverageInputText),
+        new(UsageStrings.AverageOutputLabel, UsageAverageOutputText),
+        new(UsageStrings.AverageCostLabel, UsageAverageCostText),
+    ];
+
+    public string UsageSummaryTitle => UsageStrings.Title;
+
+    public string UsageSummaryTooltip => UsageStrings.Tooltip;
+
+    /// <summary>Where the numbers come from, and which of them a session without checkpoints cannot report.</summary>
+    public string UsageSummaryHint => UsageStrings.HintText;
+
+    /// <summary>True when the session has spent nothing yet: the popover then says so instead of drawing zeros.</summary>
+    public bool IsUsageSummaryEmpty => !HasUsageSummary;
+
+    public string UsageSummaryEmptyText => UsageStrings.EmptyText;
+
+    public string UsageInputText => Scale(usage.InputTokens);
+
+    public string UsageOutputText => Scale(usage.OutputTokens);
+
+    public string UsageCacheReadText => Scale(usage.CacheReadTokens);
+
+    public string UsageCacheWriteText => Scale(usage.CacheWriteTokens);
+
+    /// <summary>"98.5%": the share of the input that came from the prompt cache, one decimal.</summary>
+    public string UsageCacheHitText => Ratio(SessionUsageMath.CacheHitRatio(usage));
+
+    /// <summary>The session's spend at the selected model's prices; "—" while the model has no price.</summary>
+    public string UsageCostText =>
+        SessionUsageMath.Cost(usage, Metadata.Pricing) is { } cost ? Price(cost) : UsageStrings.UnknownText;
+
+    /// <summary>
+    /// "5 已记录 · 2 本次": the turns of the stored history (checkpoints) and the turns this window watched complete, or the
+    /// one number a session that only has one of them can show.
+    /// </summary>
+    public string UsageTurnsText => turnHistory.Turns == 0
+        ? Turns(liveTurns)
+        : liveTurns == 0
+            ? Turns(turnHistory.Turns)
+            : UsageStrings.TurnsValueText(Turns(turnHistory.Turns), Turns(liveTurns));
+
+    /// <summary>"4.2 秒" / "3 分 05 秒": the wall clock the recorded turns took; "—" when none recorded one.</summary>
+    public string UsageDurationText =>
+        turnHistory.Duration > TimeSpan.Zero ? TextFormat.Elapsed(turnHistory.Duration) : UsageStrings.UnknownText;
+
+    /// <summary>The turns the totals are divided by: the stored history plus the ones this window watched.</summary>
+    public int UsageTurnCount => turnHistory.Turns + liveTurns;
+
+    public string UsageAverageInputText => Average(usage.InputTokens);
+
+    public string UsageAverageOutputText => Average(usage.OutputTokens);
+
+    public string UsageAverageCostText =>
+        SessionUsageMath.Cost(usage, Metadata.Pricing) is { } cost && UsageTurnCount > 0
+            ? Price(cost / UsageTurnCount)
+            : UsageStrings.UnknownText;
+
+    /// <summary>True once the session's recorded turns are known (or the read came back empty).</summary>
+    public bool HasTurnHistory => turnHistoryLoaded;
+
+    /// <summary>Reads the session's recorded turns off the UI thread; called once when the strip is built.</summary>
+    public void RefreshTurnHistory()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        var token = ++turnHistoryToken;
+        _ = LoadTurnHistoryAsync(token);
+    }
+
+    private async Task LoadTurnHistoryAsync(int token)
+    {
+        SessionTurnHistory history;
+        try
+        {
+            history = await sources.TurnHistoryAsync(session.Id, CancellationToken.None).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or InvalidDataException
+            or Microsoft.Data.Sqlite.SqliteException)
+        {
+            // The summary is a readout: a store that cannot be read leaves the recorded turns unknown instead of failing.
+            history = SessionTurnHistory.Empty;
+        }
+
+        if (disposed || token != turnHistoryToken)
+        {
+            return;
+        }
+
+        turnHistory = history;
+        turnHistoryLoaded = true;
+        OnPropertyChanged(nameof(HasTurnHistory));
+        RaiseUsageSummary();
+    }
+
+    /// <summary>One count of the turn column; the history and the live count are both plain counts.</summary>
+    private static string Turns(int turns) => turns.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>One share as a percentage with one decimal: the cache-hit rule of the strip's <c>RC</c> reading.</summary>
+    private static string Ratio(double value) =>
+        (Math.Clamp(value, 0, 1) * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+
+    /// <summary>One token total divided by the turns it took, scaled the way the totals are; no turns reads "—".</summary>
+    private string Average(int total) =>
+        UsageTurnCount > 0 ? Scale(total / UsageTurnCount) : UsageStrings.UnknownText;
+
+    private void RaiseUsageSummary()
+    {
+        OnPropertyChanged(nameof(HasUsageSummary));
+        OnPropertyChanged(nameof(IsUsageSummaryEmpty));
+        OnPropertyChanged(nameof(UsageSummaryTitle));
+        OnPropertyChanged(nameof(UsageSummaryTooltip));
+        OnPropertyChanged(nameof(UsageSummaryHint));
+        OnPropertyChanged(nameof(UsageSummaryRows));
+        OnPropertyChanged(nameof(UsageInputText));
+        OnPropertyChanged(nameof(UsageOutputText));
+        OnPropertyChanged(nameof(UsageCacheReadText));
+        OnPropertyChanged(nameof(UsageCacheWriteText));
+        OnPropertyChanged(nameof(UsageCacheHitText));
+        OnPropertyChanged(nameof(UsageCostText));
+        OnPropertyChanged(nameof(UsageTurnsText));
+        OnPropertyChanged(nameof(UsageDurationText));
+        OnPropertyChanged(nameof(UsageTurnCount));
+        OnPropertyChanged(nameof(UsageAverageInputText));
+        OnPropertyChanged(nameof(UsageAverageOutputText));
+        OnPropertyChanged(nameof(UsageAverageCostText));
+    }    // ---------------------------------------------------------------- right half: the counters
 
     public string ApprovalText => InstrumentsStrings.CountPair(PendingApprovals, approvalRecords);
 
@@ -933,6 +1127,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         }
 
         RaiseCounters();
+        RaiseUsageSummary();
         OnPropertyChanged(nameof(ContextLabel));
         OnPropertyChanged(nameof(ContextTooltip));
         OnPropertyChanged(nameof(UsageTooltip));

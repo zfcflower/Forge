@@ -12,7 +12,7 @@ MCP(Model Context Protocol)客户端与服务器管理。自写 JSON-RPC 与传�
 
 ## 边界
 
-- 支持 stdio 本地进程与可流式 HTTP 两种传输;不含旧版 HTTP+SSE 与 `completions`。OAuth、`resources/subscribe` 与进度通知的契约已定(W10d,见下「OAuth 与资源订阅」),实现落地前本节以该契约为准。
+- 支持 stdio 本地进程与可流式 HTTP 两种传输;不含旧版 HTTP+SSE 与 `completions`。OAuth、`resources/subscribe` 与进度通知的契约见下「OAuth 与资源订阅」(W10d 定稿),实现以该节为准。
 - 服务器工具经 `McpToolAdapter` 暴露为 `<server>__<tool>`,副作用默认 Execute,配置 `readOnlyTools` 可标只读;脚本/MCP 工具调用仍走主程序审批。
 - 配置读 `~/.forge/mcp.json` 与 `<workspace>/.forge/mcp.json`(项目按名覆盖全局),坏条目产生诊断不致命;`url` 仅接受绝对 http/https URI(拒绝相对路径与 file 等其它 scheme)。
 - **写**同一批文件(增删改/启停标记/从别家配置导入):只替换被编辑的那一条目,其它条目与其它根键原样保留;不展开 `${VAR}`(写回去的永远是占位符),JSON 注释不保留(`JsonNode` 无此能力,文档写明)。文件 IO 与锁**不在本库**:本库提供纯文本变换(`McpConfigFile`)与原文形态(`McpServerEntry`),原子写与互斥由 App 的 `McpConfigStore` 复用 `SettingsFileMutex` + `AtomicFile`。
@@ -45,13 +45,17 @@ MCP(Model Context Protocol)客户端与服务器管理。自写 JSON-RPC 与传�
 
 ## OAuth 与资源订阅(W10d 契约,2026-11-15 拍板)
 
-**OAuth 只对可流式 HTTP。** 401 + `WWW-Authenticate` 触发发现:RFC 9728 protected-resource metadata → RFC 8414 授权服务器 metadata → RFC 7591 动态客户端注册 → 授权码 + PKCE(S256)+ loopback 回调(BCL `HttpListener`,随机端口)→ token 交换;过期用 refresh token 刷新,刷新后重试一次。**不静默弹浏览器**:连接遇 401 只把服务器置为需要登录的状态,用户在 MCP 设置里点「登录」才走流程;「退出」清除 token。
+**OAuth 只对可流式 HTTP。** 401 + `WWW-Authenticate` 触发发现:RFC 9728 protected-resource metadata → RFC 8414 授权服务器 metadata → RFC 7591 动态客户端注册 → 授权码 + PKCE(S256)+ loopback 回调(BCL `HttpListener`,随机端口)→ token 交换;过期用 refresh token 刷新,刷新后重试一次。**不静默弹浏览器**:连接遇 401 只把服务器置为需要登录的状态,用户在 MCP 设置里点「登录」才走流程;「退出」清除 token。会话中途的 401(工具调用、资源读写)同样置为需要登录并抛给调用方,行上的登录按钮因此可见。
 
-**token 不落明文。** 本库不存储 token:经 `IMcpTokenStore`(按 server url origin + resource 指示符的稳定键)注入,App 用 `ProviderSecretStore` 同款 AES-GCM 旁钥模式实现(`mcp-secrets.json` + owner-only 旁钥,原子写);浏览器经 `IMcpOAuthUi` 注入。本库依赖边界(只 Abstractions + BCL)不变;PKCE/loopback 助手在本库内实现而不抽公共——App 的 OpenRouter 助手进不了本库的依赖边界,记为故意重复。
+**401 的重试有上限。** 每个请求(含服务端 GET 流的一次尝试)最多用新取得的 token 重试一次;重试后仍然 401 则按普通失败计入重试次数并走退避,绝不在原速率下循环。取不到 token(没有、刷新被拒、没有任何可用的)不重试:直接报需要登录。同一服务器上并发到达的多个 401 **只刷新一次**(按服务器的单飞门),后到的复用已刷新的 token——轮换 refresh token 的服务器上,两次并发刷新会让后一次拿着已被作废的 token,看起来像用户漏登录。
+
+**每个端点都要求 https。** protected-resource metadata、授权服务器 metadata、注册、token 与授权端点的 scheme 必须是 `https`(RFC 9728 §2.1),唯一例外是 loopback(RFC 8252 的 http 回调地址,本地自建的 AS 同样落在那里);不合规的 URL 在发请求或打开浏览器之前就被拒为 `McpOAuthException`。单个 OAuth 步骤 30 s 超时,连接失败、超时与读体失败都包成 `McpOAuthException`。浏览器一侧还有一道自己的关:交给系统的 URL 必须是绝对 http/https URI,`Process.Start(UseShellExecute)` 对 `file://`、UNC 路径有本地执行面。
+
+**token 不落明文。** 本库不存储 token:经 `IMcpTokenStore`(按 server url origin + resource 指示符的稳定键)注入,App 用 `ProviderSecretStore` 同款 AES-GCM 旁钥模式实现(`mcp-secrets.json` + owner-only 旁钥,原子写);两个加密存储共用同一份密文旁车件(`EncryptedSidecarFile`:密钥文件、加解密、信封与损坏检测),只在文件名与引用空间上不同。浏览器经 `IMcpOAuthUi` 注入。本库依赖边界(只 Abstractions + BCL)不变;PKCE/loopback 助手在本库内实现而不抽公共——App 的 OpenRouter 助手进不了本库的依赖边界,记为故意重复。
 
 **进度。** `tools/call` 携带 `_meta.progressToken`(每调用唯一),`notifications/progress` 按 token 路由到该调用的 `ToolContext.Progress`(最新尾快照语义,与 BashTool 同口径),资源检查器直接消费;无 token 的进度通知落通用事件。
 
-**资源订阅。** `resources/subscribe`/`unsubscribe` 请求 + `notifications/resources/updated` → `ResourceUpdated` 事件;能力位 `resources.subscribe` 已解析。App 表面:MCP 设置分区每服务器的资源浏览器(列表/读取/订阅,更新通知即时刷新);**不加 agent 资源工具**(用户拍板)。会话 id 跨重启持久化仍未决。
+**资源订阅。** `resources/subscribe`/`unsubscribe` 请求 + `notifications/resources/updated` → `ResourceUpdated` 事件;能力位 `resources.subscribe` 已解析。**订阅集合归管理器**:订阅只属于发送它的那个 MCP 会话,`McpClient` 在 peer 重建时清空自己的订阅集合;管理器按服务器保存用户期望的订阅集合并于每次新会话建立后重放它,所以断线重连不会让已订阅的资源悄无声息地停止通知,而客户端配置变更(换 URL/命令)会清空该集合。App 表面:MCP 设置分区每服务器的资源浏览器(列表/读取/订阅,更新通知即时刷新,已订阅徽标读管理器状态而不是上一行自己的标记);**不加 agent 资源工具**(用户拍板)。通知触发的刷新不是用户动作:它用分区自己的取消源、同一个 tick 只列一次、且有动作在跑时直接跳过——拿用户动作的取消源会把刚点的删除/重启静默取消掉。会话 id 跨重启持久化仍未决。
 
 ## 未决
 

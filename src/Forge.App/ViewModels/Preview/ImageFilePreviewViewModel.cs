@@ -53,42 +53,52 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
             ct.ThrowIfCancellationRequested();
             var data = File.ReadAllBytes(path);
             ct.ThrowIfCancellationRequested();
-
-            Bitmap? decoded;
-            try
-            {
-                decoded = (decoder ?? DefaultDecoder)(data);
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                AppLogs.File.ZLogWarning($"image decode failed: {name}: {exception.Message}");
-                return Failed(path, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
-            }
-
-            if (decoded is null)
-            {
-                return Failed(path, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
-            }
-
-            var pixelSize = decoded.PixelSize;
-            var longEdge = Math.Max(pixelSize.Width, pixelSize.Height);
-            if (longEdge > MaxLongEdge)
-            {
-                var scale = (double)MaxLongEdge / longEdge;
-                var target = new PixelSize(
-                    Math.Max(1, (int)(pixelSize.Width * scale)),
-                    Math.Max(1, (int)(pixelSize.Height * scale)));
-                var scaled = decoded.CreateScaledBitmap(target, BitmapInterpolationMode.HighQuality);
-                decoded.Dispose();
-                decoded = scaled;
-            }
-
-            return new ImageFilePreviewViewModel(path, name, byteSize, decoded, decoded.PixelSize.Width, decoded.PixelSize.Height);
+            return Build(data, name, byteSize, decoder);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
             return Failed(path, name, byteSize, PreviewStrings.ImageReadFailed(name, exception.Message));
         }
+    }
+
+    /// <summary>
+    /// The same decode path for bytes that did not come from a file: the old side of an image diff is a git blob, and the base
+    /// version of a file exists nowhere on disk. The caller decides the name (and whether the bytes are within the preview
+    /// limit) and gets the same bounded decode, scaling and failure notice as the file overload.
+    /// </summary>
+    public static ImageFilePreviewViewModel Build(byte[] data, string name, long byteSize, Func<byte[], Bitmap?>? decoder)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        Bitmap? decoded;
+        try
+        {
+            decoded = (decoder ?? DefaultDecoder)(data);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.File.ZLogWarning($"image decode failed: {name}: {exception.Message}");
+            return Failed(name, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
+        }
+
+        if (decoded is null)
+        {
+            return Failed(name, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
+        }
+
+        var pixelSize = decoded.PixelSize;
+        var longEdge = Math.Max(pixelSize.Width, pixelSize.Height);
+        if (longEdge > MaxLongEdge)
+        {
+            var scale = (double)MaxLongEdge / longEdge;
+            var target = new PixelSize(
+                Math.Max(1, (int)(pixelSize.Width * scale)),
+                Math.Max(1, (int)(pixelSize.Height * scale)));
+            var scaled = decoded.CreateScaledBitmap(target, BitmapInterpolationMode.HighQuality);
+            decoded.Dispose();
+            decoded = scaled;
+        }
+
+        return new ImageFilePreviewViewModel(name, name, byteSize, decoded, decoded.PixelSize.Width, decoded.PixelSize.Height);
     }
 
     private static ImageFilePreviewViewModel Failed(string path, string name, long byteSize, LocText notice)

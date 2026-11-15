@@ -21,6 +21,7 @@ internal static class EditorStrings
     public const string HighlightCurrentLine = "editor.settings.currentLine";
     public const string Hyperlinks = "editor.settings.hyperlinks";
     public const string AutoFolding = "editor.settings.folding";
+    public const string InlayHints = "editor.settings.inlayHints";
     public const string IndentationSize = "editor.settings.indentation";
     public const string TabsToSpaces = "editor.settings.tabsToSpaces";
     public const string ColumnRulers = "editor.settings.rulers";
@@ -76,6 +77,7 @@ internal static class EditorStrings
         Loc.Register(ScrollBelowDocument, "可滚动到文档末尾以下", "Scroll below the document");
         Loc.Register(HighlightCurrentLine, "高亮当前行", "Highlight current line");
         Loc.Register(Hyperlinks, "识别链接（Ctrl/Cmd + 点击）", "Links (Ctrl/Cmd + click)");
+        Loc.Register(InlayHints, "内联提示（参数名/类型）", "Inlay hints (parameter names/types)");
         Loc.Register(AutoFolding, "自动折叠", "Automatic folding");
         Loc.Register(IndentationSize, "缩进宽度", "Indent width");
         Loc.Register(TabsToSpaces, "Tab 插入空格", "Tab inserts spaces");

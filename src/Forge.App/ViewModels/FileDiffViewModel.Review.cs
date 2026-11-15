@@ -1,6 +1,7 @@
 using System.Windows.Input;
 using Forge.App.Changes;
 using Forge.App.Localization;
+using Forge.App.ViewModels.Preview;
 using Forge.Workspace;
 
 namespace Forge.App.ViewModels;
@@ -63,6 +64,7 @@ internal sealed partial class FileDiffViewModel : ObservableObject, IDiffFileIte
     private bool isViewed;
     private bool isCollapsed;
     private bool isMarkdownPreview = true;
+    private bool isImage;
     private bool hasFullContext;
     private Task<bool>? contextLoad;
 
@@ -122,6 +124,13 @@ internal sealed partial class FileDiffViewModel : ObservableObject, IDiffFileIte
     }
 
     public bool HasFullContext => hasFullContext;
+
+    /// <summary>An image change is drawn as the two pictures; git's binary patch has nothing to render as text.</summary>
+    public bool IsImage => isImage;
+
+    /// <summary>Reads both sides' bytes for the side-by-side view; the owner knows the change set's refs and root.</summary>
+    public Task<ImageDiffSides> ReadImageSidesAsync(CancellationToken ct = default) =>
+        owner is { } document && IsImage ? document.ReadImageSidesAsync(this, ct) : Task.FromResult(ImageDiffSides.None);
 
     /// <summary>The unmodified stretches are not loaded yet but can be: opening one reads the whole file once.</summary>
     public bool CanLoadContext => !hasFullContext && owner is { CanLoadContext: true } && !Diff.IsBinary && !Diff.IsTruncated;
@@ -208,6 +217,7 @@ internal sealed partial class FileDiffViewModel : ObservableObject, IDiffFileIte
         blocks = items;
         Fingerprint = DiffBlocks.Fingerprint(diff, split);
         IsMarkdown = IsMarkdownPath(diff.Path);
+        isImage = FilePreviewClassifier.IsImageExtension(diff.Path);
 
         // A full-context read puts the whole file into one hunk (git never splits it); added/deleted files are whole anyway.
         hasFullContext = !diff.IsBinary && !diff.IsTruncated &&

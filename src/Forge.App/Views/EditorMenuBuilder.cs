@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Forge.App.Editing;
+using Forge.App.Input;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 
@@ -23,13 +24,13 @@ internal sealed class EditorMenuBuilder(FileDocumentView view)
     {
         var settings = EditorSettings.Current;
         var items = new List<object>(24);
-        items.Add(Command("editor-undo", EditorStrings.MenuUndo, new KeyGesture(Key.Z, KeyModifiers.Control), view.UndoFromMenu));
-        items.Add(Command("editor-redo", EditorStrings.MenuRedo, new KeyGesture(Key.Y, KeyModifiers.Control), view.RedoFromMenu));
+        items.Add(Command("editor-undo", EditorStrings.MenuUndo, KeymapApplier.Gesture(KeymapActionIds.EditorUndo), view.UndoFromMenu));
+        items.Add(Command("editor-redo", EditorStrings.MenuRedo, KeymapApplier.Gesture(KeymapActionIds.EditorRedo), view.RedoFromMenu));
         items.Add(new Separator());
-        items.Add(Command("editor-cut", EditorStrings.MenuCut, new KeyGesture(Key.X, KeyModifiers.Control), view.CutFromMenu));
-        items.Add(Command("editor-copy", EditorStrings.MenuCopy, new KeyGesture(Key.C, KeyModifiers.Control), view.CopyFromMenu));
-        items.Add(Command("editor-paste", EditorStrings.MenuPaste, new KeyGesture(Key.V, KeyModifiers.Control), view.PasteFromMenu));
-        items.Add(Command("editor-select-all", EditorStrings.MenuSelectAll, new KeyGesture(Key.A, KeyModifiers.Control), view.SelectAllFromMenu));
+        items.Add(Command("editor-cut", EditorStrings.MenuCut, KeymapApplier.Gesture(KeymapActionIds.EditorCut), view.CutFromMenu));
+        items.Add(Command("editor-copy", EditorStrings.MenuCopy, KeymapApplier.Gesture(KeymapActionIds.EditorCopy), view.CopyFromMenu));
+        items.Add(Command("editor-paste", EditorStrings.MenuPaste, KeymapApplier.Gesture(KeymapActionIds.EditorPaste), view.PasteFromMenu));
+        items.Add(Command("editor-select-all", EditorStrings.MenuSelectAll, KeymapApplier.Gesture(KeymapActionIds.EditorSelectAll), view.SelectAllFromMenu));
         items.Add(new Separator());
 
         var display = Submenu("editor-menu-display", EditorStrings.MenuDisplay);
@@ -53,15 +54,17 @@ internal sealed class EditorMenuBuilder(FileDocumentView view)
             () => settings.Hyperlinks, value => settings.Hyperlinks = value));
         display.Items.Add(Toggle("editor-toggle-folding", EditorStrings.AutoFolding,
             () => settings.AutoFolding, value => settings.AutoFolding = value));
+        display.Items.Add(Toggle("editor-toggle-inlay-hints", EditorStrings.InlayHints,
+            () => settings.ShowInlayHints, value => settings.ShowInlayHints = value));
         items.Add(display);
 
         var folding = Submenu("editor-menu-folding", EditorStrings.MenuFolding);
         folding.Items.Add(Command("editor-fold-toggle", EditorStrings.MenuToggleFold,
-            new KeyGesture(Key.OemOpenBrackets, KeyModifiers.Control | KeyModifiers.Shift), view.ToggleFoldFromMenu));
+            KeymapApplier.Gesture(KeymapActionIds.EditorToggleFold), view.ToggleFoldFromMenu));
         folding.Items.Add(Command("editor-fold-all", EditorStrings.MenuFoldAll,
-            new KeyGesture(Key.OemOpenBrackets, KeyModifiers.Control | KeyModifiers.Alt), view.FoldAllFromMenu));
+            KeymapApplier.Gesture(KeymapActionIds.EditorFoldAll), view.FoldAllFromMenu));
         folding.Items.Add(Command("editor-fold-none", EditorStrings.MenuUnfoldAll,
-            new KeyGesture(Key.OemCloseBrackets, KeyModifiers.Control | KeyModifiers.Alt), view.UnfoldAllFromMenu));
+            KeymapApplier.Gesture(KeymapActionIds.EditorUnfoldAll), view.UnfoldAllFromMenu));
         items.Add(folding);
 
         var transform = Submenu("editor-menu-transform", EditorStrings.MenuCommands);
@@ -77,8 +80,8 @@ internal sealed class EditorMenuBuilder(FileDocumentView view)
         items.Add(transform);
 
         items.Add(new Separator());
-        items.Add(Command("editor-menu-find", EditorStrings.MenuFind, new KeyGesture(Key.F, KeyModifiers.Control), view.FindFromMenu));
-        items.Add(Command("editor-menu-replace", EditorStrings.MenuReplace, new KeyGesture(Key.H, KeyModifiers.Control), view.ReplaceFromMenu));
+        items.Add(Command("editor-menu-find", EditorStrings.MenuFind, KeymapApplier.Gesture(KeymapActionIds.EditorFind), view.FindFromMenu));
+        items.Add(Command("editor-menu-replace", EditorStrings.MenuReplace, KeymapApplier.Gesture(KeymapActionIds.EditorReplace), view.ReplaceFromMenu));
         items.Add(new Separator());
         var columnSelection = Item("editor-menu-column-selection", Text(EditorStrings.MenuColumnSelection), null);
         columnSelection.IsEnabled = false;

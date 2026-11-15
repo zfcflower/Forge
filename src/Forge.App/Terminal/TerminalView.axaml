@@ -3,7 +3,7 @@
              xmlns:term="using:Forge.App.Terminal"
              x:Class="Forge.App.Terminal.TerminalView"
              x:DataType="term:TerminalViewModel">
-  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource SurfaceBackgroundBrush}">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource SurfaceBackgroundBrush}">
 
     <!-- Vetoed close: a program is still running, so the tab stays and this banner asks what to do. -->
     <Border Grid.Row="0"
@@ -34,19 +34,109 @@
       </Grid>
     </Border>
 
-    <term:TerminalControl Grid.Row="1" Source="{Binding}" />
+    <!-- Buffer search (Ctrl+F): the query, the case toggle, where the cursor sits in the result set and the two
+         navigation buttons. Esc closes it, Enter walks the matches. -->
+    <Border Grid.Row="1"
+            Padding="8,5"
+            Background="{DynamicResource SurfaceBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,0,0,1"
+            IsVisible="{Binding IsSearchVisible}"
+            AutomationProperties.AutomationId="terminal-search-bar">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+        <TextBox x:Name="SearchQuery"
+                 Grid.Column="0"
+                 MinHeight="26"
+                 VerticalContentAlignment="Center"
+                 Text="{Binding SearchText}"
+                 PlaceholderText="{Binding SearchPlaceholder}"
+                 AutomationProperties.AutomationId="terminal-search-query"
+                 AutomationProperties.Name="{Binding SearchPlaceholder}" />
+        <ToggleButton Grid.Column="1"
+                      Margin="6,0,0,0"
+                      Padding="7,0"
+                      MinHeight="26"
+                      VerticalContentAlignment="Center"
+                      IsChecked="{Binding SearchCaseSensitive}"
+                      Content="{Binding SearchCaseText}"
+                      ToolTip.Tip="{Binding SearchCaseText}"
+                      AutomationProperties.AutomationId="terminal-search-case" />
+        <TextBlock Grid.Column="2"
+                   Classes="mono"
+                   Margin="10,0,0,0"
+                   VerticalAlignment="Center"
+                   Text="{Binding SearchMatchLabel}"
+                   AutomationProperties.AutomationId="terminal-search-count" />
+        <TextBlock Grid.Column="3"
+                   Classes="caption"
+                   Margin="8,0,0,0"
+                   VerticalAlignment="Center"
+                   Text="{Binding SearchNoMatchesText}"
+                   IsVisible="{Binding ShowSearchNoMatches}"
+                   AutomationProperties.AutomationId="terminal-search-empty" />
+        <Button Grid.Column="4"
+                Classes="ghost"
+                MinWidth="28"
+                MinHeight="26"
+                Margin="8,0,0,0"
+                Padding="6,0"
+                Content="&#x2191;"
+                Command="{Binding SearchPreviousCommand}"
+                ToolTip.Tip="{Binding SearchPreviousText}"
+                AutomationProperties.AutomationId="terminal-search-previous"
+                AutomationProperties.Name="{Binding SearchPreviousText}" />
+        <Button Grid.Column="5"
+                Classes="ghost"
+                MinWidth="28"
+                MinHeight="26"
+                Margin="4,0,0,0"
+                Padding="6,0"
+                Content="&#x2193;"
+                Command="{Binding SearchNextCommand}"
+                ToolTip.Tip="{Binding SearchNextText}"
+                AutomationProperties.AutomationId="terminal-search-next"
+                AutomationProperties.Name="{Binding SearchNextText}" />
+        <Button Grid.Column="6"
+                Classes="ghost"
+                MinWidth="28"
+                MinHeight="26"
+                Margin="4,0,0,0"
+                Padding="6,0"
+                Content="&#x2715;"
+                Command="{Binding CloseSearchCommand}"
+                ToolTip.Tip="{Binding SearchCloseText}"
+                AutomationProperties.AutomationId="terminal-search-close"
+                AutomationProperties.Name="{Binding SearchCloseText}" />
+      </Grid>
+    </Border>
 
-    <!-- One local line after the screen: "starting", the exit code, or why the terminal stopped. -->
-    <Border Grid.Row="2"
+    <term:TerminalControl Grid.Row="2" Source="{Binding}" />
+
+    <!-- One local line after the screen: "starting", the exit code, or why the terminal stopped. A terminal that is over
+         offers a restart here, next to the reason it stopped. -->
+    <Border Grid.Row="3"
             Padding="10,3"
             Background="{DynamicResource SurfaceBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,1,0,0"
             IsVisible="{Binding ShowStatus}">
-      <TextBlock Classes="caption"
-                 TextWrapping="Wrap"
-                 Text="{Binding StatusText}"
-                 AutomationProperties.AutomationId="terminal-status" />
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Center"
+                   Text="{Binding StatusText}"
+                   AutomationProperties.AutomationId="terminal-status" />
+        <Button Grid.Column="1"
+                Classes="ghost"
+                Margin="10,0,0,0"
+                MinHeight="24"
+                Padding="8,0"
+                Content="{Binding RestartText}"
+                Command="{Binding RestartCommand}"
+                IsVisible="{Binding CanRestart}"
+                AutomationProperties.AutomationId="terminal-restart"
+                AutomationProperties.Name="{Binding RestartText}" />
+      </Grid>
     </Border>
   </Grid>
 </UserControl>

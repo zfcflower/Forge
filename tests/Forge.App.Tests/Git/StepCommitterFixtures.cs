@@ -1,5 +1,6 @@
 using Forge.Abstractions;
 using Forge.App.Git;
+using Forge.App.Notifications;
 using Forge.Core.Storage;
 using Forge.Workspace;
 using Xunit;
@@ -255,7 +256,13 @@ internal sealed class StepCommitHarness : IAsyncDisposable
 
     private int resolveCalls;
 
-    private StepCommitHarness(StepCommitRepo repo, SqliteTodoStore store, ITodoStore seenByCommitter)
+    private StepCommitHarness(
+        StepCommitRepo repo,
+        SqliteTodoStore store,
+        ITodoStore seenByCommitter,
+        Func<StepReviewSettings>? reviewSettings,
+        IStepReviewMessenger? messenger,
+        INotifications? notifications)
     {
         Repo = repo;
         Store = store;
@@ -263,7 +270,10 @@ internal sealed class StepCommitHarness : IAsyncDisposable
             StepCommitRepo.Cli,
             seenByCommitter,
             ResolveAsync,
-            () => Enabled);
+            () => Enabled,
+            notifications,
+            reviewSettings,
+            messenger);
     }
 
     private Task<WorktreeResolution> ResolveAsync(string sessionId, CancellationToken ct)
@@ -318,12 +328,20 @@ internal sealed class StepCommitHarness : IAsyncDisposable
         }
     }
 
-    public static async Task<StepCommitHarness> CreateAsync(Func<SqliteTodoStore, ITodoStore>? wrap = null)
+    /// <param name="wrap">Wraps the real checklist store (faults, call counting).</param>
+    /// <param name="reviewSettings">The review preferences the committer reads at each commit; null means no automatic review.</param>
+    /// <param name="messenger">Where an automatic review request goes; null means no automatic review.</param>
+    /// <param name="notifications">Where a review request that could not be handed over is announced.</param>
+    public static async Task<StepCommitHarness> CreateAsync(
+        Func<SqliteTodoStore, ITodoStore>? wrap = null,
+        Func<StepReviewSettings>? reviewSettings = null,
+        IStepReviewMessenger? messenger = null,
+        INotifications? notifications = null)
     {
         var repo = await StepCommitRepo.CreateAsync();
         var data = System.IO.Path.Combine(repo.Root, "data");
         var store = new SqliteTodoStore(data);
-        return new StepCommitHarness(repo, store, wrap is null ? store : wrap(store));
+        return new StepCommitHarness(repo, store, wrap is null ? store : wrap(store), reviewSettings, messenger, notifications);
     }
 
     /// <summary>Adds a done item (status Done, as the caller just marked it) with the given step fields.</summary>

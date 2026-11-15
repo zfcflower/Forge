@@ -146,7 +146,27 @@ internal sealed class ScreenshotsTool : PrLifecycleToolBase
                 new ScreenshotRunRequest { Command = command, Files = files, CleanupPaths = cleanupPaths },
                 ct)
             .ConfigureAwait(false);
-        return run.Success ? new ToolResult(run.Message) : FailureOf(run);
+        return run.Success ? Success(run) : FailureOf(run);
+    }
+
+    /// <summary>
+    /// The tool's answer after a successful run: the text report plus, when the runner could read them, the published
+    /// pictures as image blocks (wave W17a) — the model sees what went into the pull request instead of only its file names.
+    /// </summary>
+    private static ToolResult Success(ScreenshotRunResult run)
+    {
+        if (run.Images is not { Count: > 0 } images)
+        {
+            return new ToolResult(run.Message);
+        }
+
+        var blocks = new List<ContentBlock>(images.Count + 1) { new TextBlock(run.Message) };
+        foreach (var image in images)
+        {
+            blocks.Add(new ImageBlock(image.MediaType, Convert.ToBase64String(image.Data)));
+        }
+
+        return new ToolResult(blocks);
     }
 
     /// <summary>

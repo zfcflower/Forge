@@ -12,6 +12,18 @@ public static class ExtensionOrigins
 }
 
 /// <summary>
+/// The path agreement of <c>extensions.install</c> (wave W10a). The main program extracts a downloaded package into
+/// <c>&lt;host data&gt;/<see cref="TempDirectoryName"/>/&lt;fresh directory&gt;</c> and sends that directory as
+/// <see cref="ExtensionInstallRequest.SourceDir"/>; the host accepts an install only from inside that root, so the two
+/// sides read the name from here rather than each spelling it out - a drift would make every install
+/// <c>invalid_request</c>.
+/// </summary>
+public static class ExtensionInstallPaths
+{
+    public const string TempDirectoryName = "install";
+}
+
+/// <summary>
 /// <c>extensions.install</c> arguments (wave W10a). The main program has already downloaded the package, verified its
 /// SHA-256 against the repository index and extracted it into <see cref="SourceDir"/> — a directory whose root holds a
 /// <c>manifest.json</c> in the existing plugin layout. The host re-validates the manifest (id/version safety, kind),
@@ -25,8 +37,10 @@ public sealed partial record ExtensionInstallRequest(
     [property: Key(1)] string Origin);
 
 /// <summary>
-/// Result of an install: the plugin id/version actually installed, its status afterwards (normally <c>Draft</c>) and any
-/// diagnostics. A failed install leaves the previous live version untouched and reports why in <see cref="Diagnostics"/>.
+/// Result of a successful install: the plugin id/version actually installed, its status afterwards (normally
+/// <c>Draft</c>) and <see cref="Diagnostics"/>, which carries non-blocking diagnostics of a successful answer only. A
+/// failed install is reported as a host error code and leaves the previous live version untouched; it is never
+/// expressed as a result with diagnostics.
 /// </summary>
 [MessagePackObject]
 public sealed partial record ExtensionInstallResult(

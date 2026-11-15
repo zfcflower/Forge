@@ -246,18 +246,6 @@ internal sealed class ModelMetadataSection
     public double? CacheWrite { get; set; }
 }
 
-/// <summary>The encrypted credential store. Names, references and nonces are not secret; the payloads are.</summary>
-internal sealed class SecretsDocument
-{
-    public const int CurrentVersion = 1;
-
-    [JsonPropertyName("version")]
-    public int? Version { get; set; }
-
-    [JsonPropertyName("entries")]
-    public Dictionary<string, SecretEntryDocument>? Entries { get; set; }
-}
-
 /// <summary>
 /// A Kimi For Coding sign-in as the secret store holds it: one JSON value under the reference
 /// <c>kimi:&lt;providerId&gt;</c>, encrypted at rest like any pasted key. Every field is a credential, so nothing here is ever
@@ -338,24 +326,10 @@ internal sealed class ChatGptTokenDocument
     public DateTimeOffset? ExpiresAt { get; set; }
 }
 
-/// <summary>One AES-GCM payload: base64 nonce, tag and ciphertext.</summary>
-internal sealed class SecretEntryDocument
-{
-    [JsonPropertyName("nonce")]
-    public string? Nonce { get; set; }
-
-    [JsonPropertyName("tag")]
-    public string? Tag { get; set; }
-
-    [JsonPropertyName("data")]
-    public string? Data { get; set; }
-}
-
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(SettingsDocument))]
 [JsonSerializable(typeof(ProvidersSectionDocument))]
 [JsonSerializable(typeof(ProviderEntryDocument))]
-[JsonSerializable(typeof(SecretsDocument))]
 [JsonSerializable(typeof(KimiTokenDocument))]
 [JsonSerializable(typeof(XAiTokenDocument))]
 [JsonSerializable(typeof(MetaTokenDocument))]

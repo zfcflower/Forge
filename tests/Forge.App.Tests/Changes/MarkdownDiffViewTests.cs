@@ -310,6 +310,10 @@ public sealed class MarkdownDiffViewTests
 
         public bool IsMarkdownPreview { get; set; } = true;
 
+        public bool IsImage => false;
+
+        public Task<ImageDiffSides> ReadImageSidesAsync(CancellationToken ct = default) => Task.FromResult(ImageDiffSides.None);
+
         public bool HasFullContext => HasFullContextValue;
 
         public bool CanLoadContext => false;

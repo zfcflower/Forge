@@ -32,6 +32,8 @@ parent: forge-architecture
 
 **语义 token 的按行索引。** `semanticTokens` 一次给全文件,视图却每帧只画几十行,所以两边之间隔一层 `SemanticLineIndex`:不可变、按行分相的 `(start, length, category)` 数组。`SemanticTokenMap` 把服务器的 (行, 字符, 长度) 换成行内偏移——UTF-16 直接取,UTF-8 两端各自解码(多字节字符会同时改变起点与长度),越行的一律剪到行尾;图例按位置一次性映射成 `TokenCategory[]`,每个 token 只付一次数组下标,而不是一次字符串查表。`SemanticLineIndex.Build` 接收与 token 平行的行号数组(非递减,由 delta 解码器保证;乱序则先排序地降级处理),**对每个内容未变的行直接复用上一版的数组**——一次编辑后只分配服务器真的改过分类的那几行,并暴露 `BuiltLines`/`ReusedLines`/`DroppedTokens` 使这件事可断言。索引带快照版本号;不是同一版本的文本是否还画由展示层决定(App 继续画,因为丢整层会闪;真正错位的那几行在下一次答案里就被纠正)。`SemanticTokensDecoder.ApplyEdits` 做两趟单次分配:先算长度,再把旧数据拼接进结果,乱序的 edit 列表先排序、重叠的起点夹进上一条留下的区间。`workspace/semanticTokens/refresh` 经 `RefreshRequested` 冒泡为 `LanguageSession.SemanticTokensRefreshRequested`(与诊断的同名事件并列),它表示“分类变了”,而不是“文本变了”。
 
+**代码操作、重命名与内联提示。** `LspClient` 声明并以同一套请求口径(截止期限 + 会话取消)实现 `textDocument/codeAction`(带 `codeActionLiteralSupport`,否则服务器只回裸 `Command`;`dataSupport` 为真——`data` 是服务器关联两次调用的唯一线索;`resolveSupport.properties: [edit]` 表示编辑可能要到 resolve 才出现)、`codeAction/resolve`、`textDocument/rename`、`textDocument/prepareRename`、`textDocument/inlayHint` 与 `inlayHint/resolve`,并处理 `workspace/{codeAction,inlayHint}/refresh`(冒泡成 `LanguageSession.CodeActionsRefreshRequested`/`InlayHintsRefreshRequested`)。能力解析同时接受 `true` 与选项对象两种形态,`resolveProvider`/`prepareProvider` 只从对象形态取;服务器没声明时请求直接回空、不发上线,编辑器据此把入口藏起来而不是报错。**工作区编辑只认文本编辑**:`changes` 映射与 3.16 `documentChanges` 的 `textDocument/edits` 两种线形都读,同一个文件的多处编辑必须互不重叠、越界位置一律拒绝;文件资源操作(create/rename/delete)不实现也不在客户端能力里声明,遇到时计入 `WorkspaceEdit.UnsupportedOperations` 交给上层报告"部分编辑未应用",绝不把半个重命名当成功;只带 `Command` 的 code action 因为不声明 `workspace/executeCommand` 一样丢弃并计数。`prepareRename` 兼容 3.12 的 `{range, placeholder}`、旧式四数字数组与 3.16 的 `{defaultBehavior: true}`。内联提示的 label 支持字符串与 `InlayHintLabelPart[]` 两种线形,空 label 保留(等待 resolve 补),并按 `range` 请求——按视口分片是展示层的事,`LspClient` 不改写调用方的 range。
+
 **诊断的工作区聚合。** `WorkspaceDiagnostics` 把会话池里每个会话的 `DiagnosticsStore` 看成一个整体:订阅 `LanguageSessionPool.SessionStarted`/`SessionClosed` 与每个 store 的 `Changed`,只冒泡一次变更通知,展平/排序在读取时做(没有后台计时器,没有变化时零工作)。行携带文件路径、**所属工作区**与**会话的位置编码**——后者使得一条存储的 LSP 位置能在文件后来才被打开时仍被正确换算成偏移,前者使得跨工作区的列表项能沿自己的会话打开,而不是回退到活动会话。订阅集合与池对齐:池静默退役的会话(查到时已 dispose)在下次读取时摘掉,不会永久续订;`Snapshot()` 也跳过状态为 Disposed 的会话——池要等到下一次查找才把它的槽位清掉,而没人能再更新那批诊断,列出来只会被当成现状。
 
 **Diff。** 行 Diff 默认比较行终止符(`CRLF` vs `LF` 是变更),`IgnoreLineEndings` 可关闭;评论锚点按内容哈希重定位(精确/移动/模糊/丢失),移动搜索按窗口×全文起始行暴力扫描(无每 hunk 索引,`MaxDistance` 默认不限),大文件下是平方级。
@@ -43,4 +45,5 @@ parent: forge-architecture
 
 ## 未决
 
+- 代码操作 / 重命名 / 内联提示在协议层的剩余缺口:`codeAction` 不按 `only` 过滤也不声明 `disabledSupport`(只防御性地读并禁用);`workspaceEdit` 不声明 `documentChanges`(服务器收到的意思是「只能发 `changes`」,资源操作因此不会出现,出现了也只计数);`inlayHint` 的 `textEdit` 不应用(接受提示时改写文本未做)。
 - `Regex.Match` 没有能返回捕获组的 span 入口,所以当命中规则需要第 1 组及以上的捕获(`captures`/捕获名/反向引用)时,分词器仍会把复用缓冲里的行文本物化成一个字符串供捕获收集;不需要捕获的规则全程在 span 上匹配,已无每行字符串分配。

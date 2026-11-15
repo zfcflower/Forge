@@ -13,7 +13,7 @@ internal static class ApprovalDatabase
     private const int DefaultTimeoutSeconds = 5;
 
     private const string SelectRecordSql = """
-        SELECT plugin_id, version, source_hash, dependency_hash, sdk_version, status
+        SELECT plugin_id, version, source_hash, dependency_hash, sdk_version, status, origin, approved_hash
         FROM plugin_approval
         WHERE plugin_id = $pluginId AND version = $version
         """;
@@ -49,7 +49,9 @@ internal static class ApprovalDatabase
                 reader.GetString(2),
                 reader.GetString(3),
                 reader.GetString(4),
-                reader.GetString(5));
+                reader.GetString(5),
+                reader.GetString(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7));
         }
         catch (SqliteException exception) when (exception.SqliteErrorCode == 1 && exception.Message.Contains("no such table", StringComparison.Ordinal))
         {

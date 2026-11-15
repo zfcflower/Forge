@@ -61,6 +61,14 @@ public sealed record HostOptions
     /// <summary>Upper bound on the script executions running at the same time; each one owns a fresh executor process.</summary>
     public int ScriptWorkerCount { get; init; } = DefaultScriptWorkerCount;
 
+    /// <summary>Optional directory of plugins that ship with the app and are copied into the plugins directory on
+    /// first run (origin <see cref="Forge.Approval.PluginOrigin.Bundled"/>). Empty currently; the mechanism is in place.</summary>
+    public string? BundledPluginsDirectory { get; init; }
+
+    /// <summary>Optional read-only directory of plugins that are part of the app payload (origin
+    /// <see cref="Forge.Approval.PluginOrigin.BuiltIn"/>); they are discovered but can neither be deleted nor disabled.</summary>
+    public string? BuiltInPluginsDirectory { get; init; }
+
     public static HostOptions Parse(IReadOnlyList<string> args)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -71,6 +79,8 @@ public sealed record HostOptions
         string? runtime = null;
         string? worker = null;
         string? executor = null;
+        string? bundledArgument = null;
+        string? builtInArgument = null;
         var toolTimeout = DefaultToolTimeout;
         var concurrency = 4;
         var scriptWorkers = DefaultScriptWorkerCount;
@@ -107,6 +117,12 @@ public sealed record HostOptions
                 case "--script-workers":
                     scriptWorkers = ParseScriptWorkers(RequireValue(args, ref index, name));
                     break;
+                case "--bundled":
+                    bundledArgument = RequireValue(args, ref index, name);
+                    break;
+                case "--builtin":
+                    builtInArgument = RequireValue(args, ref index, name);
+                    break;
                 default:
                     break;
             }
@@ -139,6 +155,12 @@ public sealed record HostOptions
             ToolTimeout = toolTimeout,
             MaxConcurrentExecutionsPerWorker = concurrency,
             ScriptWorkerCount = scriptWorkers,
+            BundledPluginsDirectory = string.IsNullOrWhiteSpace(bundledArgument)
+                ? null
+                : Path.GetFullPath(bundledArgument),
+            BuiltInPluginsDirectory = string.IsNullOrWhiteSpace(builtInArgument)
+                ? null
+                : Path.GetFullPath(builtInArgument),
         };
     }
 

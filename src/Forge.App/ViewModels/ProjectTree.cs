@@ -1087,6 +1087,89 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// </summary>
     public event EventHandler? ActiveRowChanged;
 
+    /// <summary>
+    /// Raised on the UI thread when the shell asked for a row by key: the view selects the row and scrolls it into view. The
+    /// row was expanded into the flat list by <see cref="ExpandTo"/> before this fires, so the view can find it in
+    /// <see cref="Rows"/>.
+    /// </summary>
+    public event EventHandler<TreeNodeViewModel>? NodeFocusRequested;
+
+    /// <summary>
+    /// Selects a row by node key - the breadcrumb's project and workspace segments are the callers - and brings it on screen.
+    /// Returns false when this tree holds no such row, so a shell that owns two trees can ask them in turn.
+    /// </summary>
+    public bool FocusNode(string key)
+    {
+        if (ExpandTo(key) is not { } node)
+        {
+            return false;
+        }
+
+        NodeFocusRequested?.Invoke(this, node);
+        return true;
+    }
+
+    /// <summary>
+    /// Expands every ancestor of the row with <paramref name="key"/> so the row becomes part of the flat list, and returns it;
+    /// null when the tree has no such key. A tree pruned to collapsed groups therefore still reaches a session's row.
+    /// </summary>
+    public TreeNodeViewModel? ExpandTo(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            return null;
+        }
+
+        var path = PathTo(Sections, key);
+        if (path is null)
+        {
+            return null;
+        }
+
+        var expanded = false;
+        for (var i = 0; i < path.Count - 1; i++)
+        {
+            if (path[i].IsExpanded)
+            {
+                continue;
+            }
+
+            path[i].IsExpanded = true;
+            expanded = true;
+        }
+
+        // The ExpansionChanged callback splices rows for a node that is already visible; rebuilding once is what makes the
+        // newly reachable rows appear when several levels opened at the same time.
+        if (expanded)
+        {
+            RebuildRows();
+        }
+
+        return path[^1];
+    }
+
+    /// <summary>The nodes from a root down to the row with <paramref name="key"/>, or null when no row has it.</summary>
+    private static List<TreeNodeViewModel>? PathTo(IReadOnlyList<TreeNodeViewModel> nodes, string key)
+    {
+        foreach (var node in nodes)
+        {
+            if (string.Equals(node.Key, key, StringComparison.Ordinal))
+            {
+                return [node];
+            }
+
+            if (PathTo(node.Children, key) is not { } nested)
+            {
+                continue;
+            }
+
+            nested.Insert(0, node);
+            return nested;
+        }
+
+        return null;
+    }
+
     /// <summary>Archives a session: it leaves the worktree list and shows up under "历史".</summary>
     public async Task ArchiveAsync(string sessionId, CancellationToken ct)
     {

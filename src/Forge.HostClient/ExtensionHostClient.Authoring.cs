@@ -67,6 +67,23 @@ public sealed partial class ExtensionHostClient
         return result;
     }
 
+    /// <summary>Installs an extracted package (wave W10a); the host validates the manifest, swaps the directory in and
+    /// records it with the caller's origin. The new version starts Draft and is never approved by this call.</summary>
+    public async Task<Sdk.ExtensionInstallResult> InstallExtensionAsync(
+        Sdk.ExtensionInstallRequest request, CancellationToken ct)
+    {
+        ValidateInstallRequest(request);
+        var active = RequireRunning();
+        var response = await SendAuthoringAsync(active, Sdk.ExtensionProtocol.ExtensionsInstall, request, CompileBudget, ct)
+            .ConfigureAwait(false);
+        if (!TryReadInstallResult(response, out var result, out var problem))
+        {
+            throw UnusableAnswer(Sdk.ExtensionProtocol.ExtensionsInstall, problem);
+        }
+
+        return result;
+    }
+
     /// <summary>Drops a staged draft; the live version (when there is one) is untouched.</summary>
     public async Task DiscardExtensionAsync(string pluginId, CancellationToken ct)
     {
@@ -183,6 +200,24 @@ public sealed partial class ExtensionHostClient
         ArgumentException.ThrowIfNullOrWhiteSpace(request.DependencyHash);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SdkVersion);
     }
+
+    private static void ValidateInstallRequest(Sdk.ExtensionInstallRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.SourceDir);
+        if (!IsKnownExtensionOrigin(request.Origin))
+        {
+            throw new ArgumentException(
+                $"The extension origin '{request.Origin}' cannot be installed; use '{Sdk.ExtensionOrigins.Installed}', "
+                + $"'{Sdk.ExtensionOrigins.Bundled}' or '{Sdk.ExtensionOrigins.BuiltIn}'.",
+                nameof(request));
+        }
+    }
+
+    private static bool IsKnownExtensionOrigin(string? origin) =>
+        string.Equals(origin, Sdk.ExtensionOrigins.Installed, StringComparison.Ordinal) ||
+        string.Equals(origin, Sdk.ExtensionOrigins.Bundled, StringComparison.Ordinal) ||
+        string.Equals(origin, Sdk.ExtensionOrigins.BuiltIn, StringComparison.Ordinal);
 
     private static bool IsKnownExtensionKind(string? kind) =>
         string.Equals(kind, Sdk.ExtensionKinds.Plugin, StringComparison.Ordinal) ||
@@ -435,6 +470,66 @@ public sealed partial class ExtensionHostClient
             if (string.IsNullOrWhiteSpace(toolNames[position]))
             {
                 problem = $"The commit result has an unusable tool name at toolNames[{position}].";
+                return false;
+            }
+        }
+
+        result = decoded with { Status = status };
+        return true;
+    }
+
+    /// <summary>Reads an <c>extensions.install</c> answer: the plugin status goes through the <c>plugins.status</c> row
+    /// rules unchanged and the diagnostics must be a list of usable strings.</summary>
+    private static bool TryReadInstallResult(
+        IpcMessage response, out Sdk.ExtensionInstallResult result, out string problem)
+    {
+        result = null!;
+        if (!response.HasPayload)
+        {
+            problem = "The Extension Host returned no install result.";
+            return false;
+        }
+
+        if (!HostAnswerRules.TryRead<Sdk.ExtensionInstallResult>(response, out var decoded, out var detail))
+        {
+            problem = $"The install result cannot be decoded: {detail}";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(decoded.PluginId))
+        {
+            problem = "The install result carries no plugin id.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(decoded.Version))
+        {
+            problem = "The install result carries no version.";
+            return false;
+        }
+
+        if (decoded.Status is null)
+        {
+            problem = "The install result carries no plugin status.";
+            return false;
+        }
+
+        if (!HostAnswerRules.TryReadPluginStatus(decoded.Status, "status", out var status, out problem))
+        {
+            return false;
+        }
+
+        if (decoded.Diagnostics is not { } diagnostics)
+        {
+            problem = "The install result carries no diagnostic list.";
+            return false;
+        }
+
+        for (var position = 0; position < diagnostics.Count; position++)
+        {
+            if (diagnostics[position] is null)
+            {
+                problem = $"The install result has an unusable diagnostic at diagnostics[{position}].";
                 return false;
             }
         }

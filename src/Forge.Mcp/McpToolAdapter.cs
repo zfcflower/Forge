@@ -6,7 +6,7 @@ namespace Forge.Mcp;
 /// <summary>Exposes one MCP server tool as a Forge tool named <c>&lt;server&gt;__&lt;tool&gt;</c>.</summary>
 public sealed class McpToolAdapter : ITool
 {
-    private readonly Func<string, CancellationToken, Task<McpToolCallResult>> invoke;
+    private readonly Func<string, Action<string>?, CancellationToken, Task<McpToolCallResult>> invoke;
     private readonly int maxResultChars;
 
     internal McpToolAdapter(
@@ -16,7 +16,7 @@ public sealed class McpToolAdapter : ITool
         string? description,
         string inputSchemaJson,
         ToolSideEffect sideEffect,
-        Func<string, CancellationToken, Task<McpToolCallResult>> invoke,
+        Func<string, Action<string>?, CancellationToken, Task<McpToolCallResult>> invoke,
         int maxResultChars)
     {
         ArgumentNullException.ThrowIfNull(invoke);
@@ -44,7 +44,7 @@ public sealed class McpToolAdapter : ITool
         ArgumentNullException.ThrowIfNull(call);
         try
         {
-            var result = await invoke(call.ArgumentsJson, ct).ConfigureAwait(false);
+            var result = await invoke(call.ArgumentsJson, context.Progress, ct).ConfigureAwait(false);
             return new ToolResult(BlocksOf(result), result.IsError);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

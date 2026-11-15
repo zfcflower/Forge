@@ -8,9 +8,6 @@
              xmlns:ae="using:AvaloniaEdit"
              x:Class="Forge.App.Views.FileDocumentView"
              x:DataType="vm:FileDocumentViewModel">
-  <UserControl.KeyBindings>
-    <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
-  </UserControl.KeyBindings>
   <UserControl.Styles>
     <Style Selector="wc|PanelIconButton.active /template/ Border#PART_Background">
       <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />

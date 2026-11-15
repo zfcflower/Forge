@@ -151,6 +151,15 @@ public sealed class LanguageSession : IAsyncDisposable
     /// <summary>True while the server reports its own long-running work, e.g. loading a project.</summary>
     public event EventHandler<bool>? BusyChanged;
 
+    /// <summary>
+    /// The server asked for its inlay hints to be re-read (<c>workspace/inlayHint/refresh</c>): its analysis moved without the
+    /// text changing.
+    /// </summary>
+    public event EventHandler? InlayHintsRefreshRequested;
+
+    /// <summary>The server asked for its code actions to be re-read (<c>workspace/codeAction/refresh</c>).</summary>
+    public event EventHandler? CodeActionsRefreshRequested;
+
     /// <summary>Starts a unit of work that keeps the session out of the idle sweep; pair with <see cref="ReleaseLease"/>.</summary>
     public bool TryLease()
     {
@@ -384,6 +393,117 @@ public sealed class LanguageSession : IAsyncDisposable
         bool includeDeclaration = true,
         CancellationToken ct = default) =>
         await InvokeAsync(document, client => client.RequestReferencesAsync(document, offset, includeDeclaration, ct), ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// The code actions the server offers for <paramref name="range"/>, or null when the session is not ready or the server
+    /// declares no <c>codeActionProvider</c> (an editor without the feature, not an error).
+    /// </summary>
+    public async Task<CodeActionResult?> RequestCodeActionsAsync(
+        TextDocument document,
+        LspRange range,
+        IReadOnlyList<LspDiagnostic>? diagnostics = null,
+        CancellationToken ct = default) =>
+        await InvokeAsync(document, client => client.RequestCodeActionsAsync(document, range, diagnostics, ct), ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Runs <c>codeAction/resolve</c> for an action that only carried <c>data</c>; null when the server does not resolve
+    /// actions or the answer is not an action. No document is synced: resolve takes the action back, not a position.
+    /// </summary>
+    public async Task<LspCodeAction?> ResolveCodeActionAsync(LspCodeAction action, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        Touch();
+        if (!TryLease())
+        {
+            return null;
+        }
+
+        try
+        {
+            var client = await EnsureClientAsync(ct).ConfigureAwait(false);
+            if (client is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return await client.ResolveCodeActionAsync(action, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is LspProtocolException or LanguageServerCrashedException or IOException or InvalidOperationException)
+            {
+                LastError = ex.Message;
+                _options.Log?.Invoke($"Language server request failed: {ex.Message}");
+                return null;
+            }
+        }
+        finally
+        {
+            ReleaseLease();
+        }
+    }
+
+    /// <summary>The range a rename at <paramref name="offset"/> would replace, or null when the server cannot prepare renames or refuses.</summary>
+    public async Task<RenamePreparation?> RequestPrepareRenameAsync(TextDocument document, int offset, CancellationToken ct = default) =>
+        await InvokeNullableAsync(document, client => client.RequestPrepareRenameAsync(document, offset, ct), ct).ConfigureAwait(false);
+
+    /// <summary>The edit that renames the symbol at <paramref name="offset"/>; null when the session is not ready, the server cannot rename, or it refused.</summary>
+    public async Task<WorkspaceEdit?> RequestRenameAsync(
+        TextDocument document,
+        int offset,
+        string newName,
+        CancellationToken ct = default) =>
+        await InvokeNullableAsync(document, client => client.RequestRenameAsync(document, offset, newName, ct), ct).ConfigureAwait(false);
+
+    /// <summary>Inline hints for <paramref name="range"/>, or null when the session is not ready or the server declares no <c>inlayHintProvider</c>.</summary>
+    public async Task<IReadOnlyList<InlayHint>?> RequestInlayHintsAsync(
+        TextDocument document,
+        LspRange range,
+        CancellationToken ct = default) =>
+        await InvokeAsync(document, client => client.RequestInlayHintsAsync(document, range, ct), ct).ConfigureAwait(false);
+
+    /// <summary>Runs <c>inlayHint/resolve</c> for a hint whose label the server withheld. No document is synced: resolve takes the hint back.</summary>
+    public async Task<InlayHint?> ResolveInlayHintAsync(InlayHint hint, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(hint);
+        Touch();
+        if (!TryLease())
+        {
+            return null;
+        }
+
+        try
+        {
+            var client = await EnsureClientAsync(ct).ConfigureAwait(false);
+            if (client is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return await client.ResolveInlayHintAsync(hint, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is LspProtocolException or LanguageServerCrashedException or IOException or InvalidOperationException)
+            {
+                LastError = ex.Message;
+                _options.Log?.Invoke($"Language server request failed: {ex.Message}");
+                return null;
+            }
+        }
+        finally
+        {
+            ReleaseLease();
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -949,6 +1069,14 @@ public sealed class LanguageSession : IAsyncDisposable
         else if (string.Equals(method, "workspace/semanticTokens/refresh", StringComparison.Ordinal))
         {
             SemanticTokensRefreshRequested?.Invoke(this, EventArgs.Empty);
+        }
+        else if (string.Equals(method, "workspace/inlayHint/refresh", StringComparison.Ordinal))
+        {
+            InlayHintsRefreshRequested?.Invoke(this, EventArgs.Empty);
+        }
+        else if (string.Equals(method, "workspace/codeAction/refresh", StringComparison.Ordinal))
+        {
+            CodeActionsRefreshRequested?.Invoke(this, EventArgs.Empty);
         }
     }
 

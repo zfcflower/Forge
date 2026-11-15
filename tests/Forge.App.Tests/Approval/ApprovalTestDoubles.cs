@@ -52,6 +52,10 @@ internal sealed class FakeAuthoringClient : IExtensionAuthoringClient
 
     public List<ExtensionCommitRequest> CommitCalls { get; } = [];
 
+    public List<ExtensionInstallRequest> InstallCalls { get; } = [];
+
+    public Exception? InstallError { get; set; }
+
     public List<(string Id, string Version)> DisableCalls { get; } = [];
 
     public List<(string Id, string Version)> EnableCalls { get; } = [];
@@ -103,6 +107,22 @@ internal sealed class FakeAuthoringClient : IExtensionAuthoringClient
     {
         DiscardCalls.Add(pluginId);
         return DiscardError is not null ? Task.FromException(DiscardError) : Task.CompletedTask;
+    }
+
+    public Task<ExtensionInstallResult> InstallExtensionAsync(ExtensionInstallRequest request, CancellationToken ct)
+    {
+        InstallCalls.Add(request);
+        if (InstallError is not null)
+        {
+            return Task.FromException<ExtensionInstallResult>(InstallError);
+        }
+
+        return Task.FromResult(
+            new ExtensionInstallResult(
+                "plugin.id",
+                "1.0.0",
+                new PluginStatusInfo("plugin.id", "1.0.0", "Draft", "s", "d", "sdk", []),
+                []));
     }
 
     public Task DisablePluginAsync(string pluginId, string version, CancellationToken ct)
@@ -198,6 +218,11 @@ internal sealed class FakeAdmin : IExtensionsAdmin
 
     public List<(string Id, string Version)> DeleteCalls { get; } = [];
 
+    public List<(string SourceDir, string Origin)> InstallCalls { get; } = [];
+
+    /// <summary>Keeps an install in flight so a test can act while the host has not answered yet.</summary>
+    public Func<string, string, CancellationToken, Task>? InstallHook { get; set; }
+
     public Func<string, StagedExtension?>? PendingLookup { get; set; }
 
     public int ReadCount { get; private set; }
@@ -221,6 +246,12 @@ internal sealed class FakeAdmin : IExtensionsAdmin
     {
         DeleteCalls.Add((pluginId, version));
         return Task.CompletedTask;
+    }
+
+    public Task InstallAsync(string sourceDir, string origin, CancellationToken ct)
+    {
+        InstallCalls.Add((sourceDir, origin));
+        return InstallHook?.Invoke(sourceDir, origin, ct) ?? Task.CompletedTask;
     }
 }
 

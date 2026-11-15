@@ -191,7 +191,7 @@ internal sealed class AppPreferences : ObservableObject
     // Wave W10/W17 registers the update source, the extension repository index, the keymap overrides, the review mode and
     // the terminal font overrides. The manifest default is this repository's GitHub release asset (user decision 2026-11-15);
     // the repository index starts empty so a fresh profile only shows installed extensions and local zip installs.
-    public const string DefaultUpdatesManifestUrl = "https://github.com/zfcflower/Forge/releases/latest/download/updates.json";
+    public const string DefaultUpdatesManifestUrl = "https://github.com/zfcflower/Forge/releases/download/manifest/updates.json";
     public const string DefaultExtensionRepositoryUrl = "";
     public const string DefaultReviewMode = "subagent";
     private static readonly string[] ReviewModeTokens = ["subagent", "manual"];
@@ -251,6 +251,7 @@ internal sealed class AppPreferences : ObservableObject
     private bool editorHighlightCurrentLine = true;
     private bool editorHyperlinks = true;
     private bool editorAutoFolding = true;
+    private bool editorShowInlayHints = true;
     private int editorIndentationSize = DefaultEditorIndentationSize;
     private bool editorTabsToSpaces = true;
     private string editorColumnRulers = string.Empty;
@@ -424,6 +425,9 @@ internal sealed class AppPreferences : ObservableObject
 
     /// <summary>Whether foldable ranges are computed while editing (default on).</summary>
     public bool EditorAutoFolding { get => editorAutoFolding; set => Set(ref editorAutoFolding, value); }
+
+    /// <summary>Whether the editor renders LSP inlay hints (wave W17c); the menu toggle writes through here.</summary>
+    public bool EditorShowInlayHints { get => editorShowInlayHints; set => Set(ref editorShowInlayHints, value); }
 
     /// <summary>Indentation width in columns; clamped to [<see cref="MinEditorIndentationSize"/>, <see cref="MaxEditorIndentationSize"/>].</summary>
     public int EditorIndentationSize
@@ -750,11 +754,11 @@ internal sealed class AppPreferences : ObservableObject
     /// <summary>Terminal font family override (wave W17a); empty follows <see cref="CodeFontFamily"/>.</summary>
     public string TerminalFontFamily { get => terminalFontFamily; set => Set(ref terminalFontFamily, Text(value, DefaultTerminalFontFamily)); }
 
-    /// <summary>Terminal font size override (wave W17a); 0 follows <see cref="CodeFontSize"/>, otherwise clamped to [8, 32].</summary>
+    /// <summary>Terminal font size override (wave W17a); 0 follows <see cref="CodeFontSize"/>, otherwise clamped to [8, 32]. NaN reads as the default, never persisted.</summary>
     public double TerminalFontSize
     {
         get => terminalFontSize;
-        set => Set(ref terminalFontSize, value <= 0 ? 0 : Math.Clamp(value, MinTerminalFontSize, MaxTerminalFontSize));
+        set => Set(ref terminalFontSize, value <= 0 || double.IsNaN(value) ? 0 : Math.Clamp(value, MinTerminalFontSize, MaxTerminalFontSize));
     }
 
     /// <summary>Directories (comma or newline separated) the palette content search skips besides what <c>.gitignore</c> excludes (wave W3).</summary>
@@ -868,6 +872,7 @@ internal sealed class AppPreferences : ObservableObject
         editorHighlightCurrentLine = section.EditorHighlightCurrentLine ?? true;
         editorHyperlinks = section.EditorHyperlinks ?? true;
         editorAutoFolding = section.EditorAutoFolding ?? true;
+        editorShowInlayHints = section.EditorShowInlayHints ?? true;
         editorIndentationSize = section.EditorIndentationSize is { } indentationSize
             ? Math.Clamp(indentationSize, MinEditorIndentationSize, MaxEditorIndentationSize)
             : DefaultEditorIndentationSize;
@@ -961,7 +966,7 @@ internal sealed class AppPreferences : ObservableObject
         reviewMode = Token(section.ReviewMode, ReviewModeTokens, DefaultReviewMode);
         reviewAfterStepCommit = section.ReviewAfterStepCommit ?? DefaultReviewAfterStepCommit;
         terminalFontFamily = Text(section.TerminalFontFamily, DefaultTerminalFontFamily);
-        terminalFontSize = section.TerminalFontSize is { } terminalFontSizeLoaded
+        terminalFontSize = section.TerminalFontSize is { } terminalFontSizeLoaded && !double.IsNaN(terminalFontSizeLoaded)
             ? (terminalFontSizeLoaded <= 0 ? 0 : Math.Clamp(terminalFontSizeLoaded, MinTerminalFontSize, MaxTerminalFontSize))
             : DefaultTerminalFontSize;
         paletteExcludeDirectories = Text(section.PaletteExcludeDirectories, DefaultPaletteExcludeDirectories);
@@ -1014,6 +1019,7 @@ internal sealed class AppPreferences : ObservableObject
             EditorHighlightCurrentLine = editorHighlightCurrentLine,
             EditorHyperlinks = editorHyperlinks,
             EditorAutoFolding = editorAutoFolding,
+            EditorShowInlayHints = editorShowInlayHints,
             EditorIndentationSize = editorIndentationSize,
             EditorTabsToSpaces = editorTabsToSpaces,
             EditorColumnRulers = editorColumnRulers,
@@ -1104,7 +1110,7 @@ internal sealed class AppPreferences : ObservableObject
             byAction[actionId] = actionId + KeymapOverrideSeparator + gesture;
         }
 
-        return [.. byAction.Values];
+        return [.. byAction.Values.Order(StringComparer.Ordinal)];
     }
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -1383,6 +1389,9 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("editorAutoFolding")]
     public bool? EditorAutoFolding { get; set; }
+
+    [JsonPropertyName("editorShowInlayHints")]
+    public bool? EditorShowInlayHints { get; set; }
 
     [JsonPropertyName("editorIndentationSize")]
     public int? EditorIndentationSize { get; set; }

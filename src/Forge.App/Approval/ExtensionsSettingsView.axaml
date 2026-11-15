@@ -5,6 +5,14 @@
              x:Class="Forge.App.Approval.ExtensionsSettingsView"
              x:DataType="ap:ExtensionsSettingsSectionViewModel">
 
+  <UserControl.Styles>
+    <Style Selector="Border.origin-badge">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6,1" />
+    </Style>
+  </UserControl.Styles>
+
   <StackPanel Spacing="6">
 
     <Grid ColumnDefinitions="*,Auto">
@@ -37,10 +45,13 @@
           <DataTemplate x:DataType="ap:InstalledExtensionViewModel">
             <Border Classes="card" Margin="0,0,0,6" Padding="8">
               <StackPanel Spacing="2">
-                <Grid ColumnDefinitions="Auto,*,Auto">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                   <SelectableTextBlock Classes="mono" Text="{Binding Id}" />
                   <TextBlock Grid.Column="1" Classes="caption" Margin="8,0" Text="{Binding Version}" />
-                  <TextBlock Grid.Column="2" Classes="caption" Text="{Binding StatusText}" />
+                  <Border Grid.Column="2" Classes="origin-badge" Margin="0,0,6,0">
+                    <TextBlock Classes="caption" Text="{Binding OriginText}" />
+                  </Border>
+                  <TextBlock Grid.Column="3" Classes="caption" Text="{Binding StatusText}" />
                 </Grid>
                 <TextBlock Classes="caption"
                            IsVisible="{Binding HasTools}"
@@ -91,6 +102,78 @@
       <TextBlock Classes="caption"
                  IsVisible="{Binding ShowInstalledEmpty}"
                  Text="{Binding [Extensions.Settings.NoInstalled], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
+
+    <!-- Repository: browse a repo.json index, install or update a package, or install a local zip. -->
+    <StackPanel Spacing="4" IsVisible="{Binding ShowExtensions}">
+      <TextBlock Classes="label"
+                 Text="{Binding RepositoryTitle}"
+                 AutomationProperties.AutomationId="extensions-repository-title" />
+      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+        <TextBox Grid.Row="0"
+                 Grid.Column="0"
+                 PlaceholderText="{Binding [Extensions.Settings.RepositoryUrl], Source={x:Static loc:Loc.Instance}}"
+                 Text="{Binding RepositoryUrl, Mode=TwoWay}"
+                 AutomationProperties.AutomationId="extensions-repository-url" />
+        <Button Grid.Row="0"
+                Grid.Column="1"
+                Classes="ghost"
+                Margin="6,0,0,0"
+                Command="{Binding BrowseRepositoryCommand}"
+                Content="{Binding RepositoryBrowseText}"
+                AutomationProperties.AutomationId="extensions-repository-browse" />
+        <Button Grid.Row="1"
+                Grid.ColumnSpan="2"
+                Classes="ghost"
+                Margin="0,4,0,0"
+                HorizontalContentAlignment="Left"
+                Click="OnInstallLocalZipClick"
+                Content="{Binding [Extensions.Settings.InstallLocalZip], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="extensions-install-local-zip" />
+      </Grid>
+      <Border Classes="notice error" IsVisible="{Binding HasRepositoryProblem}">
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding RepositoryProblem}" />
+      </Border>
+      <ItemsControl ItemsSource="{Binding Repository}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="ap:RepositoryPackageViewModel">
+            <Border Classes="card" Margin="0,0,0,6" Padding="8">
+              <StackPanel Spacing="2">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                  <SelectableTextBlock Classes="mono" Text="{Binding Id}" />
+                  <TextBlock Grid.Column="1" Classes="caption" Margin="8,0" Text="{Binding Version}" />
+                  <Button Grid.Column="2"
+                          Classes="ghost"
+                          Command="{Binding InstallCommand}"
+                          Content="{Binding InstallText}"
+                          AutomationProperties.AutomationId="extensions-repository-install" />
+                  <Button Grid.Column="3"
+                          Classes="ghost"
+                          Margin="4,0,0,0"
+                          IsVisible="{Binding IsInstalling}"
+                          Command="{Binding CancelCommand}"
+                          Content="{Binding [Extensions.Settings.RepositoryCancel], Source={x:Static loc:Loc.Instance}}"
+                          AutomationProperties.AutomationId="extensions-repository-cancel" />
+                </Grid>
+                <TextBlock Classes="caption" Text="{Binding Title}" />
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding HasDescription}"
+                           TextWrapping="Wrap"
+                           Text="{Binding Description}" />
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding IsInstalled}"
+                           Text="{Binding InstalledText}" />
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding IsInstalling}"
+                           Text="{Binding ProgressText}" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <TextBlock Classes="caption"
+                 IsVisible="{Binding ShowRepositoryEmpty}"
+                 Text="{Binding [Extensions.Settings.RepositoryNoPackages], Source={x:Static loc:Loc.Instance}}" />
     </StackPanel>
 
     <!-- Staged drafts: each one opens the same approval card the agent would have shown. -->

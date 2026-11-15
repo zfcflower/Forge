@@ -74,6 +74,8 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     [InlineData(SettingsSectionIds.IdleArchive, "idle-archive-days")]
     [InlineData(SettingsSectionIds.NotificationPermission, "notification-permission-state")]
     [InlineData(SettingsSectionIds.Tools, "settings-code-concurrency")]
+    [InlineData(SettingsSectionIds.Updates, "updates-manifest-url")]
+    [InlineData(SettingsSectionIds.Keymap, "keymap-search")]
     public async Task A_wave_section_renders_its_own_body(string sectionId, string marker)
     {
         // The registry knows the four sections, but only a view registered through SectionViewTemplate gives them a body: without
@@ -118,6 +120,49 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             token);
 
         Assert.Contains(expected, shown);
+    }
+
+    /// <summary>
+    /// The keymap section's own texts are resolved through the string table before the page draws them: a view model property
+    /// that returned the key constant put <c>keymap.hint</c> and <c>keymap.scope.window</c> on screen, and the registry tests
+    /// still passed because the keys were registered. The hint and the three scope headings are the page's own sentences, so
+    /// their absence is what a raw-key read looks like.
+    /// </summary>
+    [Fact]
+    public async Task The_keymap_section_renders_resolved_texts_and_no_key_constants()
+    {
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        var (texts, keymap) = await session.Dispatch(
+            () =>
+            {
+                var section = shell.ViewModel.Settings.Sections.Items.Single(item => item.Id == SettingsSectionIds.Keymap);
+                shell.ViewModel.Settings.SelectedSection = section;
+                SharedUi.Settle(shell.Window);
+                var viewModel = Assert.IsType<KeymapSettingsSectionViewModel>(section.ViewModel);
+                return (
+                    PanelShell.SelectedTexts(shell.Window),
+                    (Hint: viewModel.Hint, Search: viewModel.SearchPlaceholder, Window: viewModel.WindowScopeHeading,
+                     Editor: viewModel.EditorScopeHeading, View: viewModel.ViewScopeHeading, ResetAll: viewModel.ResetAllText));
+            },
+            token);
+
+        // Every text the section owns is the registered sentence in this language, never the key that names it.
+        Assert.Equal(Loc.Instance[KeymapStrings.HintKey], keymap.Hint);
+        Assert.Equal(Loc.Instance[KeymapStrings.SearchPlaceholderKey], keymap.Search);
+        Assert.Equal(Loc.Instance[KeymapStrings.ScopeWindowKey], keymap.Window);
+        Assert.Equal(Loc.Instance[KeymapStrings.ScopeEditorKey], keymap.Editor);
+        Assert.Equal(Loc.Instance[KeymapStrings.ScopeViewKey], keymap.View);
+        Assert.Equal(Loc.Instance[KeymapStrings.ResetAllKey], keymap.ResetAll);
+
+        Assert.Contains(keymap.Hint, texts);
+        Assert.Contains(keymap.Window, texts);
+        Assert.Contains(keymap.Editor, texts);
+        Assert.Contains(keymap.View, texts);
+        Assert.Contains(keymap.ResetAll, texts);
+        Assert.All(texts, text => Assert.DoesNotContain("keymap.", text, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -517,6 +562,8 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.NotificationPermission,
             SettingsSectionIds.Paths,
             SettingsSectionIds.Inspector,
+            SettingsSectionIds.Updates,
+            SettingsSectionIds.Keymap,
         ];
 
         private static Button? NavButton(Window window, string id) =>

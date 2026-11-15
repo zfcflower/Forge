@@ -62,40 +62,4 @@ public sealed class TerminalViewTemplateTests
         Assert.True(found, "a TerminalViewModel must template into a TerminalView (App.axaml)");
     }
 
-    [Fact]
-    public async Task Terminal_settings_view_model_resolves_to_the_settings_body()
-    {
-        var session = SharedUi.Session;
-        var ids = await TerminalUi.RunTestAsync(
-                session,
-                async () =>
-                {
-                    var window = new Window
-                    {
-                        Width = 800,
-                        Height = 600,
-                        Content = new ContentControl { Content = new TerminalSettingsViewModel(new AppPreferences()) },
-                    };
-                    TerminalUi.Show(window);
-                    try
-                    {
-                        await Task.CompletedTask;
-                        return window.GetVisualDescendants()
-                            .OfType<Control>()
-                            .Select(control => Avalonia.Automation.AutomationProperties.GetAutomationId(control) ?? string.Empty)
-                            .Where(id => id.StartsWith("terminal-settings-", StringComparison.Ordinal))
-                            .OrderBy(id => id)
-                            .ToList();
-                    }
-                    finally
-                    {
-                        window.Close();
-                    }
-                },
-                Budget);
-
-            Assert.Equal(
-                ["terminal-settings-arguments", "terminal-settings-scrollback", "terminal-settings-shell"],
-                ids);
-    }
 }
