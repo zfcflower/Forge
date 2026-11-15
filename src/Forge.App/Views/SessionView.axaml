@@ -379,8 +379,41 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="*,Auto,Auto" Background="{DynamicResource SurfaceBrush}">
-    <Panel Grid.Row="0">
+  <Grid RowDefinitions="Auto,*,Auto,Auto" Background="{DynamicResource SurfaceBrush}">
+    <!-- Where this session is: project › workspace (branch) › title. The two left segments select the matching row of the
+         project tree; the general workspace has no project segment, so those sessions read workspace › title only. -->
+    <Border Grid.Row="0"
+            Padding="14,5"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,0,0,1"
+            AutomationProperties.AutomationId="session-breadcrumb">
+      <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <Button Classes="breadcrumb"
+                IsVisible="{Binding HasBreadcrumbProject}"
+                Content="{Binding BreadcrumbProject}"
+                Command="{Binding FocusProjectCommand}"
+                ToolTip.Tip="{Binding BreadcrumbProjectHint}"
+                AutomationProperties.AutomationId="session-breadcrumb-project"
+                AutomationProperties.Name="{Binding BreadcrumbProjectHint}" />
+        <TextBlock Classes="breadcrumb-separator"
+                   IsVisible="{Binding HasBreadcrumbProject}"
+                   Text="&#x203A;" />
+        <Button Classes="breadcrumb"
+                Content="{Binding BreadcrumbWorkspace}"
+                Command="{Binding FocusWorkspaceCommand}"
+                ToolTip.Tip="{Binding BreadcrumbWorkspaceHint}"
+                AutomationProperties.AutomationId="session-breadcrumb-workspace"
+                AutomationProperties.Name="{Binding BreadcrumbWorkspaceHint}" />
+        <TextBlock Classes="breadcrumb-separator" Text="&#x203A;" />
+        <TextBlock Classes="breadcrumb-current"
+                   MaxWidth="420"
+                   TextTrimming="CharacterEllipsis"
+                   Text="{Binding Title}"
+                   AutomationProperties.AutomationId="session-breadcrumb-session" />
+      </StackPanel>
+    </Border>
+
+    <Panel Grid.Row="1">
       <ListBox x:Name="Transcript"
                ItemsSource="{Binding Transcript.Items}"
                Padding="{DynamicResource ChatTranscriptPadding}"
@@ -404,7 +437,7 @@
     <!-- An automation attached to this session (waiting for the quota or for the session to be idle, or running): it
     never interrupts the session, and the user can call it off here. -->
     <Border x:Name="AutomationBanner"
-            Grid.Row="1"
+            Grid.Row="2"
             Classes="composer-card"
             Margin="{DynamicResource ChatBannerMargin}"
             Padding="10,6"
@@ -427,7 +460,7 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="2" Margin="{DynamicResource ChatComposerMargin}">
+    <Grid Grid.Row="3" Margin="{DynamicResource ChatComposerMargin}">
       <!-- A session that is not the active one of its workspace is a read-only view: no composer, only the way back. -->
       <Border x:Name="ReadOnlyBar"
               Classes="composer-card"
@@ -608,6 +641,60 @@
                            Text="{Binding Instruments.CacheTtlText}"
                            ToolTip.Tip="{Binding Instruments.CacheTtlTooltip}"
                            AutomationProperties.AutomationId="strip-cache-ttl" />
+                <!-- The session usage summary: the expanded form of the hover line above, plus the two numbers the hover line
+                     has no room for — the turns and the time they took. A flyout, not a dialog: it reads and closes. -->
+                <Button Classes="instrument-chip"
+                        ToolTip.Tip="{Binding Instruments.UsageSummaryTooltip}"
+                        AutomationProperties.AutomationId="strip-usage-summary"
+                        AutomationProperties.Name="{Binding Instruments.UsageSummaryTitle}">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <wc:FluentIcon Data="{StaticResource IconLayers}" Width="13" Height="13" />
+                    <TextBlock Text="{Binding Instruments.UsageSummaryTitle}" VerticalAlignment="Center" />
+                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="11" Height="11" />
+                  </StackPanel>
+                  <Button.Flyout>
+                    <Flyout Placement="BottomEdgeAlignedRight">
+                      <Border MinWidth="240"
+                              MaxWidth="320"
+                              Padding="12,10"
+                              CornerRadius="{StaticResource RadiusMd}"
+                              Background="{DynamicResource SurfaceElevatedBrush}"
+                              BorderBrush="{DynamicResource BorderStrongBrush}"
+                              BorderThickness="1"
+                              AutomationProperties.AutomationId="strip-usage-summary-panel">
+                        <StackPanel Spacing="6">
+                          <TextBlock Classes="h2" Text="{Binding Instruments.UsageSummaryTitle}" />
+                          <TextBlock Classes="caption"
+                                     IsVisible="{Binding Instruments.IsUsageSummaryEmpty}"
+                                     TextWrapping="Wrap"
+                                     Foreground="{DynamicResource TextMutedBrush}"
+                                     Text="{Binding Instruments.UsageSummaryEmptyText}" />
+                          <ItemsControl ItemsSource="{Binding Instruments.UsageSummaryRows}"
+                                        AutomationProperties.AutomationId="strip-usage-summary-rows">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:UsageStatRow">
+                                <Grid ColumnDefinitions="*,Auto" Margin="0,1">
+                                  <TextBlock Classes="caption"
+                                             Foreground="{DynamicResource TextSecondaryBrush}"
+                                             Text="{Binding Label}" />
+                                  <TextBlock Grid.Column="1"
+                                             Classes="caption mono"
+                                             Foreground="{DynamicResource TextPrimaryBrush}"
+                                             Text="{Binding Value}" />
+                                </Grid>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <TextBlock Classes="caption"
+                                     Margin="0,4,0,0"
+                                     TextWrapping="Wrap"
+                                     Foreground="{DynamicResource TextMutedBrush}"
+                                     Text="{Binding Instruments.UsageSummaryHint}" />
+                        </StackPanel>
+                      </Border>
+                    </Flyout>
+                  </Button.Flyout>
+                </Button>
                 <TextBlock Classes="instrument-meta"
                            VerticalAlignment="Center"
                            Text="{Binding Instruments.CacheReadText}" />

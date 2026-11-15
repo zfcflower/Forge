@@ -17,6 +17,9 @@ internal static class DiffStrings
     public const string ToggleCollapsed = "changes.diff.toggleCollapsed";
     public const string FileHeader = "changes.diff.fileHeader";
     public const string Binary = "changes.diff.binary";
+    public const string ImageBefore = "changes.diff.image.before";
+    public const string ImageAfter = "changes.diff.image.after";
+    public const string ImageNothing = "changes.diff.image.nothing";
 
     [ModuleInitializer]
     internal static void Register()
@@ -33,5 +36,11 @@ internal static class DiffStrings
         Loc.Register(ToggleCollapsed, "折叠或展开此文件", "Collapse or expand this file");
         Loc.Register(FileHeader, "文件头：{0}", "File header: {0}");
         Loc.Register(Binary, "二进制文件，没有可显示的文本改动", "Binary file: no text changes to show");
+        Loc.Register(ImageBefore, "改动前", "Before");
+        Loc.Register(ImageAfter, "改动后", "After");
+        Loc.Register(
+            ImageNothing,
+            "这一侧没有可显示的图片（文件新增或删除，或超过预览上限）",
+            "Nothing to show on this side (the file was added or deleted, or it is above the preview limit)");
     }
 }

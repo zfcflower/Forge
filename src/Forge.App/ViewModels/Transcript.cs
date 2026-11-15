@@ -170,6 +170,102 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel, ICopyableText
     private void RaiseContentChanged() => ContentChanged?.Invoke(this, EventArgs.Empty);
 }
 
+/// <summary>
+/// One stretch of the model's reasoning, in its turn card's own place in the block order. It streams like reply text but
+/// carries no Markdown: collapsed (the default) the row shows the first line, opened it shows the whole text, so a long chain
+/// of thought never pushes the answer out of sight. Reasoning lives only in the event stream - it is not stored - so a
+/// replayed session has no thinking rows.
+/// </summary>
+internal sealed class TurnThinkingViewModel : TurnBlockViewModel
+{
+    /// <summary>Characters of the first line the collapsed row shows before it stops with an ellipsis.</summary>
+    internal const int PreviewCharacters = 160;
+
+    private readonly StringBuilder text = new();
+    private string? materialized;
+    private string? preview;
+    private bool isStreaming = true;
+    private bool isExpanded;
+
+    /// <summary>True while the model is still reasoning: the timeline node wears the running state until it stops.</summary>
+    public bool IsStreaming
+    {
+        get => isStreaming;
+        private set => Set(ref isStreaming, value);
+    }
+
+    /// <summary>Collapsed by default: the answer, not the reasoning, is what the user reads first.</summary>
+    public bool IsExpanded
+    {
+        get => isExpanded;
+        set
+        {
+            if (Set(ref isExpanded, value))
+            {
+                OnPropertyChanged(nameof(ExpandGlyph));
+            }
+        }
+    }
+
+    public string ExpandGlyph => isExpanded ? "▾" : "▸";
+
+    public RelayCommand ToggleCommand => new(() => IsExpanded = !IsExpanded);
+
+    /// <summary>Whether anything at all has arrived; a reasoning row with no text is not shown as a preview.</summary>
+    public bool HasText => text.Length > 0;
+
+    /// <summary>The reasoning as it has arrived so far, exactly as the provider sent it.</summary>
+    public string Text => materialized ??= text.ToString();
+
+    /// <summary>
+    /// The first non-blank line, capped at <see cref="PreviewCharacters">; what the collapsed row shows. Only that line is
+    /// read out of the buffer, so streaming a long paragraph stays O(to the cap) instead of copying the whole text per frame.
+    /// </summary>
+    public string Preview => preview ??= BuildPreview();
+
+    public void Append(string chunk)
+    {
+        if (chunk.Length == 0)
+        {
+            return;
+        }
+
+        text.Append(chunk);
+        materialized = null;
+        preview = null;
+        OnPropertyChanged(nameof(Text));
+        OnPropertyChanged(nameof(Preview));
+        OnPropertyChanged(nameof(HasText));
+    }
+
+    /// <summary>Closes the reasoning stretch; idempotent, like the reply text it precedes.</summary>
+    public void Complete()
+    {
+        if (isStreaming)
+        {
+            IsStreaming = false;
+        }
+    }
+
+    private string BuildPreview()
+    {
+        var start = 0;
+        while (start < text.Length && char.IsWhiteSpace(text[start]))
+        {
+            start++;
+        }
+
+        var end = start;
+        while (end < text.Length && end - start < PreviewCharacters && text[end] != '\n')
+        {
+            end++;
+        }
+
+        var line = text.ToString(start, end - start).TrimEnd();
+        return end < text.Length && text[end] != '\n' ? line + "…" : line;
+    }
+}
+
 /// <summary>A note inside a turn card, such as a redirected or stopped sub-agent.</summary>
 internal sealed class TurnNoticeViewModel(LocText text, bool isError, TimelineNodeKind kind = TimelineNodeKind.Notice)
     : TurnBlockViewModel
@@ -195,6 +291,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     private readonly Dictionary<string, ToolRowViewModel> toolRows = new(StringComparer.Ordinal);
     private readonly ObservableCollection<TurnBlockViewModel> blocks = [];
     private TurnTextViewModel? openText;
+    private TurnThinkingViewModel? openThinking;
     private LocText footnote;
     private TimeSpan? lastElapsed;
     private bool isExpanded = true;
@@ -255,6 +352,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 
     public void AppendText(string chunk)
     {
+        SealThinking();
         if (openText is null)
         {
             openText = new TurnTextViewModel();
@@ -264,10 +362,28 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         openText.Append(chunk);
     }
 
+    /// <summary>
+    /// Merges one chunk of the model's reasoning into the open thinking row, opening one (after sealing the reply text) when
+    /// this is a new stretch. Reasoning and reply alternate in arrival order, so both share <see cref="Blocks"/>
+    /// rather than a list of their own.
+    /// </summary>
+    public void AppendThinking(string chunk)
+    {
+        if (openThinking is null)
+        {
+            SealText();
+            openThinking = new TurnThinkingViewModel();
+            blocks.Add(openThinking);
+        }
+
+        openThinking.Append(chunk);
+    }
+
     /// <summary>Adds a running tool call's row and hands it back: the session attaches the live state (wave W8).</summary>
     public ToolRowViewModel AddTool(ToolCall call)
     {
         SealText();
+        SealThinking();
         var row = new ToolRowViewModel(call.Name, call.ArgumentsJson);
         toolRows[call.Id] = row;
         blocks.Add(row);
@@ -290,6 +406,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     public void AddNotice(LocText text, bool isError = false, TimelineNodeKind kind = TimelineNodeKind.Notice)
     {
         SealText();
+        SealThinking();
         blocks.Add(new TurnNoticeViewModel(text, isError, kind));
     }
 
@@ -301,6 +418,13 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     {
         openText?.Complete();
         openText = null;
+    }
+
+    /// <summary>Closes the open reasoning stretch once the answer starts, or once another block takes over.</summary>
+    private void SealThinking()
+    {
+        openThinking?.Complete();
+        openThinking = null;
     }
 
     public void AddUsage(TokenUsage usage, StopReason stopReason)
@@ -318,6 +442,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     {
         openText?.Complete();
         openText = null;
+        SealThinking();
         lastElapsed = elapsed;
         IsRunning = false;
         OnPropertyChanged(nameof(Header));
@@ -368,6 +493,7 @@ internal sealed class TranscriptViewModel : ObservableObject
     private readonly ObservableCollection<TranscriptItemViewModel> items = [];
     private readonly Lock pendingGate = new();
     private readonly StringBuilder pending = new();
+    private readonly StringBuilder pendingThinking = new();
     private TurnCardViewModel? current;
     private int round;
 
@@ -435,13 +561,34 @@ internal sealed class TranscriptViewModel : ObservableObject
         }
     }
 
+    /// <summary>Merges worker-thread reasoning into its own pending buffer, flushed by the same frame as the reply text.</summary>
+    public void QueueThinkingDelta(string chunk)
+    {
+        lock (pendingGate)
+        {
+            pendingThinking.Append(chunk);
+        }
+    }
+
+    /// <summary>
+    /// Drains both pending buffers in arrival order: reasoning first, because a provider that reasons always sends the
+    /// thinking of one request before the answer of that request, and both land in the same card in the order they came.
+    /// </summary>
     public void FlushPending()
     {
+        string thinking;
         string chunk;
         lock (pendingGate)
         {
+            thinking = pendingThinking.ToString();
+            pendingThinking.Clear();
             chunk = pending.ToString();
             pending.Clear();
+        }
+
+        if (thinking.Length > 0)
+        {
+            (current ?? BeginTurn(DateTimeOffset.Now)).AppendThinking(thinking);
         }
 
         if (chunk.Length > 0)

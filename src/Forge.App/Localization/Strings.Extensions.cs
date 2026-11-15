@@ -144,6 +144,23 @@ internal static class ExtensionsStrings
     public const string SettingsLoadProblem = "Extensions.Settings.LoadProblem";
     public const string SettingsActionFailed = "Extensions.Settings.ActionFailed";
 
+    public const string SettingsRepository = "Extensions.Settings.Repository";
+    public const string SettingsRepositoryUrlLabel = "Extensions.Settings.RepositoryUrl";
+    public const string SettingsRepositoryBrowse = "Extensions.Settings.RepositoryBrowse";
+    public const string SettingsRepositoryLoading = "Extensions.Settings.RepositoryLoading";
+    public const string SettingsRepositoryFailed = "Extensions.Settings.RepositoryFailed";
+    public const string SettingsRepositoryInstall = "Extensions.Settings.RepositoryInstall";
+    public const string SettingsRepositoryCancel = "Extensions.Settings.RepositoryCancel";
+    public const string SettingsRepositoryUpdate = "Extensions.Settings.RepositoryUpdate";
+    public const string SettingsRepositoryInstalled = "Extensions.Settings.RepositoryInstalled";
+    public const string SettingsRepositoryNoPackages = "Extensions.Settings.RepositoryNoPackages";
+    public const string SettingsRepositoryProgress = "Extensions.Settings.RepositoryProgress";
+    public const string SettingsRepositoryProgressBytes = "Extensions.Settings.RepositoryProgressBytes";
+    public const string SettingsInstallLocalZip = "Extensions.Settings.InstallLocalZip";
+    public const string SettingsOriginInstalled = "Extensions.Settings.OriginInstalled";
+    public const string SettingsOriginBundled = "Extensions.Settings.OriginBundled";
+    public const string SettingsOriginBuiltIn = "Extensions.Settings.OriginBuiltIn";
+
     public const string RulesUnreadable = "Extensions.Rules.Unreadable";
     public const string RulesReadFailed = "Extensions.Rules.ReadFailed";
     public const string RulesInvalid = "Extensions.Rules.Invalid";
@@ -291,6 +308,23 @@ internal static class ExtensionsStrings
         Loc.Register(SettingsRuleLine, "{0} · {1}", "{0} · {1}");
         Loc.Register(SettingsLoadProblem, "审批规则文件有问题，已按没有记住处理：{0}", "The approval rules file has a problem and was treated as empty: {0}");
         Loc.Register(SettingsActionFailed, "操作失败：{0}", "The action failed: {0}");
+
+        Loc.Register(SettingsRepository, "扩展仓库", "Extension repository");
+        Loc.Register(SettingsRepositoryUrlLabel, "索引 URL", "Index URL");
+        Loc.Register(SettingsRepositoryBrowse, "浏览索引", "Browse index");
+        Loc.Register(SettingsRepositoryLoading, "正在读取索引…", "Reading the index…");
+        Loc.Register(SettingsRepositoryFailed, "无法读取扩展仓库索引：{0}", "The extension repository index could not be read: {0}");
+        Loc.Register(SettingsRepositoryInstall, "安装", "Install");
+        Loc.Register(SettingsRepositoryCancel, "取消", "Cancel");
+        Loc.Register(SettingsRepositoryUpdate, "更新", "Update");
+        Loc.Register(SettingsRepositoryInstalled, "已安装：{0}", "Installed: {0}");
+        Loc.Register(SettingsRepositoryNoPackages, "这个索引里没有可安装的包。", "This index has no installable package.");
+        Loc.Register(SettingsRepositoryProgress, "正在下载… {0}/{1} 字节", "Downloading… {0}/{1} bytes");
+        Loc.Register(SettingsRepositoryProgressBytes, "正在下载… {0} 字节", "Downloading… {0} bytes");
+        Loc.Register(SettingsInstallLocalZip, "从本地 zip 安装", "Install from a local zip");
+        Loc.Register(SettingsOriginInstalled, "已安装", "Installed");
+        Loc.Register(SettingsOriginBundled, "随附", "Bundled");
+        Loc.Register(SettingsOriginBuiltIn, "内置", "Built-in");
 
         Loc.Register(RulesUnreadable, "approval-rules.json 无法读取：{0}", "approval-rules.json could not be read: {0}");
         Loc.Register(RulesReadFailed, "读取 approval-rules.json 失败：{0}", "Reading approval-rules.json failed: {0}");

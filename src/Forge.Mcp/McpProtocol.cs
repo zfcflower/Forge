@@ -15,7 +15,10 @@ public static class McpProtocol
     public const string ToolsListChanged = "notifications/tools/list_changed";
     public const string ResourcesList = "resources/list";
     public const string ResourcesRead = "resources/read";
+    public const string ResourcesSubscribe = "resources/subscribe";
+    public const string ResourcesUnsubscribe = "resources/unsubscribe";
     public const string ResourcesListChanged = "notifications/resources/list_changed";
+    public const string ResourcesUpdated = "notifications/resources/updated";
     public const string PromptsList = "prompts/list";
     public const string PromptsGet = "prompts/get";
     public const string PromptsListChanged = "notifications/prompts/list_changed";

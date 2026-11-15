@@ -4,15 +4,41 @@
              xmlns:vm="using:Forge.App.ViewModels"
              x:Class="Forge.App.Views.SubAgentView"
              x:DataType="vm:SubAgentViewModel">
-  <Grid RowDefinitions="*,Auto" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+    <!-- Where this tab sits: the parent session's title, then the sub-agent's own name. The parent segment switches the
+         shell back to the parent's tab; the sub-agent keeps running and its tab stays in the bottom group. -->
+    <Border Grid.Row="0"
+            Padding="14,5"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,0,0,1"
+            AutomationProperties.AutomationId="subagent-breadcrumb">
+      <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <Button Classes="breadcrumb"
+                IsVisible="{Binding HasBackToParent}"
+                Content="{Binding ParentSessionTitle}"
+                Command="{Binding BackToParentCommand}"
+                ToolTip.Tip="{Binding BackToParentText}"
+                AutomationProperties.AutomationId="subagent-breadcrumb-parent"
+                AutomationProperties.Name="{Binding BackToParentText}" />
+        <TextBlock Classes="breadcrumb-separator"
+                   IsVisible="{Binding HasBackToParent}"
+                   Text="&#x203A;" />
+        <TextBlock Classes="breadcrumb-current"
+                   MaxWidth="420"
+                   TextTrimming="CharacterEllipsis"
+                   Text="{Binding BreadcrumbName}"
+                   AutomationProperties.AutomationId="subagent-breadcrumb-name" />
+      </StackPanel>
+    </Border>
+
     <ListBox x:Name="Transcript"
-             Grid.Row="0"
+             Grid.Row="1"
              ItemsSource="{Binding Transcript.Items}"
              Padding="{DynamicResource ChatTranscriptPadding}"
              SelectionMode="Single"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
 
-    <Border Grid.Row="1"
+    <Border Grid.Row="2"
             Background="{DynamicResource SurfaceBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,1,0,0"

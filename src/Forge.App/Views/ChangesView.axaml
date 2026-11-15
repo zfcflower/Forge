@@ -8,10 +8,6 @@
              x:DataType="vm:ChangesViewModel"
              Focusable="True">
 
-  <UserControl.KeyBindings>
-    <KeyBinding Gesture="J" Command="{Binding NextUnviewedCommand}" />
-  </UserControl.KeyBindings>
-
   <UserControl.Styles>
     <Style Selector="Border.changes-bar">
       <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
@@ -172,7 +168,7 @@
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="{Binding [changes.review.nextUnviewed], Source={x:Static loc:Loc.Instance}}" VerticalAlignment="Center" />
             <Border Classes="key-hint">
-              <TextBlock Classes="mono" Text="J" Foreground="{DynamicResource TextMutedBrush}" />
+              <TextBlock x:Name="NextUnviewedGestureHint" Classes="mono" Foreground="{DynamicResource TextMutedBrush}" />
             </Border>
           </StackPanel>
         </Button>

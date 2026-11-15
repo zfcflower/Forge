@@ -20,6 +20,9 @@ namespace Forge.App.Git;
 /// <c>gitReviewDiffMaxChars</c> = integer clamped to [1000, 500000], default 48000, <c>gitReviewMaxCommits</c> = [5, 500],
 /// default 50, <c>gitReviewMaxFiles</c> = [20, 2000], default 200 and <c>gitReviewFieldMaxChars</c> = [200, 20000],
 /// default 2000 (how much of a change set the review package for <c>request_review</c> carries, read for each review);
+/// <c>reviewMode</c> = <c>"subagent"</c> (default) | <c>"manual"</c>, the review mode of wave W17b (who reviews a step), and
+/// <c>reviewAfterStepCommit</c> = boolean, default <c>false</c> (whether a committed step asks its session's agent for a
+/// review automatically, read at each commit);
 /// <c>gitGhPath</c> = string, default empty meaning <c>gh</c> from PATH, trimmed. The end of a wait is one notification
 /// through <see cref="INotifications"/>; whether notifications are wanted at all is the <c>notifications</c> switch of the
 /// notification section, not a git preference.</para>
@@ -33,6 +36,9 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
 
     /// <summary>Replaced (not mutated) on a language switch: the picker only re-reads its items for a new list.</summary>
     private GitPullStrategyOption[] options = CreateOptions();
+
+    /// <summary>Same rule as <see cref="options"/>: the review mode picker re-reads its labels from a new list.</summary>
+    private GitReviewModeOption[] reviewModes = CreateReviewModes();
 
     private bool disposed;
 
@@ -188,6 +194,38 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
         }
     }
 
+    /// <summary>The two review modes in display order, with localized labels.</summary>
+    public IReadOnlyList<GitReviewModeOption> ReviewModes => reviewModes;
+
+    /// <summary>Who reviews a step: the sub-agent (default) or by hand. Written to <see cref="AppPreferences.ReviewMode"/>.</summary>
+    public GitReviewModeOption SelectedReviewMode
+    {
+        get => ReviewModeOf(preferences.ReviewMode);
+        set
+        {
+            if (value is null)
+            {
+                return;
+            }
+
+            preferences.ReviewMode = value.Token;
+
+            // The preference normalizes an unknown token to the default, so the picker re-reads what it settled on.
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Whether a committed TODO step asks its session's agent for a review automatically (off by default).</summary>
+    public bool ReviewAfterStepCommit
+    {
+        get => preferences.ReviewAfterStepCommit;
+        set
+        {
+            preferences.ReviewAfterStepCommit = value;
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>
     /// Full path of the GitHub CLI; empty means <c>gh</c> from PATH. The preference stores the trimmed value and the next gh
     /// call picks it up (see <see cref="ConfiguredGh"/>). Deliberately raises no <c>PropertyChanged</c>: the box is edited
@@ -216,6 +254,10 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
         options = CreateOptions();
         OnPropertyChanged(nameof(PullStrategies));
         OnPropertyChanged(nameof(SelectedPullStrategy));
+
+        reviewModes = CreateReviewModes();
+        OnPropertyChanged(nameof(ReviewModes));
+        OnPropertyChanged(nameof(SelectedReviewMode));
     }
 
     private static GitPullStrategyOption[] CreateOptions() =>
@@ -224,6 +266,16 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
         new(GitPullStrategy.Rebase, GitStrings.SettingsPullStrategyRebase),
         new(GitPullStrategy.Merge, GitStrings.SettingsPullStrategyMerge),
     ];
+
+    private static GitReviewModeOption[] CreateReviewModes() =>
+    [
+        new(StepReviewSettings.SubAgentModeToken, GitStrings.SettingsReviewModeSubAgent),
+        new(StepReviewSettings.ManualModeToken, GitStrings.SettingsReviewModeManual),
+    ];
+
+    /// <summary>The picker item for the stored token; the preference setter keeps it one of the two, so the default wins.</summary>
+    private GitReviewModeOption ReviewModeOf(string token) =>
+        string.Equals(token, StepReviewSettings.ManualModeToken, StringComparison.Ordinal) ? reviewModes[1] : reviewModes[0];
 
     private GitPullStrategyOption ChoiceOf(GitPullStrategy strategy) => strategy switch
     {
@@ -235,6 +287,15 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
 
 /// <summary>One choice in the pull-strategy picker; <see cref="Label"/> is re-read on a language switch.</summary>
 internal sealed record GitPullStrategyOption(GitPullStrategy Value, string LabelKey)
+{
+    public string Label => Localization.Loc.Instance[LabelKey];
+}
+
+/// <summary>
+/// One choice in the review mode picker (wave W17b): the value written to <see cref="AppPreferences.ReviewMode"/> and the
+/// <see cref="Loc"/> key of its label, re-read on a language switch like <see cref="GitPullStrategyOption"/>.
+/// </summary>
+internal sealed record GitReviewModeOption(string Token, string LabelKey)
 {
     public string Label => Localization.Loc.Instance[LabelKey];
 }

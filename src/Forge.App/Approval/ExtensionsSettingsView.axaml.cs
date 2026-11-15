@@ -1,6 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
+using Forge.App.Localization;
 
 namespace Forge.App.Approval;
 
@@ -8,7 +11,8 @@ namespace Forge.App.Approval;
 /// The settings section's body. It reads the extension registry, the staged drafts and the rules when it is first shown and
 /// again every time the settings page is opened (the section stays in the visual tree while the panel is hidden, so
 /// visibility - not attachment - is what "opening" means here). The read itself runs on the background inside the view
-/// model; the view only asks for it.
+/// model; the view only asks for it. It also owns the local-zip file picker because only a view can reach the storage
+/// provider.
 /// </summary>
 public partial class ExtensionsSettingsView : UserControl
 {
@@ -49,5 +53,37 @@ public partial class ExtensionsSettingsView : UserControl
         }
 
         _ = viewModel.RefreshAsync(CancellationToken.None);
+    }
+
+    private async void OnInstallLocalZipClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ExtensionsSettingsSectionViewModel viewModel ||
+            TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage)
+        {
+            return;
+        }
+
+        IReadOnlyList<IStorageFile> picked;
+        try
+        {
+            picked = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = Loc.Instance[ExtensionsStrings.SettingsInstallLocalZip],
+                AllowMultiple = false,
+                FileTypeFilter = [new FilePickerFileType("ZIP") { Patterns = ["*.zip"] }],
+            }).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or
+                                              NotSupportedException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        if (picked.Count == 0 || picked[0].TryGetLocalPath() is not { } path)
+        {
+            return;
+        }
+
+        await viewModel.InstallLocalZipAsync(path, CancellationToken.None).ConfigureAwait(true);
     }
 }

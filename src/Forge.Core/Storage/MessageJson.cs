@@ -98,13 +98,22 @@ public static class MessageJson
             return null;
         }
 
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
-        return new TokenUsage(
-            OptionalInt(root, "input"),
-            OptionalInt(root, "output"),
-            OptionalInt(root, "cache_read"),
-            OptionalInt(root, "cache_write"));
+        // A corrupted usage cell must not break replay: one bad row would otherwise throw out of ReadAsync and the
+        // whole session would refuse to open. Usage is decoration; an unreadable value reads as absent.
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            return new TokenUsage(
+                OptionalInt(root, "input"),
+                OptionalInt(root, "output"),
+                OptionalInt(root, "cache_read"),
+                OptionalInt(root, "cache_write"));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Message text indexed for full-text search: prose, reasoning and tool output.</summary>

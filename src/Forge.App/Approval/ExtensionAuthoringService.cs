@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using Forge.Abstractions;
+using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.Approval;
 using Forge.Core.Tools;
 using Forge.HostClient;
 using Forge.Ipc;
@@ -12,7 +14,7 @@ using ZLogger;
 namespace Forge.App.Approval;
 
 /// <summary>One installed or staged extension as the extensions settings section lists it.</summary>
-internal sealed record ExtensionRow(PluginStatusInfo Status, IReadOnlyList<string> ToolNames);
+internal sealed record ExtensionRow(PluginStatusInfo Status, IReadOnlyList<string> ToolNames, PluginOrigin Origin = PluginOrigin.Installed);
 
 /// <summary>
 /// What the settings section read from the host: the registry rows, the staged drafts and, when the read failed, the
@@ -41,6 +43,9 @@ internal interface IExtensionsAdmin
     Task SetEnabledAsync(string pluginId, string version, bool enabled, CancellationToken ct);
 
     Task DeleteAsync(string pluginId, string version, CancellationToken ct);
+
+    /// <summary>Installs an extracted package directory; the host validates the manifest and swaps it in (wave W10a).</summary>
+    Task InstallAsync(string sourceDir, string origin, CancellationToken ct);
 }
 
 /// <summary>
@@ -296,10 +301,16 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         {
             var statuses = await contributions.GetPluginStatusesAsync(ct).ConfigureAwait(false);
             var pending = await authoring.GetPendingExtensionsAsync(ct).ConfigureAwait(false);
+            var origins = await ReadOriginsAsync(ct).ConfigureAwait(false);
             var rows = new List<ExtensionRow>(statuses.Count);
             foreach (var status in statuses)
             {
-                rows.Add(new ExtensionRow(status, pluginToolNames(status.PluginId)));
+                rows.Add(new ExtensionRow(
+                    status,
+                    pluginToolNames(status.PluginId),
+                    origins.TryGetValue((status.PluginId, status.Version), out var origin)
+                        ? origin
+                        : PluginOrigin.Installed));
             }
 
             return new ExtensionSnapshot(rows, pending, null);
@@ -326,6 +337,13 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
 
     public Task SetEnabledAsync(string pluginId, string version, bool enabled, CancellationToken ct) =>
         enabled ? EnableCoreAsync(pluginId, version, ct) : DisableCoreAsync(pluginId, version, ct);
+
+    public Task InstallAsync(string sourceDir, string origin, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceDir);
+        ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        return authoring.InstallExtensionAsync(new ExtensionInstallRequest(sourceDir, origin), ct);
+    }
 
     Task IExtensionsAdmin.DeleteAsync(string pluginId, string version, CancellationToken ct) =>
         DeleteCoreAsync(pluginId, version, ct);
@@ -625,6 +643,31 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         return authoring.DeletePluginAsync(pluginId, version, ct);
+    }
+
+    /// <summary>Reads the persisted origin of each approval record over a read-only connection. The app never holds a
+    /// writable approval store; a database that cannot be read falls back to Installed (the badge is not worth hiding the
+    /// whole registry).</summary>
+    private static async Task<IReadOnlyDictionary<(string PluginId, string Version), PluginOrigin>> ReadOriginsAsync(
+        CancellationToken ct)
+    {
+        try
+        {
+            var records = await ApprovalStore.ListReadOnlyAsync(AppPaths.Create().ApprovalsDatabasePath, ct)
+                .ConfigureAwait(false);
+            var origins = new Dictionary<(string, string), PluginOrigin>();
+            foreach (var record in records)
+            {
+                origins[(record.PluginId, record.Version)] = record.Origin;
+            }
+
+            return origins;
+        }
+        catch (Exception exception) when (exception is Microsoft.Data.Sqlite.SqliteException or InvalidDataException
+            or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return new Dictionary<(string, string), PluginOrigin>();
+        }
     }
 
     /// <summary>

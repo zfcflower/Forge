@@ -26,7 +26,13 @@ public sealed record LspServerCapabilities(
     bool SupportsFoldingRanges = false,
     bool SupportsDiagnosticPull = false,
     IReadOnlyList<string>? CompletionTriggerCharacters = null,
-    bool SupportsCompletionResolve = false)
+    bool SupportsCompletionResolve = false,
+    bool SupportsCodeActions = false,
+    bool SupportsCodeActionResolve = false,
+    bool SupportsRename = false,
+    bool SupportsPrepareRename = false,
+    bool SupportsInlayHints = false,
+    bool SupportsInlayHintResolve = false)
 {
     public static LspServerCapabilities Parse(JsonElement result, PositionEncoding preferred)
     {
@@ -98,8 +104,24 @@ public sealed record LspServerCapabilities(
                 capabilities.TryGetProperty("completionProvider", out var completionProvider) &&
                 completionProvider.ValueKind == JsonValueKind.Object &&
                 completionProvider.TryGetProperty("resolveProvider", out var resolveProvider) &&
-                resolveProvider.ValueKind == JsonValueKind.True);
+                resolveProvider.ValueKind == JsonValueKind.True,
+            // The three editor features below are declared either as a plain `true` or as an options object; only the object
+            // form can carry a resolve flag, and an absent capability is simply an editor without the feature.
+            SupportsCodeActions: Has(capabilities, "codeActionProvider"),
+            SupportsCodeActionResolve: ProviderFlag(capabilities, "codeActionProvider", "resolveProvider"),
+            SupportsRename: Has(capabilities, "renameProvider"),
+            SupportsPrepareRename: ProviderFlag(capabilities, "renameProvider", "prepareProvider"),
+            SupportsInlayHints: Has(capabilities, "inlayHintProvider"),
+            SupportsInlayHintResolve: ProviderFlag(capabilities, "inlayHintProvider", "resolveProvider"));
     }
+
+    /// <summary>True when <paramref name="provider"/> is an options object whose <paramref name="flag"/> is <c>true</c>.</summary>
+    private static bool ProviderFlag(JsonElement capabilities, string provider, string flag) =>
+        capabilities.ValueKind == JsonValueKind.Object &&
+        capabilities.TryGetProperty(provider, out var value) &&
+        value.ValueKind == JsonValueKind.Object &&
+        value.TryGetProperty(flag, out var declared) &&
+        declared.ValueKind == JsonValueKind.True;
 
     /// <summary>The single characters that open the completion list by themselves, as the server declared them.</summary>
     private static IReadOnlyList<string> ParseCompletionTriggers(JsonElement capabilities)

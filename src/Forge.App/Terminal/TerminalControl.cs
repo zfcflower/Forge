@@ -48,6 +48,10 @@ internal sealed class TerminalControl : Control
     private static readonly Color LightBackground = Color.Parse("#F5F6F5");
     private static readonly Color SelectionTint = Color.Parse("#3A8F5C");
 
+    /// <summary>The search highlights reuse the selection green: the current match is a solid wash, the others faint.</summary>
+    private const byte MatchTintAlpha = 55;
+    private const byte CurrentMatchTintAlpha = 135;
+
     private static readonly TextDecorationCollection Underline = TextDecorations.Underline;
     private static readonly TextDecorationCollection Strikethrough = TextDecorations.Strikethrough;
     private static readonly TextDecorationCollection UnderlineAndStrikethrough =
@@ -85,6 +89,8 @@ internal sealed class TerminalControl : Control
     private int scrollOffset;
     private long anchoredPushed;
     private long anchoredDropped;
+    private IReadOnlyList<TerminalSearchMatch>? indexedMatches;
+    private Dictionary<long, List<TerminalSearchMatch>>? matchesByLine;
     private (int Line, int Column) selectionStart;
     private (int Line, int Column) selectionEnd;
     private bool hasSelection;
@@ -180,6 +186,8 @@ internal sealed class TerminalControl : Control
         }
 
         ClearLinePaints();
+        indexedMatches = null;
+        matchesByLine = null;
         selectionStart = default;
         selectionEnd = default;
         hasSelection = false;
@@ -205,6 +213,7 @@ internal sealed class TerminalControl : Control
         boundSource = viewModel;
         viewModel.Invalidated += OnInvalidated;
         viewModel.TitleChanged += OnInvalidated;
+        viewModel.SearchMatchChanged += OnSearchMatchChanged;
         viewModel.AttachClipboard(TopLevel.GetTopLevel(this)?.Clipboard);
     }
 
@@ -214,6 +223,7 @@ internal sealed class TerminalControl : Control
         {
             viewModel.Invalidated -= OnInvalidated;
             viewModel.TitleChanged -= OnInvalidated;
+            viewModel.SearchMatchChanged -= OnSearchMatchChanged;
             boundSource = null;
         }
     }
@@ -240,9 +250,46 @@ internal sealed class TerminalControl : Control
 
     private void OnInvalidated(object? sender, EventArgs e) => InvalidateVisual();
 
+    /// <summary>
+    /// The search moved to another match: put it on screen. A match already visible leaves the viewport alone, so reading
+    /// around a found line is not disturbed; one outside it is centred.
+    /// </summary>
+    private void OnSearchMatchChanged(object? sender, EventArgs e)
+    {
+        if (Source is not { } viewModel)
+        {
+            return;
+        }
+
+        lock (viewModel.Gate)
+        {
+            var emulator = viewModel.Emulator;
+            if (viewModel.CurrentSearchMatch is not { } match)
+            {
+                return;
+            }
+
+            var line = match.AbsoluteLine(emulator.ScrollbackDropped);
+            if (line < 0)
+            {
+                return;
+            }
+
+            var top = emulator.ScrollbackCount - Math.Clamp(scrollOffset, 0, emulator.ScrollbackCount);
+            if (line < top || line >= top + emulator.Rows)
+            {
+                var target = Math.Clamp(line - (emulator.Rows / 2), 0, emulator.ScrollbackCount);
+                scrollOffset = emulator.ScrollbackCount - target;
+            }
+        }
+
+        InvalidateVisual();
+    }
+
     private void OnPreferenceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(AppPreferences.CodeFontFamily) or nameof(AppPreferences.CodeFontSize))
+        if (e.PropertyName is nameof(AppPreferences.CodeFontFamily) or nameof(AppPreferences.CodeFontSize)
+            or nameof(AppPreferences.TerminalFontFamily) or nameof(AppPreferences.TerminalFontSize))
         {
             UpdateMetrics();
             return;
@@ -293,11 +340,29 @@ internal sealed class TerminalControl : Control
 
     // ---------------------------------------------------------------- metrics, grid and theme
 
+    /// <summary>
+    /// The family the terminal draws with: its own <see cref="AppPreferences.TerminalFontFamily"/> when one is set, the code
+    /// font of the appearance section otherwise (wave W17a). Pure, so the fallback rule is testable without a visual.
+    /// </summary>
+    internal static string FontFamilyOf(AppPreferences? preferences) =>
+        preferences?.TerminalFontFamily is { Length: > 0 } terminal
+            ? terminal
+            : preferences?.CodeFontFamily ?? AppPreferences.DefaultCodeFontFamily;
+
+    /// <summary>
+    /// The size the terminal draws with: its own <see cref="AppPreferences.TerminalFontSize"/> when one is set (0 means unset,
+    /// the preference clamps the rest to 8-32), the code font size otherwise.
+    /// </summary>
+    internal static double FontSizeOf(AppPreferences? preferences) =>
+        preferences is { TerminalFontSize: > 0 } configured
+            ? configured.TerminalFontSize
+            : preferences?.CodeFontSize ?? AppPreferences.DefaultCodeFontSize;
+
     private void UpdateMetrics()
     {
         var preferences = Source?.Preferences;
-        var family = FontFamily.Parse(preferences?.CodeFontFamily ?? AppPreferences.DefaultCodeFontFamily);
-        var size = preferences?.CodeFontSize ?? AppPreferences.DefaultCodeFontSize;
+        var family = FontFamily.Parse(FontFamilyOf(preferences));
+        var size = FontSizeOf(preferences);
         regular = new Typeface(family, FontStyle.Normal, FontWeight.Normal);
         bold = new Typeface(family, FontStyle.Normal, FontWeight.Bold);
         italic = new Typeface(family, FontStyle.Italic, FontWeight.Normal);
@@ -414,6 +479,8 @@ internal sealed class TerminalControl : Control
             var reverse = (emulator.Modes & TerminalModes.ReverseVideo) != 0;
 
             EnsureLinePaints(rows);
+            EnsureMatchIndex(viewModel);
+            var dropped = emulator.ScrollbackDropped;
             for (var row = 0; row < rows; row++)
             {
                 var index = topLine + row;
@@ -422,6 +489,7 @@ internal sealed class TerminalControl : Control
                     continue;
                 }
 
+                DrawSearchHighlights(context, index, row, columns, dropped);
                 DrawLine(context, emulator.GetLine(index), row, index, columns, colors, reverse);
             }
 
@@ -508,6 +576,67 @@ internal sealed class TerminalControl : Control
         end = Math.Clamp(end, start, Math.Max(0, columns - 1));
         var brush = BrushFor(Color.FromArgb(90, SelectionTint.R, SelectionTint.G, SelectionTint.B));
         context.FillRectangle(brush, new Rect(start * cellWidth, row * cellHeight, (end - start + 1) * cellWidth, cellHeight));
+    }
+
+    /// <summary>
+    /// The matches grouped by their anchor line (<c>LineBase</c>, which does not move when the scrollback drops lines). The
+    /// index is rebuilt only when the view model published a new result set.
+    /// </summary>
+    private void EnsureMatchIndex(TerminalViewModel viewModel)
+    {
+        var matches = viewModel.SearchMatches;
+        if (ReferenceEquals(indexedMatches, matches))
+        {
+            return;
+        }
+
+        indexedMatches = matches;
+        matchesByLine = null;
+        if (matches.Count == 0)
+        {
+            return;
+        }
+
+        var index = new Dictionary<long, List<TerminalSearchMatch>>();
+        foreach (var match in matches)
+        {
+            if (!index.TryGetValue(match.LineBase, out var lineMatches))
+            {
+                index[match.LineBase] = lineMatches = new List<TerminalSearchMatch>(1);
+            }
+
+            lineMatches.Add(match);
+        }
+
+        matchesByLine = index;
+    }
+
+    /// <summary>Washes one row's matches; the current match gets the stronger tint so next/previous is visible on screen.</summary>
+    private void DrawSearchHighlights(DrawingContext context, int absolute, int row, int columns, long dropped)
+    {
+        if (matchesByLine is null || columns <= 0)
+        {
+            return;
+        }
+
+        // A match stores the absolute line it was found on plus the drop counter of that moment, so this lookup keeps
+        // working after lines were evicted: the anchor moves with the counter, not with the array.
+        if (!matchesByLine.TryGetValue(absolute + dropped, out var lineMatches))
+        {
+            return;
+        }
+
+        var current = Source?.CurrentSearchMatch;
+        var y = row * cellHeight;
+        foreach (var match in lineMatches)
+        {
+            var start = Math.Clamp(match.StartColumn, 0, columns - 1);
+            var end = Math.Clamp(match.EndColumn, start, columns - 1);
+            var alpha = current is { } active && active.Equals(match) ? CurrentMatchTintAlpha : MatchTintAlpha;
+            context.FillRectangle(
+                BrushFor(Color.FromArgb(alpha, SelectionTint.R, SelectionTint.G, SelectionTint.B)),
+                new Rect(start * cellWidth, y, (end - start + 1) * cellWidth, cellHeight));
+        }
     }
 
     private void DrawCursor(DrawingContext context, TerminalCursor cursor)
@@ -638,7 +767,7 @@ internal sealed class TerminalControl : Control
         var brush = (flags & CellFlags.Dim) != 0
             ? BrushFor(Color.FromArgb(170, color.R, color.G, color.B))
             : BrushFor(color);
-        var size = Source?.Preferences.CodeFontSize ?? AppPreferences.DefaultCodeFontSize;
+        var size = FontSizeOf(Source?.Preferences);
         var text = new FormattedText(
             value,
             CultureInfo.InvariantCulture,
@@ -802,6 +931,22 @@ internal sealed class TerminalControl : Control
             return;
         }
 
+        // Ctrl+F opens the buffer search instead of sending ^F to the program: every terminal emulator on every platform
+        // does the same, and the app's own copy/paste gestures already take precedence over the byte stream.
+        if (IsSearchGesture(e))
+        {
+            viewModel.OpenSearch();
+            e.Handled = true;
+            return;
+        }
+
+        if (viewModel.IsSearchVisible && e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
+        {
+            viewModel.CloseSearch();
+            e.Handled = true;
+            return;
+        }
+
         if (IsCopyGesture(e))
         {
             CopySelection();
@@ -884,6 +1029,11 @@ internal sealed class TerminalControl : Control
         ? e.Key == Key.C && (e.KeyModifiers & KeyModifiers.Meta) != 0
         : e.Key == Key.C && (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift)) ==
         (KeyModifiers.Control | KeyModifiers.Shift);
+
+    /// <summary>Ctrl+F (Cmd+F on macOS): the buffer search, exactly like every other terminal.</summary>
+    private static bool IsSearchGesture(KeyEventArgs e) => IsMacOs
+        ? e.Key == Key.F && e.KeyModifiers == KeyModifiers.Meta
+        : e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control;
 
     private static bool IsPasteGesture(KeyEventArgs e) => IsMacOs
         ? e.Key == Key.V && (e.KeyModifiers & KeyModifiers.Meta) != 0

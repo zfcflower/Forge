@@ -21,7 +21,7 @@ internal enum TimelineNodeKind
     /// <summary>A run of assistant reply text.</summary>
     Assistant,
 
-    /// <summary>Reserved for a reasoning block. The session drops <c>AgentThinkingDelta</c> today, so no row produces it.</summary>
+    /// <summary>A stretch of the model's reasoning (wave W17a): one collapsible row per stretch, running while it streams.</summary>
     Thinking,
 
     /// <summary>A tool that reads a file, a spec or a repository object.</summary>

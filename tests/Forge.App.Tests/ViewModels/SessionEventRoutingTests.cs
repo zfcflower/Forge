@@ -326,6 +326,90 @@ public sealed class SessionEventRoutingTests
             TestProviderServices.UnconfiguredProbe());
     }
 
+    [Fact]
+    public async Task Thinking_of_the_main_agent_reaches_the_main_transcript()
+    {
+        const string RootThinking = "why the main agent chose this";
+        var session = SharedUi.Session;
+        var thinkings = await session.Dispatch(
+            async () =>
+            {
+                var workspace = CreateWorkspace();
+                await Task.Run(() => Emit(workspace, new AgentThinkingDelta("root", RootThinking)));
+                Assert.True(
+                    await PumpUntilAsync(() => Thinkings(workspace.Transcript).Any(text => text.Contains(RootThinking, StringComparison.Ordinal))),
+                    "the main agent's reasoning never reached the main transcript");
+                return Thinkings(workspace.Transcript);
+            },
+            CancellationToken.None);
+
+        Assert.Contains(RootThinking, thinkings);
+    }
+
+    [Fact]
+    public async Task A_child_agents_thinking_never_reaches_the_main_transcript()
+    {
+        const string ChildThinking = "why the child chose that";
+        var session = SharedUi.Session;
+        var observed = await session.Dispatch(
+            async () =>
+            {
+                var workspace = CreateWorkspace();
+                Emit(workspace, Started());
+                Assert.True(await PumpUntilAsync(() => workspace.SubAgents.Count == 1), "the child was never opened");
+                Emit(workspace, new AgentThinkingDelta(ChildAgentId, ChildThinking));
+                Assert.True(
+                    await PumpUntilAsync(() => ChildThinkings(workspace).Any(text => text.Contains(ChildThinking, StringComparison.Ordinal))),
+                    "the child's reasoning never reached the child's transcript");
+                return (Main: Thinkings(workspace.Transcript), Child: ChildThinkings(workspace));
+            },
+            CancellationToken.None);
+
+        Assert.Contains(ChildThinking, observed.Child);
+        Assert.DoesNotContain(ChildThinking, observed.Main);
+    }
+
+    [Fact]
+    public async Task Thinking_that_arrives_before_its_start_event_is_not_lost()
+    {
+        const string ChildThinking = "early reasoning of the child";
+        var session = SharedUi.Session;
+        var thinkings = await session.Dispatch(
+            async () =>
+            {
+                var workspace = CreateWorkspace();
+                await Task.Run(() => Emit(workspace, new AgentThinkingDelta(ChildAgentId, ChildThinking)));
+                Emit(workspace, Started());
+                Assert.True(
+                    await PumpUntilAsync(() => ChildThinkings(workspace).Any(text => text.Contains(ChildThinking, StringComparison.Ordinal))),
+                    "the parked reasoning never reached the child's transcript");
+                return ChildThinkings(workspace);
+            },
+            CancellationToken.None);
+
+        Assert.Contains(ChildThinking, thinkings);
+    }
+
+    [Fact]
+    public async Task Early_thinking_is_capped_at_the_buffer_limit()
+    {
+        var session = SharedUi.Session;
+        var length = await session.Dispatch(
+            async () =>
+            {
+                var workspace = CreateWorkspace();
+                await Task.Run(() => Emit(workspace, new AgentThinkingDelta(ChildAgentId, new string('r', 10000))));
+                Emit(workspace, Started());
+                Assert.True(
+                    await PumpUntilAsync(() => ChildThinkings(workspace).Count > 0),
+                    "the parked reasoning never reached the child's transcript");
+                return ChildThinkings(workspace).Single().Length;
+            },
+            CancellationToken.None);
+
+        Assert.Equal(8192, length);
+    }
+
     /// <summary>Every text of the one live sub-agent; empty until its start event reached the dispatcher.</summary>
     private static List<string> ChildTexts(SessionWorkspaceViewModel workspace)
     {
@@ -361,6 +445,31 @@ public sealed class SessionEventRoutingTests
     }
 
     /// <summary>An empty catalogue for tests that never touch providers; self-cleaning because the catalogue is in memory after load.</summary>
+    private static List<string> Thinkings(TranscriptViewModel transcript)
+    {
+        var thinkings = new List<string>();
+        foreach (var item in transcript.Items)
+        {
+            if (item is TurnCardViewModel card)
+            {
+                thinkings.AddRange(card.Blocks.OfType<TurnThinkingViewModel>().Select(static thinking => thinking.Text));
+            }
+        }
+
+        return thinkings;
+    }
+
+    private static List<string> ChildThinkings(SessionWorkspaceViewModel workspace)
+    {
+        var thinkings = new List<string>();
+        foreach (var agent in workspace.SubAgents)
+        {
+            thinkings.AddRange(Thinkings(agent.Transcript));
+        }
+
+        return thinkings;
+    }
+
     private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition);
 
 }

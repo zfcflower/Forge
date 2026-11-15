@@ -43,6 +43,47 @@ internal interface ISessionInstrumentSources
 
     /// <summary>Opens the settings page on one section id (the counters' click target).</summary>
     void OpenSettingsSection(string sectionId);
+
+    /// <summary>
+    /// The main turns a session already recorded in <c>turn_checkpoints</c>, summed for the usage summary: how many turns
+    /// and how long they took. Runs off the UI thread; a session without a git worktree records none, so the answer is
+    /// empty rather than a failure.
+    /// </summary>
+    Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct);
+}
+
+/// <summary>
+/// The turns a session already recorded before this window opened it: the count and the wall clock summed over its turn
+/// checkpoints. The token totals are not here — they come from the session's stored message usage, which the strip already
+/// seeds itself with when the history is replayed.
+/// </summary>
+internal readonly record struct SessionTurnHistory(int Turns, TimeSpan Duration)
+{
+    /// <summary>Nothing recorded: not an error, just a session nobody has a checkpoint for (a scratch session).</summary>
+    public static SessionTurnHistory Empty => default;
+
+    public bool IsEmpty => Turns == 0 && Duration <= TimeSpan.Zero;
+
+    /// <summary>
+    /// Sums a session's checkpoints: one turn each, and the wall clock of every turn that has an end. A turn that began and
+    /// never completed (a crash) counts as a turn but contributes no time, because it has no duration to report.
+    /// </summary>
+    public static SessionTurnHistory From(IReadOnlyList<TurnCheckpoint> checkpoints)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoints);
+        var turns = 0;
+        var duration = TimeSpan.Zero;
+        foreach (var checkpoint in checkpoints)
+        {
+            turns++;
+            if (checkpoint.EndedAt is { } ended && ended > checkpoint.StartedAt)
+            {
+                duration += ended - checkpoint.StartedAt;
+            }
+        }
+
+        return new SessionTurnHistory(turns, duration);
+    }
 }
 
 /// <summary>The shell's implementation: composition services, the approval queue and the platform launchers.</summary>
@@ -115,6 +156,30 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
         if (!string.IsNullOrWhiteSpace(sectionId))
         {
             openSettingsSection(sectionId);
+        }
+    }
+
+    /// <summary>
+    /// Reads the session's turn checkpoints and sums them. A store that cannot be read is an empty history, not an error:
+    /// the summary then reports what this window watched instead of failing to open.
+    /// </summary>
+    public async Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return SessionTurnHistory.Empty;
+        }
+
+        try
+        {
+            var checkpoints = await composition.TurnCheckpoints.ListAsync(sessionId, ct).ConfigureAwait(false);
+            return SessionTurnHistory.From(checkpoints);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or InvalidDataException
+            or Microsoft.Data.Sqlite.SqliteException)
+        {
+            AppLogs.Instruments.ZLogWarning($"turn history unreadable for {sessionId}: {exception.Message}");
+            return SessionTurnHistory.Empty;
         }
     }
 
@@ -197,4 +262,7 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
     public void OpenSettingsSection(string sectionId)
     {
     }
+
+    public Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct) =>
+        Task.FromResult(SessionTurnHistory.Empty);
 }

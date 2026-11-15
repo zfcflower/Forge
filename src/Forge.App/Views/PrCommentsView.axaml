@@ -1,0 +1,323 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             x:Class="Forge.App.Views.PrCommentsView"
+             x:DataType="vm:PrCommentsViewModel"
+             Width="640"
+             HorizontalAlignment="Center"
+             VerticalAlignment="Top"
+             Margin="0,12,0,0"
+             AutomationProperties.AutomationId="pr-comments-panel"
+             AutomationProperties.Name="{Binding [prComments.title], Source={x:Static loc:Loc.Instance}}">
+
+  <!-- The pull request review-thread panel: a floating card at the top of the workbench, over the session, opened from the
+       files panel's pull-request area. It draws itself only while the window's Comments slot is set. Nothing here reads on
+       its own: RefreshCommand is the one way to read the threads again, and every write is a row command the user pressed. -->
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/MarkdownStyles.axaml" />
+
+    <!-- The state chip: green when the thread is resolved, warning colour once the diff moved past it. -->
+    <Style Selector="Border.chip">
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="Border.chip.resolved">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.chip.resolved > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+    <Style Selector="Border.chip.outdated > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+
+    <!-- The filter row: three segments, the active one carrying the accent — it is the list on screen. -->
+    <Style Selector="Button.filter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Padding" Value="8,2" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="Button.filter.active">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+
+    <!-- One thread card: no hover fill, because the row holds a text box that must not read as a list item. -->
+    <Style Selector="Border.thread">
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+    <Style Selector="TextBlock.location">
+      <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="Button.row-action">
+      <Setter Property="Padding" Value="6,2" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.row-status">
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.row-status.failed">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="TextBlock.comment-author">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+  </UserControl.Styles>
+
+  <Border Classes="card"
+          MaxHeight="660"
+          Padding="0"
+          Background="{DynamicResource SurfaceElevatedBrush}"
+          BorderBrush="{DynamicResource BorderStrongBrush}"
+          BoxShadow="0 10 30 0 #3A000000"
+          ClipToBounds="True">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+      <!-- Title row: what the panel is, which pull request, and the close button. -->
+      <Border Grid.Row="0"
+              Classes="toolbar"
+              BorderThickness="0,0,0,1"
+              Padding="12,8">
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock Classes="h2" Text="{Binding [prComments.title], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       VerticalAlignment="Center"
+                       Text="{Binding NumberText}"
+                       AutomationProperties.AutomationId="pr-comments-number" />
+          </StackPanel>
+          <TextBlock Grid.Column="1"
+                     Classes="caption"
+                     Margin="0,0,10,0"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding IsReading}"
+                     Text="{Binding [prComments.read.reading], Source={x:Static loc:Loc.Instance}}" />
+          <Button Grid.Column="2"
+                  Classes="ghost icon"
+                  Width="26"
+                  Height="24"
+                  Command="{Binding CloseCommand}"
+                  ToolTip.Tip="{Binding [prComments.button.close], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="pr-comments-close"
+                  AutomationProperties.Name="{Binding [prComments.button.close], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- The three filters and why the last read failed. The filters split the reading, so their counts add up. -->
+      <StackPanel Grid.Row="1" Margin="12,8,12,4" Spacing="6">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <Button Classes="filter"
+                  Classes.active="{Binding IsOpenFilter}"
+                  Command="{Binding ShowOpenCommand}"
+                  Content="{Binding OpenFilterText}"
+                  AutomationProperties.AutomationId="pr-comments-filter-open" />
+          <Button Classes="filter"
+                  Classes.active="{Binding IsResolvedFilter}"
+                  Command="{Binding ShowResolvedCommand}"
+                  Content="{Binding ResolvedFilterText}"
+                  AutomationProperties.AutomationId="pr-comments-filter-resolved" />
+          <Button Classes="filter"
+                  Classes.active="{Binding IsOutdatedFilter}"
+                  Command="{Binding ShowOutdatedCommand}"
+                  Content="{Binding OutdatedFilterText}"
+                  AutomationProperties.AutomationId="pr-comments-filter-outdated" />
+        </StackPanel>
+        <TextBlock Classes="caption"
+                   IsVisible="{Binding HasProblem}"
+                   Foreground="{DynamicResource DangerBrush}"
+                   TextWrapping="Wrap"
+                   AutomationProperties.AutomationId="pr-comments-problem"
+                   Text="{Binding ProblemText}" />
+      </StackPanel>
+
+      <!-- The threads of the selected filter. The list virtualizes: a pull request can carry hundreds of threads and every
+           comment body is parsed Markdown. An empty successful read is a state of its own, one per filter. -->
+      <Grid Grid.Row="2" RowDefinitions="Auto,Auto">
+        <StackPanel IsVisible="{Binding IsEmpty}" Spacing="4" Margin="12,12">
+          <TextBlock FontWeight="SemiBold"
+                     Text="{Binding EmptyTitleText}"
+                     AutomationProperties.AutomationId="pr-comments-empty" />
+          <TextBlock Classes="caption"
+                     TextWrapping="Wrap"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     Text="{Binding EmptyBodyText}" />
+        </StackPanel>
+
+        <ListBox Grid.Row="1"
+                 ItemsSource="{Binding Threads}"
+                 IsVisible="{Binding HasThreads}"
+                 MaxHeight="470"
+                 Background="Transparent"
+                 BorderThickness="0"
+                 Padding="12,0"
+                 AutomationProperties.AutomationId="pr-comments-threads">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate>
+              <VirtualizingStackPanel />
+            </ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:PrCommentThreadViewModel">
+              <Border Classes="thread" AutomationProperties.AutomationId="pr-comments-thread">
+                <StackPanel Spacing="6">
+
+                  <!-- Where the thread sits and what state it is in. An outdated thread shows the line it was first
+                       placed on, because the diff no longer has it. -->
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                      <TextBlock Classes="location"
+                                 Text="{Binding LocationText}"
+                                 ToolTip.Tip="{Binding LocationText}"
+                                 AutomationProperties.AutomationId="pr-comments-thread-location" />
+                      <Border Classes="chip resolved" IsVisible="{Binding IsResolved}">
+                        <TextBlock FontSize="11" Text="{Binding ResolutionText}" />
+                      </Border>
+                      <Border Classes="chip outdated" IsVisible="{Binding IsOutdated}">
+                        <TextBlock FontSize="11" Text="{Binding OutdatedText}" />
+                      </Border>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1"
+                               Classes="caption"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               VerticalAlignment="Center"
+                               Text="{Binding CommentCountText}" />
+                  </Grid>
+
+                  <!-- The comments: author and time on one line, then the body as Markdown. -->
+                  <ItemsControl ItemsSource="{Binding Comments}" AutomationProperties.AutomationId="pr-comments-comments">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Spacing="6" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:PrCommentItemViewModel">
+                        <Border Padding="8,6"
+                                CornerRadius="{StaticResource RadiusSm}"
+                                Background="{DynamicResource SurfaceElevatedBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1">
+                          <StackPanel Spacing="3">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <TextBlock Classes="comment-author" Text="{Binding Author}" />
+                              <TextBlock Classes="caption"
+                                         Foreground="{DynamicResource TextMutedBrush}"
+                                         VerticalAlignment="Center"
+                                         IsVisible="{Binding HasTime}"
+                                         Text="{Binding TimeText}" />
+                            </StackPanel>
+                            <views:MarkdownCommentBody Markdown="{Binding Body}"
+                                                       AutomationProperties.AutomationId="pr-comments-comment-body" />
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+
+                  <!-- The reply box and the row's actions. The platform takes a reply only on a thread that is neither
+                       resolved nor outdated, so the box is hidden there; the actions stay, because the hand-off and the
+                       reopen reason are still what a resolved thread can tell the user. -->
+                  <StackPanel Spacing="4">
+                    <TextBox IsVisible="{Binding IsReplyable}"
+                             AcceptsReturn="True"
+                             MinHeight="52"
+                             MaxHeight="120"
+                             TextWrapping="Wrap"
+                             IsEnabled="{Binding IsReplyEnabled}"
+                             Text="{Binding ReplyDraft, Mode=TwoWay}"
+                             PlaceholderText="{Binding ReplyPlaceholderText}"
+                             AutomationProperties.AutomationId="pr-comments-reply-box"
+                             AutomationProperties.Name="{Binding ReplyLabel}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                      <Button Classes="ghost row-action"
+                              Command="{Binding HandOffCommand}"
+                              IsVisible="{Binding HasHandOff}"
+                              Content="{Binding HandOffLabel}"
+                              ToolTip.Tip="{Binding HandOffLabel}"
+                              AutomationProperties.AutomationId="pr-comments-handoff" />
+                      <Button Classes="ghost row-action"
+                              Command="{Binding ResolveCommand}"
+                              IsVisible="{Binding !IsResolved}"
+                              Content="{Binding ResolveLabel}"
+                              AutomationProperties.AutomationId="pr-comments-resolve" />
+                      <!-- Reopening has no platform call in this build: the button carries the reason instead of doing
+                           nothing when pressed. -->
+                      <Button Classes="ghost row-action"
+                              IsVisible="{Binding IsResolved}"
+                              IsEnabled="{Binding CanReopen}"
+                              Content="{Binding ResolveLabel}"
+                              ToolTip.Tip="{Binding ReopenTooltip}"
+                              AutomationProperties.AutomationId="pr-comments-reopen" />
+                      <Button Classes="primary row-action"
+                              Command="{Binding ReplyCommand}"
+                              IsVisible="{Binding IsReplyable}"
+                              Content="{Binding ReplyLabel}"
+                              AutomationProperties.AutomationId="pr-comments-reply" />
+                    </StackPanel>
+                    <TextBlock Classes="caption row-status"
+                               Classes.failed="{Binding StatusIsError}"
+                               IsVisible="{Binding HasStatus}"
+                               TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="pr-comments-thread-status"
+                               Text="{Binding StatusText}" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Grid>
+
+      <!-- What the panel itself reports: when the threads were read, and the head of a refresh. -->
+      <Border Grid.Row="3"
+              Classes="toolbar"
+              BorderThickness="0,1,0,0"
+              Padding="12,8">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="caption"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding HasLastRead}"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     Text="{Binding LastReadText}"
+                     AutomationProperties.AutomationId="pr-comments-read-at" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Button Classes="ghost"
+                    Command="{Binding OpenPullRequestCommand}"
+                    IsVisible="{Binding HasPullRequestUrl}"
+                    Content="{Binding [prComments.button.openPullRequest], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="pr-comments-open" />
+            <Button Classes="primary"
+                    Command="{Binding RefreshCommand}"
+                    Content="{Binding [prComments.button.refresh], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="pr-comments-refresh" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
+</UserControl>

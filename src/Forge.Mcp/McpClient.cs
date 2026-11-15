@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -12,10 +13,13 @@ public sealed class McpClient : IAsyncDisposable
     private readonly McpClientOptions options;
     private JsonRpcPeer peer;
     private readonly SemaphoreSlim connectGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, byte> subscribed = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Action<string>> progressCallbacks = new(StringComparer.Ordinal);
     private McpServerCapabilities capabilities = McpServerCapabilities.None;
     private volatile bool initialized;
     private volatile bool closed;
     private int disposed;
+    private long nextProgressToken;
 
     public McpClient(IMcpTransport transport, McpClientOptions? options = null)
     {
@@ -47,6 +51,8 @@ public sealed class McpClient : IAsyncDisposable
 
     public event Action? PromptsChanged;
 
+    public event Action<McpResourceUpdated>? ResourceUpdated;
+
     public event Action<McpNotification>? NotificationReceived;
 
     public event Action<Exception?>? Closed;
@@ -65,6 +71,9 @@ public sealed class McpClient : IAsyncDisposable
             {
                 await peer.DisposeAsync().ConfigureAwait(false);
                 peer = CreatePeer();
+                // A subscription is held by the MCP session that sent it: a new peer starts with none, and the manager replays
+                // the set it keeps (see McpServerManager.ReplaySubscriptionsAsync).
+                subscribed.Clear();
             }
 
             closed = false;
@@ -120,18 +129,42 @@ public sealed class McpClient : IAsyncDisposable
     public async Task<IReadOnlyList<McpPromptInfo>> ListPromptsAsync(CancellationToken ct) =>
         await ListAllAsync(McpProtocol.PromptsList, "prompts", ParsePrompt, ct).ConfigureAwait(false);
 
-    public async Task<McpToolCallResult> CallToolAsync(string name, string? argumentsJson, CancellationToken ct)
+    public async Task<McpToolCallResult> CallToolAsync(string name, string? argumentsJson, CancellationToken ct, Action<string>? progress = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         var arguments = JsonText.Compact(argumentsJson);
-        using var document = await peer.RequestAsync(McpProtocol.ToolsCall, writer =>
+        string? progressToken = null;
+        if (progress is not null)
         {
-            writer.WriteString("name", name);
-            writer.WritePropertyName("arguments");
-            JsonText.WriteCompact(writer, arguments);
-        }, ct).ConfigureAwait(false);
+            progressToken = 'p' + Interlocked.Increment(ref nextProgressToken).ToString(CultureInfo.InvariantCulture);
+            progressCallbacks[progressToken] = progress;
+        }
 
-        return McpContentFlattener.ToolResult(ResultOf(document, McpProtocol.ToolsCall));
+        try
+        {
+            using var document = await peer.RequestAsync(McpProtocol.ToolsCall, writer =>
+            {
+                writer.WriteString("name", name);
+                writer.WritePropertyName("arguments");
+                JsonText.WriteCompact(writer, arguments);
+                if (progressToken is not null)
+                {
+                    writer.WritePropertyName("_meta");
+                    writer.WriteStartObject();
+                    writer.WriteString("progressToken", progressToken);
+                    writer.WriteEndObject();
+                }
+            }, ct).ConfigureAwait(false);
+
+            return McpContentFlattener.ToolResult(ResultOf(document, McpProtocol.ToolsCall));
+        }
+        finally
+        {
+            if (progressToken is not null)
+            {
+                progressCallbacks.TryRemove(progressToken, out _);
+            }
+        }
     }
 
     public async Task<McpResourceResult> ReadResourceAsync(string uri, CancellationToken ct)
@@ -141,6 +174,26 @@ public sealed class McpClient : IAsyncDisposable
             writer => writer.WriteString("uri", uri), ct).ConfigureAwait(false);
         return McpContentFlattener.ResourceResult(ResultOf(document, McpProtocol.ResourcesRead));
     }
+
+    /// <summary>Subscribes to <c>notifications/resources/updated</c> for one resource; idempotent.</summary>
+    public async Task SubscribeAsync(string uri, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(uri);
+        using var document = await peer.RequestAsync(McpProtocol.ResourcesSubscribe,
+            writer => writer.WriteString("uri", uri), ct).ConfigureAwait(false);
+        subscribed[uri] = 0;
+    }
+
+    /// <summary>Stops the <c>notifications/resources/updated</c> updates for one resource; idempotent.</summary>
+    public async Task UnsubscribeAsync(string uri, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(uri);
+        using var document = await peer.RequestAsync(McpProtocol.ResourcesUnsubscribe,
+            writer => writer.WriteString("uri", uri), ct).ConfigureAwait(false);
+        subscribed.TryRemove(uri, out _);
+    }
+
+    public bool IsSubscribed(string uri) => subscribed.ContainsKey(uri);
 
     public async Task<McpPromptResult> GetPromptAsync(
         string name,
@@ -277,6 +330,20 @@ public sealed class McpClient : IAsyncDisposable
             case McpProtocol.PromptsListChanged:
                 PromptsChanged?.Invoke();
                 break;
+            case McpProtocol.ResourcesUpdated:
+                if (ReadString(parameters, "uri") is { } updatedUri)
+                {
+                    ResourceUpdated?.Invoke(new McpResourceUpdated(updatedUri));
+                }
+
+                break;
+            case McpProtocol.Progress:
+                if (RouteProgress(parameters))
+                {
+                    return;
+                }
+
+                break;
         }
 
         if (NotificationReceived is { } handler)
@@ -285,6 +352,38 @@ public sealed class McpClient : IAsyncDisposable
             handler(new McpNotification(method, json));
         }
     }
+
+    /// <summary>
+    /// Routes a <c>notifications/progress</c> to the call that owns its token. A notification without a matching token is not
+    /// consumed here, so it still reaches <see cref="NotificationReceived"/> like any other untracked message.
+    /// </summary>
+    private bool RouteProgress(JsonElement parameters)
+    {
+        var token = ReadString(parameters, "progressToken");
+        if (token is null || !progressCallbacks.TryGetValue(token, out var callback))
+        {
+            return false;
+        }
+
+        callback(FormatProgress(parameters));
+        return true;
+    }
+
+    private static string FormatProgress(JsonElement parameters)
+    {
+        var message = ReadString(parameters, "message");
+        if (ReadNumber(parameters, "total") is { } total)
+        {
+            var progress = ReadNumber(parameters, "progress") ?? 0;
+            var prefix = '[' + NumberText(progress) + '/' + NumberText(total) + ']';
+            return message is { Length: > 0 } ? prefix + ' ' + message : prefix;
+        }
+
+        return message ?? string.Empty;
+    }
+
+    private static string NumberText(double value) =>
+        value.ToString(CultureInfo.InvariantCulture);
 
     private void OnPeerClosed(Exception? error)
     {
@@ -411,4 +510,19 @@ public sealed class McpClient : IAsyncDisposable
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    private static double? ReadNumber(JsonElement element, string property)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(property, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number => value.TryGetDouble(out var parsed) ? parsed : null,
+            JsonValueKind.String => double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : null,
+            _ => null,
+        };
+    }
 }

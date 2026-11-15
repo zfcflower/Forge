@@ -41,6 +41,13 @@ internal sealed partial class DiffEditorView : UserControl
     public static readonly StyledProperty<Func<IDiffFileItem, Control>?> MarkdownPreviewFactoryProperty =
         AvaloniaProperty.Register<DiffEditorView, Func<IDiffFileItem, Control>?>(nameof(MarkdownPreviewFactory));
 
+    /// <summary>
+    /// Builds the side-by-side view of one image change (wave W17a); null shows an image file's change as its binary notice,
+    /// exactly like before this factory existed.
+    /// </summary>
+    public static readonly StyledProperty<Func<IDiffFileItem, Control>?> ImageDiffFactoryProperty =
+        AvaloniaProperty.Register<DiffEditorView, Func<IDiffFileItem, Control>?>(nameof(ImageDiffFactory));
+
     private readonly DiffPalette palette = new();
     private readonly Side primary;
     private readonly Side secondary;
@@ -52,6 +59,9 @@ internal sealed partial class DiffEditorView : UserControl
     private readonly Dictionary<IDiffFileItem, Control> embeds = [];
     private readonly Dictionary<(DiffRowKind Kind, int File, int Key), Control> active = [];
     private readonly Stack<DiffFileHeader> headerPool = [];
+
+    /// <summary>Embeds whose height this view pinned (rather than one they set themselves), so a re-measure can clear it.</summary>
+    private readonly HashSet<Control> pinnedHeights = [];
     private readonly Stack<DiffBlockBar> barPool = [];
     private readonly Stack<DiffFoldBar> foldPool = [];
     private IReadOnlyList<IDiffFileItem> items = [];
@@ -124,6 +134,12 @@ internal sealed partial class DiffEditorView : UserControl
     {
         get => GetValue(MarkdownPreviewFactoryProperty);
         set => SetValue(MarkdownPreviewFactoryProperty, value);
+    }
+
+    public Func<IDiffFileItem, Control>? ImageDiffFactory
+    {
+        get => GetValue(ImageDiffFactoryProperty);
+        set => SetValue(ImageDiffFactoryProperty, value);
     }
 
     /// <summary>Row map of the left (inline: only) document.</summary>
@@ -218,8 +234,9 @@ internal sealed partial class DiffEditorView : UserControl
         {
             reviewController.Configure(Review);
         }
-        else if (change.Property == MarkdownPreviewFactoryProperty)
+        else if (change.Property == MarkdownPreviewFactoryProperty || change.Property == ImageDiffFactoryProperty)
         {
+            ReleaseEmbeds();
             embeds.Clear();
             ScheduleRebuild();
         }
@@ -269,6 +286,7 @@ internal sealed partial class DiffEditorView : UserControl
 
         Unsubscribe();
         expanded.Clear();
+        ReleaseEmbeds();
         embeds.Clear();
         indexOf.Clear();
         dirty.Clear();
@@ -395,16 +413,15 @@ internal sealed partial class DiffEditorView : UserControl
         pendingAnchor ??= CaptureAnchor();
         RecycleAll();
         var specs = new List<DiffFileSpec>(items.Count);
-        var factory = MarkdownPreviewFactory;
         var widths = Math.Max(200, Bounds.Width > 0 ? Bounds.Width : 600);
         embedHeights = new double[items.Count];
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
             expanded.TryGetValue(item, out var folds);
-            var preview = factory is not null && item.IsMarkdown && item.IsMarkdownPreview;
-            specs.Add(new DiffFileSpec(item.Diff, item.IsCollapsed, preview, item.HasFullContext, folds, item.CanLoadContext));
-            embedHeights[i] = preview && !item.IsCollapsed ? MeasureEmbed(item, factory!, widths) : 0;
+            var factory = EmbedOf(item);
+            specs.Add(new DiffFileSpec(item.Diff, item.IsCollapsed, factory is not null, item.HasFullContext, folds, item.CanLoadContext));
+            embedHeights[i] = factory is not null && !item.IsCollapsed ? MeasureEmbed(item, factory, widths) : 0;
         }
 
         var built = DiffDocumentBuilder.Build(specs, split);
@@ -513,7 +530,6 @@ internal sealed partial class DiffEditorView : UserControl
 
         pendingAnchor ??= CaptureAnchor();
         RecycleFiles(files);
-        var factory = MarkdownPreviewFactory;
         var width = Math.Max(200, Bounds.Width > 0 ? Bounds.Width : 600);
         var dark = IsDark();
         building = true;
@@ -523,9 +539,9 @@ internal sealed partial class DiffEditorView : UserControl
             {
                 var item = items[file];
                 expanded.TryGetValue(item, out var folds);
-                var preview = factory is not null && item.IsMarkdown && item.IsMarkdownPreview;
-                embedHeights[file] = preview && !item.IsCollapsed ? MeasureEmbed(item, factory!, width) : 0;
-                var spec = new DiffFileSpec(item.Diff, item.IsCollapsed, preview, item.HasFullContext, folds, item.CanLoadContext);
+                var factory = EmbedOf(item);
+                embedHeights[file] = factory is not null && !item.IsCollapsed ? MeasureEmbed(item, factory, width) : 0;
+                var spec = new DiffFileSpec(item.Diff, item.IsCollapsed, factory is not null, item.HasFullContext, folds, item.CanLoadContext);
                 var (left, right) = DiffDocumentBuilder.BuildOne(spec, file, split);
                 FilesBuilt++;
                 diffs[file] = item.Diff;
@@ -602,22 +618,69 @@ internal sealed partial class DiffEditorView : UserControl
         side.Editor.Document = document;
     }
 
+    /// <summary>
+    /// The factory for an item's embed row, or null when this item has no embed: a rendered Markdown preview (with the
+    /// header's toggle on Preview) or an image change, whose binary patch has no text to draw.
+    /// </summary>
+    private Func<IDiffFileItem, Control>? EmbedOf(IDiffFileItem item)
+    {
+        if (item.IsImage)
+        {
+            return ImageDiffFactory;
+        }
+
+        return item.IsMarkdown && item.IsMarkdownPreview ? MarkdownPreviewFactory : null;
+    }
+
     private Control EmbedFor(IDiffFileItem item, Func<IDiffFileItem, Control> factory)
     {
         if (!embeds.TryGetValue(item, out var control))
         {
             control = factory(item);
-            AutomationProperties.SetAutomationId(control, "diff-markdown-preview");
+            AutomationProperties.SetAutomationId(control, item.IsImage ? "diff-image" : "diff-markdown-preview");
             // The preview spans both columns in split mode; an opaque surface keeps the split divider from showing through.
             if (control is Avalonia.Controls.Primitives.TemplatedControl { Background: null } templated)
             {
                 templated.Bind(Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty, this.GetResourceObservable("SurfaceBrush"));
             }
 
+            if (control is ImageDiffView imageDiff)
+            {
+                // Pictures arrive after the first layout pass; re-measure then, or the row keeps the empty-box height.
+                imageDiff.Decoded += OnImageDiffDecoded;
+            }
+
             embeds[item] = control;
         }
 
         return control;
+    }
+
+    private void OnImageDiffDecoded(object? sender, EventArgs e)
+    {
+        // The height measured before the pictures arrived is an empty-box height; Avalonia answers DesiredSize with the
+        // explicit Height, so it would be self-confirming. Clear what this loop pinned and re-measure now that the content
+        // has its real size.
+        if (sender is Control control && pinnedHeights.Remove(control))
+        {
+            control.Height = double.NaN;
+        }
+
+        UpdateOverlayNow();
+    }
+
+    /// <summary>Releases the decoded pictures an embed holds before the cache is thrown away (one native bitmap per side;
+    /// the file-preview path releases exactly once when a preview leaves the screen, and an image diff must do the same).</summary>
+    private void ReleaseEmbeds()
+    {
+        foreach (var control in embeds.Values)
+        {
+            if (control is ImageDiffView imageDiff)
+            {
+                imageDiff.Decoded -= OnImageDiffDecoded;
+                imageDiff.ViewModel.Release();
+            }
+        }
     }
 
     private void EnsureOverlay()
@@ -1024,6 +1087,7 @@ internal sealed partial class DiffEditorView : UserControl
                 }
 
                 control.Height = measured;
+                pinnedHeights.Add(control);
             }
             else
             {
@@ -1104,7 +1168,7 @@ internal sealed partial class DiffEditorView : UserControl
             }
 
             case DiffRowKind.Embed:
-                return MarkdownPreviewFactory is { } factory ? EmbedFor(item, factory) : null;
+                return EmbedOf(item) is { } factory ? EmbedFor(item, factory) : null;
             default:
                 return null;
         }

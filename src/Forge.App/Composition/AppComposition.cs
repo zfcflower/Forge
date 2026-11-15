@@ -1,4 +1,6 @@
 ﻿using System.ComponentModel;
+using System.Net;
+using System.Reflection;
 using Avalonia;
 using Avalonia.Threading;
 using Forge.Abstractions;
@@ -15,6 +17,7 @@ using Forge.App.Notifications;
 using Forge.App.Preferences;
 using Forge.App.ViewModels;
 using Forge.App.ViewModels.Settings;
+using Forge.App.Views;
 using Forge.App.Services;
 using Forge.Approval;
 using Forge.App.Prompts;
@@ -163,6 +166,13 @@ internal sealed class AppComposition : IAsyncDisposable
     public Func<string?> ActiveSessionWorkspace { get; set; } = static () => null;
 
     /// <summary>
+    /// The live view of one session, or null when it is not open. The window installs this when it is constructed (it owns
+    /// the session view models); a step commit hands its automatic review request through it, so the hand-off lands in the
+    /// session's own composer and never starts a second turn behind the user's back.
+    /// </summary>
+    public Func<string, IAgentMessageHost?> SessionMessageHost { get; set; } = static _ => null;
+
+    /// <summary>
     /// What the extension host last reported it registered (plugins, tools, commands), or null before it answered. The
     /// window status bar used to show this; it now has a line in the tools settings section.
     /// </summary>
@@ -236,6 +246,9 @@ internal sealed class AppComposition : IAsyncDisposable
     /// goes through it.
     /// </summary>
     public NotificationCenter Notifications { get; private set; } = null!;
+
+    /// <summary>The automatic-update checker (wave W10b stage A); built in <see cref="Create"/> after the UI-state store.</summary>
+    public UpdateService Updates { get; private set; } = null!;
 
     /// <summary>
     /// The notification-permission guide: the runtime-settings module sets it, the first-run wizard only calls it. Null until
@@ -339,6 +352,9 @@ internal sealed class AppComposition : IAsyncDisposable
             gitSettings,
             SettingsGroups.Interface,
             "IconBranch"));
+        // Wave W17b appends the review rows in the section's own view; SectionViewTemplate is matched before the app-level
+        // templates, so the section keeps its place without an edit to the frozen App.axaml.
+        SectionViewTemplate.Register<GitSettingsSectionViewModel>(static () => new GitSettingsSectionView());
 
         // 0c. Notifications: one entry for the whole shell. The switch is the live preference (read on every notification)
         //     and the desktop notifier is the platform's own tool, so nothing here needs a restart. Created before the
@@ -391,7 +407,28 @@ internal sealed class AppComposition : IAsyncDisposable
         // 2b. Approvals: the remembered rules, the queue and the host adapter that turns a plugin draft into an approval
         //     card. Created before the agent runtimes because every session handler and the extension tools come from it,
         //     and before the window so the queue overlay finds it.
-        var approvals = ApprovalServices.Create(paths, host, hostProblem, notifications);
+        //     The extensions-repository client goes through the one network stack and decompresses (repository zips are
+        //     served gzip-encoded); it has no whole-response timeout because a package download is bounded by the user's
+        //     cancel and the size limit, not by a timer. Ownership moves into this graph: the settings section disposes
+        //     the repository service, which disposes the client.
+        var repositoryHttp = new HttpClient(network.CreateHandler(new NetworkHandlerOptions
+        {
+            AutomaticDecompression = DecompressionMethods.All,
+        }))
+        {
+            Timeout = Timeout.InfiniteTimeSpan,
+        };
+        ApprovalServices approvals;
+        try
+        {
+            approvals = ApprovalServices.Create(paths, host, hostProblem, notifications, preferences.Current, repositoryHttp);
+        }
+        catch
+        {
+            // Nothing took ownership: the section was never built, so the client and its handler are released here.
+            repositoryHttp.Dispose();
+            throw;
+        }
 
         // 3. Workspace.
         WorkspaceServices? workspace = null;
@@ -512,6 +549,20 @@ internal sealed class AppComposition : IAsyncDisposable
         var todos = new SqliteTodoStore(paths.UserDataDirectory);
         var uiState = new SqliteUiStateStore(paths.UserDataDirectory);
         var turnCheckpoints = new SqliteTurnCheckpointStore(paths.UserDataDirectory);
+
+        // The update checker (wave W10b): its own client through the one network stack, staged under <data>/updates, and
+        // the UI-state store for the last-check time the automatic schedule reads. The service owns the client.
+        var updateHttp = new HttpClient(network.CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
+        var updates = new UpdateService(
+            updateHttp,
+            Path.Combine(paths.UserDataDirectory, "updates"),
+            ReadInformationalVersion(),
+            () => preferences.Current.UpdatesManifestUrl,
+            () => preferences.Current.UpdatesChannel,
+            () => preferences.Current.UpdatesCheckFrequency,
+            uiState);
+        updates.Start();
+
         // Artifacts (Core SPEC "循环"): oversized tool output lands in forge.db's artifacts table and <UserData>/artifacts,
         // and a permanent delete removes one session's share of both. Not disposed with the composition: disposing it
         // clears every SQLite pool of the process, and it holds nothing else.
@@ -588,16 +639,27 @@ internal sealed class AppComposition : IAsyncDisposable
         // description and every later script without rebuilding a session host.
         runtimeServices.CodeMode = () => CodeModeSettings.From(preferences.Current);
         runtimeServices.WebTools = webServices.CreateTools; // web tools
+        // Late-bound: the window installs SessionMessageHost on the composition it receives, and the composition is only
+        // created further down. A step commit reads the hook at the moment it needs a session, long after that.
+        AppComposition? created = null;
         var stepCommitter = new StepCommitter(
             git,
             todos,
             StepCommitter.WorktreeOf(sessions),
             () => preferences.Current.GitStepCommits,
-            notifications);
+            notifications,
+            StepReviewSettings.Live(preferences.Current),
+            new StepReviewMessenger(
+                sessionId => created?.SessionMessageHost(sessionId),
+                DispatcherUiThread.Instance));
         runtimeServices.StepCommitter = stepCommitter;
         // Core has no git: the review change set is built here over the app's git layer and handed to the host.
         runtimeServices.Reviews = new ReviewChangeSetSource(git);
         runtimeServices.ReviewLimits = () => GitToolPreferences.ReviewLimits(preferences.Current);
+        // Each finished review is recorded into reviews.db (wave W17b), so a verdict outlives the turn that produced it. The
+        // same store the review panels use; without a workspace services block the fallback is the same reviews directory
+        // the purge path falls back to.
+        runtimeServices.ReviewConclusions = new ReviewConclusionStore(workspace?.Reviews ?? new ReviewStore(paths.ReviewsDirectory));
         runtimeServices.Mcp = mcp;
         runtimeServices.ToolRouter = toolRouter;
         runtimeServices.Artifacts = artifacts;
@@ -644,6 +706,7 @@ internal sealed class AppComposition : IAsyncDisposable
         composition.Approvals = approvals;
         composition.Network = network;
         composition.NetworkProblem = networkSettings.LoadProblem;
+        composition.Updates = updates;
         composition.webServices = webServices;
         composition.PromptTemplates = promptTemplates;
         composition.TodoStepCommitter = stepCommitter;
@@ -734,6 +797,7 @@ internal sealed class AppComposition : IAsyncDisposable
             "IconWrench"));
 
         FeatureComposition.RegisterAll(composition, settings);
+        created = composition;
         return composition;
     }
 
@@ -809,6 +873,13 @@ internal sealed class AppComposition : IAsyncDisposable
         await projects.AddAsync(general, WorktreeService.GeneralFolderName, ProjectKind.General, CancellationToken.None)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The version the update checker compares: the assembly <c>InformationalVersion</c>, which CI stamps with
+    /// <c>-p:Version</c> (a tag builds <c>1.2.0</c>, any other CI build <c>0.0.0-ci.&lt;run&gt;</c>).
+    /// </summary>
+    private static string ReadInformationalVersion() =>
+        Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
 
     /// <summary>
     /// <see cref="Loc"/> raises <c>Item[]</c> and <see cref="Loc.LanguageChanged"/> to whatever is bound, so the language
@@ -916,6 +987,7 @@ internal sealed class AppComposition : IAsyncDisposable
 
         httpClient.Dispose();
         webServices?.Dispose();
+        Updates?.Dispose();
         Network?.Dispose();
 
         // Last of the services: a session may still have been finishing a turn while everything above was released.

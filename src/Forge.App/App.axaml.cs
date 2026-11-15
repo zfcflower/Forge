@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Services;
 using Forge.App.ViewModels;
 using Forge.IO;
 using Forge.App.Logging;
@@ -54,6 +55,9 @@ public partial class App : Application
             var window = new MainWindow { DataContext = viewModel };
             viewModel.SettingsOwner = () => window;
             desktop.MainWindow = window;
+            // Wave W10c: the install confirmation is written once the main window is actually up — that is the proof the
+            // applier's watchdog is waiting for — and a finished swap's backup is cleaned at the same point.
+            window.Opened += OnMainWindowOpened;
             desktop.ShutdownRequested += OnShutdownRequested;
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         }
@@ -70,6 +74,23 @@ public partial class App : Application
 
         e.Cancel = true;
         _ = ShutdownAsync(sender as IClassicDesktopStyleApplicationLifetime);
+    }
+
+    /// <summary>
+    /// Wave W10c's app side, once per start: confirm the update this process was started for, then clean up the backups of
+    /// earlier ones. It runs on the thread pool — removing the previous version's directory is file work the window must not
+    /// wait for — and the confirmation itself is one small file, so the applier's 60 second window is never at risk.
+    /// </summary>
+    private static void OnMainWindowOpened(object? sender, EventArgs e)
+    {
+        if (sender is Window window)
+        {
+            window.Opened -= OnMainWindowOpened;
+        }
+
+        var dataRoot = AppPaths.Create().UserDataDirectory;
+        var args = Environment.GetCommandLineArgs();
+        _ = Task.Run(() => UpdateApplyStartup.RunAfterMainWindowShown(dataRoot, args));
     }
 
     private async Task ShutdownAsync(IClassicDesktopStyleApplicationLifetime? lifetime)

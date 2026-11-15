@@ -63,6 +63,9 @@ public sealed record McpResourceInfo(string Uri, string? Name = null, string? De
 
 public sealed record McpResourceResult(string Text, IReadOnlyList<McpContent>? Content = null);
 
+/// <summary>One <c>notifications/resources/updated</c> payload: the URI of the resource whose contents changed.</summary>
+public sealed record McpResourceUpdated(string Uri);
+
 public sealed record McpPromptArgument(string Name, string? Description = null, bool Required = false);
 
 public sealed record McpPromptInfo(string Name, string? Description = null, IReadOnlyList<McpPromptArgument>? Arguments = null);

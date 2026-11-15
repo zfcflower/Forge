@@ -1122,5 +1122,16 @@ public sealed class SessionInstrumentsViewModelTests
         public void OpenInExplorer(string path) => Revealed.Add(path);
 
         public void OpenSettingsSection(string sectionId) => OpenedSections.Add(sectionId);
+
+        /// <summary>What the session's stored turn checkpoints hold; the strip reads it once when it is built.</summary>
+        public SessionTurnHistory History { get; set; } = SessionTurnHistory.Empty;
+
+        public List<string> HistorySessions { get; } = [];
+
+        public Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct)
+        {
+            HistorySessions.Add(sessionId);
+            return Task.FromResult(History);
+        }
     }
 }

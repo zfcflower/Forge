@@ -46,7 +46,6 @@ public sealed class LanguageThreadGuardTests : IDisposable
         "language-section",
         "appearance-section",
         "terminal",
-        "terminal-section",
         "terminal-workbench",
         "approval-queue",
         "approval-card",
@@ -135,18 +134,6 @@ public sealed class LanguageThreadGuardTests : IDisposable
                     terminal,
                     nameof(TerminalViewModel.TabTitle),
                     terminal.DisposeAsync);
-            }
-
-            case "terminal-section":
-            {
-                var section = new TerminalSettingsViewModel(new AppPreferences());
-                // The section offers no Dispose, so the probe drops its subscription again instead of leaving a
-                // subscriber behind in a process-wide event.
-                return Subject.Sync(
-                    section,
-                    section,
-                    nameof(TerminalSettingsViewModel.ShellLabel),
-                    () => LanguageSubscriptions.Detach(section));
             }
 
             case "terminal-workbench":

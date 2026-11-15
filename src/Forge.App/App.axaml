@@ -64,12 +64,15 @@
       <views:ProblemsPanelView />
     </DataTemplate>
 
-    <!-- Window overlays (MainWindowViewModel.Palette/Checks/Plan/Inspector/Onboarding): placeholders until their waves. -->
+    <!-- Window overlays (MainWindowViewModel.Palette/Checks/Comments/Plan/Inspector/Onboarding): one template per overlay. -->
     <DataTemplate DataType="vm:PaletteViewModel" x:DataType="vm:PaletteViewModel">
       <views:PaletteView />
     </DataTemplate>
     <DataTemplate DataType="vm:ChecksPanelViewModel" x:DataType="vm:ChecksPanelViewModel">
       <views:ChecksPanelView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:PrCommentsViewModel" x:DataType="vm:PrCommentsViewModel">
+      <views:PrCommentsView />
     </DataTemplate>
     <DataTemplate DataType="vm:PlanPanelViewModel" x:DataType="vm:PlanPanelViewModel">
       <views:PlanPanelView />
@@ -86,43 +89,6 @@
       <term:TerminalView />
     </DataTemplate>
 
-    <DataTemplate DataType="term:TerminalSettingsViewModel" x:DataType="term:TerminalSettingsViewModel">
-      <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="170,*" Margin="0,2">
-        <TextBlock Classes="label" Text="{Binding ShellLabel}" VerticalAlignment="Center" Margin="0,4" />
-        <TextBox Grid.Column="1"
-                 Classes="mono"
-                 Margin="0,4"
-                 Text="{Binding Shell, Mode=TwoWay}"
-                 PlaceholderText="pwsh"
-                 AutomationProperties.AutomationId="terminal-settings-shell"
-                 AutomationProperties.Name="{Binding ShellLabel}" />
-        <TextBlock Grid.Row="1" Classes="label" Text="{Binding ArgumentsLabel}" VerticalAlignment="Center" Margin="0,4" />
-        <TextBox Grid.Row="1"
-                 Grid.Column="1"
-                 Classes="mono"
-                 Margin="0,4"
-                 Text="{Binding Arguments, Mode=TwoWay}"
-                 PlaceholderText="-l"
-                 AutomationProperties.AutomationId="terminal-settings-arguments"
-                 AutomationProperties.Name="{Binding ArgumentsLabel}" />
-        <TextBlock Grid.Row="2" Classes="label" Text="{Binding ScrollbackLabel}" VerticalAlignment="Center" Margin="0,4" />
-        <NumericUpDown Grid.Row="2"
-                       Grid.Column="1"
-                       Margin="0,4"
-                       Minimum="1000"
-                       Maximum="100000"
-                       Increment="1000"
-                       FormatString="0"
-                       Value="{Binding ScrollbackLines, Mode=TwoWay}"
-                       AutomationProperties.AutomationId="terminal-settings-scrollback"
-                       AutomationProperties.Name="{Binding ScrollbackLabel}" />
-        <TextBlock Grid.Row="3"
-                   Grid.ColumnSpan="2"
-                   Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding Hint}" />
-      </Grid>
-    </DataTemplate>
 
     <!-- Settings sections added by later waves: registered through SectionViewTemplate.Register from their composition module. -->
     <views:SectionViewTemplate />

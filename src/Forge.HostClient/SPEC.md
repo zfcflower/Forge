@@ -183,16 +183,17 @@ depends-on: [forge-ipc]
   拒绝(不再逐字段命名);之后的逐行规则只检查解码器不管的内容:空白字符串、nil 列表项、未定义的 `PermissionKind`
   与空白 scope。`invalid` 行的 `version`/哈希/`sdkVersion` 可为空串。`plugins.status` 与 `extensions.commit` 内嵌的
   `status` 共用同一份行校验(标签区分 `plugins[i]` 与 `status`),规则只有一处,消息带坏行下标与已知身份。
-- **授权的扩展写入同样只读 IPC、逐项校验。** `IExtensionAuthoringClient` 的七个方法先做本地参数校验——空白
+- **授权的扩展写入同样只读 IPC、逐项校验。** `IExtensionAuthoringClient` 的八个方法先做本地参数校验——空白
   id/version/哈希、未知 `kind`、`Files`/`Permissions`/`Dependencies` 为 null 或含 null 项都抛 `ArgumentException`
-  且不发 IPC;`extensions.stage`/`extensions.commit` 可能在 Host 侧跑 Roslyn 编译,预算取 `RequestTimeout` 与
+  且不发 IPC;`extensions.install` 的 `sourceDir` 必须非空白、`origin` 只能是 `installed`/`bundled`/`builtin`;`extensions.stage`/`extensions.commit` 可能在 Host 侧跑 Roslyn 编译,预算取 `RequestTimeout` 与
   5 分钟中较大者(客户端未配超时则不设 deadline),其余请求用 `RequestBudget`。应答逐字段校验,不合格先记
   `Diagnostics` 再抛带 op 名与具体问题的 `InvalidDataException`:`StagedExtension` 的 `pluginId`/`version`/`kind`
   必须非空白且 `kind` 只能是 `plugin`/`workflow`,`files`/`permissions`/`dependencies`/`diagnostics` 必须是非 null
   数组且元素非 null、每个文件 `path` 非空白;没有 diagnostics 时三个哈希都必须非空白(带诊断的草稿允许没有哈希,
   缺失的哈希按 `null`→`string.Empty` 归一);`extensions.pending` 的每一项按同一套规则校验,**任一项坏则整份应答
-  无效**;`extensions.commit` 的 `toolNames` 必须是非 null 数组且元素非空白。Host 的业务错误
-  (`IpcRemoteException`,如 `approval_mismatch`/`extension_blocked`/`unknown_plugin`)与调用方取消原样传播,预算
+  无效**;`extensions.commit` 的 `toolNames` 必须是非 null 数组且元素非空白;`extensions.install` 的
+  `pluginId`/`version` 必须非空白、内嵌 `status` 走同一份行校验、`diagnostics` 必须是非 null 数组且元素非 null。Host 的业务错误
+  (`IpcRemoteException`,如 `approval_mismatch`/`extension_blocked`/`unknown_plugin`/`builtin_blocked`)与调用方取消原样传播,预算
   到期映射为 `IpcTimeoutException` 并先记一条诊断。
 - **终端(`ExtensionHostClient.Terminal.cs` 实现 `ITerminalHost`)。** 线协议见 `forge-extension-host`“交互终端”。
   - **启动**:未处于 `Running` 时 `StartAsync` 抛 `InvalidOperationException`。`terminal.start` 请求本身**不绑调用方的 ct**,因为取消会让对端丢掉应答,也就丢掉了 Host 可能已建好的终端的 id。调用方取消后立即得到 `OperationCanceledException`;客户端继续等应答,若终端已建好,就清掉它的早到帧并补发 `terminal.stop`,否则这个终端会占着 Host 的 32 个名额直到断连。

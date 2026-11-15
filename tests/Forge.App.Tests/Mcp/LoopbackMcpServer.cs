@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -13,6 +14,7 @@ namespace Forge.App.Tests.Mcp;
 /// </summary>
 internal sealed class LoopbackMcpTransport : IMcpTransport
 {
+    private readonly ConcurrentQueue<string> sent = new();
     private readonly Channel<Action> inbound = Channel.CreateUnbounded<Action>(
         new UnboundedChannelOptions { SingleReader = true });
     private readonly Task pump;
@@ -30,6 +32,16 @@ internal sealed class LoopbackMcpTransport : IMcpTransport
 
     /// <summary>Answers one JSON-RPC payload; a notification (no id) gets no reply.</summary>
     public Func<JsonElement, IEnumerable<string>>? Responder { get; set; }
+
+    /// <summary>Every payload this transport was handed, oldest first, across every session it served.</summary>
+    public IReadOnlyList<string> Sent => sent.ToArray();
+
+    /// <summary>Counts the payloads whose method is <paramref name="method"/>; a test reads the list traffic from it.</summary>
+    public int CountSent(string method) =>
+        Sent.Count(payload => payload.Contains('"' + method + '"', StringComparison.Ordinal));
+
+    /// <summary>Awaited inside <see cref="StopAsync"/>: lets a test park a user action mid-stop and observe it.</summary>
+    public Func<Task>? StopHook { get; set; }
 
     public event Action<ReadOnlyMemory<byte>>? MessageReceived;
 
@@ -49,6 +61,7 @@ internal sealed class LoopbackMcpTransport : IMcpTransport
             throw new McpConnectionClosedException("The loopback transport is not connected.");
         }
 
+        sent.Enqueue(Encoding.UTF8.GetString(payload.Span));
         if (Responder is { } responder)
         {
             using var document = JsonDocument.Parse(Encoding.UTF8.GetString(payload.Span));
@@ -61,11 +74,22 @@ internal sealed class LoopbackMcpTransport : IMcpTransport
         return ValueTask.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken ct)
+    public async Task StopAsync(CancellationToken ct)
     {
+        if (StopHook is { } hook)
+        {
+            await hook().ConfigureAwait(false);
+        }
+
         Volatile.Write(ref connected, 0);
         Closed?.Invoke(null);
-        return Task.CompletedTask;
+    }
+
+    /// <summary>Delivers a server-originated payload (a notification, a response or a request) asynchronously.</summary>
+    public void Push(string json)
+    {
+        var bytes = Encoding.UTF8.GetBytes(json);
+        inbound.Writer.TryWrite(() => MessageReceived?.Invoke(bytes));
     }
 
     public async ValueTask DisposeAsync()
@@ -92,7 +116,12 @@ internal sealed class ScriptedMcpServer
     public const string InitializeResultJson =
         """{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"fake","version":"1.0.0"}}""";
 
+    /// <summary>The same handshake with the resource capability set, for the resource browser's tests.</summary>
+    public const string InitializeWithResourcesJson =
+        """{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":true},"resources":{"subscribe":true,"listChanged":true}},"serverInfo":{"name":"fake","version":"1.0.0"}}""";
+
     private readonly Dictionary<string, Func<JsonElement, string?>> handlers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Func<JsonElement, string?>> errors = new(StringComparer.Ordinal);
     private readonly string toolsListJson;
 
     public ScriptedMcpServer(IEnumerable<(string Name, string? Description)>? tools = null)
@@ -110,6 +139,16 @@ internal sealed class ScriptedMcpServer
         return this;
     }
 
+    /// <summary>
+    /// Answers one method with a JSON-RPC error body (e.g. <c>{"code":-32002,"message":"nope"}</c>); a null return falls
+    /// back to the normal handler, so one method can fail for one argument only.
+    /// </summary>
+    public ScriptedMcpServer OnError(string method, Func<JsonElement, string?> error)
+    {
+        errors[method] = error;
+        return this;
+    }
+
     public IReadOnlyList<string> Respond(JsonElement root)
     {
         if (!root.TryGetProperty("id", out _) || !root.TryGetProperty("method", out var methodElement))
@@ -118,6 +157,12 @@ internal sealed class ScriptedMcpServer
         }
 
         var method = methodElement.GetString() ?? string.Empty;
+        if (errors.TryGetValue(method, out var error) && error(root) is { } body)
+        {
+            var idJson = root.GetProperty("id").GetRawText();
+            return [$"{{\"jsonrpc\":\"2.0\",\"id\":{idJson},\"error\":{body}}}"];
+        }
+
         if (!handlers.TryGetValue(method, out var handler))
         {
             return [Result(root.GetProperty("id").GetRawText(), """{"error":{"code":-32601,"message":"method not found"}}""")];

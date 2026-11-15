@@ -6,14 +6,14 @@ namespace Forge.Approval.Tests;
 public class ApprovalSchemaTests
 {
     [Fact]
-    public void Fresh_store_creates_schema_version_1_wal_and_marker()
+    public void Fresh_store_creates_schema_version_2_wal_and_marker()
     {
         using var directory = new TempApprovalDirectory();
         using var store = new ApprovalStore(directory.Path);
 
         Assert.Equal("wal", store.JournalMode);
         Assert.Equal(0, store.Count);
-        Assert.Equal(1, ApprovalStoreTestSupport.UserVersion(directory.Path));
+        Assert.Equal(2, ApprovalStoreTestSupport.UserVersion(directory.Path));
         Assert.Equal(2, ApprovalStoreTestSupport.SchemaTableCount(directory.Path));
         Assert.NotNull(ApprovalStoreTestSupport.ImportMarker(directory.Path));
         SqliteConnection.ClearAllPools();

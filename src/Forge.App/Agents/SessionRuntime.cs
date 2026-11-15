@@ -60,6 +60,9 @@ internal sealed record AgentRuntimeServices(
     /// <summary>How much of a change set the review package carries, read per review from the settings (handed to <c>AgentHostOptions.ReviewLimits</c>). Null: the package defaults.</summary>
     public Func<ReviewPackageLimits>? ReviewLimits { get; set; }
 
+    /// <summary>Where <c>request_review</c> records each finished review (handed to <c>AgentHostOptions.ReviewConclusions</c>). Null: nothing is recorded.</summary>
+    public IReviewConclusionStore? ReviewConclusions { get; set; }
+
     /// <summary>
     /// Where oversized tool output is stored (handed to <c>AgentHostOptions.Artifacts</c>, which also adds the tool that
     /// reads it back). Null when the runtime was assembled without the composition root: output then stays inline.
@@ -993,6 +996,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 StepCommitter = services.StepCommitter,
                 Reviews = services.Reviews,
                 ReviewLimits = services.ReviewLimits,
+                ReviewConclusions = services.ReviewConclusions,
                 Artifacts = services.Artifacts,
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),

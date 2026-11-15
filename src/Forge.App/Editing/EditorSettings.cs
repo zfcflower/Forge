@@ -28,6 +28,7 @@ internal sealed class EditorSettings : ObservableObject
     private bool highlightCurrentLine = true;
     private bool hyperlinks = true;
     private bool autoFolding = true;
+    private bool showInlayHints = true;
     private int indentationSize = AppPreferences.DefaultEditorIndentationSize;
     private bool tabsToSpaces = true;
     private string columnRulers = string.Empty;
@@ -51,6 +52,7 @@ internal sealed class EditorSettings : ObservableObject
         highlightCurrentLine = preferences.EditorHighlightCurrentLine;
         hyperlinks = preferences.EditorHyperlinks;
         autoFolding = preferences.EditorAutoFolding;
+        showInlayHints = preferences.EditorShowInlayHints;
         indentationSize = preferences.EditorIndentationSize;
         tabsToSpaces = preferences.EditorTabsToSpaces;
         columnRulers = preferences.EditorColumnRulers;
@@ -181,6 +183,23 @@ internal sealed class EditorSettings : ObservableObject
             if (Set(ref autoFolding, value))
             {
                 preferences?.EditorAutoFolding = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether the editor draws the language server's inline hints. There is no preference for it yet (the editor settings
+    /// section is the frozen <c>App.axaml</c> template), so it starts on for every session and lives with the editor; the App
+    /// spec records the missing preference.
+    /// </summary>
+    public bool ShowInlayHints
+    {
+        get => showInlayHints;
+        set
+        {
+            if (Set(ref showInlayHints, value))
+            {
+                preferences?.EditorShowInlayHints = value;
             }
         }
     }

@@ -15,7 +15,8 @@ public sealed record McpServerState(
     string? LastError = null,
     string? StderrTail = null,
     DateTimeOffset? ReadyAt = null,
-    int ConsecutiveFailures = 0)
+    int ConsecutiveFailures = 0,
+    bool NeedsSignIn = false)
 {
     public bool IsReady => Status == McpServerStatus.Ready;
 }
@@ -73,4 +74,13 @@ public sealed class McpServerManagerOptions
     /// Not owned by the manager. Null keeps the transport's own shared client.
     /// </summary>
     public HttpClient? HttpClient { get; init; }
+
+    /// <summary>Encrypted token persistence for OAuth; null disables OAuth entirely (stdio-only setups).</summary>
+    public IMcpTokenStore? TokenStore { get; init; }
+
+    /// <summary>The browser side of the OAuth sign-in; required with <see cref="TokenStore"/> for the interactive flow.</summary>
+    public IMcpOAuthUi? OAuthUi { get; init; }
+
+    /// <summary>Clock for token lifetimes and the sign-in timeout; tests inject a fake instead of waiting five minutes.</summary>
+    public TimeProvider? TimeProvider { get; init; }
 }

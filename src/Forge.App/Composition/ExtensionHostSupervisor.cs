@@ -66,12 +66,15 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
         IHostToolCallRouter? toolRouter = null,
         INotifications? notifications = null)
     {
+        var hostArguments = new List<string> { "--worker", layout.WorkerPath, "--executor", layout.ExecutorPath };
+        hostArguments.AddRange(PluginRootArguments(AppContext.BaseDirectory));
+
         var connection = new HostConnection
         {
             PipeName = "forge-app-" + Guid.NewGuid().ToString("N")[..20],
             HostExecutablePath = layout.HostPath,
             RuntimePath = "dotnet",
-            HostArguments = ["--worker", layout.WorkerPath, "--executor", layout.ExecutorPath],
+            HostArguments = hostArguments,
             StartTimeout = TimeSpan.FromSeconds(60),
         };
         var options = new ExtensionHostClientOptions
@@ -92,6 +95,31 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
     /// </summary>
     internal static ExtensionHostSupervisor WrapClient(ExtensionHostClient client, INotifications? notifications) =>
         new(client, notifications);
+
+    /// <summary>
+    /// The plugin-root switches of one app layout (wave W10a): bundled plugins ship next to the app and are copied into the
+    /// plugins directory on first run, while the read-only built-in directory is discovered without ever being written to.
+    /// Both are empty for now, so a switch is passed only when its directory exists - the host treats a missing directory
+    /// as "none" anyway, and inventing a path would make a typo look like an empty payload. Split out of
+    /// <see cref="Create"/> so the rule can be pinned without a host process.
+    /// </summary>
+    internal static List<string> PluginRootArguments(string appDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appDirectory);
+        var arguments = new List<string>(4);
+        AddIfPresent(arguments, "--bundled", Path.Combine(appDirectory, "plugins-bundled"));
+        AddIfPresent(arguments, "--builtin", Path.Combine(appDirectory, "plugins-builtin"));
+        return arguments;
+
+        static void AddIfPresent(List<string> target, string name, string directory)
+        {
+            if (Directory.Exists(directory))
+            {
+                target.Add(name);
+                target.Add(directory);
+            }
+        }
+    }
 
     /// <summary>Starts the host in the background; returns immediately so the window is up before the pipe is open.</summary>
     public void Start()

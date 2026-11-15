@@ -234,6 +234,8 @@ public sealed class GitSettingsSectionGitTests : IDisposable
         section.ChecksPollSeconds = 45;
         section.ChecksMaxWaitMinutes = 5;
         section.StepCommits = false;
+        section.SelectedReviewMode = section.ReviewModes[1];
+        section.ReviewAfterStepCommit = true;
 
         Assert.Equal(
             [
@@ -242,6 +244,8 @@ public sealed class GitSettingsSectionGitTests : IDisposable
                 nameof(GitSettingsSectionViewModel.ChecksPollSeconds),
                 nameof(GitSettingsSectionViewModel.ChecksMaxWaitMinutes),
                 nameof(GitSettingsSectionViewModel.StepCommits),
+                nameof(GitSettingsSectionViewModel.SelectedReviewMode),
+                nameof(GitSettingsSectionViewModel.ReviewAfterStepCommit),
             ],
             raised);
     }

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Forge.App.Input;
 using Forge.App.Localization;
 using Forge.App.Logging;
 using Forge.App.Preferences;
@@ -60,14 +61,15 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
         itemsView = new ReadOnlyObservableCollection<PaletteItem>(new ObservableCollection<PaletteItem>());
 
         CloseCommand = new RelayCommand(Close);
-        sources.Add(new PaletteSourceOption(PaletteSource.Files, PaletteStrings.SourceFiles, PaletteCommandCatalog.FilesGesture));
-        sources.Add(new PaletteSourceOption(PaletteSource.Content, PaletteStrings.SourceContent, PaletteCommandCatalog.ContentGesture));
-        sources.Add(new PaletteSourceOption(PaletteSource.Sessions, PaletteStrings.SourceSessions, string.Empty));
-        sources.Add(new PaletteSourceOption(PaletteSource.Commands, PaletteStrings.SourceCommands, PaletteCommandCatalog.CommandsGesture));
-        sources.Add(new PaletteSourceOption(PaletteSource.Symbols, PaletteStrings.SourceSymbols, string.Empty));
+        sources.Add(new PaletteSourceOption(PaletteSource.Files, PaletteStrings.SourceFiles, KeymapActionIds.OpenFilePalette));
+        sources.Add(new PaletteSourceOption(PaletteSource.Content, PaletteStrings.SourceContent, KeymapActionIds.OpenSearchPalette));
+        sources.Add(new PaletteSourceOption(PaletteSource.Sessions, PaletteStrings.SourceSessions, null));
+        sources.Add(new PaletteSourceOption(PaletteSource.Commands, PaletteStrings.SourceCommands, KeymapActionIds.OpenCommandPalette));
+        sources.Add(new PaletteSourceOption(PaletteSource.Symbols, PaletteStrings.SourceSymbols, null));
         selectedSource = sources[0];
 
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        KeymapApplier.Changed += OnKeymapChanged;
     }
 
     /// <summary>Closes the palette; bound to the close affordance so the view needs no code for it.</summary>
@@ -365,6 +367,7 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
 
         disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        KeymapApplier.Changed -= OnKeymapChanged;
         Cancel(ref contentCts);
         Cancel(ref previewCts);
         Cancel(ref refreshCts);
@@ -401,6 +404,22 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(Placeholder));
         OnPropertyChanged(nameof(EmptyText));
         OnPropertyChanged(nameof(StatusText));
+        Rebuild(keepSelection: true);
+    }
+
+    /// <summary>
+    /// A rebind moves the gestures of the source strip and of the four global commands. Both resolve on read (the strip's
+    /// option and the command row ask the applier), so the bindings are told the strip changed and the rows are rebuilt
+    /// from the snapshot in hand — a row that kept the old badge would name a key that no longer opens it.
+    /// </summary>
+    private void OnKeymapChanged()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(Sources));
         Rebuild(keepSelection: true);
     }
 

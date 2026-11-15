@@ -1,0 +1,232 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:git="using:Forge.App.Git"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Views.GitSettingsSectionView"
+             x:DataType="git:GitSettingsSectionViewModel">
+  <!-- The `git` section body: pull strategy, network timeout, step commits and the review rows of wave W17b, the checks
+       wait timing, the review package limits and the gh path, each edited live on the preference it belongs to. This
+       control is the section's view: SectionViewTemplate is matched before the app-level templates, so the inline copy of
+       these rows that App.axaml still carries is no longer drawn. -->
+  <StackPanel Spacing="6">
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.pullStrategy], Source={x:Static loc:Loc.Instance}}" />
+      <ComboBox Grid.Column="1"
+                MinWidth="170"
+                HorizontalAlignment="Left"
+                ItemsSource="{Binding PullStrategies}"
+                SelectedItem="{Binding SelectedPullStrategy, Mode=TwoWay}"
+                AutomationProperties.AutomationId="git-pull-strategy"
+                AutomationProperties.Name="{Binding [git.settings.pullStrategy], Source={x:Static loc:Loc.Instance}}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="git:GitPullStrategyOption">
+            <TextBlock Classes="caption" Text="{Binding Label}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.networkTimeout], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="10"
+                     Maximum="600"
+                     Increment="10"
+                     FormatString="0"
+                     Value="{Binding NetworkTimeoutSeconds, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-network-timeout"
+                     AutomationProperties.Name="{Binding [git.settings.networkTimeout], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [git.settings.networkTimeoutHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.stepCommits], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox Grid.Column="1"
+                IsChecked="{Binding StepCommits, Mode=TwoWay}"
+                AutomationProperties.AutomationId="git-step-commits"
+                AutomationProperties.Name="{Binding [git.settings.stepCommits], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [git.settings.stepCommitsHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.reviewMode], Source={x:Static loc:Loc.Instance}}" />
+      <ComboBox Grid.Column="1"
+                MinWidth="170"
+                HorizontalAlignment="Left"
+                ItemsSource="{Binding ReviewModes}"
+                SelectedItem="{Binding SelectedReviewMode, Mode=TwoWay}"
+                AutomationProperties.AutomationId="git-review-mode"
+                AutomationProperties.Name="{Binding [git.settings.reviewMode], Source={x:Static loc:Loc.Instance}}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="git:GitReviewModeOption">
+            <TextBlock Classes="caption" Text="{Binding Label}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.reviewAfterStepCommit], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox Grid.Column="1"
+                IsChecked="{Binding ReviewAfterStepCommit, Mode=TwoWay}"
+                AutomationProperties.AutomationId="git-review-after-step"
+                AutomationProperties.Name="{Binding [git.settings.reviewAfterStepCommit], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [git.settings.reviewModeHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.checksPoll], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="10"
+                     Maximum="300"
+                     Increment="5"
+                     FormatString="0"
+                     Value="{Binding ChecksPollSeconds, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-checks-poll"
+                     AutomationProperties.Name="{Binding [git.settings.checksPoll], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.checksMaxWait], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="1"
+                     Maximum="180"
+                     Increment="5"
+                     FormatString="0"
+                     Value="{Binding ChecksMaxWaitMinutes, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-checks-max-wait"
+                     AutomationProperties.Name="{Binding [git.settings.checksMaxWait], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.checksNoChecks], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="1"
+                     Maximum="10"
+                     Increment="1"
+                     FormatString="0"
+                     Value="{Binding ChecksNoChecksConfirmations, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-checks-no-checks"
+                     AutomationProperties.Name="{Binding [git.settings.checksNoChecks], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.checksLogTail], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="20"
+                     Maximum="2000"
+                     Increment="10"
+                     FormatString="0"
+                     Value="{Binding ChecksFailureLogTailLines, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-checks-log-tail"
+                     AutomationProperties.Name="{Binding [git.settings.checksLogTail], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [git.settings.checksHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.reviewDiffChars], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="1000"
+                     Maximum="500000"
+                     Increment="1000"
+                     FormatString="0"
+                     Value="{Binding ReviewDiffMaxChars, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-review-diff-chars"
+                     AutomationProperties.Name="{Binding [git.settings.reviewDiffChars], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.reviewCommits], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="5"
+                     Maximum="500"
+                     Increment="5"
+                     FormatString="0"
+                     Value="{Binding ReviewMaxCommits, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-review-commits"
+                     AutomationProperties.Name="{Binding [git.settings.reviewCommits], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.reviewFiles], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="20"
+                     Maximum="2000"
+                     Increment="10"
+                     FormatString="0"
+                     Value="{Binding ReviewMaxFiles, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-review-files"
+                     AutomationProperties.Name="{Binding [git.settings.reviewFiles], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.reviewFieldChars], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="200"
+                     Maximum="20000"
+                     Increment="100"
+                     FormatString="0"
+                     Value="{Binding ReviewFieldMaxChars, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="git-review-field-chars"
+                     AutomationProperties.Name="{Binding [git.settings.reviewFieldChars], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [git.settings.reviewHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [git.settings.ghPath], Source={x:Static loc:Loc.Instance}}" />
+      <TextBox Grid.Column="1"
+               MinWidth="260"
+               HorizontalAlignment="Left"
+               PlaceholderText="gh"
+               Text="{Binding GhPath, Mode=TwoWay}"
+               AutomationProperties.AutomationId="git-gh-path"
+               AutomationProperties.Name="{Binding [git.settings.ghPath], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [git.settings.ghPathHint], Source={x:Static loc:Loc.Instance}}" />
+  </StackPanel>
+</UserControl>

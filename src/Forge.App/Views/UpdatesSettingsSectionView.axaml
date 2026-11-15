@@ -1,0 +1,137 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:settings="using:Forge.App.Settings"
+             x:Class="Forge.App.Views.UpdatesSettingsSectionView"
+             x:DataType="settings:UpdatesSettingsSectionViewModel">
+  <!-- The `updates` section: where the manifest lives, how often and from which channel to check, the running version,
+       and the check-now action with progress and a readable result. Release notes are rendered from Markdown in
+       code-behind, reusing the app's renderer. -->
+  <StackPanel Spacing="6">
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [updates.settings.hint], Source={x:Static loc:Loc.Instance}}" />
+
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [updates.settings.manifestUrl], Source={x:Static loc:Loc.Instance}}" />
+      <TextBox Grid.Column="1"
+               MinWidth="320"
+               HorizontalAlignment="Left"
+               PlaceholderText="https://…/updates.json"
+               Text="{Binding ManifestUrl, Mode=TwoWay}"
+               AutomationProperties.AutomationId="updates-manifest-url"
+               AutomationProperties.Name="{Binding [updates.settings.manifestUrl], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [updates.settings.manifestUrlHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [updates.settings.frequency], Source={x:Static loc:Loc.Instance}}" />
+      <ComboBox Grid.Column="1"
+                MinWidth="170"
+                HorizontalAlignment="Left"
+                ItemsSource="{Binding Frequencies}"
+                SelectedItem="{Binding SelectedFrequency, Mode=TwoWay}"
+                AutomationProperties.AutomationId="updates-frequency"
+                AutomationProperties.Name="{Binding [updates.settings.frequency], Source={x:Static loc:Loc.Instance}}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="settings:UpdatesChoiceOption">
+            <TextBlock Classes="caption" Text="{Binding Label}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Grid>
+
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [updates.settings.channel], Source={x:Static loc:Loc.Instance}}" />
+      <ComboBox Grid.Column="1"
+                MinWidth="170"
+                HorizontalAlignment="Left"
+                ItemsSource="{Binding Channels}"
+                SelectedItem="{Binding SelectedChannel, Mode=TwoWay}"
+                AutomationProperties.AutomationId="updates-channel"
+                AutomationProperties.Name="{Binding [updates.settings.channel], Source={x:Static loc:Loc.Instance}}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="settings:UpdatesChoiceOption">
+            <TextBlock Classes="caption" Text="{Binding Label}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Grid>
+
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [updates.settings.currentVersion], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 VerticalAlignment="Center"
+                 Text="{Binding CurrentVersion}"
+                 AutomationProperties.AutomationId="updates-current-version" />
+    </Grid>
+
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [updates.settings.lastCheck], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 VerticalAlignment="Center"
+                 Text="{Binding LastCheckText}"
+                 AutomationProperties.AutomationId="updates-last-check" />
+    </Grid>
+
+    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+      <Button Command="{Binding CheckNowCommand}"
+              AutomationProperties.AutomationId="updates-check-now"
+              AutomationProperties.Name="{Binding [updates.settings.checkNow], Source={x:Static loc:Loc.Instance}}"
+              Content="{Binding [updates.settings.checkNow], Source={x:Static loc:Loc.Instance}}" />
+      <Button Command="{Binding CancelCommand}"
+              IsVisible="{Binding IsChecking}"
+              AutomationProperties.AutomationId="updates-cancel"
+              AutomationProperties.Name="{Binding [updates.settings.cancel], Source={x:Static loc:Loc.Instance}}"
+              Content="{Binding [updates.settings.cancel], Source={x:Static loc:Loc.Instance}}" />
+      <Button Command="{Binding OpenDownloadLocationCommand}"
+              IsVisible="{Binding CanOpenDownloadLocation}"
+              AutomationProperties.AutomationId="updates-open-download-location"
+              AutomationProperties.Name="{Binding [updates.settings.openDownloadLocation], Source={x:Static loc:Loc.Instance}}"
+              Content="{Binding [updates.settings.openDownloadLocation], Source={x:Static loc:Loc.Instance}}" />
+      <Button Command="{Binding InstallAndRestartCommand}"
+              AutomationProperties.AutomationId="updates-install-restart"
+              AutomationProperties.Name="{Binding [updates.settings.install], Source={x:Static loc:Loc.Instance}}"
+              Content="{Binding [updates.settings.install], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
+
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [updates.settings.installHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <TextBlock Classes="caption"
+               IsVisible="{Binding HasInstallResult}"
+               TextWrapping="Wrap"
+               Text="{Binding InstallText}"
+               AutomationProperties.AutomationId="updates-install-result" />
+
+    <TextBlock Classes="caption"
+               IsVisible="{Binding IsChecking}"
+               TextWrapping="Wrap"
+               Text="{Binding ProgressText}"
+               AutomationProperties.AutomationId="updates-progress" />
+
+    <TextBlock Classes="caption"
+               IsVisible="{Binding HasResult}"
+               TextWrapping="Wrap"
+               Text="{Binding ResultText}"
+               AutomationProperties.AutomationId="updates-result" />
+
+    <ContentControl x:Name="NotesHost"
+                    IsVisible="{Binding HasNotes}" />
+  </StackPanel>
+</UserControl>

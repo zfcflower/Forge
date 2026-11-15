@@ -16,18 +16,32 @@ internal sealed partial class FileDocumentViewModel
 {
     private readonly record struct EditorLspRequest(
         TextDocument Document, LanguageSession Session, TextSnapshot Snapshot, int Generation, CancellationToken Token);
+    internal readonly record struct EditorLspCodeActionList(int Version, CodeActionResult Result);
+
+    internal readonly record struct EditorLspRenameResult(int Version, WorkspaceEdit Edit);
+
+    /// <summary>
+    /// Queries the workbench for a document open in another tab (wave W17c review): a workspace edit must never write
+    /// such a file to disk behind its buffer — the tab gets no didChange/reload and its next save would silently roll
+    /// the edit back. Set by the window that owns the tabs; null in hosts without tabs, where the disk path is safe.
+    /// </summary>
+    internal Func<string, FileDocumentViewModel?>? FindOpenDocument { get; set; }
+
     private CancellationTokenSource? editorLspCts;
     private LanguageSession? diagnosticsSession;
     private EventHandler<DiagnosticsChangedEventArgs>? diagnosticsHandler;
     private EventHandler<bool>? busyHandler;
+    private EventHandler? codeActionsRefreshHandler;
     private int editorLspGeneration;
     private long editorDiagnosticsSequence = -1;
     private bool unsupportedHoverReported;
     private EditorLspDiagnosticSet editorDiagnostics = EditorLspDiagnosticSet.Empty;
     private EditorLspDefinitionTarget? pendingReveal;
     private PullLoop? pullLoop;
-    private SemanticLoop? semanticLoop;
+    private EditorRequestLoop? semanticLoop;
+    private EditorRequestLoop? inlayHintsLoop;
     private SemanticLineIndex semanticIndex = SemanticLineIndex.Empty;
+    private InlayHintLineIndex inlayHints = InlayHintLineIndex.Empty;
 
     /// <summary>Quiet period after an edit before the semantic classification is asked for again.</summary>
     /// <summary>The most reference rows the list shows; past it the list says it is cut.</summary>
@@ -45,17 +59,35 @@ internal sealed partial class FileDocumentViewModel
     /// <summary>Second pull after a document opens, so a server that needed to load a project still reports.</summary>
     private const int PullCatchUpMilliseconds = 2_500;
 
+    /// <summary>Most hints of one answer that are resolved one by one; past it the label just stays missing.</summary>
+    private const int MaxInlayHintResolves = 32;
+
     internal event EventHandler<EditorLspDiagnosticsEventArgs>? EditorDiagnosticsChanged;
     internal event EventHandler<EditorLspDefinitionTarget>? DefinitionRequested;
     internal event EventHandler? RevealRequested;
 
+    /// <summary>Raised when the server asks for its code actions to be re-read (<c>workspace/codeAction/refresh</c>).</summary>
+    internal event EventHandler? CodeActionsRefreshRequested;
+
     /// <summary>Raised on the UI thread with the lines the server newly classified.</summary>
     internal event EventHandler<EditorLspSemanticTokensEventArgs>? SemanticTokensChanged;
+
+    /// <summary>Raised on the UI thread when a new inlay hint answer was bucketed, or when the hints were cleared.</summary>
+    internal event EventHandler<EditorLspInlayHintsEventArgs>? InlayHintsChanged;
 
     internal EditorLspDiagnosticSet EditorDiagnostics => editorDiagnostics;
 
     /// <summary>The semantic classification in use: per line, stamped with the document version it maps against.</summary>
     internal SemanticLineIndex EditorSemanticTokens => semanticIndex;
+
+    /// <summary>The inlay hints in use: per line, stamped with the document version the offsets were mapped against.</summary>
+    internal InlayHintLineIndex EditorInlayHints => inlayHints;
+
+    /// <summary>Whether the attached server offers code actions; the bulb and Ctrl+. have nothing to show otherwise.</summary>
+    internal bool SupportsCodeActions => session?.Client?.Capabilities is { SupportsCodeActions: true };
+
+    /// <summary>Whether the attached server renames symbols; F2 has no entry when it does not.</summary>
+    internal bool SupportsRename => session?.Client?.Capabilities is { SupportsRename: true };
 
     internal string? EditorWorkspace => openWorkspace ?? Workspace;
 
@@ -82,6 +114,7 @@ internal sealed partial class FileDocumentViewModel
     {
         StopDiagnosticsPull();
         StopSemanticTokens();
+        StopInlayHints();
         editorLspGeneration++;
         var cts = editorLspCts;
         editorLspCts = null;
@@ -102,11 +135,17 @@ internal sealed partial class FileDocumentViewModel
             {
                 active.BusyChanged -= busy;
             }
+
+            if (codeActionsRefreshHandler is { } refresh)
+            {
+                active.CodeActionsRefreshRequested -= refresh;
+            }
         }
 
         diagnosticsSession = null;
         diagnosticsHandler = null;
         busyHandler = null;
+        codeActionsRefreshHandler = null;
         editorDiagnosticsSequence = -1;
         editorDiagnostics = EditorLspDiagnosticSet.Empty;
     }
@@ -526,6 +565,376 @@ internal sealed partial class FileDocumentViewModel
     }
 
     /// <summary>
+    /// The code actions the server offers at <paramref name="offset"/> (a zero-width range at the caret: that is the position
+    /// a quick fix is asked for), tagged with the document version they were computed against. Null means no answer — no
+    /// session, a server without <c>codeActionProvider</c>, a cancelled request or a protocol failure.
+    /// </summary>
+    internal async Task<EditorLspCodeActionList?> RequestCodeActionsAsync(int offset, CancellationToken ct)
+    {
+        if (await PrepareEditorRequestAsync(offset, ct, silent: true).ConfigureAwait(true) is not { } request)
+        {
+            return null;
+        }
+
+        if (request.Session.Client?.Capabilities is not { SupportsCodeActions: true })
+        {
+            return null;
+        }
+
+        var position = ToLspPosition(request.Snapshot, offset, EncodingOf(request));
+        var range = new LspRange(position, position);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, request.Token);
+        CodeActionResult? result;
+        try
+        {
+            result = await request.Session.RequestCodeActionsAsync(request.Document, range, null, linked.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (IsLspFailure(exception))
+        {
+            ReportEditorLspFailure(exception, request, linked.Token);
+            return null;
+        }
+
+        if (result is null || linked.IsCancellationRequested || !IsEditorRequestCurrent(request))
+        {
+            return null;
+        }
+
+        if (result.Unsupported > 0 || result.Malformed > 0)
+        {
+            SetLspStatus(new LocText(
+                InspectorStrings.EditorLspActionsIgnored, TextFormat.Number(result.Unsupported + result.Malformed)));
+        }
+
+        return new EditorLspCodeActionList(request.Snapshot.Version, result);
+    }
+
+    /// <summary>
+    /// Runs one code action: resolves it first when the server only sent <c>data</c>, then applies the edit. Every failure is
+    /// reported on the status line (and as a notification), so the view only has to call this and refresh its list.
+    /// </summary>
+    internal async Task<EditorLspWorkspaceEditResult> ApplyCodeActionAsync(
+        LspCodeAction action,
+        int version,
+        Action<IReadOnlyList<EditorLspEdit>> applyLocal,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        if (document is not { } doc || IsEditorFaulted || session is not { } active)
+        {
+            return ReportEditFailure(InspectorStrings.EditorLspNoResponse);
+        }
+
+        if (doc.Snapshot.Version != version)
+        {
+            return ReportEditFailure(InspectorStrings.EditorLspDocumentChanged);
+        }
+
+        var edit = action.Edit;
+        if (edit is null)
+        {
+            LspCodeAction? resolved;
+            try
+            {
+                resolved = await active.ResolveCodeActionAsync(action, ct).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return ReportEditFailure(InspectorStrings.EditorLspCancelled);
+            }
+            catch (Exception exception) when (IsLspFailure(exception))
+            {
+                ReportEditorLspFailure(exception);
+                return EditorLspWorkspaceEditResult.Failed(exception.Message);
+            }
+
+            edit = resolved?.Edit;
+            if (edit is null)
+            {
+                return ReportEditFailure(InspectorStrings.EditorLspActionNoEdit);
+            }
+        }
+
+        return await ApplyWorkspaceEditAsync(edit, version, applyLocal, ct).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Applies a server edit: the open buffer through <paramref name="applyLocal"/> (the view's editor document, one undo
+    /// step) and the other files on the thread pool through <see cref="EditorWorkspaceEditApplier"/>. All-or-nothing per file;
+    /// a file whose ranges do not map is dropped and reported as a partial edit.
+    /// </summary>
+    internal async Task<EditorLspWorkspaceEditResult> ApplyWorkspaceEditAsync(
+        WorkspaceEdit edit,
+        int version,
+        Action<IReadOnlyList<EditorLspEdit>> applyLocal,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(edit);
+        ArgumentNullException.ThrowIfNull(applyLocal);
+        if (document is not { } doc || IsEditorFaulted || session is not { } active)
+        {
+            return ReportEditFailure(InspectorStrings.EditorLspNoResponse);
+        }
+
+        if (doc.Snapshot.Version != version)
+        {
+            return ReportEditFailure(InspectorStrings.EditorLspDocumentChanged);
+        }
+
+        var snapshot = doc.Snapshot;
+        var encoding = active.Client?.PositionEncoding ?? snapshot.PositionEncoding;
+        var newLine = NewLineText;
+        var ownEdits = new List<EditorLspEdit>();
+        var others = new List<EditorLspFileEdit>();
+        var dropped = edit.UnsupportedOperations;
+        foreach (var file in edit.Files)
+        {
+            if (LspUri.SameFile(file.Uri, Path))
+            {
+                if (!EditorWorkspaceEditApplier.TryMapEdits(file.Edits, snapshot, encoding, newLine, out var mapped))
+                {
+                    dropped += file.Edits.Count;
+                    continue;
+                }
+
+                ownEdits.AddRange(mapped);
+                continue;
+            }
+
+            if (LspUri.ToPath(file.Uri) is { Length: > 0 } otherPath)
+            {
+                if (FindOpenDocument?.Invoke(otherPath) is not null)
+                {
+                    // Open in another tab: skip and count (same口径 as resource operations) instead of writing to disk
+                    // behind that buffer; the status line reports the partial application.
+                    dropped += file.Edits.Count;
+                    continue;
+                }
+
+                others.Add(new EditorLspFileEdit(otherPath, file.Edits));
+            }
+            else
+            {
+                dropped += file.Edits.Count;
+            }
+        }
+
+        ownEdits.Sort(static (left, right) => left.Start != right.Start
+            ? left.Start.CompareTo(right.Start)
+            : left.End.CompareTo(right.End));
+
+        // The same URI can arrive twice (changes + documentChanges, or repeated documentChanges entries); the per-entry
+        // mapper only checks overlaps within one entry, so re-check the merged list with the same rule — overlapping edits
+        // drop the whole file rather than applying a corrupting subset to the open buffer.
+        for (var i = 1; i < ownEdits.Count; i++)
+        {
+            if (ownEdits[i].Start < ownEdits[i - 1].End
+                || (ownEdits[i].Start == ownEdits[i - 1].Start && ownEdits[i].End == ownEdits[i - 1].End))
+            {
+                dropped += ownEdits.Count;
+                ownEdits.Clear();
+                break;
+            }
+        }
+
+        if (ownEdits.Count > 0)
+        {
+            try
+            {
+                applyLocal(ownEdits);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                AppLogs.File.ZLogError(exception, $"applying a workspace edit to the open document failed");
+                return ReportEditFailure(InspectorStrings.EditorLspApplyFailed);
+            }
+        }
+
+        var written = 0;
+        var otherEdits = 0;
+        if (others.Count > 0)
+        {
+            (written, otherEdits) = await Task.Run(() => WriteWorkspaceEditFilesAsync(others, encoding, newLine, ct), ct)
+                .ConfigureAwait(true);
+            dropped += SumEdits(others) - otherEdits;
+        }
+
+        var files = (ownEdits.Count > 0 ? 1 : 0) + written;
+        var edits = ownEdits.Count + otherEdits;
+        var result = new EditorLspWorkspaceEditResult(files, edits, written, dropped);
+        if (files == 0 && dropped == 0)
+        {
+            SetLspStatus(new LocText(InspectorStrings.EditorLspActionNoEdit));
+        }
+        else if (dropped > 0)
+        {
+            ReportEditorLspNotice(new LocText(InspectorStrings.EditorLspEditPartial, TextFormat.Number(dropped)));
+        }
+        else
+        {
+            SetLspStatus(new LocText(InspectorStrings.EditorLspEditApplied, TextFormat.Number(files), TextFormat.Number(edits)));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Asks the server whether the symbol at <paramref name="offset"/> can be renamed and what to seed the input box with.
+    /// Null means no answer (no session, or a protocol failure); <c>Allowed = false</c> means the server said no.
+    /// </summary>
+    internal async Task<EditorLspPrepareRename?> PrepareRenameAsync(int offset, CancellationToken ct)
+    {
+        if (await PrepareEditorRequestAsync(offset, ct, silent: true).ConfigureAwait(true) is not { } request)
+        {
+            return null;
+        }
+
+        var capabilities = request.Session.Client?.Capabilities;
+        if (capabilities is not { SupportsRename: true })
+        {
+            return null;
+        }
+
+        if (capabilities is not { SupportsPrepareRename: true })
+        {
+            return new EditorLspPrepareRename(true, null);
+        }
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, request.Token);
+        RenamePreparation? preparation;
+        try
+        {
+            preparation = await request.Session.RequestPrepareRenameAsync(request.Document, offset, linked.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (IsLspFailure(exception))
+        {
+            ReportEditorLspFailure(exception, request, linked.Token);
+            return null;
+        }
+
+        if (linked.IsCancellationRequested || !IsEditorRequestCurrent(request))
+        {
+            return null;
+        }
+
+        return preparation is null
+            ? new EditorLspPrepareRename(false, null)
+            : new EditorLspPrepareRename(true, preparation.Placeholder);
+    }
+
+    /// <summary>The identifier at <paramref name="offset"/>, used to seed the rename input box when the server offers no placeholder.</summary>
+    internal string SymbolAt(int offset) => document is { } doc ? EditorLspMapping.WordAt(doc.Snapshot, offset) : string.Empty;
+
+    /// <summary>
+    /// The edit that renames the symbol at <paramref name="offset"/>, tagged with the document version it applies to. Null
+    /// means no answer: no session, no <c>renameProvider</c>, a cancelled request, or a server that refused.
+    /// </summary>
+    internal async Task<EditorLspRenameResult?> RequestRenameAsync(int offset, string newName, CancellationToken ct)
+    {
+        if (await PrepareEditorRequestAsync(offset, ct, silent: false).ConfigureAwait(true) is not { } request)
+        {
+            return null;
+        }
+
+        if (request.Session.Client?.Capabilities is not { SupportsRename: true })
+        {
+            ReportUnsupported(InspectorStrings.EditorLspFeatureRename);
+            return null;
+        }
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, request.Token);
+        WorkspaceEdit? edit;
+        try
+        {
+            edit = await request.Session.RequestRenameAsync(request.Document, offset, newName, linked.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (IsLspFailure(exception))
+        {
+            ReportEditorLspFailure(exception, request, linked.Token);
+            return null;
+        }
+
+        if (linked.IsCancellationRequested || !IsEditorRequestCurrent(request))
+        {
+            return null;
+        }
+
+        if (edit is null)
+        {
+            SetLspStatus(new LocText(InspectorStrings.EditorLspRenameNone));
+            return null;
+        }
+
+        return new EditorLspRenameResult(request.Snapshot.Version, edit);
+    }
+
+    private static LspPosition ToLspPosition(TextSnapshot snapshot, int offset, PositionEncoding encoding)
+    {
+        var position = snapshot.OffsetToPosition(offset, encoding);
+        return new LspPosition(position.Line, position.Character);
+    }
+
+    private static PositionEncoding EncodingOf(EditorLspRequest request) =>
+        request.Session.Client?.PositionEncoding ?? request.Snapshot.PositionEncoding;
+
+    private EditorLspWorkspaceEditResult ReportEditFailure(string key)
+    {
+        ReportEditorLspNotice(new LocText(key));
+        return EditorLspWorkspaceEditResult.Failed(Loc.Instance[key]);
+    }
+
+    private static int SumEdits(IReadOnlyList<EditorLspFileEdit> files)
+    {
+        var total = 0;
+        foreach (var file in files)
+        {
+            total += file.Edits.Count;
+        }
+
+        return total;
+    }
+
+    /// <summary>Writes each other file and reports exactly what landed: files written and edits applied.</summary>
+    private static async Task<(int Files, int Edits)> WriteWorkspaceEditFilesAsync(
+        IReadOnlyList<EditorLspFileEdit> files,
+        PositionEncoding encoding,
+        string newLine,
+        CancellationToken ct)
+    {
+        var written = 0;
+        var edits = 0;
+        foreach (var file in files)
+        {
+            try
+            {
+                if (await EditorWorkspaceEditApplier.ApplyToFileAsync(file.Path, file.Edits, encoding, newLine, ct).ConfigureAwait(false))
+                {
+                    written++;
+                    edits += file.Edits.Count;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                AppLogs.File.ZLogWarning($"writing '{file.Path}' for a workspace edit failed: {exception.Message}");
+            }
+        }
+
+        return (written, edits);
+    }
+
+    /// <summary>
     /// The characters that open the completion list by themselves: the server's declared
     /// <c>triggerCharacters</c> plus <c>.</c>, which every server means even when it forgets to declare it. Empty when
     /// there is no session, so an unserved file opens completion only with Ctrl+Space.
@@ -727,7 +1136,7 @@ internal sealed partial class FileDocumentViewModel
         }
 
         var generation = editorLspGeneration;
-        var loop = new SemanticLoop(active, doc);
+        var loop = new EditorRequestLoop(active, doc);
         semanticLoop = loop;
 
         void OnRefresh(object? sender, EventArgs e) => loop.Request();
@@ -749,7 +1158,7 @@ internal sealed partial class FileDocumentViewModel
     /// One request after the quiet period, then another as soon as the pump is signalled again: an edit that arrives while
     /// a request is in flight is not lost, it becomes the next round.
     /// </summary>
-    private async Task PumpSemanticTokensAsync(SemanticLoop loop, TextDocument doc, int generation)
+    private async Task PumpSemanticTokensAsync(EditorRequestLoop loop, TextDocument doc, int generation)
     {
         while (!loop.Token.IsCancellationRequested)
         {
@@ -777,7 +1186,7 @@ internal sealed partial class FileDocumentViewModel
         }
     }
 
-    private async Task CatchUpSemanticTokensAsync(SemanticLoop loop, TextDocument doc, int generation)
+    private async Task CatchUpSemanticTokensAsync(EditorRequestLoop loop, TextDocument doc, int generation)
     {
         try
         {
@@ -792,7 +1201,7 @@ internal sealed partial class FileDocumentViewModel
         }
     }
 
-    private async Task RequestSemanticTokensAsync(SemanticLoop loop, TextDocument doc, int generation)
+    private async Task RequestSemanticTokensAsync(EditorRequestLoop loop, TextDocument doc, int generation)
     {
         var snapshot = doc.Snapshot;
         if (snapshot.Length > ForgeEditorBridge.HighlightLimit)
@@ -875,8 +1284,8 @@ internal sealed partial class FileDocumentViewModel
         }
     }
 
-    /// <summary>One document's semantic-token pump: the session, the request signal and the cancellation root.</summary>
-    private sealed class SemanticLoop(LanguageSession session, TextDocument document) : IDisposable
+    /// <summary>One document's request pump (semantic tokens or inlay hints): the session, the signal and the cancellation root.</summary>
+    private sealed class EditorRequestLoop(LanguageSession session, TextDocument document) : IDisposable
     {
         private readonly SemaphoreSlim signal = new(0, 1);
         private readonly CancellationTokenSource lifetime = new();
@@ -916,6 +1325,12 @@ internal sealed partial class FileDocumentViewModel
 
         public Task WaitForRequestAsync() => signal.WaitAsync(lifetime.Token);
 
+        /// <summary>
+        /// True when another request arrived within <paramref name="milliseconds"/>: the quiet window a debounce has to restart,
+        /// so a burst of edits becomes one request instead of one per keystroke.
+        /// </summary>
+        public Task<bool> TryWaitForRequestAsync(int milliseconds) => signal.WaitAsync(milliseconds, lifetime.Token);
+
         public void Dispose()
         {
             if (disposed)
@@ -930,6 +1345,224 @@ internal sealed partial class FileDocumentViewModel
             lifetime.Dispose();
             signal.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Inlay hints (parameter names, inferred types): asked for on attach, after every edit (debounced like the diagnostic
+    /// pull) and whenever the server reports <c>workspace/inlayHint/refresh</c>. The answer is bucketed per line off the UI
+    /// thread, so the renderer reads one array per visible line instead of scanning the document.
+    /// </summary>
+    private void StartInlayHints(TextDocument doc, LanguageSession active)
+    {
+        StopInlayHints();
+        if (active.Client?.Capabilities is not { SupportsInlayHints: true })
+        {
+            return;
+        }
+
+        var generation = editorLspGeneration;
+        var loop = new EditorRequestLoop(active, doc);
+        inlayHintsLoop = loop;
+
+        void OnRefresh(object? sender, EventArgs e) => loop.Request();
+        void OnChanged(object? sender, Forge.Editor.Text.TextChangedEventArgs e) => loop.Request();
+        active.InlayHintsRefreshRequested += OnRefresh;
+        doc.Changed += OnChanged;
+        loop.Subscriptions = () =>
+        {
+            active.InlayHintsRefreshRequested -= OnRefresh;
+            doc.Changed -= OnChanged;
+        };
+
+        loop.Request();
+        _ = PumpInlayHintsAsync(loop, doc, generation);
+        _ = CatchUpInlayHintsAsync(loop, doc, generation);
+    }
+
+    private async Task PumpInlayHintsAsync(EditorRequestLoop loop, TextDocument doc, int generation)
+    {
+        while (!loop.Token.IsCancellationRequested)
+        {
+            try
+            {
+                await loop.WaitForRequestAsync().ConfigureAwait(true);
+                // Trailing-edge debounce: every further edit restarts the quiet window, exactly like the diagnostic pull does
+                // by cancelling and rescheduling its pending request.
+                while (await loop.TryWaitForRequestAsync(PullDebounceMilliseconds).ConfigureAwait(true))
+                {
+                }
+
+                await RequestInlayHintsAsync(loop, doc, generation).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A fire-and-forget pump that died silently would leave the file without hints and no trace of why.
+                AppLogs.File.ZLogError(exception, $"inlay hint pump stopped");
+                return;
+            }
+        }
+    }
+
+    private async Task CatchUpInlayHintsAsync(EditorRequestLoop loop, TextDocument doc, int generation)
+    {
+        try
+        {
+            await Task.Delay(PullCatchUpMilliseconds, loop.Token).ConfigureAwait(true);
+            if (generation == editorLspGeneration && ReferenceEquals(document, doc))
+            {
+                loop.Request();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RequestInlayHintsAsync(EditorRequestLoop loop, TextDocument doc, int generation)
+    {
+        var snapshot = doc.Snapshot;
+        if (snapshot.Length > ForgeEditorBridge.HighlightLimit)
+        {
+            // Over the ceiling the overlay is dropped rather than kept from the last small version of the file.
+            ClearInlayHints();
+            return;
+        }
+
+        var encoding = loop.Session.Client?.PositionEncoding ?? snapshot.PositionEncoding;
+        // The whole file this wave: the renderer still draws only the visible lines, and a viewport-shaped request would need
+        // the scroll position to reach the view model. Documented as the remaining limitation in the App spec.
+        var range = new LspRange(new LspPosition(0, 0), new LspPosition(snapshot.LineCount, 0));
+        IReadOnlyList<InlayHint>? hints;
+        try
+        {
+            hints = await loop.Session.RequestInlayHintsAsync(doc, range, loop.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception) when (IsLspFailure(exception))
+        {
+            AppLogs.File.ZLogWarning($"inlay hints failed: {exception.Message}");
+            return;
+        }
+
+        if (hints is null || loop.Token.IsCancellationRequested || generation != editorLspGeneration ||
+            !ReferenceEquals(document, doc) || !ReferenceEquals(inlayHintsLoop, loop))
+        {
+            return;
+        }
+
+        if (hints.Count > 0 && loop.Session.Client?.Capabilities is { SupportsInlayHintResolve: true })
+        {
+            try
+            {
+                hints = await ResolveInlayHintLabelsAsync(loop.Session, hints, loop.Token).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+
+        InlayHintLineIndex index;
+        try
+        {
+            index = await Task.Run(
+                () => EditorLspMapping.ToInlayHintIndex(hints, snapshot, encoding),
+                loop.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            AppLogs.File.ZLogError(exception, $"mapping inlay hints failed");
+            return;
+        }
+
+        if (generation != editorLspGeneration || !ReferenceEquals(document, doc) || !ReferenceEquals(inlayHintsLoop, loop))
+        {
+            return;
+        }
+
+        inlayHints = index;
+        InlayHintsChanged?.Invoke(this, new EditorLspInlayHintsEventArgs(index));
+
+        // The server answered for text that has already moved on: ask again instead of leaving those positions behind.
+        if (index.Version != doc.Snapshot.Version)
+        {
+            loop.Request();
+        }
+    }
+
+    /// <summary>
+    /// Fills in labels a server withheld until <c>inlayHint/resolve</c>, one call per hint and bounded per answer: a server that
+    /// withholds every label must not turn one pull into an unbounded burst of requests.
+    /// </summary>
+    private static async Task<IReadOnlyList<InlayHint>> ResolveInlayHintLabelsAsync(
+        LanguageSession session,
+        IReadOnlyList<InlayHint> hints,
+        CancellationToken token)
+    {
+        List<InlayHint>? resolved = null;
+        var budget = MaxInlayHintResolves;
+        for (var i = 0; i < hints.Count; i++)
+        {
+            var hint = hints[i];
+            if (!hint.NeedsResolve || budget-- <= 0)
+            {
+                continue;
+            }
+
+            InlayHint? answer;
+            try
+            {
+                answer = await session.ResolveInlayHintAsync(hint, token).ConfigureAwait(true);
+            }
+            catch (Exception exception) when (IsLspFailure(exception))
+            {
+                continue;
+            }
+
+            if (answer is not { Label.Length: > 0 } labelled)
+            {
+                continue;
+            }
+
+            resolved ??= [.. hints];
+            resolved[i] = labelled;
+        }
+
+        return resolved ?? hints;
+    }
+
+    private void StopInlayHints()
+    {
+        var loop = inlayHintsLoop;
+        inlayHintsLoop = null;
+        loop?.Dispose();
+        ClearInlayHints();
+    }
+
+    private void ClearInlayHints()
+    {
+        if (inlayHints.IsEmpty)
+        {
+            return;
+        }
+
+        inlayHints = InlayHintLineIndex.Empty;
+        InlayHintsChanged?.Invoke(this, new EditorLspInlayHintsEventArgs(inlayHints));
     }
 
     /// <summary>
@@ -999,6 +1632,8 @@ internal sealed partial class FileDocumentViewModel
             active.DiagnosticsChanged += handler;
             busyHandler = (_, isBusy) => Dispatcher.UIThread.Post(() => OnServerBusy(active, isBusy));
             active.BusyChanged += busyHandler;
+            codeActionsRefreshHandler = (_, _) => CodeActionsRefreshRequested?.Invoke(this, EventArgs.Empty);
+            active.CodeActionsRefreshRequested += codeActionsRefreshHandler;
             if (active.Diagnostics.GetForPath(path) is { } current)
             {
                 _ = Task.Run(() => OnEditorSessionDiagnostics(current, active, doc, path, generation), CancellationToken.None);
@@ -1011,6 +1646,9 @@ internal sealed partial class FileDocumentViewModel
             // Semantic classification rides the same session and the same document events, but its own debounce: the
             // server re-analyses on its own schedule and reports it through workspace/semanticTokens/refresh.
             StartSemanticTokens(doc, active);
+
+            // Inlay hints ride the diagnostics debounce and the server's own workspace/inlayHint/refresh.
+            StartInlayHints(doc, active);
         }
         catch (OperationCanceledException)
         {

@@ -60,7 +60,8 @@ public sealed record ScreenshotRunResult(
     string? PullRequestUrl = null,
     ScreenshotCaptureResult? Capture = null,
     ScreenshotPublishResult? Publish = null,
-    ScreenshotCleanupReport? Cleanup = null);
+    ScreenshotCleanupReport? Cleanup = null,
+    IReadOnlyList<ScreenshotImage>? Images = null);
 
 /// <summary>
 /// One full screenshot step, shared by the <c>pr_screenshots</c> tool and the Git panel's "Screenshots" button so the two
@@ -75,6 +76,10 @@ public sealed class ScreenshotRunner(GitCli git, IPrPlatform platform, GitToolSe
     private readonly IPrPlatform platform = platform ?? throw new ArgumentNullException(nameof(platform));
     private readonly GitToolSettings settings = settings ?? throw new ArgumentNullException(nameof(settings));
     private readonly ScreenshotCaptureOptions options = options ?? new ScreenshotCaptureOptions();
+
+    /// <summary>Upper bound for one picture handed back as an image block (the app's own single-image bound). A larger
+    /// capture is still published and reported by name, just not returned as bytes.</summary>
+    private const int ImageByteLimit = 5 * 1024 * 1024;
 
     /// <summary>
     /// Runs the step in <paramref name="worktree"/> against <paramref name="baseBranch"/> (a branch name; it is compared as
@@ -201,6 +206,10 @@ public sealed class ScreenshotRunner(GitCli git, IPrPlatform platform, GitToolSe
 
             AppendNotes(report, notes);
 
+            // Read the pictures before the capture directory goes away: the tool returns them as image blocks so the model
+            // sees what was published, not just its name (wave W17a). An unreadable or oversized file is simply absent.
+            var images = ScreenshotImages.Read(pairs, ImageByteLimit);
+
             ScreenshotCapture.DeleteCaptureDirectory(captureDirectory);
             captureDirectory = null;
 
@@ -220,7 +229,8 @@ public sealed class ScreenshotRunner(GitCli git, IPrPlatform platform, GitToolSe
                 published.PullRequestUrl,
                 captureResult,
                 published,
-                cleaned);
+                cleaned,
+                images);
         }
         finally
         {

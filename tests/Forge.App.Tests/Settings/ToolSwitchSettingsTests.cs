@@ -142,6 +142,25 @@ public sealed class ToolSwitchSettingsTests : IDisposable
     }
 
     [Fact]
+    public void Group_titles_follow_the_language()
+    {
+        string chinese;
+        using (new Forge.App.Tests.Localization.LanguageScope(UiLanguage.Chinese))
+        {
+            chinese = string.Join("|", ToolsSettingsSectionViewModel.Build(Catalog(), new AppPreferences()).Select(static group => group.Title));
+        }
+
+        string english;
+        using (new Forge.App.Tests.Localization.LanguageScope(UiLanguage.English))
+        {
+            english = string.Join("|", ToolsSettingsSectionViewModel.Build(Catalog(), new AppPreferences()).Select(static group => group.Title));
+        }
+
+        Assert.NotEqual(chinese, english);
+        Assert.Contains("Git", english, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task The_list_round_trips_through_settings_json_and_is_omitted_when_empty()
     {
         await File.WriteAllTextAsync(settingsPath, """{ "preferences": { "toolsDisabled": ["web_search", "bash"] } }""");

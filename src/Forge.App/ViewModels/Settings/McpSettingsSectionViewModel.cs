@@ -38,12 +38,17 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     /// </summary>
     private static readonly McpImportSource[] ImportSources = McpImportSource.Known;
 
-    private readonly AppComposition composition;
+    private readonly AppPreferences preferences;
+    private readonly McpServices? services;
+    private readonly LocText problem;
+    private readonly string workspaceDirectory;
 
     /// <summary>The thread the section was built on (the UI thread); a language notification from another one is not ours.</summary>
     private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     private readonly Dispatcher dispatcher = Dispatcher.UIThread;
+
+    private CancellationTokenSource? notificationCts;
 
     private CancellationTokenSource? refreshCts;
     private CancellationTokenSource? actionCts;
@@ -68,9 +73,30 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     private HashSet<string> projectNames = new(StringComparer.Ordinal);
 
     public McpSettingsSectionViewModel(AppComposition composition)
+        : this(
+            composition?.Preferences ?? throw new ArgumentNullException(nameof(composition)),
+            composition.Mcp,
+            composition.McpProblem,
+            composition.WorkspaceDirectory)
     {
-        ArgumentNullException.ThrowIfNull(composition);
-        this.composition = composition;
+    }
+
+    /// <summary>
+    /// The same page over its four inputs. The public entry point is the composition one; this overload is what a headless test
+    /// uses, because a page whose MCP servers are answered by an in-memory transport has no composition to build.
+    /// </summary>
+    internal McpSettingsSectionViewModel(
+        AppPreferences preferences,
+        McpServices? services,
+        LocText problem,
+        string workspaceDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        this.preferences = preferences;
+        this.services = services;
+        this.problem = problem;
+        this.workspaceDirectory = workspaceDirectory;
+        notificationCts = new CancellationTokenSource();
         presets = BuildPresets();
 
         AddCommand = new RelayCommand(Add);
@@ -84,10 +110,12 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         ApplyPresetCommand = new ItemCommand<McpPresetOptionViewModel>(ApplyPreset);
         ReloadCommand = new AsyncRelayCommand(ReloadAndApplyAsync, onError: ReportUnexpected);
 
-        if (composition.Mcp is { } services)
+        if (services is { } mcp)
         {
-            services.Manager.StateChanged += OnServerStateChanged;
-            services.Manager.ToolsChanged += OnToolsChanged;
+            mcp.Manager.StateChanged += OnServerStateChanged;
+            mcp.Manager.ToolsChanged += OnToolsChanged;
+            mcp.Manager.ResourcesChanged += OnResourcesChanged;
+            mcp.Manager.ResourceUpdated += OnResourceUpdated;
         }
 
         Loc.Instance.LanguageChanged += OnLanguageChanged;
@@ -153,10 +181,10 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     }
 
     public string ImportGlobalTargetText =>
-        composition.Mcp is { } services ? McpSettingsStrings.TargetGlobal(services.Store.GlobalPath) : string.Empty;
+        this.services is { } services ? McpSettingsStrings.TargetGlobal(services.Store.GlobalPath) : string.Empty;
 
     public string ImportProjectTargetText =>
-        composition.Mcp is { } services && services.Store.ProjectPath is { } path
+        this.services is { } services && services.Store.ProjectPath is { } path
             ? McpSettingsStrings.TargetProject(path)
             : string.Empty;
 
@@ -171,40 +199,40 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
     public int McpRequestTimeoutSeconds
     {
-        get => composition.Preferences.McpRequestTimeoutSeconds;
+        get => preferences.McpRequestTimeoutSeconds;
         set
         {
-            composition.Preferences.McpRequestTimeoutSeconds = value;
+            preferences.McpRequestTimeoutSeconds = value;
             OnPropertyChanged();
         }
     }
 
     public int McpReconnectInitialDelaySeconds
     {
-        get => composition.Preferences.McpReconnectInitialDelaySeconds;
+        get => preferences.McpReconnectInitialDelaySeconds;
         set
         {
-            composition.Preferences.McpReconnectInitialDelaySeconds = value;
+            preferences.McpReconnectInitialDelaySeconds = value;
             OnPropertyChanged();
         }
     }
 
     public int McpToolSearchLimit
     {
-        get => composition.Preferences.McpToolSearchLimit;
+        get => preferences.McpToolSearchLimit;
         set
         {
-            composition.Preferences.McpToolSearchLimit = value;
+            preferences.McpToolSearchLimit = value;
             OnPropertyChanged();
         }
     }
 
     public int McpStderrTailLines
     {
-        get => composition.Preferences.McpStderrTailLines;
+        get => preferences.McpStderrTailLines;
         set
         {
-            composition.Preferences.McpStderrTailLines = value;
+            preferences.McpStderrTailLines = value;
             OnPropertyChanged();
         }
     }
@@ -247,7 +275,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     /// </summary>
     private async Task ReloadAndApplyAsync(CancellationToken ct)
     {
-        if (disposed || !CanApply || composition.Mcp is not { } services)
+        if (disposed || !CanApply || this.services is not { } services)
         {
             ShowError(McpSettingsStrings.StatusUnavailable);
             return;
@@ -290,11 +318,14 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         disposed = true;
         CancelToken(ref refreshCts);
         CancelToken(ref actionCts);
+        CancelToken(ref notificationCts);
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
-        if (composition.Mcp is { } services)
+        if (this.services is { } services)
         {
             services.Manager.StateChanged -= OnServerStateChanged;
             services.Manager.ToolsChanged -= OnToolsChanged;
+            services.Manager.ResourcesChanged -= OnResourcesChanged;
+            services.Manager.ResourceUpdated -= OnResourceUpdated;
         }
 
         DetachImportCandidates();
@@ -308,16 +339,17 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
     // ------------------------------------------------------------------ internal helpers (rows and editors call these)
 
-    internal McpServices? Services => composition.Mcp;
+    internal McpServices? Services => services;
 
-    internal int StderrTailLines => composition.Preferences.McpStderrTailLines;
+    internal int StderrTailLines => preferences.McpStderrTailLines;
 
     /// <summary>Guards against reporting off the UI thread and against work that lands after the window closed.</summary>
     internal bool CanApply => !disposed && Environment.CurrentManagedThreadId == uiThread;
 
     /// <summary>The exceptions a user-triggered MCP action may reasonably fail with; anything else is a defect.</summary>
     internal static bool Expected(Exception exception) =>
-        exception is McpException or IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException;
+        exception is McpException or IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or
+            HttpRequestException or NotSupportedException;
 
     internal void ShowStatus(string text, bool isError)
     {
@@ -361,6 +393,13 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
     /// <summary>A token for one row action: starting a new one cancels the previous (one MCP action at a time).</summary>
     internal CancellationToken ActionToken() => NewToken(ref actionCts);
+
+    /// <summary>
+    /// The token for a refresh a notification started. It is deliberately not <see cref="ActionToken"/>: taking the action token
+    /// from a notification cancels whatever the user was doing (a delete, a restart) and swallows its cancellation, which looks
+    /// like the click did nothing. This one lives for the section's lifetime and is only cancelled on dispose.
+    /// </summary>
+    internal CancellationToken NotificationToken() => notificationCts?.Token ?? CancellationToken.None;
 
     private CancellationToken RefreshToken() => NewToken(ref refreshCts);
 
@@ -449,10 +488,10 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             return false;
         }
 
-        var services = composition.Mcp;
+        var services = this.services;
         if (services is null)
         {
-            var problem = composition.McpProblem.Resolve();
+            var problem = this.problem.Resolve();
             ShowStatus(problem.Length > 0 ? problem : McpSettingsStrings.StatusUnavailable, isError: true);
             return false;
         }
@@ -613,7 +652,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
     private void Add()
     {
-        if (!CanApply || composition.Mcp is null)
+        if (!CanApply || services is null)
         {
             return;
         }
@@ -623,7 +662,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
     private void OpenEditor(McpServerEntry entry, bool isNew)
     {
-        if (composition.Mcp is not { } services)
+        if (this.services is not { } services)
         {
             ShowError(McpSettingsStrings.StatusUnavailable);
             return;
@@ -670,7 +709,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        if (composition.Mcp is not { } services)
+        if (this.services is not { } services)
         {
             ShowError(McpSettingsStrings.StatusUnavailable);
             return;
@@ -718,7 +757,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             taken.Add(row.Name);
         }
 
-        if (composition.Mcp is { } services)
+        if (this.services is { } services)
         {
             foreach (var name in services.Manager.ServerNames)
             {
@@ -760,7 +799,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
     private void ApplyPreset(McpPresetOptionViewModel? option)
     {
-        if (option is null || !CanApply || composition.Mcp is null)
+        if (option is null || !CanApply || services is null)
         {
             return;
         }
@@ -769,7 +808,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         var entry = McpPresets.ToEntry(
             option.Preset,
             UniqueName(option.Preset.Id),
-            option.Preset.NeedsPath ? composition.WorkspaceDirectory : null);
+            option.Preset.NeedsPath ? workspaceDirectory : null);
         OpenEditor(entry, isNew: true);
     }
 
@@ -788,7 +827,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        if (composition.Mcp is not { } services)
+        if (this.services is not { } services)
         {
             ShowError(McpSettingsStrings.StatusUnavailable);
             return;
@@ -898,7 +937,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
     private async Task ApplyImportAsync(CancellationToken _)
     {
-        if (disposed || !CanApply || composition.Mcp is not { } services)
+        if (disposed || !CanApply || this.services is not { } services)
         {
             return;
         }
@@ -1076,6 +1115,54 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
                 if (row.IsExpanded)
                 {
                     row.RequestToolsRefresh();
+                }
+            }
+        });
+    }
+
+    private void OnResourcesChanged(string serverName)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        dispatcher.Post(() =>
+        {
+            if (disposed || !CanApply)
+            {
+                return;
+            }
+
+            foreach (var row in Servers)
+            {
+                if (row.Name == serverName && row.IsExpanded)
+                {
+                    row.RequestResourcesRefresh();
+                }
+            }
+        });
+    }
+
+    private void OnResourceUpdated(string serverName, McpResourceUpdated update)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        dispatcher.Post(() =>
+        {
+            if (disposed || !CanApply)
+            {
+                return;
+            }
+
+            foreach (var row in Servers)
+            {
+                if (row.Name == serverName && row.IsExpanded)
+                {
+                    row.OnResourceUpdated(update);
                 }
             }
         });

@@ -188,6 +188,50 @@ public sealed class TerminalThemeFontTests
         Assert.True(observed.Columns < observed.beforeColumns, "a larger font must fit fewer columns");
     }
 
+    [Fact]
+    public async Task Terminal_font_size_override_covers_the_code_font_without_a_restart()
+    {
+        var observed = await RunAsync(async scene =>
+        {
+            var initial = await TerminalUi.WaitInsideAsync(
+                scene.Window, () => scene.Host.Session.Resizes.Count > 0, TimeSpan.FromSeconds(10));
+            Assert.True(initial, "the initial grid never reached the session");
+
+            // No override: the terminal follows the code font of the appearance section.
+            Assert.Equal(scene.Preferences.CodeFontSize, TerminalControl.FontSizeOf(scene.Preferences));
+
+            var beforeWidth = MeasureWidth(scene.Control);
+            var beforeColumns = scene.ViewModel.Emulator.Columns;
+            var beforeResizes = scene.Host.Session.Resizes.Count;
+
+            scene.Preferences.TerminalFontSize = 20;
+            var remeasured = await TerminalUi.WaitInsideAsync(
+                scene.Window, () => MeasureWidth(scene.Control) > beforeWidth, TimeSpan.FromSeconds(10));
+            var resized = await TerminalUi.WaitInsideAsync(
+                scene.Window, () => scene.Host.Session.Resizes.Count > beforeResizes, TimeSpan.FromSeconds(10));
+            var overrideSize = TerminalControl.FontSizeOf(scene.Preferences);
+
+            // Clearing the override falls back to the code font again, live.
+            scene.Preferences.TerminalFontSize = 0;
+            var fallback = await TerminalUi.WaitInsideAsync(
+                scene.Window, () => TerminalControl.FontSizeOf(scene.Preferences) == scene.Preferences.CodeFontSize,
+                TimeSpan.FromSeconds(10));
+            return (
+                remeasured,
+                resized,
+                beforeColumns,
+                OverrideSize: overrideSize,
+                Fallback: fallback,
+                Columns: scene.ViewModel.Emulator.Columns);
+        });
+
+        Assert.True(observed.remeasured, "the cell was never re-measured after the terminal font-size override");
+        Assert.True(observed.resized, "the new grid never reached the session");
+        Assert.Equal(20, observed.OverrideSize);
+        Assert.True(observed.Fallback, "clearing the override never fell back to the code font");
+        Assert.True(observed.Columns < observed.beforeColumns, "a larger terminal font must fit fewer columns");
+    }
+
     private static async Task<string> QueryForegroundAsync(Scene scene)
     {
         scene.Host.Session.DropWritten();

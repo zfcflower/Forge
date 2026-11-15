@@ -167,6 +167,48 @@ internal static class ApprovalStoreTestSupport
         }
     }
 
+    /// <summary>A schema-v2 database whose origin column has no CHECK, so a test can insert an unknown origin the
+    /// store's row mapping must refuse (mirroring the unchecked v1 table the status tests use).</summary>
+    internal static void InsertRawOrigin(string directory, string pluginId, string version, string origin)
+    {
+        using var connection = OpenDatabase(directory);
+        try
+        {
+            Execute(connection, "DROP TABLE plugin_approval;");
+            Execute(connection, """
+                CREATE TABLE plugin_approval (
+                    plugin_id         TEXT NOT NULL,
+                    version           TEXT NOT NULL,
+                    status            TEXT NOT NULL,
+                    origin            TEXT NOT NULL,
+                    source_hash       TEXT NOT NULL,
+                    dependency_hash   TEXT NOT NULL,
+                    sdk_version       TEXT NOT NULL,
+                    approved_hash     TEXT NULL,
+                    created_at        TEXT NOT NULL,
+                    updated_at        TEXT NOT NULL,
+                    updated_utc_ticks INTEGER NOT NULL,
+                    PRIMARY KEY (plugin_id, version)
+                ) WITHOUT ROWID;
+                """);
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO plugin_approval
+                    (plugin_id, version, status, origin, source_hash, dependency_hash, sdk_version, approved_hash, created_at, updated_at, updated_utc_ticks)
+                VALUES
+                    ($pluginId, $version, 'Draft', $origin, 's', 'd', 'sdk', NULL, '2025-01-01T00:00:00.0000000+00:00', '2025-01-01T00:00:00.0000000+00:00', 0)
+                """;
+            command.Parameters.AddWithValue("$pluginId", pluginId);
+            command.Parameters.AddWithValue("$version", version);
+            command.Parameters.AddWithValue("$origin", origin);
+            command.ExecuteNonQuery();
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+        }
+    }
+
     internal static void InsertRawRow(
         string directory,
         string pluginId,

@@ -55,6 +55,12 @@ public sealed record AgentHostOptions
     public Func<ReviewPackageLimits>? ReviewLimits { get; init; }
 
     /// <summary>
+    /// Where <c>request_review</c> records each finished review (wave W17b); the app writes the rows into <c>reviews.db</c>.
+    /// Null (no store) records nothing and changes no tool result. Only used together with <see cref="Reviews"/>.
+    /// </summary>
+    public IReviewConclusionStore? ReviewConclusions { get; init; }
+
+    /// <summary>
     /// The prompt templates this host was built from (<see cref="Prompts.Templates.PromptTemplateStore.Resolve"/>). The
     /// default compactor takes its summarizer prompt from the <c>compaction.summarizer</c> slot. Null = compiled-in texts.
     /// The system slot is not read from here: it is <see cref="Layers"/>' <see cref="PromptLayers.System"/>.
@@ -148,7 +154,7 @@ public sealed class AgentHost
 
         if (options.Reviews is { } reviews)
         {
-            builtIns.Add(new RequestReviewTool(scheduler, reviews, options.Todos, options.ReviewLimits));
+            builtIns.Add(new RequestReviewTool(scheduler, reviews, options.Todos, options.ReviewLimits, options.ReviewConclusions));
         }
 
         var compactor = options.Compactor

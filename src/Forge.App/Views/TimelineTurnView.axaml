@@ -25,7 +25,46 @@
         </StackPanel>
       </Button>
     </Grid>
-    <ItemsControl ItemsSource="{Binding Blocks}" IsVisible="{Binding IsExpanded}" />
+    <ItemsControl ItemsSource="{Binding Blocks}" IsVisible="{Binding IsExpanded}">
+      <!-- The reasoning row (wave W17a) is the one block type without an app-wide template: it carries no business data
+           beyond its text, so its row lives next to the block list that holds it. A collapsed row shows the first line only. -->
+      <ItemsControl.DataTemplates>
+        <DataTemplate DataType="vm:TurnThinkingViewModel" x:DataType="vm:TurnThinkingViewModel">
+          <Grid ColumnDefinitions="Auto,*">
+            <views:TimelineGutter Role="Block" Kind="Thinking" IsRunning="{Binding IsStreaming}" />
+            <StackPanel Grid.Column="1" Margin="0,2,0,4" Spacing="2">
+              <Button Classes="link"
+                      HorizontalAlignment="Left"
+                      HorizontalContentAlignment="Left"
+                      Command="{Binding ToggleCommand}"
+                      AutomationProperties.AutomationId="thinking-toggle"
+                      AutomationProperties.Name="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
+                  <TextBlock Classes="caption" Text="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}" />
+                  <TextBlock Classes="caption"
+                             MaxWidth="560"
+                             Text="{Binding Preview}"
+                             TextTrimming="CharacterEllipsis"
+                             IsVisible="{Binding !IsExpanded}" />
+                </StackPanel>
+              </Button>
+              <ScrollViewer MaxHeight="240"
+                            IsVisible="{Binding IsExpanded}"
+                            HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto">
+                <TextBlock Classes="caption"
+                           Margin="0,0,8,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           Text="{Binding Text}"
+                           AutomationProperties.AutomationId="thinking-text" />
+              </ScrollViewer>
+            </StackPanel>
+          </Grid>
+        </DataTemplate>
+      </ItemsControl.DataTemplates>
+    </ItemsControl>
     <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFootnote}">
       <views:TimelineGutter Role="Footnote" Kind="Error" IsFailing="True" />
       <TextBlock Grid.Column="1"

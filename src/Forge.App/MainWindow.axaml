@@ -24,15 +24,8 @@
     </Style>
   </Window.Styles>
 
-  <Window.KeyBindings>
-    <!-- Ctrl+` opens a terminal in the active session; a focused terminal leaves this gesture to the window. -->
-    <KeyBinding Gesture="Ctrl+OemTilde" Command="{Binding NewTerminalCommand}" />
-    <!-- The global palette: Ctrl+P files, Ctrl+Shift+P commands, Ctrl+Shift+F workspace text. Every gesture toggles its
-         source, so pressing it again closes the palette instead of wiping the typed query. -->
-    <KeyBinding Gesture="Ctrl+P" Command="{Binding OpenFilePaletteCommand}" />
-    <KeyBinding Gesture="Ctrl+Shift+P" Command="{Binding OpenCommandPaletteCommand}" />
-    <KeyBinding Gesture="Ctrl+Shift+F" Command="{Binding OpenSearchPaletteCommand}" />
-  </Window.KeyBindings>
+  <!-- Window key bindings are built in code by KeymapApplier from the keymap catalog and the stored overrides, so a
+       rebind applies without touching this file. -->
 
   <Grid RowDefinitions="Auto,*">
 
@@ -187,6 +180,7 @@
     its own constructor, so the root view model does not have to carry it. -->
     <!-- Window overlays: each draws the template of its view model (App.axaml) and is empty while the property is null. -->
     <ContentControl Grid.Row="1" Content="{Binding Checks}" />
+    <ContentControl Grid.Row="1" Content="{Binding Comments}" />
     <ContentControl Grid.Row="1" Content="{Binding Plan}" />
     <ContentControl Grid.Row="1" Content="{Binding Inspector}" />
     <ContentControl Grid.Row="1" Content="{Binding Onboarding}" />

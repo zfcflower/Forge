@@ -1,5 +1,15 @@
 namespace Forge.Approval;
 
+/// <summary>Where a plugin came from (wave W10a). <see cref="Installed"/> is the default for every record written before
+/// the origin existed; <see cref="Bundled"/> ships with the app and is copied in on first run (removable);
+/// <see cref="BuiltIn"/> is part of the app payload and can neither be deleted nor disabled.</summary>
+public enum PluginOrigin
+{
+    Installed = 0,
+    Bundled = 1,
+    BuiltIn = 2,
+}
+
 /// <summary>Lifecycle state of one plugin version as recorded by the approval engine.</summary>
 public enum PluginStatus
 {
@@ -37,6 +47,9 @@ public sealed record PluginRecord
     public string SdkVersion { get; init; } = "";
 
     public PluginStatus Status { get; init; } = PluginStatus.Draft;
+
+    /// <summary>Where this plugin came from (wave W10a); records written before the origin existed read as <see cref="PluginOrigin.Installed"/>.</summary>
+    public PluginOrigin Origin { get; init; } = PluginOrigin.Installed;
 
     public DateTimeOffset CreatedAt { get; init; }
 

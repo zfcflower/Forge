@@ -30,9 +30,21 @@ internal static class TerminalStrings
     public const string CloseConfirm = "terminal.close.confirm";
     public const string CloseCancel = "terminal.close.cancel";
 
+    public const string Restart = "terminal.restart";
+
+    public const string SearchPlaceholder = "terminal.search.placeholder";
+    public const string SearchCase = "terminal.search.case";
+    public const string SearchPrevious = "terminal.search.previous";
+    public const string SearchNext = "terminal.search.next";
+    public const string SearchClose = "terminal.search.close";
+    public const string SearchNoMatches = "terminal.search.noMatches";
+
     public const string AutomationSurface = "terminal.automation.surface";
 
     public const string SettingsSection = "terminal.settings.section";
+    public const string SettingsFontFamily = "terminal.settings.fontFamily";
+    public const string SettingsFontSize = "terminal.settings.fontSize";
+    public const string SettingsFontsHint = "terminal.settings.fontsHint";
     public const string SettingsShell = "terminal.settings.shell";
     public const string SettingsArguments = "terminal.settings.arguments";
     public const string SettingsScrollback = "terminal.settings.scrollback";
@@ -74,9 +86,24 @@ internal static class TerminalStrings
         Loc.Register(CloseConfirm, "结束并关闭", "End and close");
         Loc.Register(CloseCancel, "取消", "Cancel");
 
+        Loc.Register(Restart, "重启", "Restart");
+
+        Loc.Register(SearchPlaceholder, "在终端缓冲区中搜索", "Search the terminal buffer");
+        Loc.Register(SearchCase, "区分大小写", "Match case");
+        Loc.Register(SearchPrevious, "上一个匹配（Shift+Enter）", "Previous match (Shift+Enter)");
+        Loc.Register(SearchNext, "下一个匹配（Enter）", "Next match (Enter)");
+        Loc.Register(SearchClose, "关闭搜索（Esc）", "Close search (Esc)");
+        Loc.Register(SearchNoMatches, "无匹配", "No matches");
+
         Loc.Register(AutomationSurface, "终端", "Terminal");
 
         Loc.Register(SettingsSection, "终端", "Terminal");
+        Loc.Register(SettingsFontFamily, "字体", "Font family");
+        Loc.Register(SettingsFontSize, "字号", "Font size");
+        Loc.Register(
+            SettingsFontsHint,
+            "两项都留空或写 0 时跟随外观分区的代码字体；字号单独填时取 8–32。",
+            "Leave both blank (or 0) to follow the code font of the appearance section; a size of its own takes 8–32.");
         Loc.Register(SettingsShell, "Shell 程序", "Shell");
         Loc.Register(SettingsArguments, "参数", "Arguments");
         Loc.Register(SettingsScrollback, "回滚行数", "Scrollback lines");

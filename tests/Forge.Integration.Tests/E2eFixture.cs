@@ -9,14 +9,18 @@ using Xunit;
 
 namespace Forge.Integration.Tests;
 
-/// <summary>Approval record as persisted in <c>approvals.db</c> under the host's data directory.</summary>
+/// <summary>Approval record as persisted in <c>approvals.db</c> under the host's data directory. <paramref name="Origin"/>
+/// is the stored origin column (<c>Installed</c>/<c>Bundled</c>/<c>BuiltIn</c>) and <paramref name="ApprovedHash"/> is
+/// null until the user approves the exact content hashes.</summary>
 internal sealed record ApprovalRecord(
     string PluginId,
     string Version,
     string SourceHash,
     string DependencyHash,
     string SdkVersion,
-    string Status);
+    string Status,
+    string Origin,
+    string? ApprovedHash);
 
 /// <summary>
 /// One end-to-end run: a temp plugins/data layout, a unique pipe, and an <see cref="ExtensionHostClient"/> that launches

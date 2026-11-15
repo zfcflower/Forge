@@ -86,6 +86,63 @@ public sealed class RequestReviewToolTests
             throw new NotSupportedException("This fake only answers step lookups.");
     }
 
+    /// <summary>
+    /// The store <c>request_review</c> records its conclusions into: keeps every row, and can be told to fail so the
+    /// "a store that throws never loses the review" rule can be pinned.
+    /// </summary>
+    private sealed class FakeConclusionStore : IReviewConclusionStore
+    {
+        private readonly Lock gate = new();
+        private readonly List<ReviewConclusion> recorded = [];
+
+        /// <summary>When set, the next <see cref="AddAsync"/> throws this instead of recording.</summary>
+        public Func<Exception?>? Failure { get; set; }
+
+        public IReadOnlyList<ReviewConclusion> Recorded
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return [.. recorded];
+                }
+            }
+        }
+
+        public Task<ReviewConclusion> AddAsync(NewReviewConclusion conclusion, CancellationToken ct = default)
+        {
+            if (Failure?.Invoke() is { } failure)
+            {
+                return Task.FromException<ReviewConclusion>(failure);
+            }
+
+            lock (gate)
+            {
+                var stored = new ReviewConclusion(
+                    recorded.Count + 1,
+                    conclusion.WorkspacePath,
+                    conclusion.SessionId,
+                    conclusion.StepId,
+                    conclusion.Base,
+                    conclusion.HeadCommit,
+                    conclusion.Outcome,
+                    conclusion.Text,
+                    DateTimeOffset.UnixEpoch.AddSeconds(recorded.Count));
+                recorded.Add(stored);
+                return Task.FromResult(stored);
+            }
+        }
+
+        public Task<IReadOnlyList<ReviewConclusion>> ListAsync(string sessionId, CancellationToken ct = default)
+        {
+            lock (gate)
+            {
+                return Task.FromResult<IReadOnlyList<ReviewConclusion>>(
+                    [.. recorded.Where(row => string.Equals(row.SessionId, sessionId, StringComparison.Ordinal))]);
+            }
+        }
+    }
+
     private sealed class ListSink : IAgentEventSink
     {
         public List<AgentEvent> Events { get; } = [];
@@ -118,7 +175,8 @@ public sealed class RequestReviewToolTests
         ITodoStore? todos = null,
         AgentOptions? options = null,
         ITool? read = null,
-        Func<ReviewPackageLimits>? limits = null) =>
+        Func<ReviewPackageLimits>? limits = null,
+        IReviewConclusionStore? conclusions = null) =>
         new(new AgentHostOptions
         {
             Providers = _ => provider,
@@ -136,6 +194,7 @@ public sealed class RequestReviewToolTests
             Layers = new PromptLayers("test system", null, null),
             Reviews = source,
             ReviewLimits = limits,
+            ReviewConclusions = conclusions,
             Todos = todos,
             Options = options ?? new AgentOptions(),
         });
@@ -849,5 +908,381 @@ public sealed class RequestReviewToolTests
         var wide = Turn.LastUserText(ReviewerRequest(provider2));
         Assert.DoesNotContain("[the diff was cut at ", wide, StringComparison.Ordinal);
         Assert.DoesNotContain("more files", wide, StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------ conclusions (wave W17b)
+
+    [Fact]
+    public async Task An_approved_step_review_is_recorded_with_its_verdict_and_step()
+    {
+        var store = new FakeConclusionStore();
+        var host = CreateHost(
+            ReviewScript("No blocking findings.\n\nverdict: approve", """{"step_id":"a1"}"""),
+            new FakeReviewChangeSetSource(),
+            new FakeTodoStore(Step()),
+            conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var row = Assert.Single(store.Recorded);
+        Assert.Equal(ReviewConclusionOutcome.Approve, row.Outcome);
+        Assert.Equal(Session, row.SessionId);
+        Assert.Equal("a1", row.StepId);
+        Assert.Equal("1234567890abcdef", row.HeadCommit);
+        Assert.Equal("0987654321fedcba", row.Base);
+        Assert.Equal(root.WorkingDirectory, row.WorkspacePath);
+        Assert.Contains("verdict: approve", row.Text, StringComparison.Ordinal);
+        Assert.Equal(DateTimeOffset.UnixEpoch, row.CreatedAt);
+        Assert.Single(await store.ListAsync(Session));
+    }
+
+    [Fact]
+    public async Task A_request_changes_review_is_recorded_as_such()
+    {
+        var store = new FakeConclusionStore();
+        var host = CreateHost(
+            ReviewScript("blocking: the cap is off by one\n\nverdict: request changes"),
+            new FakeReviewChangeSetSource(),
+            conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var row = Assert.Single(store.Recorded);
+        Assert.Equal(ReviewConclusionOutcome.RequestChanges, row.Outcome);
+        Assert.Null(row.StepId);
+        Assert.Contains("blocking: the cap is off by one", row.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_review_without_a_verdict_line_is_recorded_as_unstructured()
+    {
+        var store = new FakeConclusionStore();
+        var host = CreateHost(ReviewScript("Two findings, and I forgot the format."), new FakeReviewChangeSetSource(), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        // The stored state is what a reader of the history has to trust: unstructured is never an approval.
+        var row = Assert.Single(store.Recorded);
+        Assert.Equal(ReviewConclusionOutcome.Unstructured, row.Outcome);
+        Assert.Contains("forgot the format", row.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_stopped_review_is_recorded_as_stopped_with_its_partial_text()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var store = new FakeConclusionStore();
+        var host = CreateHost(PrematureVerdictScript(), new FakeReviewChangeSetSource(), read: BlockingRead(entered), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        var run = host.RunToCompletionAsync(root);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Stop("Reviewer-1", "user stopped it"));
+        await run;
+
+        var row = Assert.Single(store.Recorded);
+        Assert.Equal(ReviewConclusionOutcome.Stopped, row.Outcome);
+        // The premature verdict line is in the text the reviewer wrote, so a reader must not read it as the verdict.
+        Assert.Contains("verdict: approve", row.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_review_that_could_not_be_started_is_recorded_as_failed()
+    {
+        var store = new FakeConclusionStore();
+        var tool = new RequestReviewTool(CreateScheduler(), new FakeReviewChangeSetSource(), null, null, store);
+        var slot = Assert.IsType<AgentSlot>(new AgentSlotPool(1).TryAcquire());
+        try
+        {
+            using (AgentScope.Enter(new ListSink(), "root", slot))
+            {
+                var result = await tool.InvokeAsync(
+                    new ToolCall("call-1", RequestReviewTool.Name, """{"intent":"add the request_review tool"}"""),
+                    new ToolContext(Session, "work/tree", AgentDepth: 3),
+                    CancellationToken.None);
+
+                Assert.True(result.IsError);
+            }
+        }
+        finally
+        {
+            slot.Dispose();
+        }
+
+        var row = Assert.Single(store.Recorded);
+        Assert.Equal(ReviewConclusionOutcome.Failed, row.Outcome);
+        Assert.Contains("could not be started", row.Text, StringComparison.Ordinal);
+        Assert.Equal("work/tree", row.WorkspacePath);
+    }
+
+    [Fact]
+    public async Task A_reviewer_that_returned_no_text_is_recorded_as_failed()
+    {
+        var store = new FakeConclusionStore();
+        var host = CreateHost(ReviewScript("   "), new FakeReviewChangeSetSource(), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var row = Assert.Single(store.Recorded);
+        Assert.Equal(ReviewConclusionOutcome.Failed, row.Outcome);
+        Assert.Contains("returned no text", row.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_change_set_that_cannot_be_read_leaves_no_row_because_no_review_happened()
+    {
+        var store = new FakeConclusionStore();
+        var source = new FakeReviewChangeSetSource
+        {
+            Handler = (_, _) => Task.FromResult(ReviewChangeSetResult.Failed("boom")),
+        };
+        var tool = new RequestReviewTool(CreateScheduler(), source, null, null, store);
+
+        var result = await InAgentScopeAsync(tool, """{"intent":"add the request_review tool"}""");
+
+        Assert.True(result.IsError);
+        Assert.Empty(store.Recorded);
+    }
+
+    [Fact]
+    public async Task An_empty_change_set_leaves_no_row_because_no_reviewer_ran()
+    {
+        var store = new FakeConclusionStore();
+        var source = new FakeReviewChangeSetSource
+        {
+            Handler = (_, _) => Task.FromResult(ReviewChangeSetResult.Ok(ChangeSet(0, diff: null))),
+        };
+        var host = CreateHost(ReviewScript("verdict: approve"), source, conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        Assert.Empty(store.Recorded);
+    }
+
+    [Fact]
+    public async Task Without_a_store_the_tool_result_is_exactly_the_same()
+    {
+        var withoutStore = CreateHost(ReviewScript("No blocking findings.\n\nverdict: approve"), new FakeReviewChangeSetSource());
+        var rootWithout = withoutStore.CreateRoot(Session, Path.GetTempPath());
+        await withoutStore.RunToCompletionAsync(rootWithout);
+
+        var store = new FakeConclusionStore();
+        var withStore = CreateHost(ReviewScript("No blocking findings.\n\nverdict: approve"), new FakeReviewChangeSetSource(), conclusions: store);
+        var rootWith = withStore.CreateRoot(Session, Path.GetTempPath());
+        await withStore.RunToCompletionAsync(rootWith);
+
+        var without = Assert.Single(rootWithout.History[2].Content.OfType<ToolResultBlock>());
+        var with = Assert.Single(rootWith.History[2].Content.OfType<ToolResultBlock>());
+        Assert.Equal(without.Content, with.Content);
+        Assert.Equal(without.IsError, with.IsError);
+        Assert.Single(store.Recorded);
+    }
+
+    [Fact]
+    public async Task A_store_that_throws_never_turns_a_finished_review_into_an_error()
+    {
+        var store = new FakeConclusionStore { Failure = () => new InvalidOperationException("the database is gone") };
+        var host = CreateHost(ReviewScript("No blocking findings.\n\nverdict: approve"), new FakeReviewChangeSetSource(), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var result = Assert.Single(root.History[2].Content.OfType<ToolResultBlock>());
+        Assert.False(result.IsError);
+        Assert.StartsWith("verdict: approve", result.Content, StringComparison.Ordinal);
+        Assert.Empty(store.Recorded);
+    }
+
+    [Fact]
+    public void The_stored_outcomes_keep_their_numbering_because_reviews_db_stores_them_as_integers()
+    {
+        // A row written today is read by a later version by number, so a renumbering would silently reinterpret history.
+        Assert.Equal(0, (int)ReviewConclusionOutcome.Unstructured);
+        Assert.Equal(1, (int)ReviewConclusionOutcome.Approve);
+        Assert.Equal(2, (int)ReviewConclusionOutcome.RequestChanges);
+        Assert.Equal(3, (int)ReviewConclusionOutcome.Stopped);
+        Assert.Equal(4, (int)ReviewConclusionOutcome.Failed);
+    }
+
+    // ------------------------------------------------------------ a failing store never changes the result (blind spots)
+
+    [Fact]
+    public async Task A_store_that_throws_leaves_a_request_changes_review_unchanged()
+    {
+        var store = new FakeConclusionStore { Failure = () => new InvalidOperationException("the database is gone") };
+        var host = CreateHost(ReviewScript("blocking: the cap is off by one\n\nverdict: request changes"), new FakeReviewChangeSetSource(), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var result = Assert.Single(root.History[2].Content.OfType<ToolResultBlock>());
+        Assert.False(result.IsError);
+        Assert.StartsWith("verdict: request changes", result.Content, StringComparison.Ordinal);
+        Assert.Empty(store.Recorded);
+    }
+
+    [Fact]
+    public async Task A_store_that_throws_leaves_an_unstructured_review_unchanged()
+    {
+        var store = new FakeConclusionStore { Failure = () => new InvalidOperationException("the database is gone") };
+        var host = CreateHost(ReviewScript("Two findings, and I forgot the format."), new FakeReviewChangeSetSource(), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var result = Assert.Single(root.History[2].Content.OfType<ToolResultBlock>());
+        Assert.False(result.IsError);
+        Assert.StartsWith("verdict: unstructured", result.Content, StringComparison.Ordinal);
+        Assert.Empty(store.Recorded);
+    }
+
+    [Fact]
+    public async Task A_store_that_throws_leaves_a_reviewer_that_returned_no_text_unchanged()
+    {
+        var store = new FakeConclusionStore { Failure = () => new InvalidOperationException("the database is gone") };
+        var host = CreateHost(ReviewScript("   "), new FakeReviewChangeSetSource(), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var result = Assert.Single(root.History[2].Content.OfType<ToolResultBlock>());
+        Assert.True(result.IsError);
+        Assert.Contains("returned no text", result.Content, StringComparison.Ordinal);
+        Assert.Empty(store.Recorded);
+    }
+
+    [Fact]
+    public async Task A_store_that_throws_leaves_a_stopped_review_unchanged()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var store = new FakeConclusionStore { Failure = () => new InvalidOperationException("the database is gone") };
+        var host = CreateHost(PrematureVerdictScript(), new FakeReviewChangeSetSource(), read: BlockingRead(entered), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        var run = host.RunToCompletionAsync(root);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Stop("Reviewer-1", "user stopped it"));
+        await run;
+
+        var result = Assert.Single(root.History[2].Content.OfType<ToolResultBlock>());
+        Assert.True(result.IsError);
+        Assert.StartsWith("The review was stopped before it finished", result.Content, StringComparison.Ordinal);
+        Assert.Empty(store.Recorded);
+    }
+
+    [Fact]
+    public async Task A_store_that_throws_leaves_a_review_that_could_not_start_unchanged()
+    {
+        var store = new FakeConclusionStore { Failure = () => new InvalidOperationException("the database is gone") };
+        var tool = new RequestReviewTool(CreateScheduler(), new FakeReviewChangeSetSource(), null, null, store);
+        var slot = Assert.IsType<AgentSlot>(new AgentSlotPool(1).TryAcquire());
+        try
+        {
+            using (AgentScope.Enter(new ListSink(), "root", slot))
+            {
+                var result = await tool.InvokeAsync(
+                    new ToolCall("call-1", RequestReviewTool.Name, """{"intent":"add the request_review tool"}"""),
+                    new ToolContext(Session, "work/tree", AgentDepth: 3),
+                    CancellationToken.None);
+
+                Assert.True(result.IsError);
+                Assert.StartsWith("The review could not be started: ", result.Content, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            slot.Dispose();
+        }
+
+        Assert.Empty(store.Recorded);
+    }
+
+    // ------------------------------------------------------------ the paths that leave no row (blind spots)
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("""{"intent":"review it","verbosity":"loud"}""")]
+    [InlineData("""{"step_id":5}""")]
+    [InlineData("{}")]
+    [InlineData("""{"intent":"   "}""")]
+    [InlineData("""{"step_id":"a1","base":"main"}""")]
+    [InlineData("""{"step_id":"zzz"}""")]
+    public async Task An_argument_error_leaves_no_row_because_no_review_happened(string json)
+    {
+        var store = new FakeConclusionStore();
+        var source = new FakeReviewChangeSetSource();
+        var tool = new RequestReviewTool(CreateScheduler(), source, new FakeTodoStore(Step()), null, store);
+
+        var result = await InAgentScopeAsync(tool, json);
+
+        Assert.True(result.IsError);
+        Assert.Empty(store.Recorded);
+        Assert.Equal(0, source.Calls);
+    }
+
+    [Fact]
+    public async Task A_review_without_a_working_directory_leaves_no_row()
+    {
+        var store = new FakeConclusionStore();
+        var tool = new RequestReviewTool(CreateScheduler(), new FakeReviewChangeSetSource(), null, null, store);
+
+        var result = await InAgentScopeAsync(() => InvokeAsync(tool, """{"intent":"review it"}""", " ").AsTask());
+
+        Assert.True(result.IsError);
+        Assert.Empty(store.Recorded);
+    }
+
+    [Fact]
+    public async Task Two_reviews_in_one_session_record_both_conclusions_in_the_session()
+    {
+        var store = new FakeConclusionStore();
+        var source = new FakeReviewChangeSetSource();
+        var provider = new FakeProvider((request, index) =>
+            Turn.LastUserText(request).StartsWith("This is a review request:", StringComparison.Ordinal)
+                ? Turn.Say(Turn.LastUserText(request).Contains("first change", StringComparison.Ordinal)
+                    ? "verdict: approve"
+                    : "blocking: broken\n\nverdict: request changes")
+                : index == 0
+                    ? Turn.Call(
+                        ("call-1", RequestReviewTool.Name, """{"intent":"first change"}"""),
+                        ("call-2", RequestReviewTool.Name, """{"intent":"second change"}"""))
+                    : Turn.Say("parent done"));
+        var host = CreateHost(provider, source, options: new AgentOptions { MaxParallelSubAgents = 2 }, conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        Assert.Equal(2, store.Recorded.Count);
+        Assert.All(store.Recorded, static row => Assert.Equal(Session, row.SessionId));
+        Assert.Equal(
+            [ReviewConclusionOutcome.Approve, ReviewConclusionOutcome.RequestChanges],
+            store.Recorded.Select(static row => row.Outcome).Order().ToArray());
+        Assert.Equal(2, (await store.ListAsync(Session)).Count);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_parent_mid_review_records_no_conclusion()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var store = new FakeConclusionStore();
+        var host = CreateHost(PrematureVerdictScript(), new FakeReviewChangeSetSource(), read: BlockingRead(entered, cancelled), conclusions: store);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+        using var cts = new CancellationTokenSource();
+
+        var run = AgentTestHost.CollectAsync(host.RunAsync(root, "go", cts.Token));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await cts.CancelAsync();
+
+        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // The cancellation reached the reviewer before a verdict existed, so nothing was recorded.
+        Assert.Empty(store.Recorded);
     }
 }

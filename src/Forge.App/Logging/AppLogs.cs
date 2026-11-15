@@ -81,6 +81,8 @@ internal static class AppLogs
 
     public static readonly ILogger Turn = AppLog.Create("turn");
 
+    public static readonly ILogger Update = AppLog.Create("update");
+
     public static readonly ILogger Usage = AppLog.Create("usage");
 
     public static readonly ILogger Workbench = AppLog.Create("workbench");

@@ -149,6 +149,30 @@ internal static class EditorLspMapping
         return new EditorLspCompletionMap(new EditorLspCompletion(text.Version, offset, prefixStart, items, result.IsIncomplete), snippets, invalid);
     }
 
+    /// <summary>
+    /// Buckets server inlay hints onto document offsets and lines; runs off the UI thread against one immutable snapshot like
+    /// every other mapping here. A hint whose position the snapshot does not have is dropped rather than drawn at a guessed
+    /// offset.
+    /// </summary>
+    public static InlayHintLineIndex ToInlayHintIndex(IReadOnlyList<InlayHint> hints, TextSnapshot snapshot, PositionEncoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(hints);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var mapped = new List<EditorInlayHint>(hints.Count);
+        foreach (var hint in hints)
+        {
+            if (!TryStrictOffset(snapshot, hint.Position, encoding, out var offset))
+            {
+                continue;
+            }
+
+            mapped.Add(new EditorInlayHint(hint.Position.Line, offset, hint.Label, hint.Kind, hint.PaddingLeft, hint.PaddingRight));
+        }
+
+        return InlayHintLineIndex.Build(mapped, snapshot.LineCount, snapshot.Version);
+    }
+
     public static string NormalizeNewLines(string text, string newLine)
     {
         if (text.AsSpan().IndexOfAny('\r', '\n') < 0)

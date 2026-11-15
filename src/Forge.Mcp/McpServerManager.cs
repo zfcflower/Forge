@@ -17,6 +17,10 @@ public sealed class McpServerManager : IAsyncDisposable
     private readonly Dictionary<string, string> identityByName = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource lifetime = new();
     private readonly Lock gate = new();
+    private readonly IMcpTokenStore? tokenStore;
+    private readonly IMcpOAuthUi? oauthUi;
+    private readonly TimeProvider? oauthTime;
+    private McpOAuth? oauth;
     private McpToolAdapter[] tools = [];
     private McpConfigDiagnostic[] diagnostics = [];
     private bool disposed;
@@ -36,6 +40,10 @@ public sealed class McpServerManager : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(options);
         optionsAccessor = options;
+        var initial = options();
+        tokenStore = initial.TokenStore;
+        oauthUi = initial.OAuthUi;
+        oauthTime = initial.TimeProvider;
         diagnostics = [.. config.Diagnostics];
         foreach (var server in config.Servers)
         {
@@ -77,6 +85,27 @@ public sealed class McpServerManager : IAsyncDisposable
     public event Action? ToolsChanged;
 
     public event Action<McpServerState>? StateChanged;
+
+    /// <summary>A server's <c>notifications/resources/list_changed</c> arrived; the name is the configured server.</summary>
+    public event Action<string>? ResourcesChanged;
+
+    /// <summary>A server's <c>notifications/resources/updated</c> arrived for one subscribed resource.</summary>
+    public event Action<string, McpResourceUpdated>? ResourceUpdated;
+
+    /// <summary>True when both the token store and the browser UI are wired, so a server can run the interactive sign-in.</summary>
+    public bool IsOAuthAvailable => tokenStore is not null && oauthUi is not null;
+
+    /// <summary>The <see cref="McpServerState.LastError"/> a 401 without a usable token records; the page localizes it via <see cref="McpServerState.NeedsSignIn"/>.</summary>
+    public const string SignInRequiredMessage = "Sign-in required";
+
+    /// <summary>Whether this server holds a token in memory (loaded by a connect or minted by a sign-in). Unknown names read false.</summary>
+    public bool IsSignedIn(string name)
+    {
+        lock (gate)
+        {
+            return servers.TryGetValue(name, out var server) && server.CachedToken is not null;
+        }
+    }
 
     public bool IsEnabled(string name) => Resolve(name).Enabled;
 
@@ -190,6 +219,11 @@ public sealed class McpServerManager : IAsyncDisposable
                 managed.ConsecutiveFailures = 0;
                 managed.LastError = null;
                 managed.ReadyAt = null;
+                managed.CachedToken = null;
+                managed.OAuthChallenge = null;
+                managed.NeedsSignIn = false;
+                // A changed entry may point at a different server entirely: the old resource URIs are not its to keep.
+                managed.Subscriptions.Clear();
             }
 
             RaiseState(managed);
@@ -434,6 +468,129 @@ public sealed class McpServerManager : IAsyncDisposable
         return server.Tools;
     }
 
+    /// <summary>Runs the interactive OAuth sign-in for one streamable HTTP server, stores the tokens and reconnects.</summary>
+    public async Task SignInAsync(string name, CancellationToken ct)
+    {
+        var server = Resolve(name);
+        if (tokenStore is null || oauthUi is null)
+        {
+            throw new McpException($"OAuth is not available for MCP server '{name}': no token store or browser UI was wired.");
+        }
+
+        var challenge = server.OAuthChallenge;
+        if (challenge is null)
+        {
+            // Trigger a connect through the start gate, so a pending reconnect timer cannot race a second client into existence;
+            // the transport's 401 hook records the RFC 9728 challenge. A server that never advertised OAuth has nothing to
+            // sign in to.
+            try
+            {
+                await EnsureClientAsync(name, ct).ConfigureAwait(false);
+            }
+            catch (McpException)
+            {
+            }
+
+            challenge = server.OAuthChallenge;
+        }
+
+        if (challenge is null)
+        {
+            throw new McpException($"MCP server '{name}' did not advertise OAuth (no resource_metadata challenge).");
+        }
+
+        var key = OAuthKey(server.Config, challenge.Resource);
+        var tokens = await OAuth.SignInAsync(challenge, ct).ConfigureAwait(false);
+        await tokenStore.SaveAsync(key, tokens, ct).ConfigureAwait(false);
+        lock (gate)
+        {
+            server.CachedToken = tokens;
+            server.OAuthChallenge = challenge;
+            server.NeedsSignIn = false;
+            server.LastError = null;
+        }
+
+        await RestartAsync(name, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Clears a server's stored token and stops it; the next connect 401s and shows the sign-in action again.</summary>
+    public async Task SignOutAsync(string name, CancellationToken ct)
+    {
+        var server = Resolve(name);
+        if (tokenStore is null)
+        {
+            return;
+        }
+
+        var key = OAuthKey(server.Config, server.OAuthChallenge?.Resource);
+        await tokenStore.DeleteAsync(key, ct).ConfigureAwait(false);
+        lock (gate)
+        {
+            server.CachedToken = null;
+            server.OAuthChallenge = null;
+            server.NeedsSignIn = false;
+        }
+
+        await StopAsync(name, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Lists one server's resources; empty when it is not ready or advertises no resources.</summary>
+    public Task<IReadOnlyList<McpResourceInfo>> ListResourcesAsync(string name, CancellationToken ct) =>
+        RunAgainstServerAsync(name, ct, async client =>
+            client.Capabilities.Resources ? await client.ListResourcesAsync(ct).ConfigureAwait(false) : []);
+
+    public Task<McpResourceResult> ReadResourceAsync(string name, string uri, CancellationToken ct) =>
+        RunAgainstServerAsync(name, ct, client => client.ReadResourceAsync(uri, ct));
+
+    public async Task SubscribeAsync(string name, string uri, CancellationToken ct)
+    {
+        var server = Resolve(name);
+        await RunAgainstServerAsync(name, ct, async client =>
+        {
+            if (!client.Capabilities.ResourcesSubscribe)
+            {
+                throw new McpException($"MCP server '{name}' does not support resource subscriptions.");
+            }
+
+            await client.SubscribeAsync(uri, ct).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+
+        lock (gate)
+        {
+            // The manager keeps the set the user asked for, not the client's: a subscription lives only as long as the session
+            // that sent it, so this set is what a reconnect replays (see ReplaySubscriptionsAsync).
+            server.Subscriptions.Add(uri);
+        }
+    }
+
+    /// <summary>The resources the manager keeps subscribed for one server; empty for a name the config no longer has.</summary>
+    public IReadOnlyList<string> SubscriptionsOf(string name)
+    {
+        lock (gate)
+        {
+            return servers.TryGetValue(name, out var server) ? [.. server.Subscriptions] : [];
+        }
+    }
+
+    /// <summary>Whether the manager holds a subscription for one resource; the settings page's rows read their badge from it.</summary>
+    public bool IsSubscribed(string name, string uri)
+    {
+        lock (gate)
+        {
+            return servers.TryGetValue(name, out var server) && server.Subscriptions.Contains(uri);
+        }
+    }
+
+    public async Task UnsubscribeAsync(string name, string uri, CancellationToken ct)
+    {
+        var server = Resolve(name);
+        await RunAgainstServerAsync(name, ct, client => client.UnsubscribeAsync(uri, ct)).ConfigureAwait(false);
+        lock (gate)
+        {
+            server.Subscriptions.Remove(uri);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         lock (gate)
@@ -490,8 +647,191 @@ public sealed class McpServerManager : IAsyncDisposable
 
     internal async Task<McpToolCallResult> InvokeToolAsync(string serverName, string toolName, string argumentsJson, CancellationToken ct)
     {
-        var client = await EnsureClientAsync(serverName, ct).ConfigureAwait(false);
-        return await client.CallToolAsync(toolName, argumentsJson, ct).ConfigureAwait(false);
+        return await RunAgainstServerAsync(
+            serverName,
+            ct,
+            client => client.CallToolAsync(toolName, argumentsJson, ct)).ConfigureAwait(false);
+    }
+
+    internal async Task<McpToolCallResult> InvokeToolAsync(
+        string serverName,
+        string toolName,
+        string argumentsJson,
+        Action<string>? progress,
+        CancellationToken ct)
+    {
+        return await RunAgainstServerAsync(
+            serverName,
+            ct,
+            client => client.CallToolAsync(toolName, argumentsJson, ct, progress)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one request against a server's session. A 401 that arrives mid-session (the token expired or was revoked while the
+    /// connection stayed up) marks the server as needing sign-in before the failure reaches the caller, so the settings page's
+    /// sign-in action appears instead of only a red line the user cannot act on.
+    /// </summary>
+    private async Task<TResult> RunAgainstServerAsync<TResult>(string name, CancellationToken ct, Func<McpClient, Task<TResult>> body)
+    {
+        var server = Resolve(name);
+        try
+        {
+            var client = await EnsureClientAsync(name, ct).ConfigureAwait(false);
+            return await body(client).ConfigureAwait(false);
+        }
+        catch (McpOAuthRequiredException exception)
+        {
+            RequireSignIn(server, exception);
+            throw;
+        }
+    }
+
+    private async Task RunAgainstServerAsync(string name, CancellationToken ct, Func<McpClient, Task> body)
+    {
+        var server = Resolve(name);
+        try
+        {
+            var client = await EnsureClientAsync(name, ct).ConfigureAwait(false);
+            await body(client).ConfigureAwait(false);
+        }
+        catch (McpOAuthRequiredException exception)
+        {
+            RequireSignIn(server, exception);
+            throw;
+        }
+    }
+
+    /// <summary>Records that the server needs an interactive sign-in, keeping the challenge a later sign-in starts from.</summary>
+    private void RequireSignIn(ManagedServer server, McpOAuthRequiredException exception)
+    {
+        lock (gate)
+        {
+            server.NeedsSignIn = true;
+            server.LastError = SignInRequiredMessage;
+            server.OAuthChallenge = exception.Challenge ?? server.OAuthChallenge;
+        }
+
+        RaiseState(server);
+    }
+
+    private McpOAuth OAuth
+    {
+        get
+        {
+            if (oauth is not null)
+            {
+                return oauth;
+            }
+
+            if (tokenStore is null)
+            {
+                throw new McpException("OAuth is not configured for this MCP server manager.");
+            }
+
+            var client = Options.HttpClient ?? McpOAuth.DefaultClient;
+            return oauth = new McpOAuth(client, oauthUi, oauthTime);
+        }
+    }
+
+    /// <summary>
+    /// The transport's 401 hook: load the cached token, refresh it when it is expired, and hand the access token back. A null
+    /// result means "no usable token" — the transport then reports <see cref="McpOAuthRequiredException"/> and the server
+    /// becomes needing-sign-in. This path never opens a browser.
+    /// <para>The refresh is single-flight per server: with a rotating refresh token two concurrent 401s would each refresh and
+    /// the slower one would present a token the server has already invalidated, which shows up as a sign-in failure the user
+    /// never caused. The second caller therefore waits and then reuses whatever the first one stored.</para>
+    /// </summary>
+    private async ValueTask<string?> ProvideTokenAsync(ManagedServer server, McpOAuthChallenge challenge, CancellationToken ct)
+    {
+        if (tokenStore is null)
+        {
+            return null;
+        }
+
+        lock (gate)
+        {
+            server.OAuthChallenge = challenge;
+        }
+
+        var key = OAuthKey(server.Config, challenge.Resource);
+        if (await CachedOrStoredTokenAsync(server, key, ct).ConfigureAwait(false) is not { } tokens)
+        {
+            return null;
+        }
+
+        if (!IsExpired(tokens))
+        {
+            return tokens.AccessToken;
+        }
+
+        await server.RefreshGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // A 401 that arrived while this one waited may already have refreshed the token: reuse it instead of refreshing
+            // (and rotating) a second time.
+            tokens = server.CachedToken ?? tokens;
+            if (!IsExpired(tokens))
+            {
+                return tokens.AccessToken;
+            }
+
+            if (string.IsNullOrWhiteSpace(tokens.RefreshToken))
+            {
+                return null;
+            }
+
+            var refreshed = await OAuth.RefreshAsync(tokens, challenge, ct).ConfigureAwait(false);
+            lock (gate)
+            {
+                server.CachedToken = refreshed;
+            }
+
+            await tokenStore.SaveAsync(key, refreshed, ct).ConfigureAwait(false);
+            return refreshed.AccessToken;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // A rejected refresh (invalid or rotated grant), a network failure and an authorization server that is down are all
+            // the same to the transport: no usable token right now. The server goes back to "sign in" instead of failing a
+            // tool call with a detail the page cannot act on.
+            return null;
+        }
+        finally
+        {
+            server.RefreshGate.Release();
+        }
+    }
+
+    private async ValueTask<McpTokenSet?> CachedOrStoredTokenAsync(ManagedServer server, string key, CancellationToken ct)
+    {
+        McpTokenSet? tokens;
+        lock (gate)
+        {
+            tokens = server.CachedToken;
+        }
+
+        tokens ??= await tokenStore!.LoadAsync(key, ct).ConfigureAwait(false);
+        if (tokens is not null)
+        {
+            lock (gate)
+            {
+                server.CachedToken = tokens;
+            }
+        }
+
+        return tokens;
+    }
+
+    private static bool IsExpired(McpTokenSet tokens) =>
+        tokens.ExpiresAt is { } expires && expires <= DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+
+    /// <summary>The store key is stable across reconnects: the URL origin plus the resource the tokens were issued for.</summary>
+    internal static string OAuthKey(McpServerConfig config, string? resource)
+    {
+        var origin = config.IsHttp && Uri.TryCreate(config.Url, UriKind.Absolute, out var uri)
+            ? uri.GetLeftPart(UriPartial.Authority)
+            : config.Name;
+        return origin + '\u0000' + (resource ?? string.Empty);
     }
 
     private async Task<McpClient> ConnectAsync(ManagedServer server, CancellationToken ct)
@@ -509,7 +849,7 @@ public sealed class McpServerManager : IAsyncDisposable
         var options = Options;
         try
         {
-            var transport = server.Transport ??= CreateTransport(server.Config);
+            var transport = server.Transport ??= CreateTransport(server);
             var created = new McpClient(transport, new McpClientOptions
             {
                 ClientName = options.ClientName,
@@ -520,6 +860,8 @@ public sealed class McpServerManager : IAsyncDisposable
             client = created;
             created.Closed += error => OnClientClosed(server, created, error);
             created.ToolsChanged += () => OnToolsListChanged(server);
+            created.ResourcesChanged += () => OnResourcesListChanged(server);
+            created.ResourceUpdated += update => OnResourceUpdated(server, update);
 
             await created.ConnectAsync(ct).ConfigureAwait(false);
             lock (gate)
@@ -536,6 +878,7 @@ public sealed class McpServerManager : IAsyncDisposable
             }
 
             RaiseState(server);
+            await ReplaySubscriptionsAsync(server, created, ct).ConfigureAwait(false);
             return created;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -559,12 +902,17 @@ public sealed class McpServerManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            var needsSignIn = ex is McpOAuthRequiredException;
             var error = ex as McpException ?? new McpException($"Failed to start MCP server '{server.Config.Name}': {ex.Message}", ex);
             lock (gate)
             {
                 server.Client = null;
                 server.Status = McpServerStatus.Failed;
-                server.LastError = error.Message;
+                server.LastError = needsSignIn ? SignInRequiredMessage : error.Message;
+                server.NeedsSignIn = needsSignIn;
+                // The challenge is what the sign-in action starts from, so a connect that 401'd keeps it even though no token
+                // was ever handed to the transport.
+                server.OAuthChallenge = (ex as McpOAuthRequiredException)?.Challenge ?? server.OAuthChallenge;
                 server.ConsecutiveFailures++;
                 server.Tools = [];
                 PublishToolsLocked();
@@ -848,7 +1196,7 @@ public sealed class McpServerManager : IAsyncDisposable
             CapDescription(info.Description, options.MaxToolDescriptionChars),
             info.InputSchemaJson,
             server.Config.IsReadOnlyTool(toolName) ? ToolSideEffect.ReadOnly : ToolSideEffect.Execute,
-            (arguments, token) => InvokeToolAsync(serverName, toolName, arguments, token),
+            (arguments, progress, token) => InvokeToolAsync(serverName, toolName, arguments, progress, token),
             options.MaxResultChars);
     }
 
@@ -880,7 +1228,9 @@ public sealed class McpServerManager : IAsyncDisposable
 
             server.Client = null;
             server.Status = McpServerStatus.Failed;
-            server.LastError = error?.Message ?? "The MCP connection closed.";
+            server.NeedsSignIn = error is McpOAuthRequiredException;
+            server.LastError = server.NeedsSignIn ? SignInRequiredMessage : error?.Message ?? "The MCP connection closed.";
+            server.OAuthChallenge = (error as McpOAuthRequiredException)?.Challenge ?? server.OAuthChallenge;
             server.ConsecutiveFailures++;
             server.Tools = [];
             server.ReadyAt = null;
@@ -913,6 +1263,11 @@ public sealed class McpServerManager : IAsyncDisposable
             {
             }
         });
+
+    private void OnResourcesListChanged(ManagedServer server) => ResourcesChanged?.Invoke(server.Config.Name);
+
+    private void OnResourceUpdated(ManagedServer server, McpResourceUpdated update) =>
+        ResourceUpdated?.Invoke(server.Config.Name, update);
 
     private void ScheduleReconnect(ManagedServer server)
     {
@@ -961,8 +1316,9 @@ public sealed class McpServerManager : IAsyncDisposable
             : TimeSpan.FromTicks((long)ticks);
     }
 
-    private IMcpTransport CreateTransport(McpServerConfig config)
+    private IMcpTransport CreateTransport(ManagedServer server)
     {
+        var config = server.Config;
         var options = Options;
         if (options.TransportFactory is { } factory)
         {
@@ -976,6 +1332,10 @@ public sealed class McpServerManager : IAsyncDisposable
                 Endpoint = new Uri(config.Url!),
                 Headers = config.Headers,
                 HttpClient = options.HttpClient,
+                BearerToken = server.CachedToken?.AccessToken,
+                OAuthTokenProvider = tokenStore is null
+                    ? null
+                    : (challenge, ct) => ProvideTokenAsync(server, challenge, ct),
             });
         }
 
@@ -987,6 +1347,48 @@ public sealed class McpServerManager : IAsyncDisposable
             WorkingDirectory = config.WorkingDirectory,
             StderrCapacityChars = options.StderrCapacityChars,
         });
+    }
+
+    /// <summary>
+    /// A subscription belongs to the MCP session that sent it, so a reconnected client starts with none. The manager keeps the
+    /// set the user asked for and replays it here: the settings page's resource browser then keeps receiving
+    /// <c>notifications/resources/updated</c> across a dropped connection instead of going quiet until someone re-subscribes.
+    /// A resource the server no longer has is reported on the state and skipped; it must not fail the connect.
+    /// </summary>
+    private async Task ReplaySubscriptionsAsync(ManagedServer server, McpClient client, CancellationToken ct)
+    {
+        string[] wanted;
+        lock (gate)
+        {
+            wanted = [.. server.Subscriptions];
+        }
+
+        if (wanted.Length == 0 || !client.Capabilities.ResourcesSubscribe)
+        {
+            return;
+        }
+
+        string? failed = null;
+        foreach (var uri in wanted)
+        {
+            try
+            {
+                await client.SubscribeAsync(uri, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception exception) when (exception is McpException or HttpRequestException)
+            {
+                failed ??= $"resources/subscribe for '{uri}' failed: {exception.Message}";
+            }
+        }
+
+        if (failed is not null)
+        {
+            Mutate(server, managed => managed.LastError = failed);
+        }
     }
 
     private void PublishToolsLocked()
@@ -1029,7 +1431,8 @@ public sealed class McpServerManager : IAsyncDisposable
             server.LastError,
             string.IsNullOrEmpty(stderr) ? null : stderr,
             server.ReadyAt,
-            server.ConsecutiveFailures);
+            server.ConsecutiveFailures,
+            server.NeedsSignIn);
     }
 
     private ManagedServer Resolve(string name)
@@ -1071,6 +1474,19 @@ public sealed class McpServerManager : IAsyncDisposable
         public IMcpTransport? Transport;
         public McpToolAdapter[] Tools = [];
         public CancellationTokenSource? Reconnect;
+        public McpTokenSet? CachedToken;
+        public McpOAuthChallenge? OAuthChallenge;
+        public bool NeedsSignIn;
+
+        /// <summary>The resources the user subscribed to; replayed onto every new session (see ReplaySubscriptionsAsync).</summary>
+        public HashSet<string> Subscriptions = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Serializes token refreshes for this server, so two concurrent 401s cannot rotate the refresh token twice. Deliberately
+        /// not disposed: a refresh still winding down would throw on release, and a SemaphoreSlim without a wait handle owns
+        /// nothing that needs freeing.
+        /// </summary>
+        public SemaphoreSlim RefreshGate { get; } = new(1, 1);
 
         /// <summary>The last stdio stderr tail seen, kept after the transport is gone (see <see cref="CaptureStderr"/>).</summary>
         public string? LastStderr;

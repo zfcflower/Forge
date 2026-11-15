@@ -1,17 +1,28 @@
+using Forge.App.Input;
 using Forge.App.Localization;
 
 namespace Forge.App.Services;
 
 /// <summary>
-/// One command the palette offers: a stable id (what <c>MainWindowViewModel.RunCommand</c> switches on), the keys of its
-/// title and category, and the gesture that also reaches it from the window. Both texts are localization keys, so the
-/// row follows a language switch when the list is rebuilt.
+/// One command the palette offers: a stable id (what <c>MainWindowViewModel.RunCommand</c> switches on) and the keys of its
+/// title and category. The gesture that also reaches it from the window is resolved from the keymap catalog, so a rebind
+/// changes the badge and the source strip without touching this table.
 /// </summary>
-internal sealed record PaletteCommand(string Id, string TitleKey, string CategoryKey, string Gesture)
+internal sealed record PaletteCommand(string Id, string TitleKey, string CategoryKey)
 {
     public string Title => Loc.Instance[TitleKey];
 
     public string Category => Loc.Instance[CategoryKey];
+
+    /// <summary>The opening gesture, or empty when the command has none.</summary>
+    public string Gesture => Id switch
+    {
+        PaletteCommandIds.Files => KeymapApplier.DisplayGesture(KeymapActionIds.OpenFilePalette),
+        PaletteCommandIds.Content => KeymapApplier.DisplayGesture(KeymapActionIds.OpenSearchPalette),
+        PaletteCommandIds.Commands => KeymapApplier.DisplayGesture(KeymapActionIds.OpenCommandPalette),
+        PaletteCommandIds.Terminal => KeymapApplier.DisplayGesture(KeymapActionIds.NewTerminal),
+        _ => string.Empty,
+    };
 }
 
 /// <summary>
@@ -53,35 +64,28 @@ internal static class PaletteCommandIds
 /// </summary>
 internal static class PaletteCommandCatalog
 {
-    /// <summary>The gesture texts, spelled the way the window's bindings are written.</summary>
-    public const string FilesGesture = "Ctrl+P";
-
-    public const string CommandsGesture = "Ctrl+Shift+P";
-    public const string ContentGesture = "Ctrl+Shift+F";
-    public const string TerminalGesture = "Ctrl+`";
-
     private static readonly PaletteCommand[] Items =
     [
-        new(PaletteCommandIds.Files, PaletteStrings.CommandFiles, PaletteStrings.CategoryNavigate, FilesGesture),
-        new(PaletteCommandIds.Content, PaletteStrings.CommandContent, PaletteStrings.CategoryNavigate, ContentGesture),
-        new(PaletteCommandIds.Sessions, PaletteStrings.CommandSessions, PaletteStrings.CategoryNavigate, string.Empty),
-        new(PaletteCommandIds.Symbols, PaletteStrings.CommandSymbols, PaletteStrings.CategoryNavigate, string.Empty),
-        new(PaletteCommandIds.Commands, PaletteStrings.CommandCommands, PaletteStrings.CategoryNavigate, CommandsGesture),
-        new(PaletteCommandIds.Changes, PaletteStrings.CommandChanges, PaletteStrings.CategoryView, string.Empty),
-        new(PaletteCommandIds.Terminal, PaletteStrings.CommandTerminal, PaletteStrings.CategoryView, TerminalGesture),
-        new(PaletteCommandIds.ToggleProjects, PaletteStrings.CommandToggleProjects, PaletteStrings.CategoryView, string.Empty),
-        new(PaletteCommandIds.ToggleFiles, PaletteStrings.CommandToggleFiles, PaletteStrings.CategoryView, string.Empty),
-        new(PaletteCommandIds.TogglePreview, PaletteStrings.CommandTogglePreview, PaletteStrings.CategoryView, string.Empty),
-        new(PaletteCommandIds.TodoTab, PaletteStrings.CommandTodoTab, PaletteStrings.CategoryView, string.Empty),
-        new(PaletteCommandIds.ReviewTab, PaletteStrings.CommandReviewTab, PaletteStrings.CategoryView, string.Empty),
-        new(PaletteCommandIds.SpecsTab, PaletteStrings.CommandSpecsTab, PaletteStrings.CategoryView, string.Empty),
-        new(PaletteCommandIds.AddProject, PaletteStrings.CommandAddProject, PaletteStrings.CategoryProject, string.Empty),
-        new(PaletteCommandIds.RevealGeneral, PaletteStrings.CommandRevealGeneral, PaletteStrings.CategoryProject, string.Empty),
-        new(PaletteCommandIds.OpenSettings, PaletteStrings.CommandOpenSettings, PaletteStrings.CategorySettings, string.Empty),
-        new(PaletteCommandIds.ReloadSettings, PaletteStrings.CommandReloadSettings, PaletteStrings.CategorySettings, string.Empty),
-        new(PaletteCommandIds.GitFetch, PaletteStrings.CommandGitFetch, PaletteStrings.CategoryGit, string.Empty),
-        new(PaletteCommandIds.GitPull, PaletteStrings.CommandGitPull, PaletteStrings.CategoryGit, string.Empty),
-        new(PaletteCommandIds.GitPush, PaletteStrings.CommandGitPush, PaletteStrings.CategoryGit, string.Empty),
+        new(PaletteCommandIds.Files, PaletteStrings.CommandFiles, PaletteStrings.CategoryNavigate),
+        new(PaletteCommandIds.Content, PaletteStrings.CommandContent, PaletteStrings.CategoryNavigate),
+        new(PaletteCommandIds.Sessions, PaletteStrings.CommandSessions, PaletteStrings.CategoryNavigate),
+        new(PaletteCommandIds.Symbols, PaletteStrings.CommandSymbols, PaletteStrings.CategoryNavigate),
+        new(PaletteCommandIds.Commands, PaletteStrings.CommandCommands, PaletteStrings.CategoryNavigate),
+        new(PaletteCommandIds.Changes, PaletteStrings.CommandChanges, PaletteStrings.CategoryView),
+        new(PaletteCommandIds.Terminal, PaletteStrings.CommandTerminal, PaletteStrings.CategoryView),
+        new(PaletteCommandIds.ToggleProjects, PaletteStrings.CommandToggleProjects, PaletteStrings.CategoryView),
+        new(PaletteCommandIds.ToggleFiles, PaletteStrings.CommandToggleFiles, PaletteStrings.CategoryView),
+        new(PaletteCommandIds.TogglePreview, PaletteStrings.CommandTogglePreview, PaletteStrings.CategoryView),
+        new(PaletteCommandIds.TodoTab, PaletteStrings.CommandTodoTab, PaletteStrings.CategoryView),
+        new(PaletteCommandIds.ReviewTab, PaletteStrings.CommandReviewTab, PaletteStrings.CategoryView),
+        new(PaletteCommandIds.SpecsTab, PaletteStrings.CommandSpecsTab, PaletteStrings.CategoryView),
+        new(PaletteCommandIds.AddProject, PaletteStrings.CommandAddProject, PaletteStrings.CategoryProject),
+        new(PaletteCommandIds.RevealGeneral, PaletteStrings.CommandRevealGeneral, PaletteStrings.CategoryProject),
+        new(PaletteCommandIds.OpenSettings, PaletteStrings.CommandOpenSettings, PaletteStrings.CategorySettings),
+        new(PaletteCommandIds.ReloadSettings, PaletteStrings.CommandReloadSettings, PaletteStrings.CategorySettings),
+        new(PaletteCommandIds.GitFetch, PaletteStrings.CommandGitFetch, PaletteStrings.CategoryGit),
+        new(PaletteCommandIds.GitPull, PaletteStrings.CommandGitPull, PaletteStrings.CategoryGit),
+        new(PaletteCommandIds.GitPush, PaletteStrings.CommandGitPush, PaletteStrings.CategoryGit),
     ];
 
     /// <summary>The catalog in display order; a caller may hold the array (it is immutable).</summary>

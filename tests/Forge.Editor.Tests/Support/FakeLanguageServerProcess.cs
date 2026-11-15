@@ -30,16 +30,26 @@ internal sealed class FakeLanguageServerProcess : LanguageServerProcess
     private readonly SemaphoreSlim _writes = new(1, 1);
     private TaskCompletionSource _writeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly FakeInitialisationExit _initialisationExit;
+    private readonly string? capabilities;
+    private readonly IReadOnlyDictionary<string, string> answers;
 
     private FakeLanguageServer? _server;
     private CancellationTokenSource? _lifetime;
     private Task? _serve;
     private bool _running;
 
-    public FakeLanguageServerProcess(RestartPolicy? policy = null, FakeInitialisationExit initialisationExit = FakeInitialisationExit.None)
+    /// <param name="capabilities">Overrides the whole <c>initialize</c> result, e.g. to declare editor providers.</param>
+    /// <param name="answers">The <c>result</c> JSON per request method; an unregistered method answers <c>null</c>.</param>
+    public FakeLanguageServerProcess(
+        RestartPolicy? policy = null,
+        FakeInitialisationExit initialisationExit = FakeInitialisationExit.None,
+        string? capabilities = null,
+        IReadOnlyDictionary<string, string>? answers = null)
         : base(new LanguageServerLaunch("fake-language-server"), policy ?? new RestartPolicy())
     {
         _initialisationExit = initialisationExit;
+        this.capabilities = capabilities;
+        this.answers = answers ?? new Dictionary<string, string>(StringComparer.Ordinal);
     }
 
     public override event EventHandler<LanguageServerExitedEventArgs>? Exited;
@@ -172,6 +182,28 @@ internal sealed class FakeLanguageServerProcess : LanguageServerProcess
 
     public void ReleaseWrites() => _writes.Release();
 
+    /// <summary>Sends a server-to-client notification (e.g. <c>textDocument/publishDiagnostics</c>) through the fake server.</summary>
+    public async Task NotifyAsync(string method, string paramsJson = "null") =>
+        await SendAsync(server => server.NotifyAsync(method, paramsJson)).ConfigureAwait(false);
+
+    /// <summary>Sends a server-to-client request (e.g. <c>workspace/inlayHint/refresh</c>), which the client answers by id.</summary>
+    public async Task RequestAsync(int id, string method, string paramsJson = "null") =>
+        await SendAsync(server => server.RequestAsync(id, method, paramsJson)).ConfigureAwait(false);
+
+    private async Task SendAsync(Func<FakeLanguageServer, Task> send)
+    {
+        FakeLanguageServer? server;
+        lock (_gate)
+        {
+            server = _server;
+        }
+
+        if (server is not null)
+        {
+            await send(server).ConfigureAwait(false);
+        }
+    }
+
     public async Task WaitForWriteAsync()
     {
         using var timeout = new CancellationTokenSource(Timeout);
@@ -259,8 +291,8 @@ internal sealed class FakeLanguageServerProcess : LanguageServerProcess
                 }
 
                 var result = method.GetString() == "initialize"
-                    ? """{"capabilities":{"textDocumentSync":2}}"""
-                    : "null";
+                    ? capabilities ?? """{"capabilities":{"textDocumentSync":2}}"""
+                    : answers.GetValueOrDefault(method.GetString() ?? string.Empty, "null");
                 await server.RespondAsync(id, result).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)

@@ -1,7 +1,13 @@
+using System.IO.Compression;
+using System.Net;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using Forge.Abstractions;
 using Forge.App.Approval;
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Services;
 using Forge.Core.Tools;
 using Forge.HostClient;
 using Forge.Plugin.Sdk;
@@ -39,7 +45,11 @@ public sealed class ExtensionsSettingsSectionTests
             return new Harness(dir, new ApprovalRules(Path.Combine(dir, ApprovalRules.FileName), debounceMilliseconds: 0));
         }
 
-        public ExtensionsSettingsSectionViewModel Section(IExtensionsAdmin? admin, Func<string, bool>? openResult = null) =>
+        public ExtensionsSettingsSectionViewModel Section(
+            IExtensionsAdmin? admin,
+            Func<string, bool>? openResult = null,
+            AppPreferences? preferences = null,
+            HttpClient? repositoryHttp = null) =>
             new(
                 admin,
                 Host,
@@ -49,7 +59,9 @@ public sealed class ExtensionsSettingsSectionTests
                     OpenedCards.Add(id);
                     return Task.FromResult(openResult?.Invoke(id) ?? true);
                 },
-                InlineDispatcher.Instance);
+                InlineDispatcher.Instance,
+                preferences,
+                repositoryHttp);
 
         public async ValueTask DisposeAsync() => await Rules.DisposeAsync();
 
@@ -317,6 +329,318 @@ public sealed class ExtensionsSettingsSectionTests
     }
 
     [Fact]
+    public async Task Repository_url_round_trips_through_the_injected_preferences()
+    {
+        var harness = Harness.Create();
+        var settingsDirectory = ApprovalFixtures.TempDir("forge-extensions-prefs-");
+        var settingsPath = Path.Combine(settingsDirectory, "settings.json");
+        try
+        {
+            await using var _ = harness;
+            await using var store = new PreferencesStore(settingsPath);
+            await store.LoadAsync(CancellationToken.None);
+
+            using (var section = harness.Section(harness.Admin, preferences: store.Current))
+            {
+                Assert.Equal(string.Empty, section.RepositoryUrl);
+                Assert.False(section.HasRepositoryUrl);
+
+                // A pasted URL is stored trimmed, and the section writes it through as the user types.
+                section.RepositoryUrl = "  https://example.test/repo.json  ";
+                Assert.Equal("https://example.test/repo.json", store.Current.ExtensionRepositoryUrl);
+                Assert.True(section.HasRepositoryUrl);
+            }
+
+            await store.SaveAsync(CancellationToken.None);
+            var json = await File.ReadAllTextAsync(settingsPath);
+            Assert.Contains("\"extensionRepositoryUrl\"", json, StringComparison.Ordinal);
+
+            // A new process reads the same file and a new section starts on the remembered index.
+            await using var reloaded = new PreferencesStore(settingsPath);
+            await reloaded.LoadAsync(CancellationToken.None);
+            Assert.Null(reloaded.LoadProblem);
+            using var reopened = harness.Section(harness.Admin, preferences: reloaded.Current);
+            Assert.Equal("https://example.test/repo.json", reopened.RepositoryUrl);
+            Assert.True(reopened.HasRepositoryUrl);
+        }
+        finally
+        {
+            harness.DisposeDir();
+            ApprovalFixtures.DeleteTree(settingsDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task A_version_that_cannot_be_ordered_never_offers_an_update()
+    {
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+            harness.Admin.Snapshot = SnapshotWith([ApprovalFixtures.Installed("plug", version: "1.0.0")]);
+            using var section = harness.Section(
+                harness.Admin,
+                repositoryHttp: RepositoryHttp($$"""{ "schema": 1, "packages": [{{PackageEntry("plug", "garbage")}}] }""", PackageZipBytes()));
+            await section.RefreshAsync(CancellationToken.None);
+            section.RepositoryUrl = "https://example.test/repo.json";
+
+            section.BrowseRepositoryCommand.Execute(null);
+            await ApprovalFixtures.WaitUntilAsync(() => section.Repository.Count == 1, "the browsed row");
+
+            var row = section.Repository[0];
+            Assert.Equal(VersionComparison.Incomparable, row.Comparison);
+            Assert.False(row.IsUpdate);
+            Assert.Equal(Loc.Instance[ExtensionsStrings.SettingsRepositoryInstall], row.InstallText);
+            // The installed version is still named, so the user can see why nothing was offered as an update.
+            Assert.Contains("1.0.0", row.InstalledText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            harness.DisposeDir();
+        }
+    }
+
+    [Fact]
+    public async Task Browsing_while_an_install_runs_keeps_the_install_and_replaces_the_rows()
+    {
+        var (root, previous) = TempDataRoot.Redirect("forge-extensions-repository-");
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            string? installedFrom = null;
+            var manifestPresent = false;
+            harness.Admin.InstallHook = (sourceDir, origin, _) =>
+            {
+                installedFrom = sourceDir;
+                manifestPresent = File.Exists(Path.Combine(sourceDir, "manifest.json"));
+                Assert.Equal(ExtensionOrigins.Installed, origin);
+                return gate.Task;
+            };
+            using var section = harness.Section(
+                harness.Admin,
+                repositoryHttp: RepositoryHttp(IndexJson("plug", "2.0.0"), PackageZipBytes()));
+            await section.RefreshAsync(CancellationToken.None);
+            section.RepositoryUrl = "https://example.test/repo.json";
+
+            section.BrowseRepositoryCommand.Execute(null);
+            await ApprovalFixtures.WaitUntilAsync(() => section.Repository.Count == 1, "the browsed row");
+            var installing = section.Repository[0];
+            Assert.True(installing.CanInstall);
+
+            installing.InstallCommand.Execute(null);
+            await ApprovalFixtures.WaitUntilAsync(() => harness.Admin.InstallCalls.Count == 1, "the install call");
+            Assert.True(installing.IsInstalling);
+            Assert.NotNull(installedFrom);
+            // The host only accepts a package directory under the agreed install temp root, holding the manifest.
+            Assert.StartsWith(
+                Path.GetFullPath(ExtensionRepositoryService.DefaultInstallTempRoot()),
+                installedFrom,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.True(manifestPresent);
+
+            // A second fetch while the first install waits on the host: the list is rebuilt, the running install is not
+            // cancelled and its row is not the one the new list shows.
+            section.BrowseRepositoryCommand.Execute(null);
+            await ApprovalFixtures.WaitUntilAsync(
+                () => section.Repository.Count == 1 && !ReferenceEquals(section.Repository[0], installing),
+                "the second browse");
+
+            var refreshed = section.Repository[0];
+            Assert.False(refreshed.IsInstalling);
+            Assert.Equal(string.Empty, refreshed.ProgressText);
+            Assert.True(installing.IsInstalling);
+            Assert.Single(harness.Admin.InstallCalls);
+
+            gate.SetResult();
+            await ApprovalFixtures.WaitUntilAsync(() => !installing.IsInstalling, "the install to finish");
+
+            Assert.Single(harness.Admin.InstallCalls);
+            Assert.False(section.HasRepositoryProblem);
+            Assert.False(section.HasActionProblem);
+            Assert.Single(section.Repository);
+            Assert.True(harness.Admin.ReadCount > 1, "the section re-read the registry after the install");
+        }
+        finally
+        {
+            harness.DisposeDir();
+            previous.Restore();
+            ApprovalFixtures.DeleteTree(root);
+        }
+    }
+
+    [Fact]
+    public async Task A_second_click_on_an_installing_row_starts_one_install()
+    {
+        var (root, previous) = TempDataRoot.Redirect("forge-extensions-double-click-");
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            harness.Admin.InstallHook = (_, _, _) => gate.Task;
+            using var section = harness.Section(
+                harness.Admin,
+                repositoryHttp: RepositoryHttp(IndexJson("plug", "1.0.0"), PackageZipBytes()));
+            await section.RefreshAsync(CancellationToken.None);
+            section.RepositoryUrl = "https://example.test/repo.json";
+            section.BrowseRepositoryCommand.Execute(null);
+            await ApprovalFixtures.WaitUntilAsync(() => section.Repository.Count == 1, "the browsed row");
+
+            var row = section.Repository[0];
+            row.InstallCommand.Execute(null);
+            await ApprovalFixtures.WaitUntilAsync(() => harness.Admin.InstallCalls.Count == 1, "the first install call");
+
+            Assert.False(row.InstallCommand.CanExecute(null));
+            row.InstallCommand.Execute(null);
+            gate.SetResult();
+            await ApprovalFixtures.WaitUntilAsync(() => !row.IsInstalling, "the install to finish");
+
+            // One row, one package directory, one host install - a double click must not install the same id twice.
+            Assert.Single(harness.Admin.InstallCalls);
+        }
+        finally
+        {
+            harness.DisposeDir();
+            previous.Restore();
+            ApprovalFixtures.DeleteTree(root);
+        }
+    }
+
+    [Fact]
+    public async Task Cancelling_a_row_cancels_its_install_token_and_leaves_no_problem()
+    {
+        var (root, previous) = TempDataRoot.Redirect("forge-extensions-cancel-");
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            // The host call is where a cancel has to be visible: the token travels from the row's cancel command all
+            // the way into the host install, so cancelling stops the download, the extraction and the install itself.
+            harness.Admin.InstallHook = async (_, _, ct) =>
+            {
+                entered.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    cancelled.TrySetResult();
+                    throw;
+                }
+            };
+            using var section = harness.Section(
+                harness.Admin,
+                repositoryHttp: RepositoryHttp(IndexJson("plug", "1.0.0"), PackageZipBytes()));
+            await section.RefreshAsync(CancellationToken.None);
+            section.RepositoryUrl = "https://example.test/repo.json";
+            section.BrowseRepositoryCommand.Execute(null);
+            await ApprovalFixtures.WaitUntilAsync(() => section.Repository.Count == 1, "the browsed row");
+
+            var row = section.Repository[0];
+            Assert.False(row.CancelCommand.CanExecute(null));
+            row.InstallCommand.Execute(null);
+            await entered.Task.WaitAsync(ApprovalFixtures.StepTimeout);
+            Assert.True(row.CancelCommand.CanExecute(null));
+
+            row.CancelCommand.Execute(null);
+
+            await ApprovalFixtures.WaitUntilAsync(() => !row.IsInstalling, "the cancelled install to end");
+            Assert.True(cancelled.Task.IsCompleted, "the install token handed to the host was cancelled");
+            // A cancel is the user's own decision, not a failure to report back as a problem.
+            Assert.False(section.HasActionProblem);
+            Assert.Single(harness.Admin.InstallCalls);
+        }
+        finally
+        {
+            harness.DisposeDir();
+            previous.Restore();
+            ApprovalFixtures.DeleteTree(root);
+        }
+    }
+
+    [Fact]
+    public async Task Disposing_the_section_cancels_an_install_that_is_still_running()
+    {
+        var (root, previous) = TempDataRoot.Redirect("forge-extensions-dispose-cancel-");
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            harness.Admin.InstallHook = async (_, _, ct) =>
+            {
+                entered.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    cancelled.TrySetResult();
+                    throw;
+                }
+            };
+            var section = harness.Section(
+                harness.Admin,
+                repositoryHttp: RepositoryHttp(IndexJson("plug", "1.0.0"), PackageZipBytes()));
+            await section.RefreshAsync(CancellationToken.None);
+            section.RepositoryUrl = "https://example.test/repo.json";
+            section.BrowseRepositoryCommand.Execute(null);
+            await ApprovalFixtures.WaitUntilAsync(() => section.Repository.Count == 1, "the browsed row");
+
+            var row = section.Repository[0];
+            row.InstallCommand.Execute(null);
+            await entered.Task.WaitAsync(ApprovalFixtures.StepTimeout);
+
+            // Closing the shell must not leave an install running into a graph that is being torn down.
+            section.Dispose();
+
+            await cancelled.Task.WaitAsync(ApprovalFixtures.StepTimeout);
+            Assert.Single(harness.Admin.InstallCalls);
+        }
+        finally
+        {
+            harness.DisposeDir();
+            previous.Restore();
+            ApprovalFixtures.DeleteTree(root);
+        }
+    }
+
+    [Fact]
+    public async Task Building_the_section_clears_the_leftover_install_root()
+    {
+        var (root, previous) = TempDataRoot.Redirect("forge-extensions-stale-install-");
+        var harness = Harness.Create();
+        try
+        {
+            await using var _ = harness;
+            var stale = Path.Combine(ExtensionRepositoryService.DefaultInstallTempRoot(), "package-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(stale);
+            await File.WriteAllTextAsync(Path.Combine(stale, "manifest.json"), "{}");
+
+            using var section = harness.Section(harness.Admin);
+            await section.RefreshAsync(CancellationToken.None);
+
+            // A run that was killed mid-install leaves extractions the host will never accept; the root is transient by
+            // contract and is emptied once when the section is built (startup), not left to accumulate.
+            Assert.False(Directory.Exists(stale));
+            Assert.False(Directory.Exists(ExtensionRepositoryService.DefaultInstallTempRoot()));
+        }
+        finally
+        {
+            harness.DisposeDir();
+            previous.Restore();
+            ApprovalFixtures.DeleteTree(root);
+        }
+    }
+
+    [Fact]
     public async Task Switching_language_refreshes_the_cached_titles()
     {
         var harness = Harness.Create();
@@ -341,6 +665,48 @@ public sealed class ExtensionsSettingsSectionTests
         {
             Loc.Instance.Language = previous;
             harness.DisposeDir();
+        }
+    }
+
+    // ---------------------------------------------------------------- repository fixtures
+
+    private static string PackageEntry(string id, string version)
+    {
+        var sha = Convert.ToHexStringLower(SHA256.HashData(PackageZipBytes()));
+        return $$"""{ "id": "{{id}}", "version": "{{version}}", "kind": "plugin", "url": "https://example.test/{{id}}.zip", "sha256": "{{sha}}" }""";
+    }
+
+    private static string IndexJson(string id, string version) =>
+        $$"""{ "schema": 1, "name": "test", "packages": [{{PackageEntry(id, version)}}] }""";
+
+    /// <summary>The package itself: a zip whose only entry is the manifest the host validates.</summary>
+    private static byte[] PackageZipBytes()
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = archive.CreateEntry("manifest.json");
+            using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
+            writer.Write("""{ "id": "plug", "version": "2.0.0", "kind": "plugin", "source": "class P {}" }""");
+        }
+
+        return buffer.ToArray();
+    }
+
+    private static HttpClient RepositoryHttp(string indexJson, byte[] package)
+    {
+        var handler = new RepositoryHandler(Encoding.UTF8.GetBytes(indexJson), package);
+        return new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+    }
+
+    /// <summary>Serves the index and the package of a two-URL repository, so no test ever opens a socket.</summary>
+    private sealed class RepositoryHandler(byte[] indexJson, byte[] package) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            var body = path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? package : indexJson;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) });
         }
     }
 }

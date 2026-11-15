@@ -396,6 +396,166 @@ public sealed class LspClient : IAsyncDisposable
         CancellationToken ct = default) =>
         RequestLocationsAsync("textDocument/references", document, offset, Capabilities is { SupportsReferences: false }, includeDeclaration, ct);
 
+    /// <summary>
+    /// The code actions the server offers for <paramref name="range"/>: quick fixes for the diagnostics the caller passes
+    /// back, refactorings and source actions. An empty result is a real answer (nothing applies here).
+    /// </summary>
+    public async Task<CodeActionResult> RequestCodeActionsAsync(
+        TextDocument document,
+        LspRange range,
+        IReadOnlyList<LspDiagnostic>? diagnostics = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (Capabilities is { SupportsCodeActions: false })
+        {
+            return CodeActionResult.Empty;
+        }
+
+        var uri = UriFor(document);
+        using var timeout = CreateTimeout(ct);
+        var result = await _connection.SendRequestAsync("textDocument/codeAction", writer =>
+        {
+            writer.WriteStartObject();
+            WriteTextDocumentIdentifier(writer, uri);
+            writer.WritePropertyName("range");
+            WriteRange(writer, range);
+            writer.WritePropertyName("context");
+            writer.WriteStartObject();
+            writer.WritePropertyName("diagnostics");
+            writer.WriteStartArray();
+            if (diagnostics is not null)
+            {
+                foreach (var diagnostic in diagnostics)
+                {
+                    WriteDiagnostic(writer, diagnostic);
+                }
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }, timeout.Token).ConfigureAwait(false);
+        return ParseCodeActions(result);
+    }
+
+    /// <summary>
+    /// Sends the action back for <c>codeAction/resolve</c>, which is where a server that only sent <c>data</c> produces the
+    /// edit. Null when the server does not resolve actions or answered with something that is not an action.
+    /// </summary>
+    public async Task<LspCodeAction?> ResolveCodeActionAsync(LspCodeAction action, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        if (Capabilities is { SupportsCodeActionResolve: false })
+        {
+            return null;
+        }
+
+        using var timeout = CreateTimeout(ct);
+        var result = await _connection.SendRequestAsync("codeAction/resolve", writer => action.Raw.WriteTo(writer), timeout.Token)
+            .ConfigureAwait(false);
+        return TryParseCodeAction(result, out var resolved, out _) ? resolved : null;
+    }
+
+    /// <summary>
+    /// Asks the server what a rename at <paramref name="offset"/> would replace, so the editor can refuse an impossible
+    /// rename before it opens an input box and can seed the box with the server's own placeholder. Null means "the server
+    /// has no answer" (no capability, no session, or a refusal).
+    /// </summary>
+    public async Task<RenamePreparation?> RequestPrepareRenameAsync(TextDocument document, int offset, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (Capabilities is { SupportsPrepareRename: false })
+        {
+            return null;
+        }
+
+        var uri = UriFor(document);
+        var position = ToLsp(document.Snapshot.OffsetToPosition(offset, PositionEncoding));
+        using var timeout = CreateTimeout(ct);
+        var result = await _connection.SendRequestAsync("textDocument/prepareRename", writer =>
+        {
+            writer.WriteStartObject();
+            WriteTextDocumentIdentifier(writer, uri);
+            writer.WritePropertyName("position");
+            WritePosition(writer, position);
+            writer.WriteEndObject();
+        }, timeout.Token).ConfigureAwait(false);
+        return ParsePrepareRename(result);
+    }
+
+    /// <summary>The edit that renames the symbol at <paramref name="offset"/> to <paramref name="newName"/>; null when the server refuses.</summary>
+    public async Task<WorkspaceEdit?> RequestRenameAsync(
+        TextDocument document,
+        int offset,
+        string newName,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newName);
+        if (Capabilities is { SupportsRename: false })
+        {
+            return null;
+        }
+
+        var uri = UriFor(document);
+        var position = ToLsp(document.Snapshot.OffsetToPosition(offset, PositionEncoding));
+        using var timeout = CreateTimeout(ct);
+        var result = await _connection.SendRequestAsync("textDocument/rename", writer =>
+        {
+            writer.WriteStartObject();
+            WriteTextDocumentIdentifier(writer, uri);
+            writer.WritePropertyName("position");
+            WritePosition(writer, position);
+            writer.WriteString("newName", newName);
+            writer.WriteEndObject();
+        }, timeout.Token).ConfigureAwait(false);
+        return ParseWorkspaceEdit(result, out _);
+    }
+
+    /// <summary>
+    /// Inline hints (parameter names, types) for <paramref name="range"/>. The editor asks per range — the file's whole range
+    /// this wave — and draws only the lines it shows.
+    /// </summary>
+    public async Task<IReadOnlyList<InlayHint>> RequestInlayHintsAsync(
+        TextDocument document,
+        LspRange range,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (Capabilities is { SupportsInlayHints: false })
+        {
+            return [];
+        }
+
+        var uri = UriFor(document);
+        using var timeout = CreateTimeout(ct);
+        var result = await _connection.SendRequestAsync("textDocument/inlayHint", writer =>
+        {
+            writer.WriteStartObject();
+            WriteTextDocumentIdentifier(writer, uri);
+            writer.WritePropertyName("range");
+            WriteRange(writer, range);
+            writer.WriteEndObject();
+        }, timeout.Token).ConfigureAwait(false);
+        return ParseInlayHints(result);
+    }
+
+    /// <summary>Sends one hint back for <c>inlayHint/resolve</c>, used only for a hint whose label the server withheld.</summary>
+    public async Task<InlayHint?> ResolveInlayHintAsync(InlayHint hint, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(hint);
+        if (Capabilities is { SupportsInlayHintResolve: false })
+        {
+            return null;
+        }
+
+        using var timeout = CreateTimeout(ct);
+        var result = await _connection.SendRequestAsync("inlayHint/resolve", writer => hint.Raw.WriteTo(writer), timeout.Token)
+            .ConfigureAwait(false);
+        return ParseInlayHint(result);
+    }
+
     public async Task<SemanticTokensResult> RequestSemanticTokensAsync(TextDocument document, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -579,6 +739,14 @@ public sealed class LspClient : IAsyncDisposable
         writer.WriteStartObject();
         writer.WriteBoolean("refreshSupport", true);
         writer.WriteEndObject();
+        writer.WritePropertyName("inlayHint");
+        writer.WriteStartObject();
+        writer.WriteBoolean("refreshSupport", true);
+        writer.WriteEndObject();
+        writer.WritePropertyName("codeAction");
+        writer.WriteStartObject();
+        writer.WriteBoolean("refreshSupport", true);
+        writer.WriteEndObject();
         writer.WriteEndObject();
 
         writer.WritePropertyName("textDocument");
@@ -646,6 +814,60 @@ public sealed class LspClient : IAsyncDisposable
         writer.WritePropertyName("references");
         writer.WriteStartObject();
         writer.WriteBoolean("dynamicRegistration", false);
+        writer.WriteEndObject();
+
+        // `codeActionLiteralSupport` is what makes a server answer with CodeAction literals instead of bare Commands, and
+        // `resolveSupport.properties: [edit]` says a resolved action may be the first thing that carries its edit. `data`
+        // travels back untouched, which is the only correlation a server has between the two calls.
+        writer.WritePropertyName("codeAction");
+        writer.WriteStartObject();
+        writer.WriteBoolean("dynamicRegistration", false);
+        writer.WriteBoolean("isPreferredSupport", true);
+        writer.WriteBoolean("dataSupport", true);
+        writer.WritePropertyName("codeActionLiteralSupport");
+        writer.WriteStartObject();
+        writer.WritePropertyName("codeActionKind");
+        writer.WriteStartObject();
+        writer.WritePropertyName("valueSet");
+        writer.WriteStartArray();
+        writer.WriteStringValue(string.Empty);
+        writer.WriteStringValue("quickfix");
+        writer.WriteStringValue("refactor");
+        writer.WriteStringValue("refactor.extract");
+        writer.WriteStringValue("refactor.inline");
+        writer.WriteStringValue("refactor.rewrite");
+        writer.WriteStringValue("source");
+        writer.WriteStringValue("source.fixAll");
+        writer.WriteStringValue("source.organizeImports");
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        writer.WriteEndObject();
+        writer.WritePropertyName("resolveSupport");
+        writer.WriteStartObject();
+        writer.WritePropertyName("properties");
+        writer.WriteStartArray();
+        writer.WriteStringValue("edit");
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        writer.WriteEndObject();
+
+        writer.WritePropertyName("rename");
+        writer.WriteStartObject();
+        writer.WriteBoolean("dynamicRegistration", false);
+        writer.WriteBoolean("prepareSupport", true);
+        writer.WriteEndObject();
+
+        // No `textEdits` support in the resolve properties: a hint is drawn text here, accepting one is not offered.
+        writer.WritePropertyName("inlayHint");
+        writer.WriteStartObject();
+        writer.WriteBoolean("dynamicRegistration", false);
+        writer.WritePropertyName("resolveSupport");
+        writer.WriteStartObject();
+        writer.WritePropertyName("properties");
+        writer.WriteStartArray();
+        writer.WriteStringValue("tooltip");
+        writer.WriteEndArray();
+        writer.WriteEndObject();
         writer.WriteEndObject();
 
         // Pull diagnostics (LSP 3.17): Roslyn only reports diagnostics when the client can ask for them, and hides its
@@ -756,7 +978,7 @@ public sealed class LspClient : IAsyncDisposable
             "workspace/applyEdit" => JsonRpcReply.Unsupported("workspace/applyEdit is not supported by this client"),
             "window/workDoneProgress/create" or "window/showMessageRequest" or "client/registerCapability" or "client/unregisterCapability" =>
                 JsonRpcReply.Null,
-            "workspace/semanticTokens/refresh" or "workspace/inlayHint/refresh" or "workspace/codeLens/refresh" or "workspace/diagnostic/refresh" =>
+            "workspace/semanticTokens/refresh" or "workspace/inlayHint/refresh" or "workspace/codeAction/refresh" or "workspace/codeLens/refresh" or "workspace/diagnostic/refresh" =>
                 RefreshReply(method),
             _ => JsonRpcReply.Unsupported($"Unsupported server request '{method}'"),
         });
@@ -1153,6 +1375,370 @@ public sealed class LspClient : IAsyncDisposable
 
         position = new LspPosition(lineValue, characterValue);
         return true;
+    }
+
+    private static void WriteDiagnostic(Utf8JsonWriter writer, LspDiagnostic diagnostic)
+    {
+        writer.WriteStartObject();
+        writer.WritePropertyName("range");
+        WriteRange(writer, diagnostic.Range);
+        writer.WriteNumber("severity", (int)diagnostic.Severity);
+        if (diagnostic.Code is { Length: > 0 } code)
+        {
+            writer.WriteString("code", code);
+        }
+
+        if (diagnostic.Source is { Length: > 0 } source)
+        {
+            writer.WriteString("source", source);
+        }
+
+        writer.WriteString("message", diagnostic.Message);
+        writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// Reads a <c>textDocument/codeAction</c> answer. An entry is offered when it carries an edit the client can apply;
+    /// an entry that only carries a <c>Command</c> is counted as unsupported because this client advertises no
+    /// <c>workspace/executeCommand</c>, and an entry with an unusable shape is counted so the editor can say how many were
+    /// ignored instead of pretending the list is complete.
+    /// </summary>
+    private static CodeActionResult ParseCodeActions(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Array)
+        {
+            return CodeActionResult.Empty;
+        }
+
+        var items = new List<LspCodeAction>(result.GetArrayLength());
+        var malformed = 0;
+        var unsupported = 0;
+        foreach (var entry in result.EnumerateArray())
+        {
+            if (TryParseCodeAction(entry, out var action, out var needsCommand))
+            {
+                items.Add(action!);
+            }
+            else if (needsCommand)
+            {
+                unsupported++;
+            }
+            else
+            {
+                malformed++;
+            }
+        }
+
+        items.Sort(static (left, right) =>
+        {
+            if (left.IsPreferred != right.IsPreferred)
+            {
+                return left.IsPreferred ? -1 : 1;
+            }
+
+            var byKind = string.CompareOrdinal(left.Kind ?? string.Empty, right.Kind ?? string.Empty);
+            return byKind != 0 ? byKind : string.CompareOrdinal(left.Title, right.Title);
+        });
+        return new CodeActionResult(items, malformed, unsupported);
+    }
+
+    /// <summary>
+    /// One code action entry. False with <paramref name="needsCommand"/> means the entry was well-formed but is a bare
+    /// <c>Command</c>; false without it means the entry is unusable.
+    /// </summary>
+    private static bool TryParseCodeAction(JsonElement entry, out LspCodeAction? action, out bool needsCommand)
+    {
+        action = null;
+        needsCommand = false;
+        if (entry.ValueKind != JsonValueKind.Object ||
+            !entry.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var hasCommand = entry.TryGetProperty("command", out var command) && command.ValueKind == JsonValueKind.Object;
+        WorkspaceEdit? edit = null;
+        if (entry.TryGetProperty("edit", out var editElement) && editElement.ValueKind != JsonValueKind.Null)
+        {
+            edit = ParseWorkspaceEdit(editElement, out _);
+            if (edit is null)
+            {
+                return false;
+            }
+
+            if (edit.FileCount == 0)
+            {
+                edit = null;
+            }
+        }
+
+        // Without `data` and without an edit there is nothing to resolve either: the server answered an empty action.
+        var hasData = entry.TryGetProperty("data", out var dataElement) && dataElement.ValueKind != JsonValueKind.Null;
+        if (edit is null && !hasData)
+        {
+            needsCommand = hasCommand;
+            return false;
+        }
+
+        var kind = entry.TryGetProperty("kind", out var kindElement) && kindElement.ValueKind == JsonValueKind.String
+            ? kindElement.GetString()
+            : null;
+        var isPreferred = entry.TryGetProperty("isPreferred", out var preferredElement) && preferredElement.ValueKind == JsonValueKind.True;
+        var disabled = entry.TryGetProperty("disabled", out var disabledElement) && disabledElement.ValueKind == JsonValueKind.Object;
+        var disabledReason = disabled && disabledElement.TryGetProperty("reason", out var reasonElement) &&
+            reasonElement.ValueKind == JsonValueKind.String
+            ? reasonElement.GetString()
+            : null;
+
+        action = new LspCodeAction(
+            title.GetString() ?? string.Empty,
+            kind,
+            isPreferred,
+            disabled,
+            disabledReason,
+            edit,
+            hasCommand,
+            entry.Clone());
+        return true;
+    }
+
+    /// <summary>
+    /// Reads a workspace edit from either wire form: the <c>changes</c> map of uri → edits and the 3.16
+    /// <c>documentChanges</c> array of text document edits. File resource operations and edits with an unusable range are
+    /// dropped into <paramref name="dropped"/>; null means the whole edit has neither form.
+    /// </summary>
+    private static WorkspaceEdit? ParseWorkspaceEdit(JsonElement element, out int dropped)
+    {
+        dropped = 0;
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var hasShape = false;
+        var byUri = new Dictionary<string, List<LspTextEdit>>(StringComparer.Ordinal);
+        var order = new List<string>();
+
+        void AddEdits(string uri, List<LspTextEdit> edits)
+        {
+            if (!byUri.TryGetValue(uri, out var list))
+            {
+                list = [];
+                byUri[uri] = list;
+                order.Add(uri);
+            }
+
+            list.AddRange(edits);
+        }
+
+        // LSP semantics: documentChanges wins when present — reading both shapes would apply the same file twice (the
+        // second pass against already-modified text). Entries for one URI are merged into a single file edit so the
+        // applier's overlap check spans them and the disk path reads the file once.
+        if (element.TryGetProperty("documentChanges", out var documentChanges) && documentChanges.ValueKind == JsonValueKind.Array)
+        {
+            hasShape = true;
+            foreach (var change in documentChanges.EnumerateArray())
+            {
+                // `create`/`rename`/`delete` carry a `kind`; this client advertises no support for them.
+                if (change.ValueKind != JsonValueKind.Object ||
+                    (change.TryGetProperty("kind", out var changeKind) && changeKind.ValueKind == JsonValueKind.String) ||
+                    !change.TryGetProperty("textDocument", out var textDocument) || textDocument.ValueKind != JsonValueKind.Object ||
+                    !textDocument.TryGetProperty("uri", out var uriElement) || uriElement.ValueKind != JsonValueKind.String ||
+                    !change.TryGetProperty("edits", out var editArray))
+                {
+                    dropped++;
+                    continue;
+                }
+
+                if (ParseTextEdits(editArray) is not { Count: > 0 } changeEdits)
+                {
+                    dropped++;
+                    continue;
+                }
+
+                AddEdits(uriElement.GetString() ?? string.Empty, changeEdits);
+            }
+        }
+        else if (element.TryGetProperty("changes", out var changes) && changes.ValueKind == JsonValueKind.Object)
+        {
+            hasShape = true;
+            foreach (var file in changes.EnumerateObject())
+            {
+                if (ParseTextEdits(file.Value) is not { Count: > 0 } edits)
+                {
+                    dropped++;
+                    continue;
+                }
+
+                AddEdits(file.Name, edits);
+            }
+        }
+
+        var files = new List<LspFileEdit>(order.Count);
+        foreach (var uri in order)
+        {
+            files.Add(new LspFileEdit(uri, byUri[uri]));
+        }
+
+        return hasShape ? new WorkspaceEdit(files, dropped) : null;
+    }
+
+    private static List<LspTextEdit>? ParseTextEdits(JsonElement array)
+    {
+        if (array.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var edits = new List<LspTextEdit>(array.GetArrayLength());
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !item.TryGetProperty("newText", out var newText) || newText.ValueKind != JsonValueKind.String ||
+                !item.TryGetProperty("range", out var rangeElement) || !TryParseRangeStrict(rangeElement, out var range))
+            {
+                return null;
+            }
+
+            edits.Add(new LspTextEdit(range, newText.GetString() ?? string.Empty));
+        }
+
+        return edits;
+    }
+
+    private static RenamePreparation? ParsePrepareRename(JsonElement result)
+    {
+        if (result.ValueKind == JsonValueKind.Null || result.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (result.ValueKind == JsonValueKind.Array)
+        {
+            return TryParseLegacyRange(result, out var legacy) ? new RenamePreparation(legacy) : null;
+        }
+
+        if (result.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (result.TryGetProperty("defaultBehavior", out var defaultBehavior) && defaultBehavior.ValueKind == JsonValueKind.True)
+        {
+            return RenamePreparation.Anywhere;
+        }
+
+        if (!result.TryGetProperty("range", out var rangeElement) || !TryParseRangeStrict(rangeElement, out var range))
+        {
+            return null;
+        }
+
+        var placeholder = result.TryGetProperty("placeholder", out var placeholderElement) &&
+            placeholderElement.ValueKind == JsonValueKind.String
+            ? placeholderElement.GetString()
+            : null;
+        return new RenamePreparation(range, placeholder);
+    }
+
+    /// <summary>The pre-3.12 range shape of <c>prepareRename</c>: four numbers in one array.</summary>
+    private static bool TryParseLegacyRange(JsonElement array, out LspRange range)
+    {
+        range = default;
+        if (array.GetArrayLength() != 4)
+        {
+            return false;
+        }
+
+        var values = new int[4];
+        var index = 0;
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Number || !item.TryGetInt32(out values[index]) || values[index] < 0)
+            {
+                return false;
+            }
+
+            index++;
+        }
+
+        if (values[2] < values[0] || (values[2] == values[0] && values[3] < values[1]))
+        {
+            return false;
+        }
+
+        range = new LspRange(new LspPosition(values[0], values[1]), new LspPosition(values[2], values[3]));
+        return true;
+    }
+
+    private static IReadOnlyList<InlayHint> ParseInlayHints(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var hints = new List<InlayHint>(result.GetArrayLength());
+        foreach (var item in result.EnumerateArray())
+        {
+            if (ParseInlayHint(item) is { } hint)
+            {
+                hints.Add(hint);
+            }
+        }
+
+        hints.Sort(static (left, right) => left.Position.Line != right.Position.Line
+            ? left.Position.Line.CompareTo(right.Position.Line)
+            : left.Position.Character.CompareTo(right.Position.Character));
+        return hints;
+    }
+
+    private static InlayHint? ParseInlayHint(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object ||
+            !item.TryGetProperty("position", out var positionElement) || !TryParsePositionStrict(positionElement, out var position))
+        {
+            return null;
+        }
+
+        // A label is either one string or InlayHintLabelPart[]; an empty label is kept because `inlayHint/resolve` may be
+        // where the server fills it in, which is exactly the case the caller has to resolve.
+        var label = string.Empty;
+        if (item.TryGetProperty("label", out var labelElement))
+        {
+            if (labelElement.ValueKind == JsonValueKind.String)
+            {
+                label = labelElement.GetString() ?? string.Empty;
+            }
+            else if (labelElement.ValueKind == JsonValueKind.Array)
+            {
+                var parts = new List<string>(labelElement.GetArrayLength());
+                foreach (var part in labelElement.EnumerateArray())
+                {
+                    if (part.ValueKind == JsonValueKind.Object && part.TryGetProperty("value", out var value) &&
+                        value.ValueKind == JsonValueKind.String)
+                    {
+                        parts.Add(value.GetString() ?? string.Empty);
+                    }
+                }
+
+                label = string.Concat(parts);
+            }
+        }
+
+        InlayHintKind? kind = null;
+        if (item.TryGetProperty("kind", out var kindElement) && kindElement.ValueKind == JsonValueKind.Number &&
+            kindElement.TryGetInt32(out var kindValue) && kindValue is 1 or 2)
+        {
+            kind = (InlayHintKind)kindValue;
+        }
+
+        return new InlayHint(
+            position,
+            label,
+            kind,
+            item.TryGetProperty("paddingLeft", out var paddingLeft) && paddingLeft.ValueKind == JsonValueKind.True,
+            item.TryGetProperty("paddingRight", out var paddingRight) && paddingRight.ValueKind == JsonValueKind.True,
+            item.Clone());
     }
 
     /// <summary>

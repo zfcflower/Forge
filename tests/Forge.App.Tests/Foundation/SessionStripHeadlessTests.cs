@@ -290,6 +290,9 @@ public sealed class SessionStripHeadlessTests
         public void OpenSettingsSection(string sectionId)
         {
         }
+
+        public Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct) =>
+            Task.FromResult(SessionTurnHistory.Empty);
     }
 
 }

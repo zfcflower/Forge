@@ -34,6 +34,11 @@ internal static class GitStrings
     public const string SettingsReviewFiles = "git.settings.reviewFiles";
     public const string SettingsReviewFieldChars = "git.settings.reviewFieldChars";
     public const string SettingsReviewHint = "git.settings.reviewHint";
+    public const string SettingsReviewMode = "git.settings.reviewMode";
+    public const string SettingsReviewModeSubAgent = "git.settings.reviewMode.subagent";
+    public const string SettingsReviewModeManual = "git.settings.reviewMode.manual";
+    public const string SettingsReviewAfterStepCommit = "git.settings.reviewAfterStepCommit";
+    public const string SettingsReviewModeHint = "git.settings.reviewModeHint";
     public const string SettingsGhPath = "git.settings.ghPath";
     public const string SettingsGhPathHint = "git.settings.ghPathHint";
 
@@ -287,6 +292,14 @@ internal static class GitStrings
     public const string ShipMergeDialogMerge = "git.ship.mergeDialog.merge";
     public const string ShipMergeDialogRebase = "git.ship.mergeDialog.rebase";
 
+    // ---------------------------------------------------------------- hand-off and notification (wave W17b)
+
+    /// <summary>Origin line of the automatic review request a committed step hands to its session.</summary>
+    public const string HandOffReviewOrigin = "git.handOff.reviewOrigin";
+
+    /// <summary>Title of the notification shown when a step's review request could not be handed over.</summary>
+    public const string NotificationReviewHandOffFailed = "git.title.reviewHandOffFailed";
+
     // ---------------------------------------------------------------- recovery hints, one per failure kind
 
     public const string HintAuthentication = "git.hint.authentication";
@@ -340,6 +353,14 @@ internal static class GitStrings
             SettingsReviewHint,
             "request_review 交给评审者的材料上限：diff 字符数（1000–500000，超出会截断并注明）、列出的提交行数（5–500）、文件行数（20–2000），以及意图、步骤说明、关注点、提交标题与限定路径列表各自保留的字符数（200–20000）；改动对下一次评审生效。",
             "Caps on what request_review hands the reviewer: diff characters (1000–500000, a longer diff is cut and says so), commit lines listed (5–500), file lines listed (20–2000), and the characters kept of the intent, step text, focus, commit subjects and the narrowed-to path list (200–20000); a change applies to the next review.");
+        Loc.Register(SettingsReviewMode, "评审方式", "Review mode");
+        Loc.Register(SettingsReviewModeSubAgent, "子 Agent 评审", "Sub-agent review");
+        Loc.Register(SettingsReviewModeManual, "人工", "Manual");
+        Loc.Register(SettingsReviewAfterStepCommit, "步骤提交后自动评审", "Review after each step commit");
+        Loc.Register(
+            SettingsReviewModeHint,
+            "评审方式决定谁来评审：子 Agent 评审每次起一个只读的 Reviewer 跑一遍 request_review，人工则由自己检查。打开上面的开关后，每次步骤提交成功都会请该会话的 Agent 自动评审这一步的提交；人工模式不自动触发。改动对下一次提交生效。",
+            "The review mode decides who reviews: sub-agent review starts the read-only Reviewer for one request_review pass, manual leaves the check to you. With the switch above on, every committed step asks its own session's agent to review that step's commit; the manual mode never triggers one. A change applies to the next commit.");
         Loc.Register(SettingsGhPath, "gh 可执行文件", "gh executable");
         Loc.Register(
             SettingsGhPathHint,
@@ -559,5 +580,11 @@ internal static class GitStrings
             "操作超时：可在 Git 设置分区加大网络超时。",
             "The operation timed out: raise the network timeout in the Git settings.");
         Loc.Register(HintOther, "查看下方的 Git 输出。", "See the Git output below.");
+
+        Loc.Register(HandOffReviewOrigin, "步骤提交后自动评审", "Automatic review after a step commit");
+        Loc.Register(
+            NotificationReviewHandOffFailed,
+            "自动评审未能交给会话",
+            "The automatic review could not be handed to the session");
     }
 }

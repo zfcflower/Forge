@@ -181,6 +181,16 @@ internal sealed class FakeFile : IDiffFileItem
         set => Set(ref preview, value, nameof(IsMarkdownPreview));
     }
 
+    public bool IsImage => Path.EndsWith(".png", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What <see cref="ReadImageSidesAsync"/> reports; an image test sets it to one side only to model add/delete.</summary>
+    public ImageDiffSides Sides { get; set; } = new(Png("before"), Png("after"));
+
+    public Task<ImageDiffSides> ReadImageSidesAsync(CancellationToken ct = default) => Task.FromResult(Sides);
+
+    /// <summary>The two sides every image test file reports: a PNG signature followed by a tag, so the decode stub can tell them apart.</summary>
+    public static byte[] Png(string tag) => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, .. System.Text.Encoding.UTF8.GetBytes(tag)];
+
     public bool HasFullContext { get; }
 
     public bool CanLoadContext => false;

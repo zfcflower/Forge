@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
 using Forge.Abstractions;
 using Forge.App.Agents;
+using Forge.App.Automations;
 using Forge.App.Composition;
+using Forge.App.Git;
 using Forge.App.Localization;
 using Forge.App.Providers;
 using Forge.App.Services;
@@ -108,6 +110,52 @@ public sealed class SessionHandMessageTests
             await Assert.ThrowsAnyAsync<ArgumentException>(() => workspace.HandMessageAsync("  ", Origin));
             Assert.Equal(string.Empty, workspace.Draft);
         });
+
+    // ------------------------------------------------------------ wave W17b: the step review trigger uses this contract
+
+    [Fact]
+    public Task An_idle_sessions_step_review_request_runs_as_its_own_turn() => RunAsync(
+        gated: false,
+        async (workspace, provider) =>
+        {
+            var message = ReviewRequest();
+            var ran = await new StepReviewMessenger(_ => workspace, InlineUi()).HandAsync(
+                workspace.SessionId,
+                message,
+                new LocText(GitStrings.HandOffReviewOrigin));
+
+            Assert.True(ran);
+            Assert.Equal(1, provider.Calls);
+            Assert.Equal(string.Empty, workspace.Draft);
+        });
+
+    [Fact]
+    public Task A_busy_sessions_step_review_request_lands_in_the_composer_draft() => RunAsync(
+        gated: true,
+        async (workspace, provider) =>
+        {
+            var running = workspace.RunAutomationTurnAsync("first", Origin, agent: null);
+            await UntilAsync(() => !workspace.IsAutomationIdle);
+
+            var message = ReviewRequest();
+            var ran = await new StepReviewMessenger(_ => workspace, InlineUi()).HandAsync(
+                workspace.SessionId,
+                message,
+                new LocText(GitStrings.HandOffReviewOrigin));
+
+            // The auto-review trigger gets the same answer as any other hand-off: no second turn, the message waits in the
+            // composer where the user sends it when the current turn is done.
+            Assert.False(ran);
+            Assert.Equal(message, workspace.Draft);
+            provider.Release();
+            await running;
+            Assert.Equal(1, provider.Calls);
+        });
+
+    private static string ReviewRequest() => StepCommitter.BuildReviewRequest(
+        new TodoItem("step-1", "hand-message-session", "Wire the review trigger", TodoStatus.Done, null, 0, DateTimeOffset.UnixEpoch));
+
+    private static IUiThread InlineUi() => DispatcherUiThread.Instance;
 
     private static async Task UntilAsync(Func<bool> condition)
     {

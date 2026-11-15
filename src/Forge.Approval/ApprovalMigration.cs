@@ -43,10 +43,20 @@ internal static class ApprovalMigration
         var imported = false;
         if (version < ApprovalDatabase.SchemaVersion)
         {
-            ApprovalDatabase.Execute(connection, transaction, ApprovalDatabase.SchemaSql);
-            if (options.ImportLegacyJson)
+            if (version == 0)
             {
-                imported = ImportLegacyJson(connection, transaction, databasePath, legacyPath);
+                // A fresh (or empty) database is created at the current schema in one step: the table already carries
+                // the origin column, and the one-time legacy import (if enabled) runs inside the same transaction.
+                ApprovalDatabase.Execute(connection, transaction, ApprovalDatabase.SchemaSql);
+                if (options.ImportLegacyJson)
+                {
+                    imported = ImportLegacyJson(connection, transaction, databasePath, legacyPath);
+                }
+            }
+            else if (version < 2)
+            {
+                // Version 1 predates the origin dimension: add the column; every existing row reads as Installed.
+                ApprovalDatabase.Execute(connection, transaction, ApprovalDatabase.AddOriginColumnSql);
             }
 
             SetUserVersion(connection, transaction, ApprovalDatabase.SchemaVersion);

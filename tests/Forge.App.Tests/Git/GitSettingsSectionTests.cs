@@ -94,6 +94,177 @@ public sealed class GitSettingsSectionTests
         }
     }
 
+    [Fact]
+    public void The_review_mode_picker_reflects_and_edits_the_preference()
+    {
+        var preferences = new AppPreferences();
+        var section = new GitSettingsSectionViewModel(preferences);
+
+        Assert.Equal(StepReviewSettings.SubAgentModeToken, section.SelectedReviewMode.Token);
+        // The labels are Loc keys like the pull strategies' (the language switch has its own test below).
+        Assert.Equal(
+            [GitStrings.SettingsReviewModeSubAgent, GitStrings.SettingsReviewModeManual],
+            section.ReviewModes.Select(static mode => mode.LabelKey));
+
+        section.SelectedReviewMode = section.ReviewModes[1];
+        Assert.Equal(StepReviewSettings.ManualModeToken, preferences.ReviewMode);
+        Assert.Equal(StepReviewSettings.ManualModeToken, section.SelectedReviewMode.Token);
+
+        // A null selection is a picker clearing itself, not a value to write.
+        section.SelectedReviewMode = null!;
+        Assert.Equal(StepReviewSettings.ManualModeToken, preferences.ReviewMode);
+
+        section.SelectedReviewMode = section.ReviewModes[0];
+        Assert.Equal(StepReviewSettings.SubAgentModeToken, preferences.ReviewMode);
+    }
+
+    [Fact]
+    public void The_review_after_step_commit_switch_round_trips_through_the_preference()
+    {
+        var preferences = new AppPreferences();
+        var section = new GitSettingsSectionViewModel(preferences);
+
+        Assert.False(section.ReviewAfterStepCommit);
+
+        section.ReviewAfterStepCommit = true;
+        Assert.True(preferences.ReviewAfterStepCommit);
+        Assert.True(section.ReviewAfterStepCommit);
+
+        preferences.ReviewAfterStepCommit = false;
+        Assert.False(section.ReviewAfterStepCommit);
+    }
+
+    [Fact]
+    public void The_two_review_rows_raise_their_own_change_notifications()
+    {
+        using var section = new GitSettingsSectionViewModel(new AppPreferences());
+        var raised = PropertyChangeLog.For(section);
+
+        section.SelectedReviewMode = section.ReviewModes[1];
+        section.ReviewAfterStepCommit = true;
+
+        Assert.Equal(
+            [
+                nameof(GitSettingsSectionViewModel.SelectedReviewMode),
+                nameof(GitSettingsSectionViewModel.ReviewAfterStepCommit),
+            ],
+            raised);
+    }
+
+    [Fact]
+    public void Setting_a_review_row_re_reads_the_settled_value_even_when_the_preference_did_not_change()
+    {
+        var preferences = new AppPreferences();
+        using var section = new GitSettingsSectionViewModel(preferences);
+        var raised = PropertyChangeLog.For(section);
+
+        // Both rows already carry their defaults; the section still re-raises so the picker re-reads what the
+        // preference settled on (the review mode normalizes an unknown token to the default).
+        section.SelectedReviewMode = section.ReviewModes[0];
+        section.ReviewAfterStepCommit = false;
+
+        Assert.Equal(
+            [
+                nameof(GitSettingsSectionViewModel.SelectedReviewMode),
+                nameof(GitSettingsSectionViewModel.ReviewAfterStepCommit),
+            ],
+            raised);
+        Assert.Equal(AppPreferences.DefaultReviewMode, preferences.ReviewMode);
+        Assert.False(preferences.ReviewAfterStepCommit);
+    }
+
+    [Fact]
+    public void An_unknown_review_mode_token_shows_the_default_option_and_normalizes()
+    {
+        var preferences = new AppPreferences { ReviewMode = "not-a-mode" };
+        using var section = new GitSettingsSectionViewModel(preferences);
+
+        Assert.Equal(AppPreferences.DefaultReviewMode, preferences.ReviewMode);
+        Assert.Equal(StepReviewSettings.SubAgentModeToken, section.SelectedReviewMode.Token);
+
+        // A later bogus write through the preference stays normalized and the picker keeps showing the default.
+        preferences.ReviewMode = "garbage";
+        Assert.Equal(StepReviewSettings.SubAgentModeToken, section.SelectedReviewMode.Token);
+    }
+
+    [Fact]
+    public void The_review_mode_preference_setter_raises_only_for_a_real_change_and_normalizes_unknown_tokens()
+    {
+        var preferences = new AppPreferences();
+        var raised = PropertyChangeLog.For(preferences);
+
+        preferences.ReviewMode = AppPreferences.DefaultReviewMode; // already the default
+        Assert.Empty(raised);
+
+        preferences.ReviewMode = "manual";
+        Assert.Equal([nameof(AppPreferences.ReviewMode)], raised);
+
+        preferences.ReviewMode = "bogus"; // normalizes back to the default, a real change
+        Assert.Equal(
+            [nameof(AppPreferences.ReviewMode), nameof(AppPreferences.ReviewMode)],
+            raised);
+        Assert.Equal(AppPreferences.DefaultReviewMode, preferences.ReviewMode);
+    }
+
+    [Fact]
+    public void The_review_mode_option_list_is_rebuilt_not_mutated_when_the_language_changes()
+    {
+        var previous = Loc.Instance.Language;
+        try
+        {
+            var preferences = new AppPreferences { ReviewMode = StepReviewSettings.ManualModeToken };
+            using var section = new GitSettingsSectionViewModel(preferences);
+            var before = section.ReviewModes;
+
+            Loc.Instance.Language = previous == UiLanguage.Chinese ? UiLanguage.English : UiLanguage.Chinese;
+
+            Assert.NotSame(before, section.ReviewModes);
+            Assert.Equal(
+                [StepReviewSettings.SubAgentModeToken, StepReviewSettings.ManualModeToken],
+                section.ReviewModes.Select(static mode => mode.Token).ToArray());
+            // Rebuilding the list must keep the selection the preference holds.
+            Assert.Equal(StepReviewSettings.ManualModeToken, section.SelectedReviewMode.Token);
+        }
+        finally
+        {
+            Loc.Instance.Language = previous;
+        }
+    }
+
+    [Fact]
+    public async Task The_review_mode_labels_are_re_read_after_a_language_switch()
+    {
+        var session = SharedUi.Session;
+        var previous = await session.Dispatch(() => Loc.Instance.Language, CancellationToken.None);
+        try
+        {
+            var section = new GitSettingsSectionViewModel(new AppPreferences());
+
+            await session.Dispatch(() => { Loc.Instance.Language = UiLanguage.English; return 0; }, CancellationToken.None);
+            var english = await session.Dispatch(
+                () => section.ReviewModes.Select(static mode => mode.Label).ToList(),
+                CancellationToken.None);
+
+            await session.Dispatch(() => { Loc.Instance.Language = UiLanguage.Chinese; return 0; }, CancellationToken.None);
+            var chinese = await session.Dispatch(
+                () => section.ReviewModes.Select(static mode => mode.Label).ToList(),
+                CancellationToken.None);
+
+            Assert.Equal(["Sub-agent review", "Manual"], english);
+            Assert.Equal(["子 Agent 评审", "人工"], chinese);
+
+            // The replaced list must keep the selection the preference holds.
+            Assert.Equal(
+                StepReviewSettings.SubAgentModeToken,
+                await session.Dispatch(() => section.SelectedReviewMode.Token, CancellationToken.None));
+        }
+        finally
+        {
+            var restore = previous;
+            await session.Dispatch(() => { Loc.Instance.Language = restore; return 0; }, CancellationToken.None);
+        }
+    }
+
     // ------------------------------------------------------------ registration and rendering
 
     [Fact]
@@ -163,7 +334,11 @@ public sealed class GitSettingsSectionTests
             Assert.True(rendered.English.HasStrategyPicker);
             Assert.True(rendered.English.HasTimeoutInput);
             Assert.True(rendered.English.HasReviewLimitInputs, "the four review package limits render as number boxes");
+            Assert.True(rendered.English.HasReviewModePicker, "the review mode picker of wave W17b renders");
+            Assert.True(rendered.English.HasReviewAfterStepToggle, "the automatic review switch of wave W17b renders");
             Assert.Contains("评审包 diff 字符上限", rendered.English.Texts, StringComparer.Ordinal);
+            Assert.Contains("评审方式", rendered.English.Texts, StringComparer.Ordinal);
+            Assert.Contains("步骤提交后自动评审", rendered.English.Texts, StringComparer.Ordinal);
             Assert.Contains("拉取方式", rendered.English.Texts, StringComparer.Ordinal);
             Assert.Equal(["仅快进", "变基", "合并"], rendered.Labels);
         }
@@ -226,7 +401,7 @@ public sealed class GitSettingsSectionTests
             return tops.All(static top => !double.IsNaN(top)) && tops.Distinct().Count() == tops.Count;
         }
 
-        public (string? Id, string? Title, double Top, double ProviderTop, double PathsTop, bool HasStrategyPicker, bool HasTimeoutInput, IReadOnlyList<string> Texts, bool HasReviewLimitInputs) ReadGitSection()
+        public (string? Id, string? Title, double Top, double ProviderTop, double PathsTop, bool HasStrategyPicker, bool HasTimeoutInput, IReadOnlyList<string> Texts, bool HasReviewLimitInputs, bool HasReviewModePicker, bool HasReviewAfterStepToggle) ReadGitSection()
         {
             var heading = Heading("git");
             var provider = Heading(SettingsSectionIds.Provider);
@@ -244,7 +419,9 @@ public sealed class GitSettingsSectionTests
                 ControlOf<NumericUpDown>("git-network-timeout") is not null,
                 texts,
                 new[] { "git-review-diff-chars", "git-review-commits", "git-review-files", "git-review-field-chars" }
-                    .All(id => ControlOf<NumericUpDown>(id) is not null));
+                    .All(id => ControlOf<NumericUpDown>(id) is not null),
+                ControlOf<ComboBox>("git-review-mode") is not null,
+                ControlOf<CheckBox>("git-review-after-step") is not null);
         }
 
         public IReadOnlyList<string> RenderedSectionIds() =>

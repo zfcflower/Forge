@@ -71,7 +71,13 @@ internal sealed class McpServices : IAsyncDisposable
         PreferencesStore preferences,
         INotifications? notifications = null,
         HttpClient? http = null) =>
-        Create(new McpConfigStore(McpConfigLoader.GlobalPath, paths.WorkspaceDirectory), preferences, notifications, http);
+        Create(
+            new McpConfigStore(McpConfigLoader.GlobalPath, paths.WorkspaceDirectory),
+            preferences,
+            notifications,
+            http,
+            tokenStore: new McpTokenStore(paths.UserDataDirectory),
+            oauthUi: new McpOAuthUi());
 
     /// <summary>Same wiring over explicit files, for a test that has no user profile to read.</summary>
     /// <param name="transportFactory">
@@ -83,7 +89,9 @@ internal sealed class McpServices : IAsyncDisposable
         PreferencesStore preferences,
         INotifications? notifications = null,
         HttpClient? http = null,
-        Func<McpServerConfig, IMcpTransport>? transportFactory = null)
+        Func<McpServerConfig, IMcpTransport>? transportFactory = null,
+        IMcpTokenStore? tokenStore = null,
+        IMcpOAuthUi? oauthUi = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(preferences);
@@ -92,7 +100,7 @@ internal sealed class McpServices : IAsyncDisposable
         // connection without restarting a server or rebuilding the manager.
         var manager = new McpServerManager(
             LoadInitial(store),
-            () => ServerOptions(preferences.Current, http, transportFactory));
+            () => ServerOptions(preferences.Current, http, transportFactory, tokenStore, oauthUi));
         return new McpServices(manager, store, preferences, notifications, http);
     }
 
@@ -204,6 +212,33 @@ internal sealed class McpServices : IAsyncDisposable
     /// <summary>The settings page's test: connect, list the tools and report how long it took.</summary>
     public Task<McpServerProbe> ProbeAsync(string serverName, CancellationToken ct) => manager.ProbeAsync(serverName, ct);
 
+    /// <summary>True when OAuth is fully wired (token store + browser UI); only then is the sign-in action offered.</summary>
+    public bool CanSignIn => manager.IsOAuthAvailable;
+
+    public bool IsSignedIn(string serverName) => manager.IsSignedIn(serverName);
+
+    public Task SignInAsync(string serverName, CancellationToken ct) => manager.SignInAsync(serverName, ct);
+
+    public Task SignOutAsync(string serverName, CancellationToken ct) => manager.SignOutAsync(serverName, ct);
+
+    public Task<IReadOnlyList<McpResourceInfo>> ListResourcesAsync(string serverName, CancellationToken ct) =>
+        manager.ListResourcesAsync(serverName, ct);
+
+    public Task<McpResourceResult> ReadResourceAsync(string serverName, string uri, CancellationToken ct) =>
+        manager.ReadResourceAsync(serverName, uri, ct);
+
+    public Task SubscribeAsync(string serverName, string uri, CancellationToken ct) =>
+        manager.SubscribeAsync(serverName, uri, ct);
+
+    public Task UnsubscribeAsync(string serverName, string uri, CancellationToken ct) =>
+        manager.UnsubscribeAsync(serverName, uri, ct);
+
+    /// <summary>
+    /// Whether the manager holds a subscription for one resource. The settings page's badge reads this rather than its own rows:
+    /// the manager keeps the set and replays it onto every new session, so it is the truth a rebuilt row has to show.
+    /// </summary>
+    public bool IsSubscribed(string serverName, string uri) => manager.IsSubscribed(serverName, uri);
+
     /// <summary>The tail of a server's stderr, cut to <paramref name="lines"/> lines for display.</summary>
     public static string? Tail(string? stderr, int lines)
     {
@@ -233,7 +268,9 @@ internal sealed class McpServices : IAsyncDisposable
 
     /// <summary>
     /// A server that failed says so in the settings section and nowhere else; a toast is what tells the user the tools
-    /// they expect are missing. One toast per server: the key is the server's name.
+    /// they expect are missing. One toast per server: the key is the server's name. A 401 is reported as "sign-in required" in
+    /// the current language: the library's <see cref="McpServerManager.SignInRequiredMessage"/> is the state machine's constant,
+    /// not a sentence for people.
     /// </summary>
     private void OnServerStateChanged(McpServerState state)
     {
@@ -245,7 +282,7 @@ internal sealed class McpServices : IAsyncDisposable
         notifications.Notify(
             NotificationLevel.Warning,
             NotificationsStrings.McpFailedTitle,
-            LocText.Literal(state.Name + " · " + error),
+            LocText.Literal(state.Name + " · " + (state.NeedsSignIn ? McpSettingsStrings.NeedsSignIn : error)),
             "mcp:" + state.Name);
     }
 
@@ -297,10 +334,14 @@ internal sealed class McpServices : IAsyncDisposable
     private static McpServerManagerOptions ServerOptions(
         AppPreferences preferences,
         HttpClient? http,
-        Func<McpServerConfig, IMcpTransport>? transportFactory) => new()
+        Func<McpServerConfig, IMcpTransport>? transportFactory,
+        IMcpTokenStore? tokenStore,
+        IMcpOAuthUi? oauthUi) => new()
     {
         HttpClient = http,
         TransportFactory = transportFactory,
+        TokenStore = tokenStore,
+        OAuthUi = oauthUi,
         RequestTimeout = TimeSpan.FromSeconds(preferences.McpRequestTimeoutSeconds),
         InitialReconnectDelay = TimeSpan.FromSeconds(preferences.McpReconnectInitialDelaySeconds),
     };

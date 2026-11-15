@@ -100,25 +100,14 @@ public sealed class TerminalPreferenceTests
     }
 
     [Fact]
-    public async Task Scrollback_section_clamps_before_reaching_the_preferences()
+    public void The_scrollback_preference_clamps_to_the_supported_range()
     {
-        var session = SharedUi.Session;
-        var clamped = await TerminalUi.RunTestAsync(
-            session,
-            async () =>
-            {
-                var preferences = new AppPreferences();
-                var section = new TerminalSettingsViewModel(preferences);
-                    section.ScrollbackLines = 5;
-                    var low = preferences.TerminalScrollbackLines;
-                    section.ScrollbackLines = 250_000;
-                    await Task.CompletedTask;
-                    return (low, preferences.TerminalScrollbackLines);
-                },
-                TimeSpan.FromSeconds(10));
+        // The tools section edits the same preference (wave W17a replaced the never-registered terminal section).
+        var preferences = new AppPreferences { TerminalScrollbackLines = 5 };
+        Assert.Equal(AppPreferences.MinScrollbackLines, preferences.TerminalScrollbackLines);
 
-        Assert.Equal(1000, clamped.low);
-        Assert.Equal(100_000, clamped.Item2);
+        preferences.TerminalScrollbackLines = 250_000;
+        Assert.Equal(AppPreferences.MaxScrollbackLines, preferences.TerminalScrollbackLines);
     }
 
     [Theory]

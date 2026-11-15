@@ -86,6 +86,86 @@
                    Text="{Binding [codeMode.settings.toolsHint], Source={x:Static loc:Loc.Instance}}" />
       </StackPanel>
       <Separator Margin="0,4,0,0" />
+      <!-- Wave W17a: how the terminal looks and which shell it starts. The font fields follow the code font of the appearance
+           section until they are given a value of their own. -->
+      <StackPanel Spacing="6">
+        <TextBlock Classes="label"
+                   FontWeight="SemiBold"
+                   Text="{Binding [terminal.settings.section], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [terminal.settings.fontsHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [terminal.settings.fontFamily], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Grid.Column="1"
+                   Classes="mono"
+                   HorizontalAlignment="Stretch"
+                   Text="{Binding TerminalFontFamily, Mode=TwoWay}"
+                   PlaceholderText="{Binding [appearance.family.placeholder], Source={x:Static loc:Loc.Instance}}"
+                   AutomationProperties.AutomationId="settings-terminal-font-family"
+                   AutomationProperties.Name="{Binding [terminal.settings.fontFamily], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [terminal.settings.fontSize], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="0"
+                         Maximum="{Binding MaxTerminalFontSize}"
+                         Increment="1"
+                         FormatString="0"
+                         Value="{Binding TerminalFontSize, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-terminal-font-size"
+                         AutomationProperties.Name="{Binding [terminal.settings.fontSize], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [terminal.settings.shell], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Grid.Column="1"
+                   Classes="mono"
+                   HorizontalAlignment="Stretch"
+                   Text="{Binding TerminalShell, Mode=TwoWay}"
+                   PlaceholderText="pwsh"
+                   AutomationProperties.AutomationId="settings-terminal-shell"
+                   AutomationProperties.Name="{Binding [terminal.settings.shell], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [terminal.settings.arguments], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Grid.Column="1"
+                   Classes="mono"
+                   HorizontalAlignment="Stretch"
+                   Text="{Binding TerminalArguments, Mode=TwoWay}"
+                   PlaceholderText="-l"
+                   AutomationProperties.AutomationId="settings-terminal-arguments"
+                   AutomationProperties.Name="{Binding [terminal.settings.arguments], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [terminal.settings.scrollback], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinTerminalScrollbackLines}"
+                         Maximum="{Binding MaxTerminalScrollbackLines}"
+                         Increment="1000"
+                         FormatString="0"
+                         Value="{Binding TerminalScrollbackLines, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-terminal-scrollback"
+                         AutomationProperties.Name="{Binding [terminal.settings.scrollback], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [terminal.settings.hint], Source={x:Static loc:Loc.Instance}}" />
+      </StackPanel>
+      <Separator Margin="0,4,0,0" />
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
                  Text="{Binding InventoryText}"

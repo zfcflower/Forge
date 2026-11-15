@@ -16,5 +16,7 @@ internal static class FeatureComposition
         InspectorComposition.Register(composition, settings);
         ProjectsComposition.Register(composition, settings);
         RateLimitComposition.Register(composition, settings);
+        UpdatesComposition.Register(composition, settings);
+        KeymapComposition.Register(composition, settings);
     }
 }
