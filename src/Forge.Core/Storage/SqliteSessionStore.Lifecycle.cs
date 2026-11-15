@@ -481,6 +481,29 @@ public sealed partial class SqliteSessionStore
         return await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>Deletes every row of the purged sessions from one table keyed by <c>session_id</c>.</summary>
+    private static async Task DeleteSessionRowsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string table,
+        string idsJson)
+    {
+        await using var delete = Command(
+            connection,
+            transaction,
+            $"DELETE FROM {table} WHERE session_id IN (SELECT value FROM json_each($ids))");
+        delete.Parameters.AddWithValue("$ids", idsJson);
+        await delete.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>True when this database has <paramref name="table"/>; a search table only one kind of build created is absent.</summary>
+    private static async Task<bool> TableExistsAsync(SqliteConnection connection, SqliteTransaction transaction, string table)
+    {
+        await using var probe = Command(connection, transaction, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name");
+        probe.Parameters.AddWithValue("$name", table);
+        return await probe.ExecuteScalarAsync(CancellationToken.None).ConfigureAwait(false) is not null;
+    }
+
     private async Task<SessionInfo> ReadSessionAsync(SqliteConnection connection, SqliteTransaction transaction, string sessionId)
     {
         await using var command = Command(connection, transaction, $"SELECT {SessionColumns} FROM sessions WHERE id = $id");
@@ -781,12 +804,24 @@ public sealed partial class SqliteSessionStore
                 throw new SessionPurgeRefusedException(inheriting);
             }
 
-            var search = store.Fts5Available ? "messages_fts" : "messages_text";
-            foreach (var table in new[] { "messages", search, "summaries", "todos", "todo_groups", "plan_summaries", "plan_summary_revisions", "turn_checkpoints" })
+            await DeleteSessionRowsAsync(connection, transaction, "messages", json).ConfigureAwait(false);
+
+            // Both search tables, each on its own existence: clearing only the one this build uses leaves the purged
+            // text in the other, where a build that switches to it finds a session that is gone. The FTS5 index joins
+            // only when this build can write it - without the module no statement against the virtual table can even
+            // be prepared, and its rows are unreachable here, so they do not fail the purge.
+            string[] searchTables = store.Fts5Available ? ["messages_fts", "messages_text"] : ["messages_text"];
+            foreach (var search in searchTables)
             {
-                await using var delete = Command(connection, transaction, $"DELETE FROM {table} WHERE session_id IN (SELECT value FROM json_each($ids))");
-                delete.Parameters.AddWithValue("$ids", json);
-                await delete.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+                if (await TableExistsAsync(connection, transaction, search).ConfigureAwait(false))
+                {
+                    await DeleteSessionRowsAsync(connection, transaction, search, json).ConfigureAwait(false);
+                }
+            }
+
+            foreach (var table in new[] { "summaries", "todos", "todo_groups", "plan_summaries", "plan_summary_revisions", "turn_checkpoints" })
+            {
+                await DeleteSessionRowsAsync(connection, transaction, table, json).ConfigureAwait(false);
             }
 
             await using (var sessions = Command(connection, transaction, "DELETE FROM sessions WHERE id IN (SELECT value FROM json_each($ids))"))

@@ -1,17 +1,25 @@
+using System.Text;
 using Avalonia.Headless;
+using AvaloniaEdit.Document;
 using Forge.Abstractions;
 using Forge.App.Approval;
+using Forge.App.Changes;
 using Forge.App.Composition;
 using Forge.App.Git;
+using Forge.App.Lifecycle;
 using Forge.App.Localization;
 using Forge.App.Notifications;
 using Forge.App.Preferences;
+using Forge.App.Providers;
+using Forge.App.Review;
 using Forge.App.Services;
 using Forge.App.Terminal;
 using Forge.App.Tests.Approval;
+using Forge.App.Tests.Changes;
 using Forge.App.Tests.Git;
 using Forge.App.Tests.Terminal;
 using Forge.App.ViewModels;
+using Forge.HostClient;
 using Forge.Mcp;
 using Forge.Workspace;
 using Xunit;
@@ -26,11 +34,15 @@ namespace Forge.App.Tests.Notifications;
 /// that wanted to notify. The session's turn and checkpoint failures are pinned beside their own harness
 /// (<c>SessionTurnFailureTests</c>); the notification centre itself is covered by <see cref="NotificationCenterTests"/>.
 /// <para>The environment-side half of the same list follows: an MCP server that never comes up, a terminal that exits
-/// non-zero (and one that exits cleanly, which must stay silent), an editor language service that cannot apply, and a file
-/// that refuses to save. Those two seams differ the way production wires them — a service the composition root owns takes
-/// an <see cref="INotifications"/> and is read through <see cref="RecordingNotifications"/>, while a leaf view reads the
-/// static <see cref="NotificationCenter.Current"/> and is read through a real center over a queued post, so the toast the
-/// user would see is the thing asserted on.</para>
+/// non-zero (and one that exits cleanly, which must stay silent), an editor language service that cannot apply, a file
+/// that refuses to save, an extension host that never comes up, a model list that cannot be fetched, the two review
+/// surfaces whose store cannot be written, and the four things the shell itself reports while it starts (a preferences
+/// file that fell back to defaults, a database that cannot be opened, a project list that cannot be read, a purge
+/// cleanup whose retry failed again). Those seams differ the way production wires them — a service the composition root
+/// owns takes an <see cref="INotifications"/> and is read through <see cref="RecordingNotifications"/>, while a leaf view
+/// reads the static <see cref="NotificationCenter.Current"/> and is read through a real center over a queued post, so the
+/// toast the user would see is the thing asserted on. The shell's own cases read the center its composition root built,
+/// over the real dispatcher rather than a queued post.</para>
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class NotificationWiringTests : IDisposable
@@ -349,12 +361,273 @@ public sealed class NotificationWiringTests : IDisposable
             });
     }
 
+    [Fact]
+    public async Task An_extension_host_that_never_comes_up_is_announced_as_an_error_keyed_by_the_host()
+    {
+        var notifications = new RecordingNotifications();
+        // A connection without a host executable only waits for a pipe nobody listens on: the client fails on its own and
+        // spawns nothing, which is the one start failure the supervisor announces instead of retrying silently.
+        var connection = new HostConnection
+        {
+            PipeName = "forge-test-" + Guid.NewGuid().ToString("N")[..20],
+            StartTimeout = TimeSpan.FromMilliseconds(300),
+        };
+        await using var client = new ExtensionHostClient(connection);
+        await using var supervisor = ExtensionHostSupervisor.WrapClient(client, notifications);
+
+        supervisor.Start();
+
+        Assert.True(
+            await TestPump.UntilAsync(() => notifications.WithKey("host:failed").Count > 0),
+            "the host that never came up was not announced");
+
+        var call = notifications.WithKey("host:failed")[0];
+        Assert.Equal(NotificationLevel.Error, call.Level);
+        Assert.Equal(NotificationsStrings.HostUnavailableTitleKey, call.TitleKey);
+        // The body is the client's own sentence about why the pipe never opened, which no string table holds.
+        Assert.Null(call.BodyKey);
+    }
+
+    [Fact]
+    public async Task A_model_list_that_cannot_be_fetched_is_announced_as_a_warning_keyed_by_the_fetch()
+    {
+        var post = new QueuedPost();
+        using var center = new NotificationCenter(static () => true, new SilentNotifier(), post.Post);
+        var settings = TestTempFiles.WriteFile(
+            root,
+            "providers.json",
+            """
+            {"providers":{"version":1,"defaultId":"alpha","items":[
+              {"id":"alpha","preset":"custom-openai","name":"Alpha","protocol":"openai-compatible",
+               "baseUrl":"https://alpha.invalid/v1","auth":{"kind":"api-key"},
+               "models":["alpha-1"],"defaultModel":"alpha-1"}]}}
+            """);
+        var data = Path.Combine(root, "provider-data");
+        Directory.CreateDirectory(data);
+        using var http = new HttpClient(new OfflineHandler());
+        var providers = new ProviderServices(settings, data, http);
+
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                using var composer = new ComposerViewModel(
+                    providers,
+                    _ => { },
+                    new ComposerPreferences(),
+                    root,
+                    skillSource: static () => []);
+
+                await composer.RefreshAsync(CancellationToken.None);
+                post.Drain();
+
+                var toast = Assert.Single(center.Items);
+                Assert.Equal(NotificationLevel.Warning, toast.Level);
+                Assert.Equal("model-fetch", toast.Key);
+                // The picker's refresh has no headline of its own: it reuses the provider one.
+                Assert.Equal(Loc.Instance[NotificationsStrings.ProviderMissingTitleKey], toast.Title);
+                // The announcement does not empty the picker: the models already known stay selectable.
+                Assert.Contains("alpha-1", composer.Models.Select(static model => model.Name));
+            });
+    }
+
+    [Fact]
+    public async Task A_review_store_the_file_surface_cannot_write_is_announced_as_an_error_keyed_by_the_surface()
+    {
+        var post = new QueuedPost();
+        using var center = new NotificationCenter(static () => true, new SilentNotifier(), post.Post);
+        var path = Path.Combine(root, "a.cs");
+        await File.WriteAllTextAsync(path, "one\ntwo\nthree\n");
+        // The store's directory would sit under a file, so it can never be created: the store fails the way a full or
+        // locked disk does, and the surface announces it instead of only muttering into its own status line.
+        var store = new ReviewStore(Path.Combine(path, ".review-data"));
+
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = await TestDocuments.LoadAsync(path);
+                try
+                {
+                    model.ConfigureReview(
+                        new ReviewServices(store, static (_, _, _) => true, static () => { }),
+                        new ReviewOwner(root, "A"));
+
+                    Assert.True(
+                        await TestPump.UntilAsync(() => post.Count > 0),
+                        "the review store failure was never announced");
+                    post.Drain();
+
+                    var toast = Assert.Single(center.Items);
+                    Assert.Equal(NotificationLevel.Error, toast.Level);
+                    Assert.Equal("review-file", toast.Key);
+                    Assert.Equal(Loc.Instance[NotificationsStrings.EditorFailedTitleKey], toast.Title);
+                    // The toast is the reach, not the record: the panel's own status line keeps the failure.
+                    Assert.Equal(ReviewStrings.StoreFailed, model.ReviewController.Status.Key);
+                }
+                finally
+                {
+                    model.DisposeReview();
+                    await model.ReleaseDocumentAsync();
+                }
+            });
+    }
+
+    [Fact]
+    public async Task A_review_store_the_diff_surface_cannot_write_is_announced_as_an_error_keyed_by_the_surface()
+    {
+        var post = new QueuedPost();
+        using var center = new NotificationCenter(static () => true, new SilentNotifier(), post.Post);
+        var blocked = Path.Combine(root, "diff-host.txt");
+        await File.WriteAllTextAsync(blocked, "a file where the store's directory would be\n");
+        var store = new ReviewStore(Path.Combine(blocked, ".review-data"));
+        var files = DiffFixtures.Files(1);
+
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var controller = new DiffReviewController();
+                try
+                {
+                    var built = DiffDocumentBuilder.Build(
+                        files.Select(static file => new DiffFileSpec(file.Diff, file.IsCollapsed, false, true, null)).ToList(),
+                        split: false);
+                    var document = built.Secondary ?? built.Primary;
+                    // The diff surface only reads the store once it has both a document and an owner, so the reload that
+                    // fails is the one the owner brings.
+                    controller.Rebind(new TextDocument(document.Text), document.Map, files);
+                    controller.Configure(
+                        new DiffReviewContext(
+                            new ReviewServices(store, static (_, _, _) => true, static () => { }),
+                            new ReviewOwner(root, "A"),
+                            "base123"));
+
+                    Assert.True(
+                        await TestPump.UntilAsync(() => post.Count > 0),
+                        "the diff surface's store failure was never announced");
+                    post.Drain();
+
+                    var toast = Assert.Single(center.Items);
+                    Assert.Equal(NotificationLevel.Error, toast.Level);
+                    // The two surfaces of one store keep their own key: a failure in the diff is not a failure in a file.
+                    Assert.Equal("review-diff", toast.Key);
+                    Assert.Equal(Loc.Instance[NotificationsStrings.EditorFailedTitleKey], toast.Title);
+                    Assert.Equal(ReviewStrings.StoreFailed, controller.Status.Key);
+                }
+                finally
+                {
+                    controller.Dispose();
+                }
+            });
+    }
+
+    [Fact]
+    public Task A_preferences_file_that_fell_back_to_defaults_is_announced_as_a_warning_keyed_by_the_file() =>
+        WithShellAsync(
+            "forge-notify-preferences-",
+            dataRoot => File.WriteAllTextAsync(
+                Path.Combine(dataRoot, "data", "settings.json"),
+                // Valid JSON with a preferences section that is not an object: the reader falls back to defaults and says why.
+                """{"preferences":42}"""),
+            async (shell, composition) =>
+            {
+                await shell.InitializeAsync();
+
+                Assert.True(
+                    await TestPump.UntilAsync(() => composition.Notifications.Items.Count > 0),
+                    "the preferences file that fell back to defaults was not announced");
+
+                var toast = Toast(composition.Notifications, "preferences-problem");
+                Assert.Equal(NotificationLevel.Warning, toast.Level);
+                Assert.Equal(Loc.Instance[NotificationsStrings.PreferencesProblemTitleKey], toast.Title);
+                // The body is the reader's own sentence about the file - the same one the settings page shows - so the
+                // toast says what was lost, not just that something was.
+                Assert.False(string.IsNullOrWhiteSpace(toast.Body));
+                Assert.Equal(composition.PreferencesProblem, toast.Body);
+            });
+
+    [Fact]
+    public Task A_database_that_cannot_be_opened_is_announced_as_an_error_keyed_by_the_startup() =>
+        WithShellAsync(
+            "forge-notify-startup-",
+            dataRoot => File.WriteAllBytesAsync(
+                Path.Combine(dataRoot, "data", "forge.db"),
+                Encoding.UTF8.GetBytes(new string('x', 4096))),
+            async (shell, composition) =>
+            {
+                await shell.InitializeAsync();
+
+                Assert.True(
+                    await TestPump.UntilAsync(() => composition.Notifications.Items.Count > 0),
+                    "the database that could not be opened was not announced");
+
+                var toast = Toast(composition.Notifications, "startup-failed");
+                Assert.Equal(NotificationLevel.Error, toast.Level);
+                Assert.Equal(Loc.Instance[NotificationsStrings.StartupProblemTitleKey], toast.Title);
+                // The startup stops here: nothing else is read, so no second problem is announced over it.
+                Assert.Single(composition.Notifications.Items);
+                Assert.Equal(toast.Body, shell.Status.HostDetail);
+            });
+
+    [Fact]
+    public Task A_project_list_that_cannot_be_read_is_announced_as_a_warning_keyed_by_the_panel() =>
+        WithShellAsync(
+            "forge-notify-projects-",
+            static _ => Task.CompletedTask,
+            async (shell, composition) =>
+            {
+                shell.ProjectListRead = _ => throw new IOException("the projects table could not be read");
+
+                await shell.InitializeAsync();
+
+                Assert.True(
+                    await TestPump.UntilAsync(() => composition.Notifications.Items.Count > 0),
+                    "the project list that could not be read was not announced");
+
+                var toast = Toast(composition.Notifications, "projects-problem");
+                Assert.Equal(NotificationLevel.Warning, toast.Level);
+                Assert.Equal(Loc.Instance[NotificationsStrings.StartupProblemTitleKey], toast.Title);
+                Assert.Contains("the projects table could not be read", toast.Body, StringComparison.Ordinal);
+                // The toast goes away; the status bar keeps the same sentence for as long as the problem stands.
+                Assert.Equal(toast.Body, shell.Status.HostDetail);
+            });
+
+    [Fact]
+    public Task A_purge_cleanup_whose_retry_failed_again_is_announced_as_a_warning_keyed_by_the_purge() =>
+        WithShellAsync(
+            "forge-notify-purge-",
+            static _ => Task.CompletedTask,
+            async (shell, composition) =>
+            {
+                // What a permanent delete left behind: one id in the journal whose files still cannot be removed.
+                var journal = new PurgeCleanupJournal(Path.Combine(composition.Paths.UserDataDirectory, "purge-pending.txt"));
+                await journal.AddAsync("s1", CancellationToken.None);
+                composition.PurgeCleanup = new PurgeCleanup(
+                    journal,
+                    (_, _) => Task.FromException(new IOException("the artifacts directory is locked")),
+                    (_, _) => Task.FromResult(false));
+
+                await shell.RetryPurgeCleanupAsync();
+
+                var toast = Toast(composition.Notifications, "purge-cleanup");
+                Assert.Equal(NotificationLevel.Warning, toast.Level);
+                Assert.Equal(Loc.Instance[NotificationsStrings.StartupProblemTitleKey], toast.Title);
+                // The body names the id that stayed pending, so the next start is not a mystery.
+                Assert.Contains("s1", toast.Body, StringComparison.Ordinal);
+                Assert.Equal(toast.Body, shell.Status.HostDetail);
+            });
+
     /// <summary>A desktop notifier that shows nothing: these cases are about the in-window toast, never the platform.</summary>
     private sealed class SilentNotifier : ISystemNotifier
     {
         public Task NotifyAsync(string title, string body, CancellationToken ct) => Task.CompletedTask;
 
         public Task<bool> TryNotifyAsync(string title, string body, CancellationToken ct) => Task.FromResult(false);
+    }
+
+    /// <summary>A provider endpoint that cannot be reached at all: the network failure the model picker announces.</summary>
+    private sealed class OfflineHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new HttpRequestException("no route to the model list");
     }
 
     private static GitSyncViewModel Panel(INotifications notifications) =>
@@ -374,4 +647,43 @@ public sealed class NotificationWiringTests : IDisposable
                 return 0;
             },
             CancellationToken.None);
+
+    /// <summary>
+    /// Runs one shell over a fresh data root on the shared UI thread: <paramref name="breakRoot"/> breaks that root before
+    /// the composition root is built over it, <paramref name="act"/> drives the shell and reads the toasts the shell's own
+    /// centre announced. The shell's cases are the ones production wires through the composition root, so the centre under
+    /// test is the real one (and the real dispatcher), not a recording double.
+    /// </summary>
+    private static async Task WithShellAsync(
+        string prefix,
+        Func<string, Task> breakRoot,
+        Func<MainWindowViewModel, AppComposition, Task> act) =>
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var (dataRoot, previous) = TempDataRoot.Redirect(prefix);
+                try
+                {
+                    await breakRoot(dataRoot);
+                    var composition = AppComposition.Create();
+                    try
+                    {
+                        using var shell = new MainWindowViewModel(composition);
+                        await act(shell, composition);
+                    }
+                    finally
+                    {
+                        await composition.DisposeAsync();
+                    }
+                }
+                finally
+                {
+                    previous.Restore();
+                    TestTempFiles.DeleteTree(dataRoot);
+                }
+            });
+
+    /// <summary>The one toast a path announced itself with; a missing or duplicated key fails here, not in the assertion after.</summary>
+    private static NotificationItemViewModel Toast(NotificationCenter center, string key) =>
+        center.Items.Single(item => string.Equals(item.Key, key, StringComparison.Ordinal));
 }

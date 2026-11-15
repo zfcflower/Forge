@@ -86,6 +86,13 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
         return new ExtensionHostSupervisor(new ExtensionHostClient(connection, toolRouter, options), notifications);
     }
 
+    /// <summary>
+    /// Test seam: a supervisor over a client the caller built (production builds its own in <see cref="Create"/>), so the
+    /// "host failed" announcement can be pinned against a host that never comes up without a resolved JIT layout.
+    /// </summary>
+    internal static ExtensionHostSupervisor WrapClient(ExtensionHostClient client, INotifications? notifications) =>
+        new(client, notifications);
+
     /// <summary>Starts the host in the background; returns immediately so the window is up before the pipe is open.</summary>
     public void Start()
     {

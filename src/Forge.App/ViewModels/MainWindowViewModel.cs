@@ -706,13 +706,20 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             || string.Equals(agent.ChildSessionId, id, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The project-list read behind the tree's id→root cache; settable so a shell test can make it fail the way a store
+    /// that cannot answer does, and pin the announcement of that failure. Null reads through the composition.
+    /// </summary>
+    internal Func<CancellationToken, Task<IReadOnlyList<ProjectInfo>>>? ProjectListRead { get; set; }
+
     private void RefreshProjectCacheAsync() =>
         _ = Task.Run(
             async () =>
             {
                 try
                 {
-                    var projects = await composition.Projects.ListAsync(CancellationToken.None).ConfigureAwait(false);
+                    var projects = await (ProjectListRead ?? composition.Projects.ListAsync)(CancellationToken.None)
+                        .ConfigureAwait(false);
                     Dispatcher.UIThread.Post(() =>
                     {
                         projectRoots.Clear();

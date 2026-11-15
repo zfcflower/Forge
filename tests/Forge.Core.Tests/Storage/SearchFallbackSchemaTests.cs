@@ -1,4 +1,5 @@
 using System.Globalization;
+using Forge.Abstractions;
 using Forge.Core.Storage;
 using Microsoft.Data.Sqlite;
 using Xunit;
@@ -101,6 +102,86 @@ public sealed class SearchFallbackSchemaTests
         Assert.Equal(
             [1L, 2L, 3L],
             (await store.SearchAsync(sessionId, "message", 10, default)).Select(static hit => hit.Seq));
+    }
+
+    [Fact]
+    public async Task A_purge_clears_the_fallback_table_a_degraded_open_left_behind_so_no_build_finds_the_text_again()
+    {
+        using var directory = new TempDirectory();
+        string purgedId;
+        string keptId;
+        await using (var ftsBuild = new SqliteSessionStore(directory.Path))
+        {
+            var purged = await ftsBuild.CreateSessionAsync("D:/ws", "purged", default);
+            var kept = await ftsBuild.CreateSessionAsync("D:/other", "kept", default);
+            purgedId = purged.Id;
+            keptId = kept.Id;
+            await ftsBuild.AppendAsync(purged.Id, Text("quokka purged"), null, default);
+            await ftsBuild.AppendAsync(kept.Id, Text("quokka kept"), null, default);
+        }
+
+        // A degraded open creates and fills the fallback table; its own append never reaches the FTS5 index.
+        await SetFtsModuleAsync(directory, AbsentModule);
+        await using (var degraded = new SqliteSessionStore(directory.Path))
+        {
+            await degraded.AppendAsync(purgedId, Text("a second purged message"), null, default);
+            Assert.False(degraded.Fts5Available);
+        }
+
+        Assert.Equal(2L, await CountAsync(directory, $"SELECT count(*) FROM messages_text WHERE session_id = '{purgedId}'"));
+
+        await SetFtsModuleAsync(directory, Fts5Module);
+
+        // Both tables hold the purged session before the purge: one row in the index, two in the fallback table.
+        Assert.Equal(1L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{purgedId}'"));
+
+        await using var store = new SqliteSessionStore(directory.Path);
+        ISessionCatalog catalog = store;
+        Assert.Equal(1, await catalog.SoftDeleteAsync([purgedId], default));
+        Assert.True(store.Fts5Available);
+        Assert.Equal([purgedId], await catalog.PurgeAsync(purgedId, default));
+
+        // Neither search table may keep the purged text: this build searches the index, a later degraded one the table.
+        foreach (var table in new[] { "messages", "messages_fts", "messages_text" })
+        {
+            Assert.Equal(0L, await CountAsync(directory, $"SELECT count(*) FROM {table} WHERE session_id = '{purgedId}'"));
+            Assert.Equal(1L, await CountAsync(directory, $"SELECT count(*) FROM {table} WHERE session_id = '{keptId}'"));
+        }
+
+        Assert.Empty(await store.SearchAsync(purgedId, "quokka", 10, default));
+        Assert.Equal([1L], (await store.SearchAsync(keptId, "quokka", 10, default)).Select(static hit => hit.Seq));
+    }
+
+    [Fact]
+    public async Task A_purge_run_by_a_degraded_build_clears_the_table_it_searches_and_still_deletes_the_session()
+    {
+        using var directory = new TempDirectory();
+        string purgedId;
+        string keptId;
+        await using (var ftsBuild = new SqliteSessionStore(directory.Path))
+        {
+            var purged = await ftsBuild.CreateSessionAsync("D:/ws", "purged", default);
+            var kept = await ftsBuild.CreateSessionAsync("D:/other", "kept", default);
+            purgedId = purged.Id;
+            keptId = kept.Id;
+            await ftsBuild.AppendAsync(purged.Id, Text("quokka purged"), null, default);
+            await ftsBuild.AppendAsync(kept.Id, Text("quokka kept"), null, default);
+        }
+
+        await SetFtsModuleAsync(directory, AbsentModule);
+        await using var store = new SqliteSessionStore(directory.Path);
+        ISessionCatalog catalog = store;
+        Assert.Equal(1, await catalog.SoftDeleteAsync([purgedId], default));
+        Assert.False(store.Fts5Available);
+
+        // The index of a module this build does not have cannot be written - not even to be emptied - so the purge
+        // clears the table it does search instead of failing on the one it cannot read.
+        Assert.Equal([purgedId], await catalog.PurgeAsync(purgedId, default));
+        Assert.Equal(0L, await CountAsync(directory, $"SELECT count(*) FROM messages_text WHERE session_id = '{purgedId}'"));
+        Assert.Equal(0L, await CountAsync(directory, $"SELECT count(*) FROM messages WHERE session_id = '{purgedId}'"));
+        Assert.Equal(1L, await CountAsync(directory, $"SELECT count(*) FROM messages_text WHERE session_id = '{keptId}'"));
+        Assert.Empty(await store.SearchAsync(purgedId, "quokka", 10, default));
+        Assert.Equal([1L], (await store.SearchAsync(keptId, "quokka", 10, default)).Select(static hit => hit.Seq));
     }
 
     /// <summary>

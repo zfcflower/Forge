@@ -301,6 +301,11 @@ public sealed partial class ExtensionHost
 
         // (d) The commit is live now. Everything below is cleanup: it must not turn a successful swap into a failure.
         ExtensionStagingArea.DeleteTrash(trash);
+
+        // The replaced live version compiled from bytes that just left the live path; its cached image is dead weight
+        // unless the committed source happened to compile to the very same key. A rolled-back commit never gets here,
+        // so the restored previous entry keeps its warm compilation.
+        EvictCompilation(previous, entry);
         if (previousVersion is not null && !string.Equals(previousVersion, entry.Version, StringComparison.Ordinal))
         {
             try
@@ -414,6 +419,7 @@ public sealed partial class ExtensionHost
             SyncRecord(entry);
             approvals.Disable(entry.Id, version);
             await StopPluginAsync(entry, state, ct).ConfigureAwait(false);
+            EvictCompilation(entry);
             await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
         }
         finally
@@ -493,6 +499,9 @@ public sealed partial class ExtensionHost
             {
                 plugins.Remove(entry.Id);
             }
+
+            // The plugin left discovery and its directory is about to be deleted; nothing can reuse this compilation.
+            EvictCompilation(entry);
 
             staging.Discard(entry.Id);
             try

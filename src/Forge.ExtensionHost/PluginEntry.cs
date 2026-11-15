@@ -116,6 +116,12 @@ internal sealed class PluginEntry(PluginManifest manifest)
 
     public string? AssemblyPath => Image?.AssemblyPath;
 
+    /// <summary>Key of this plugin's entry in the <see cref="Forge.Scripting.CompilationCache"/>, recorded while a
+    /// source plugin is prepared; <c>null</c> for prebuilt and workflow packages, which are never compiled. Lifecycle
+    /// paths evict by this key when the entry is replaced, removed or stopped: memory hygiene only - correctness never
+    /// depended on the cache, because the key already covers the source and references.</summary>
+    public string? CacheKey { get; set; }
+
     public ApprovalDecision Decision { get; set; } = ApprovalDecision.Block("the plugin has not been evaluated");
 
     public IReadOnlyList<ToolDeclaration> Tools { get; set; } = [];

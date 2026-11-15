@@ -78,6 +78,9 @@ public partial class FileDocumentView : UserControl
     /// <summary>Folding for the open document, or null before a document is bound.</summary>
     internal EditorFoldingController? Folding => bridge?.Folding;
 
+    /// <summary>The review overlay of this view; tests raise its own language handler, which the view does not forward.</summary>
+    internal ReviewOverlay? Review => review;
+
     /// <summary>The editor options this view's toolbar and menus edit.</summary>
     internal EditorSettings Settings => EditorSettings.Current;
 

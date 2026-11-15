@@ -54,7 +54,7 @@ Extension Host 的动态 C# 插件编译/缓存/加载层,以及 `run_code` 的�
 
 - 根任务完成不证明脚本全部工作结束:未等待的异步任务可在成功结果之后继续执行。主调用预算与 RequiresTermination 只覆盖被等待的任务,因此进程**不复用**是唯一正确的处置——由 `forge-extension-host` 的一次性执行器负责杀树,而不是由本模块证明“没有残留”。
 
-- 失败的编译保留在缓存;依赖变化时的主动失效(`Evict`/`Clear`)尚未被 ExtensionHost 接线,正确性由缓存键身份(引用路径 + 三个自有程序集 MVID + 源码 + 选项)兜底——依赖换了键就不同,不会命中旧产物;主动失效与内存卫生待接线。
+- 失败的编译保留在缓存。依赖变化时的主动失效已由 ExtensionHost 接线(内存卫生,见 `forge-extension-host`):插件编译缓存(`CompilationCache`)在 refresh 替换/移除、revoke、disable、delete 与 commit 成功等生命周期路径按 `PluginEntry.CacheKey` 被 `Evict`;正确性仍由缓存键身份(引用路径 + 三个自有程序集 MVID + 源码 + 选项)兜底,失效不改键语义。脚本侧 `ScriptCodeCompiler` 缓存没有接 `Clear`:其键里的编译表面指纹在宿主进程内是进程级常量(自有程序集 MVID 启动后不变),依赖变化不可能让脚本缓存条目失效,LRU 也已按 `CompilationCacheCapacity` 有界。
 - 脚本白名单与禁用名单的条目未经实战校准(尤其 `System.Type` 允许成员、`Regex` 回溯型 CPU 炸弹)。
 - 内存与 CPU 无法在进程内限制;失控脚本只能整进程终止,1 秒宽限是常量而非按调用配置。
 - 描述内联全部工具的 JSON schema,工具很多时描述会显著变长,尚无裁剪或分层策略。

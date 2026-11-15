@@ -7,14 +7,18 @@ namespace Forge.Core.Storage;
 
 /// <summary>
 /// Stores artifact bytes under <c>&lt;directory&gt;/&lt;sessionId&gt;/&lt;id&gt;</c> and their metadata in the
-/// SQLite <c>artifacts</c> table. Range reads go through <see cref="RandomAccess"/> so a large
-/// artifact is never materialized just to serve a window of it.
+/// SQLite <c>artifacts</c> table, whose <c>at</c> is a guarded canonical timestamp like every other one in
+/// <c>forge.db</c>. Range reads go through <see cref="RandomAccess"/> so a large artifact is never materialized just
+/// to serve a window of it.
 /// </summary>
 public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDisposable
 {
     private const int IdLength = 12;
     private const int WriteBufferSize = 64 * 1024;
     private const int InfoCacheLimit = 4096;
+
+    /// <summary>The table this store owns: it creates it, guards its timestamp and reads it strictly.</summary>
+    private const string Table = "artifacts";
 
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS artifacts (
@@ -29,6 +33,7 @@ public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDispo
 
     private readonly string _directory;
     private readonly string _connectionString;
+    private readonly string _databasePath;
     private readonly ConcurrentDictionary<string, ArtifactInfo> _infoCache = new(StringComparer.Ordinal);
     private readonly Lazy<Task> _initialization;
 
@@ -38,6 +43,7 @@ public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDispo
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _directory = Path.GetFullPath(directory);
         _connectionString = connectionString;
+        _databasePath = ResolveDatabasePath(connectionString);
         _initialization = new Lazy<Task>(InitializeAsync, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
@@ -124,12 +130,18 @@ public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDispo
             return null;
         }
 
+        var id = reader.GetString(0);
+        var row = $"artifact {id}";
         var info = new ArtifactInfo(
-            reader.GetString(0),
+            id,
             reader.GetString(1),
             reader.GetString(2),
             reader.GetInt64(3),
-            StorageDb.ParseTimestamp(reader.GetString(4)));
+            StorageDb.ParseCanonicalTimestamp(
+                StorageDb.ReadText(reader, 4, "at", _databasePath, row),
+                "at",
+                _databasePath,
+                row));
         Cache(info);
         return info;
     }
@@ -294,6 +306,12 @@ public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDispo
         return Convert.ToHexStringLower(bytes);
     }
 
+    /// <summary>The file a malformed-value report points at; the connection string is the only place it is recorded.</summary>
+    private static string ResolveDatabasePath(string connectionString) =>
+        new SqliteConnectionStringBuilder(connectionString).DataSource is { Length: > 0 } dataSource
+            ? dataSource
+            : StorageDb.FileName;
+
     private void Cache(ArtifactInfo info)
     {
         if (_infoCache.Count >= InfoCacheLimit)
@@ -328,5 +346,8 @@ public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDispo
         await using var command = connection.CreateCommand();
         command.CommandText = SchemaSql;
         await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        // No migration step creates this table, so none is left to guard its timestamp: the owner installs the same
+        // pair the ladder would, from the same registration, before the first strict read can meet a foreign value.
+        await StorageSchema.EnsureOwnedTimestampsAsync(connection, Table, CancellationToken.None).ConfigureAwait(false);
     }
 }

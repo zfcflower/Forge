@@ -156,7 +156,10 @@ internal static class StorageSchema
     /// <summary>
     /// Every timestamp column of <c>forge.db</c>, with the columns that identify its row. The v3 step repairs stored
     /// values against this list and builds the write guards from it, so a column added to the schema later has one
-    /// place to register.
+    /// place to register. A table the ladder itself never creates - <c>artifacts</c>, which
+    /// <see cref="FileArtifactStore"/> creates on its first use, normally long after the database reached
+    /// <see cref="Version"/> - is registered here all the same and guarded by its owner through
+    /// <see cref="EnsureOwnedTimestampsAsync"/>.
     /// </summary>
     private static readonly (string Table, string[] Key, string[] Columns)[] TimestampColumns =
     [
@@ -172,6 +175,7 @@ internal static class StorageSchema
         ("todo_groups", ["id"], ["updated_at"]),
         ("storage_notices", ["id"], ["created_at", "acknowledged_at"]),
         ("automation_runs", ["id"], ["started_at", "ended_at", "resume_at"]),
+        ("artifacts", ["id"], ["at"]),
     ];
 
     private const string StorageNoticesSql = """
@@ -858,7 +862,7 @@ internal static class StorageSchema
                 var message = $"{table}.{column} must hold the canonical forge.db timestamp (yyyy-MM-ddTHH:mm:ss.fffffff+HH:mm)";
                 foreach (var (kind, suffix) in new[] { ("INSERT", "insert"), ("UPDATE", "update") })
                 {
-                    var name = $"trg_{table}_{column}_{suffix}";
+                    var name = TriggerName(table, column, suffix);
                     sql.Append($"DROP TRIGGER IF EXISTS {name};\n");
                     sql.Append($"CREATE TRIGGER {name} BEFORE {kind} ON {table} FOR EACH ROW WHEN {condition}\n");
                     sql.Append($"BEGIN SELECT RAISE(ABORT, '{message}'); END;\n");
@@ -867,6 +871,84 @@ internal static class StorageSchema
         }
 
         return sql.ToString();
+    }
+
+    /// <summary>The name one guard of <paramref name="column"/> is installed under.</summary>
+    private static string TriggerName(string table, string column, string suffix) => $"trg_{table}_{column}_{suffix}";
+
+    /// <summary>The guards of a single table, built exactly as the ladder builds the whole set.</summary>
+    private static string TimestampGuardSql(string table, string[] columns) =>
+        TimestampGuardSql(new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+        {
+            [table] = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase),
+        });
+
+    /// <summary>
+    /// Repairs and guards the timestamp columns of a table its owner creates outside the ladder, from the same
+    /// <see cref="TimestampColumns"/> registration, with the same normalization and the same trigger names a migration
+    /// step would use. <c>artifacts</c> is created by <see cref="FileArtifactStore"/> on its first write, which is
+    /// normally after the database already reached <see cref="Version"/>, so no step is left to install its guard - and
+    /// a step that ran before the table existed could not have. The repair goes first for the reason it does in v3:
+    /// the guards would reject the very history they are installed over. Re-runnable and a no-op once the guards are
+    /// there, so opening the table again stays a read.
+    /// </summary>
+    internal static async Task EnsureOwnedTimestampsAsync(SqliteConnection connection, string table, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        foreach (var (name, key, columns) in TimestampColumns)
+        {
+            if (!string.Equals(name, table, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (await GuardsInstalledAsync(connection, table, columns, null, ct).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            using var transaction = connection.BeginTransaction(deferred: false);
+            // Re-check under the write lock: another process opening the same file may have installed them already.
+            if (await GuardsInstalledAsync(connection, table, columns, transaction, ct).ConfigureAwait(false))
+            {
+                transaction.Rollback();
+                return;
+            }
+
+            foreach (var column in columns)
+            {
+                await NormalizeTimestampColumnAsync(connection, transaction, table, key, column, ct).ConfigureAwait(false);
+            }
+
+            await ExecuteAsync(connection, transaction, TimestampGuardSql(table, columns), ct).ConfigureAwait(false);
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+            return;
+        }
+    }
+
+    /// <summary>True when both guards of every column of <paramref name="table"/> are already in <c>sqlite_master</c>.</summary>
+    private static async Task<bool> GuardsInstalledAsync(
+        SqliteConnection connection,
+        string table,
+        string[] columns,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        foreach (var column in columns)
+        {
+            foreach (var suffix in new[] { "insert", "update" })
+            {
+                await using var command = StorageDb.Command(
+                    connection, transaction, "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = $name");
+                command.Parameters.AddWithValue("$name", TriggerName(table, column, suffix));
+                if (await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is null)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

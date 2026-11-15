@@ -1,9 +1,13 @@
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.LogicalTree;
 using Avalonia.VisualTree;
+using Forge.App.Changes;
 using Forge.App.Changes.Markdown;
 using Forge.App.Localization;
+using Forge.App.Review;
 using Forge.App.Terminal;
+using Forge.App.Tests.Changes;
 using Forge.App.Tests.Editor;
 using Forge.App.Tests.Terminal;
 using Forge.App.ViewModels;
@@ -22,7 +26,9 @@ namespace Forge.App.Tests.Localization;
 /// <see cref="LanguageSubscriptions"/> — from a thread-pool thread first (the sentinel must survive) and then from the
 /// attaching thread (the sentinel must be replaced by the localized value), so a guard that is too wide, one that stops the
 /// control following a real switch, fails here as well. The language itself is never switched: doing so would reach every
-/// other subscriber in the process.</para>
+/// other subscriber in the process. The controls covered are the ones whose handler writes something a test can hold: a
+/// terminal surface and a timeline gutter their read-screen name, a code block header and a review overlay their button's
+/// name, a mermaid block its diagram's name, a diff editor the file header it recycles.</para>
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class ControlLanguageThreadGuardTests
@@ -108,6 +114,133 @@ public sealed class ControlLanguageThreadGuardTests
 
                     Assert.Equal(1, LanguageSubscriptions.RaiseHere(host.View));
                     Assert.Contains(nameof(FileDocumentViewModel.TabTitle), raised);
+                }
+                finally
+                {
+                    host.Window.Close();
+                }
+            });
+    }
+
+    [Fact]
+    public async Task A_diff_editor_ignores_a_switch_from_another_thread_and_follows_one_from_its_own()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var files = DiffFixtures.Files(1);
+                var view = new DiffEditorView { Files = files };
+                var window = SharedUi.Show(view, 900, 600);
+                try
+                {
+                    SharedUi.Settle(window);
+                    view.SettleNow();
+                    SharedUi.Settle(window);
+                    var header = view.ActiveOverlayControls.OfType<DiffFileHeader>().Single();
+
+                    // A switch recycles every overlay row, and the row that comes back is named again: that name is the seat.
+                    AutomationProperties.SetName(header, Sentinel);
+
+                    await AssertIgnoredOffThreadAsync(view);
+                    Assert.Equal(Sentinel, AutomationProperties.GetName(header));
+
+                    Assert.Equal(1, LanguageSubscriptions.RaiseHere(view));
+                    Assert.Equal(
+                        Loc.Instance.Format(DiffStrings.FileHeader, files[0].Path),
+                        AutomationProperties.GetName(view.ActiveOverlayControls.OfType<DiffFileHeader>().Single()));
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+    }
+
+    [Fact]
+    public async Task A_mermaid_block_ignores_a_switch_from_another_thread_and_follows_one_from_its_own()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                // An open fence renders nothing, so the block stays in the one state whose only localized text is its
+                // diagram's read-screen name: no renderer, no cache and no render tick between the two raises.
+                var block = new MermaidBlockView("flowchart TD\n  A[Start] --> B{Done}\n", "mermaid", closed: false);
+                var window = SharedUi.Show(block, 600, 400);
+                try
+                {
+                    var diagram = block.GetLogicalDescendants().OfType<MermaidDiagramView>().Single();
+                    AutomationProperties.SetName(diagram, Sentinel);
+
+                    await AssertIgnoredOffThreadAsync(block);
+                    Assert.Equal(Sentinel, AutomationProperties.GetName(diagram));
+
+                    Assert.Equal(1, LanguageSubscriptions.RaiseHere(block));
+                    Assert.Equal(Loc.Instance[MermaidStrings.Diagram], AutomationProperties.GetName(diagram));
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+    }
+
+    [Fact]
+    public async Task A_timeline_gutter_ignores_a_switch_from_another_thread_and_follows_one_from_its_own()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+                transcript.AddUserMessage("hello", new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero));
+                var list = new ListBox { ItemsSource = transcript.Items };
+                var window = SharedUi.Show(list, 900, 400);
+                try
+                {
+                    SharedUi.Settle(window);
+                    var gutter = window.GetVisualDescendants().OfType<TimelineGutter>().First();
+                    AutomationProperties.SetName(gutter, Sentinel);
+
+                    await AssertIgnoredOffThreadAsync(gutter);
+                    Assert.Equal(Sentinel, gutter.NodeName);
+
+                    // The name is forced on, so a gutter whose node did not change still writes it again after a switch.
+                    Assert.Equal(1, LanguageSubscriptions.RaiseHere(gutter));
+                    Assert.Equal(
+                        TimelineStrings.Describe(TimelineNodeKind.User, TimelineNodeState.Idle),
+                        gutter.NodeName);
+                }
+                finally
+                {
+                    window.Close();
+                }
+            });
+    }
+
+    [Fact]
+    public async Task A_review_overlay_ignores_a_switch_from_another_thread_and_follows_one_from_its_own()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = FileDocumentViewModel.Create();
+                var host = EditorUi.Show(model);
+                try
+                {
+                    var overlay = Assert.IsType<ReviewOverlay>(host.View.Review);
+                    var icon = host
+                        .Window
+                        .GetVisualDescendants()
+                        .OfType<Button>()
+                        .Single(button => AutomationProperties.GetAutomationId(button) == "review-add");
+
+                    // The overlay localizes its "add a comment" icon rather than itself, so the sentinel sits on the icon.
+                    AutomationProperties.SetName(icon, Sentinel);
+
+                    await AssertIgnoredOffThreadAsync(overlay);
+                    Assert.Equal(Sentinel, AutomationProperties.GetName(icon));
+
+                    Assert.Equal(1, LanguageSubscriptions.RaiseHere(overlay));
+                    Assert.Equal(Loc.Instance[ReviewStrings.AddComment], AutomationProperties.GetName(icon));
                 }
                 finally
                 {

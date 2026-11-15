@@ -145,6 +145,42 @@ public sealed class StorageSchemaV3MigrationTests
     }
 
     [Fact]
+    public async Task A_foreign_artifact_timestamp_is_repaired_by_the_step_and_the_column_stays_guarded()
+    {
+        using var directory = new TempDirectory();
+        await using (var registry = new SqliteProjectRegistry(directory.Path))
+        {
+            await registry.ListAsync(default);
+        }
+
+        string artifactId;
+        await using (var artifacts = FileArtifactStore.ForDataDirectory(directory.Path))
+        {
+            artifactId = (await artifacts.PutAsync("session1", "build.log", new byte[] { 1 }, default)).Id;
+        }
+
+        await ReopenAsVersion2Async(directory);
+        await TodoSchemaRaw.ExecuteAsync(directory, $"UPDATE artifacts SET at = '{ForeignTimestamp}'");
+
+        // The artifact table is not one the ladder creates, but its column is registered like any other, so the step
+        // repairs it and guards it on the way past.
+        await using (var migrated = new SqliteProjectRegistry(directory.Path))
+        {
+            await migrated.ListAsync(default);
+        }
+
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(CanonicalTimestamp, await TextAsync(directory, "SELECT at FROM artifacts"));
+        Assert.Contains("trg_artifacts_at_insert", await TriggerNamesAsync(directory));
+        Assert.Contains("trg_artifacts_at_update", await TriggerNamesAsync(directory));
+
+        await using var reopened = FileArtifactStore.ForDataDirectory(directory.Path);
+        var info = await reopened.GetInfoAsync(artifactId, default);
+        Assert.NotNull(info);
+        Assert.Equal(DateTimeOffset.Parse(ForeignTimestamp, CultureInfo.InvariantCulture), info.At);
+    }
+
+    [Fact]
     public async Task Every_timestamp_column_gets_an_insert_and_an_update_guard()
     {
         using var directory = new TempDirectory();

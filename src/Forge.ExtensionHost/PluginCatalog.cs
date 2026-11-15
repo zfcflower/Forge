@@ -44,6 +44,19 @@ internal sealed class PluginCatalog
 
     public string PluginsDirectory { get; }
 
+    /// <summary>The compilation cache every prepared source plugin lands in; a test seam for the eviction wiring.</summary>
+    internal CompilationCache Cache => compiler.Cache;
+
+    /// <summary>
+    /// Drops one cached compilation result, keyed by <see cref="PluginEntry.CacheKey"/>. Pure memory hygiene: the cache
+    /// never carried correctness (its key covers the source and references, so changed content can never hit a stale
+    /// result), and the versioned output on disk stays untouched, so a plugin that comes back does not pay Roslyn twice
+    /// while its <c>bin</c> output exists. Returns whether an entry was present; a <c>null</c> or unknown key is a
+    /// no-op.
+    /// </summary>
+    public bool EvictCacheKey(string? cacheKey) =>
+        cacheKey is { Length: > 0 } && compiler.Cache.Evict(cacheKey);
+
     /// <summary>
     /// Contract a workflow package is approved against. It is deliberately not the C# <c>ScriptCompiler.ContractVersion</c>:
     /// a change to the workflow format invalidates workflow approvals without touching compiled plugins, and the two kinds
@@ -350,6 +363,10 @@ internal sealed class PluginCatalog
             ContractVersion = entry.SdkVersion,
             FilePath = sourcePath is null ? ScriptCompiler.DefaultFilePath : Path.GetFileName(sourcePath),
         };
+
+        // Recorded even when the image comes straight from the versioned output: the key identifies this entry's
+        // compilation for eviction later, no matter which of the two paths produced the bytes.
+        entry.CacheKey = request.CacheKey;
 
         var version = VersionedOutputStore.VersionFor(request.CacheKey);
         var fileName = manifest.OutputFileName;

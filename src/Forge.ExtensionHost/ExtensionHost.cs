@@ -81,6 +81,10 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     internal const string FailCleanupEnvironmentVariable = "FORGE_HOST_TEST_FAIL_CLEANUP";
 #endif
 
+    /// <summary>The catalog whose compiler owns the plugin compilation cache; a test seam for the eviction wiring
+    /// (Debug-only <c>InternalsVisibleTo</c>, see <c>AssemblyInfo.cs</c>).</summary>
+    internal PluginCatalog Catalog => catalog;
+
     /// <summary>Every issue the last discovery reported, newest last.</summary>
     internal IReadOnlyList<PluginIssue> Issues
     {
@@ -1106,6 +1110,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             await StopWorkerAsync(entry.Id).ConfigureAwait(false);
             CancelWorkflowRuns(entry.Id);
             await state.WaitForIdleAsync(RevokeDrainWindow, ct).ConfigureAwait(false);
+            EvictCompilation(entry);
             await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
         }
         finally
@@ -1114,6 +1119,24 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         }
 
         return IpcEmpty.Instance;
+    }
+
+    /// <summary>
+    /// Releases the cached compilation result of an entry that changed content or stopped running, so a stale PE image
+    /// does not occupy the cache until the LRU drops it. Pure memory hygiene: correctness never depended on the cache
+    /// (its key covers the source and references), and the versioned output on disk stays put, so a plugin that is
+    /// re-approved or re-discovered without a content change never pays Roslyn twice. <paramref name="replacement"/> is
+    /// the entry taking over the same id: when it compiled to the same key, the warm result belongs to it and stays.
+    /// </summary>
+    private void EvictCompilation(PluginEntry? entry, PluginEntry? replacement = null)
+    {
+        if (entry?.CacheKey is not { Length: > 0 } key ||
+            string.Equals(replacement?.CacheKey, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        catalog.EvictCacheKey(key);
     }
 
     private async Task<IpcEmpty> RefreshAsync(CancellationToken ct)
@@ -1131,10 +1154,16 @@ public sealed partial class ExtensionHost : IAsyncDisposable
                 try
                 {
                     SyncRecord(entry);
+                    PluginEntry? previous;
                     lock (sync)
                     {
+                        plugins.TryGetValue(entry.Id, out previous);
                         plugins[entry.Id] = entry;
                     }
+
+                    // The entry this scan replaced compiled from content that is no longer on disk; its cached image
+                    // is dead weight now unless the replacement kept the very same compilation.
+                    EvictCompilation(previous, entry);
 
                     await ApplyLockedAsync(entry, ct).ConfigureAwait(false);
                 }
@@ -1163,10 +1192,14 @@ public sealed partial class ExtensionHost : IAsyncDisposable
                 await state.EnterAsync(ct).ConfigureAwait(false);
                 try
                 {
+                    PluginEntry? removed;
                     lock (sync)
                     {
+                        plugins.TryGetValue(id, out removed);
                         plugins.Remove(id);
                     }
+
+                    EvictCompilation(removed);
 
                     await UnregisterAllAsync(id, ct).ConfigureAwait(false);
                     await StopWorkerAsync(id).ConfigureAwait(false);
