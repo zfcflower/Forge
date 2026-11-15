@@ -42,8 +42,9 @@ public sealed class SessionRuntimeGitHostTests
         var tools = rig.Runtime.BuildTools();
         var names = tools.Select(static tool => tool.Definition.Name).ToList();
 
-        // Host tools first, then the git tools in registration order, then run_code (CollectExternalTools adds it last).
-        Assert.Equal(["echo", .. GitToolNames, "run_code"], names);
+        // Host tools first, then the git tools in registration order, then the skill tool, then run_code
+        // (CollectExternalTools adds it last).
+        Assert.Equal(["echo", .. GitToolNames, SkillTool.Name, "run_code"], names);
 
         var runCode = tools.Single(static tool => tool.Definition.Name == "run_code");
         var listing = runCode.Definition.Description;

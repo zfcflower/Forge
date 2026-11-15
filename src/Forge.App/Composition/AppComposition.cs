@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Net;
 using System.Reflection;
 using Avalonia;
@@ -12,6 +12,7 @@ using Forge.App.Editing;
 using Forge.App.Git;
 using Forge.App.Lifecycle;
 using Forge.App.Localization;
+using Forge.App.Logging;
 using Forge.App.Network;
 using Forge.App.Notifications;
 using Forge.App.Preferences;
@@ -32,6 +33,7 @@ using Forge.HostClient;
 using Forge.IO;
 using Forge.IO.Tools;
 using Forge.Workspace;
+using ZLogger;
 
 namespace Forge.App.Composition;
 
@@ -590,7 +592,8 @@ internal sealed class AppComposition : IAsyncDisposable
                 gitToolSettings,
                 reviewLedger,
                 todos,
-                (phase, directory) => promptTemplates.PrWorkflowOverride(phase, directory)).All,
+                (phase, directory) => promptTemplates.PrWorkflowOverride(phase, directory),
+                () => preferences.Current.WorkflowGatesEnabled).All,
             .. new ScreenshotTools(git, prPlatform, gitToolSettings).All,
             .. new PrCheckTools(prPlatform, prChecksPoller, checksOptions).All,
             .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, gh.UserResolver).All,
@@ -655,6 +658,12 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.StepCommitter = stepCommitter;
         // Core has no git: the review change set is built here over the app's git layer and handed to the host.
         runtimeServices.Reviews = new ReviewChangeSetSource(git);
+        // The step-completion gate's git side, over the same worktree resolution the step committer uses: a session with
+        // no worktree of its own (general scratch) and a sub-agent session are not gated, because they never commit a step.
+        runtimeServices.StepChanges = new GitStepChangeProbe(git, StepCommitter.WorktreeOf(sessions));
+        runtimeServices.WorkflowGatesEnabled = () => preferences.Current.WorkflowGatesEnabled;
+        // The default orchestration is a prompt snapshot taken when a host is built, like the prompt templates above.
+        runtimeServices.OrchestrationEnabled = () => preferences.Current.OrchestrationEnabled;
         runtimeServices.ReviewLimits = () => GitToolPreferences.ReviewLimits(preferences.Current);
         // Each finished review is recorded into reviews.db (wave W17b), so a verdict outlives the turn that produced it. The
         // same store the review panels use; without a workspace services block the fallback is the same reviews directory
@@ -864,7 +873,11 @@ internal sealed class AppComposition : IAsyncDisposable
         await preferences.LoadAsync(CancellationToken.None).ConfigureAwait(true);
         ApplyLanguage(preferences.Current.Language);
         appearance.ApplyLoaded();
-        // The loaded values reach the limiter here, for the same reason the appearance feature re-applies: ApplyLoaded raises no
+        // The product's own skills are written out before any session host is built (the shell awaits this task before it
+        // restores tabs), so the first root agent already sees them in its skill index. Off the UI thread: it is file IO.
+        AgentRuntimeServices.ProductSkillsDirectory = await Task
+            .Run(() => MaterializeBuiltInSkills(paths.UserDataDirectory))
+            .ConfigureAwait(false);        // The loaded values reach the limiter here, for the same reason the appearance feature re-applies: ApplyLoaded raises no
         // change notification, so the ones wired in Register only see edits the user makes after this point.
         RateLimitComposition.Publish(preferences.Current);
 
@@ -880,6 +893,21 @@ internal sealed class AppComposition : IAsyncDisposable
     /// </summary>
     private static string ReadInformationalVersion() =>
         Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+
+    /// <summary>
+    /// Writes the product's own skills where the skill catalog and the <c>skill</c> tool can reach them. A failure is not
+    /// fatal: the app runs with the workspace's and the user's skills only, and the reason is traced.
+    /// </summary>
+    private static string? MaterializeBuiltInSkills(string userDataDirectory)
+    {
+        var directory = Skills.BuiltInSkills.Materialize(userDataDirectory);
+        if (directory is null)
+        {
+            AppLogs.Prompts.ZLogWarning($"the built-in skills could not be written under {userDataDirectory}; only workspace and user skills are offered");
+        }
+
+        return directory;
+    }
 
     /// <summary>
     /// <see cref="Loc"/> raises <c>Item[]</c> and <see cref="Loc.LanguageChanged"/> to whatever is bound, so the language

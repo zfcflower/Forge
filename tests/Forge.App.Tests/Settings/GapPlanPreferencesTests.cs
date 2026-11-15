@@ -140,6 +140,8 @@ public sealed class GapPlanPreferencesTests
         var p = new AppPreferences();
 
         Assert.True(p.AgentsSubAgentsEnabled);
+        Assert.True(p.OrchestrationEnabled);
+        Assert.True(p.WorkflowGatesEnabled);
         Assert.True(p.IdleArchiveEnabled);
         Assert.Equal("automation", p.IdleArchiveScope);
         Assert.True(p.NotificationPermissionReprompt);
@@ -225,6 +227,60 @@ public sealed class GapPlanPreferencesTests
         Assert.Equal(
             [nameof(AppPreferences.AgentsSubAgentsEnabled), nameof(AppPreferences.IdleArchiveEnabled), nameof(AppPreferences.NotificationPermissionReprompt), nameof(AppPreferences.ChatToolImagesToModel)],
             raised);
+    }
+
+    // ------------------------------------------------------------ orchestration and workflow gates
+
+    [Theory]
+    [InlineData(false, false, false, false)]   // a stored false switches the gates off
+    [InlineData(true, true, true, true)]
+    [InlineData(null, null, true, true)]       // a missing key falls back to the default
+    public void Orchestration_and_workflow_gates_load_from_the_section_and_fall_back_to_true(
+        bool? storedOrchestration,
+        bool? storedGates,
+        bool expectedOrchestration,
+        bool expectedGates)
+    {
+        // Each run starts from the opposite value, so only a load that really wrote the property can pass.
+        var p = new AppPreferences
+        {
+            OrchestrationEnabled = !expectedOrchestration,
+            WorkflowGatesEnabled = !expectedGates,
+        };
+
+        p.ApplyLoaded(
+            new PreferencesSection
+            {
+                OrchestrationEnabled = storedOrchestration,
+                WorkflowGatesEnabled = storedGates,
+            },
+            UiLanguage.System);
+
+        Assert.Equal(expectedOrchestration, p.OrchestrationEnabled);
+        Assert.Equal(expectedGates, p.WorkflowGatesEnabled);
+    }
+
+    [Fact]
+    public void Orchestration_and_workflow_gates_survive_ToSection_json_and_ApplyLoaded()
+    {
+        var source = new AppPreferences { OrchestrationEnabled = false, WorkflowGatesEnabled = false };
+
+        var section = source.ToSection();
+        Assert.False(section.OrchestrationEnabled ?? true);
+        Assert.False(section.WorkflowGatesEnabled ?? true);
+
+        var json = JsonSerializer.Serialize(section, PreferencesJsonContext.Default.PreferencesSection);
+        var node = Assert.IsType<JsonObject>(JsonNode.Parse(json));
+        Assert.False(node["orchestrationEnabled"]!.GetValue<bool>());
+        Assert.False(node["workflowGatesEnabled"]!.GetValue<bool>());
+
+        var parsed = JsonSerializer.Deserialize(json, PreferencesJsonContext.Default.PreferencesSection);
+        Assert.NotNull(parsed);
+        var loaded = new AppPreferences();
+        loaded.ApplyLoaded(parsed, UiLanguage.System);
+
+        Assert.False(loaded.OrchestrationEnabled);
+        Assert.False(loaded.WorkflowGatesEnabled);
     }
 
     // ------------------------------------------------------------ tokens
@@ -536,6 +592,8 @@ public sealed class GapPlanPreferencesTests
     {
         Assert.Equal(AppPreferences.DefaultAgentsMaxParallelSubAgents, p.AgentsMaxParallelSubAgents);
         Assert.True(p.AgentsSubAgentsEnabled);
+        Assert.True(p.OrchestrationEnabled);
+        Assert.True(p.WorkflowGatesEnabled);
         Assert.True(p.IdleArchiveEnabled);
         Assert.Equal(AppPreferences.DefaultIdleArchiveDays, p.IdleArchiveDays);
         Assert.Equal("automation", p.IdleArchiveScope);

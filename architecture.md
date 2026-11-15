@@ -77,6 +77,10 @@ depends-on: [forge-goal]
 
 **动态工作流。** 工作流以 Markdown 技能文件定义(frontmatter + 步骤文本,同 ThinkRail/PI 的 SKILL.md),由 Agent 阅读并执行;用户与插件均可提供,由路由工作流按任务类型选择(参考 choosing-a-workflow)。不引入新语法,也不提供 C# 状态机形态(已确认)。
 
+**默认编排随产品发布,承载是嵌入式技能文件。** 产品自带四份编排技能(`choosing-a-workflow`/`brainstorming`/`todos`/`shipping-a-pr`,范式取 ThinkRail),作为 `Forge.App` 的嵌入资源发布,启动时物化到 `<UserData>/builtin-skills/<内容哈希>/`,成为技能发现的**第四个、优先级最低**的来源——工作区与用户目录的同名技能覆盖它,所以「默认编排可改」不需要第二套机制。技能正文经 `skill` 工具按名送达模型,不走 `read`:物化目录在工作区之外,`read` 的工作区路径校验本来就拒绝它。路由是 **per-task** 的,索引与路由文本只注入**根 Agent 的 role 层**,不进 system 层——system 层整棵 Agent 树共享,注入它会让被派活的子 Agent 也去选工作流、访谈用户。开关 `preferences.orchestrationEnabled`(默认开)。
+
+**编排的约束力:关键 gate 机械,其余提示。** 路由、头脑风暴、计划都是提示引导(Agent 可以不遵守,这是技能范式的固有代价);两个节点由代码强制:改了代码的 TODO 步骤要标 done,必须先有 `request_review` 的 approve 结论与真实 `verification`(见 forge-core「步骤完成门禁」);`pr_create` 要求本会话计划的分组步骤全部 done(见 forge-workspace)。开关 `preferences.workflowGatesEnabled`(默认开)。产品**不认任何仓库特定的测试收据文件**:`forge-test.ps1`/`artifacts/testruns/` 是本仓的开发约定,不是产品能力,通用仓库没有它;证据来源是 Core 声明的窄接口,项目要接真收据源时实现它,不改契约。
+
 ## 开源代码内化
 
 agent-framework、MCP、编辑器/Git 及其他成熟三方包,均只取有用源码并改命名空间内化;署名按许可证要求保留,不要求则不保留(见 `forge-goal`)。

@@ -98,6 +98,8 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxAgentsMaxParallelSubAgents = 16;
     public const int DefaultAgentsMaxParallelSubAgents = 4;
     public const bool DefaultAgentsSubAgentsEnabled = true;
+    public const bool DefaultOrchestrationEnabled = true;
+    public const bool DefaultWorkflowGatesEnabled = true;
     public const bool DefaultIdleArchiveEnabled = true;
     public const int MinIdleArchiveDays = 1;
     public const int MaxIdleArchiveDays = 365;
@@ -258,6 +260,8 @@ internal sealed class AppPreferences : ObservableObject
     private string editorTheme = DefaultEditorTheme;
     private int agentsMaxParallelSubAgents = DefaultAgentsMaxParallelSubAgents;
     private bool agentsSubAgentsEnabled = DefaultAgentsSubAgentsEnabled;
+    private bool orchestrationEnabled = DefaultOrchestrationEnabled;
+    private bool workflowGatesEnabled = DefaultWorkflowGatesEnabled;
     private bool idleArchiveEnabled = DefaultIdleArchiveEnabled;
     private int idleArchiveDays = DefaultIdleArchiveDays;
     private bool notificationPermissionReprompt = DefaultNotificationPermissionReprompt;
@@ -486,6 +490,20 @@ internal sealed class AppPreferences : ObservableObject
 
     /// <summary>Whether the <c>spawn_agent</c> tool is offered at all (wave W1).</summary>
     public bool AgentsSubAgentsEnabled { get => agentsSubAgentsEnabled; set => Set(ref agentsSubAgentsEnabled, value); }
+
+    /// <summary>
+    /// Whether the default orchestration is injected into the root agent: the skill index and the per-task routing rule
+    /// that sends features, behavior changes and bug fixes through the workflow skills. Read when a session's agent host
+    /// is built, so a change applies to the next host and never rewrites a cached prefix mid-turn.
+    /// </summary>
+    public bool OrchestrationEnabled { get => orchestrationEnabled; set => Set(ref orchestrationEnabled, value); }
+
+    /// <summary>
+    /// Whether the mechanical workflow gates hold: a checklist step that changed code needs an approving review and a
+    /// real verification before it may be marked done, and <c>pr_create</c> needs every grouped step done. Read on every
+    /// gated call, so turning it off applies to the next call.
+    /// </summary>
+    public bool WorkflowGatesEnabled { get => workflowGatesEnabled; set => Set(ref workflowGatesEnabled, value); }
 
     /// <summary>Whether idle workspaces are archived automatically (wave W1).</summary>
     public bool IdleArchiveEnabled { get => idleArchiveEnabled; set => Set(ref idleArchiveEnabled, value); }
@@ -883,6 +901,8 @@ internal sealed class AppPreferences : ObservableObject
             ? Math.Clamp(agentsMaxParallelSubAgentsLoaded, MinAgentsMaxParallelSubAgents, MaxAgentsMaxParallelSubAgents)
             : DefaultAgentsMaxParallelSubAgents;
         agentsSubAgentsEnabled = section.AgentsSubAgentsEnabled ?? DefaultAgentsSubAgentsEnabled;
+        orchestrationEnabled = section.OrchestrationEnabled ?? DefaultOrchestrationEnabled;
+        workflowGatesEnabled = section.WorkflowGatesEnabled ?? DefaultWorkflowGatesEnabled;
         idleArchiveEnabled = section.IdleArchiveEnabled ?? DefaultIdleArchiveEnabled;
         idleArchiveDays = section.IdleArchiveDays is { } idleArchiveDaysLoaded
             ? Math.Clamp(idleArchiveDaysLoaded, MinIdleArchiveDays, MaxIdleArchiveDays)
@@ -1026,6 +1046,8 @@ internal sealed class AppPreferences : ObservableObject
             EditorTheme = editorTheme,
             AgentsMaxParallelSubAgents = agentsMaxParallelSubAgents,
             AgentsSubAgentsEnabled = agentsSubAgentsEnabled,
+            OrchestrationEnabled = orchestrationEnabled,
+            WorkflowGatesEnabled = workflowGatesEnabled,
             IdleArchiveEnabled = idleArchiveEnabled,
             IdleArchiveDays = idleArchiveDays,
             NotificationPermissionReprompt = notificationPermissionReprompt,
@@ -1410,6 +1432,12 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("agentsSubAgentsEnabled")]
     public bool? AgentsSubAgentsEnabled { get; set; }
+
+    [JsonPropertyName("orchestrationEnabled")]
+    public bool? OrchestrationEnabled { get; set; }
+
+    [JsonPropertyName("workflowGatesEnabled")]
+    public bool? WorkflowGatesEnabled { get; set; }
 
     [JsonPropertyName("idleArchiveEnabled")]
     public bool? IdleArchiveEnabled { get; set; }

@@ -1,7 +1,9 @@
 using Forge.Abstractions;
 using Forge.Core.Agents;
 using Forge.Core.Prompts;
+using Forge.Core.Storage;
 using Forge.Core.Tests.Agents;
+using Forge.Core.Tests.Storage;
 using Forge.Core.Tools;
 using Xunit;
 
@@ -166,8 +168,8 @@ public sealed class RequestReviewToolTests
     private static SubAgentScheduler CreateScheduler() =>
         new(new AgentCatalog(null), new PromptLayers("test system", null, null), new PromptComposer(), null, new AgentOptions());
 
-    private static RequestReviewTool CreateTool(FakeReviewChangeSetSource source, ITodoStore? todos = null) =>
-        new(CreateScheduler(), source, todos);
+    private static RequestReviewTool CreateTool(FakeReviewChangeSetSource source, ITodoStore? todos = null, StepReviewLedger? ledger = null) =>
+        new(CreateScheduler(), source, todos, ledger: ledger);
 
     private static AgentHost CreateHost(
         IChatProvider provider,
@@ -176,7 +178,9 @@ public sealed class RequestReviewToolTests
         AgentOptions? options = null,
         ITool? read = null,
         Func<ReviewPackageLimits>? limits = null,
-        IReviewConclusionStore? conclusions = null) =>
+        IReviewConclusionStore? conclusions = null,
+        IStepChangeProbe? stepChanges = null,
+        Func<bool>? stepGatesEnabled = null) =>
         new(new AgentHostOptions
         {
             Providers = _ => provider,
@@ -196,8 +200,18 @@ public sealed class RequestReviewToolTests
             ReviewLimits = limits,
             ReviewConclusions = conclusions,
             Todos = todos,
+            StepChanges = stepChanges,
+            StepGatesEnabled = stepGatesEnabled,
+            ApprovalHandler = new AllowAll(),
             Options = options ?? new AgentOptions(),
         });
+
+    /// <summary>Approves every ask, so a write tool call in a scripted turn reaches the tool instead of being denied.</summary>
+    private sealed class AllowAll : IApprovalHandler
+    {
+        public ValueTask<ApprovalDecision> RequestAsync(ApprovalRequest request, CancellationToken ct) =>
+            ValueTask.FromResult(ApprovalDecision.Allow);
+    }
 
     /// <summary>A parent turn that asks for one review (<paramref name="arguments"/>), the Reviewer answering
     /// <paramref name="reviewerReply"/>, then the parent finishing.</summary>
@@ -732,6 +746,220 @@ public sealed class RequestReviewToolTests
             slot.Dispose();
         }
     }
+
+    // ---------------------------------------------------------------- recording the verdict for the step gate
+
+    [Fact]
+    public async Task A_branch_review_records_no_verdict_so_it_does_not_unlock_the_step_gate()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        var item = await store.AddAsync(Session, "Step", null, null, default);
+        var provider = new FakeProvider((request, index) =>
+            Turn.LastUserText(request).StartsWith("This is a review request:", StringComparison.Ordinal)
+                ? Turn.Say("No blocking findings.\n\nverdict: approve")
+                : index == 0
+                    ? Turn.Call(("call-1", RequestReviewTool.Name, """{"intent":"add the request_review tool"}"""))
+                    : index == 2
+                        ? Turn.Call(("call-2", "todo", $$"""{"operation":"update","id":"{{item.Id}}","status":"done","verification":"dotnet test: 12 passed"}"""))
+                        : Turn.Say("parent done"));
+        var host = CreateHost(provider, new FakeReviewChangeSetSource(), todos: store, stepChanges: new DirtyProbe());
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        // The branch review approves, but only a step review (step_id) earns a verdict: the dirty step stays refused.
+        var results = root.History.SelectMany(message => message.Content.OfType<ToolResultBlock>()).ToArray();
+        Assert.False(results[0].IsError, results[0].Content);
+        Assert.StartsWith("verdict: approve", results[0].Content, StringComparison.Ordinal);
+        Assert.True(results[1].IsError);
+        Assert.Contains("cannot be marked done yet", results[1].Content, StringComparison.Ordinal);
+        Assert.Equal(TodoStatus.Pending, Assert.Single(await store.ListAsync(Session, default)).Status);
+    }
+
+    [Fact]
+    public async Task A_step_review_that_never_reaches_a_verdict_records_nothing()
+    {
+        var ledger = new StepReviewLedger();
+
+        // An empty change set starts no reviewer at all.
+        var empty = CreateTool(
+            new FakeReviewChangeSetSource { Handler = (_, _) => Task.FromResult(ReviewChangeSetResult.Ok(ChangeSet(0, diff: null))) },
+            new FakeTodoStore(Step()),
+            ledger);
+        var emptyResult = await InAgentScopeAsync(empty, """{"step_id":"a1"}""");
+        Assert.False(emptyResult.IsError);
+        Assert.Null(ledger.Find(Session, "a1"));
+
+        // A review the scheduler refuses to start has no verdict either.
+        var refused = CreateTool(new FakeReviewChangeSetSource(), new FakeTodoStore(Step()), ledger);
+        var slot = Assert.IsType<AgentSlot>(new AgentSlotPool(1).TryAcquire());
+        try
+        {
+            using (AgentScope.Enter(new ListSink(), "root", slot))
+            {
+                var result = await refused.InvokeAsync(
+                    new ToolCall("call-1", RequestReviewTool.Name, """{"step_id":"a1"}"""),
+                    new ToolContext(Session, "work/tree", AgentDepth: 3),
+                    CancellationToken.None);
+                Assert.True(result.IsError);
+                Assert.StartsWith("The review could not be started: ", result.Content, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            slot.Dispose();
+        }
+
+        Assert.Null(ledger.Find(Session, "a1"));
+    }
+
+    [Fact]
+    public async Task A_stopped_step_review_records_no_verdict_even_though_its_partial_text_has_one()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = CreateHost(
+            PrematureVerdictStepScript(),
+            new FakeReviewChangeSetSource(),
+            todos: new FakeTodoStore(Step()),
+            read: BlockingRead(entered),
+            stepChanges: new DirtyProbe());
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        var run = host.RunToCompletionAsync(root);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Stop("Reviewer-1", "user stopped it"));
+        await run;
+
+        // The stopped review is an error, its partial text does carry "verdict: approve", and the todo call that follows
+        // is still refused by the gate: the stop recorded no approval for the step. (Had it recorded one, the stored
+        // verification of the step would satisfy the gate and the update would reach the fake store instead.)
+        var results = root.History.SelectMany(message => message.Content.OfType<ToolResultBlock>()).ToArray();
+        Assert.Contains("The review was stopped before it finished", results[0].Content, StringComparison.Ordinal);
+        Assert.True(results[^1].IsError);
+        Assert.Contains("cannot be marked done yet", results[^1].Content, StringComparison.Ordinal);
+    }
+
+    /// <summary>The gate's git evidence: always a dirty worktree, the answer that needs a review verdict.</summary>
+    private sealed class DirtyProbe : IStepChangeProbe
+    {
+        public Task<StepChangeProbe> ProbeAsync(string sessionId, string workingDirectory, CancellationToken ct) =>
+            Task.FromResult(new StepChangeProbe(StepChangeState.Dirty));
+    }
+
+    /// <summary>
+    /// The parent asks for a step review; the Reviewer's first answer already carries a verdict line next to a read it
+    /// never finishes, which is what a stop in the middle of a review leaves behind. After the stopped review the parent
+    /// tries to mark the step done.
+    /// </summary>
+    private static FakeProvider PrematureVerdictStepScript() =>
+        new((request, index) =>
+            Turn.LastUserText(request).StartsWith("This is a review request:", StringComparison.Ordinal)
+                ?
+                [
+                    new MessageCompleted(
+                        new ChatMessage(
+                            MessageRole.Assistant,
+                            [new TextBlock("verdict: approve"), new ToolCallBlock("r-1", "read", "{}")]),
+                        new TokenUsage(10, 5),
+                        StopReason.ToolUse),
+                ]
+                : index == 0
+                    ? Turn.Call(("call-1", RequestReviewTool.Name, """{"step_id":"a1"}"""))
+                    : index == 2
+                        ? Turn.Call(("call-2", "todo", """{"operation":"update","id":"a1","status":"done"}"""))
+                        : Turn.Say("parent done"));
+
+    // ---------------------------------------------------------------- the host wiring: one ledger for both tools
+
+    [Fact]
+    public async Task The_gate_and_request_review_share_one_ledger_so_an_approval_lets_only_that_step_be_done()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        var reviewed = await store.AddAsync(Session, "Wire the gate", null, null, default);
+        var other = await store.AddAsync(Session, "Second step", null, null, default);
+        var host = CreateHost(
+            ReviewThenTwoDonesScript(reviewed.Id, other.Id),
+            new FakeReviewChangeSetSource(),
+            todos: store,
+            stepChanges: new DirtyProbe());
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        // The review approves one step, and only because both tools hold the host's one ledger does that step's done pass
+        // the gate - while the other step, which was never reviewed, is still refused.
+        var results = root.History.SelectMany(message => message.Content.OfType<ToolResultBlock>()).ToArray();
+        Assert.False(results[0].IsError, results[0].Content);
+        Assert.StartsWith("verdict: approve", results[0].Content, StringComparison.Ordinal);
+        Assert.False(results[1].IsError, results[1].Content);
+        Assert.Contains($"[x] #{reviewed.Id} Wire the gate", results[1].Content, StringComparison.Ordinal);
+        Assert.True(results[2].IsError);
+        Assert.Contains("cannot be marked done yet", results[2].Content, StringComparison.Ordinal);
+        var stored = await store.ListAsync(Session, default);
+        Assert.Equal(TodoStatus.Done, Assert.Single(stored, item => item.Id == reviewed.Id).Status);
+        Assert.Equal(TodoStatus.Pending, Assert.Single(stored, item => item.Id == other.Id).Status);
+    }
+
+    [Fact]
+    public async Task A_host_without_reviews_installs_no_probe_so_a_changed_step_still_finishes()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        var item = await store.AddAsync(Session, "Step", null, null, default);
+        var provider = new FakeProvider((_, index) => index == 0
+            ? Turn.Call(("call-1", "todo", $$"""{"operation":"update","id":"{{item.Id}}","status":"done","verification":"dotnet test: 12 passed"}"""))
+            : Turn.Say("parent done"));
+        var host = CreateHost(provider, source: null, todos: store, stepChanges: new DirtyProbe());
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        // No review tool means no verdict can be earned, so the host installs no probe: a dirty step is still let through.
+        Assert.True(host.Tools.TryGet(TodoTool.Name, out _));
+        Assert.False(host.Tools.TryGet(RequestReviewTool.Name, out _));
+        var result = Assert.Single(root.History.SelectMany(message => message.Content.OfType<ToolResultBlock>()));
+        Assert.False(result.IsError, result.Content);
+        Assert.Contains($"[x] #{item.Id} Step", result.Content, StringComparison.Ordinal);
+        Assert.Equal(TodoStatus.Done, Assert.Single(await store.ListAsync(Session, default)).Status);
+    }
+
+    [Fact]
+    public async Task A_host_with_the_gates_preference_off_lets_a_changed_step_finish_without_a_review()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        var item = await store.AddAsync(Session, "Step", null, null, default);
+        var provider = new FakeProvider((_, index) => index == 0
+            ? Turn.Call(("call-1", "todo", $$"""{"operation":"update","id":"{{item.Id}}","status":"done","verification":"dotnet test: 12 passed"}"""))
+            : Turn.Say("parent done"));
+        var host = CreateHost(provider, new FakeReviewChangeSetSource(), todos: store, stepChanges: new DirtyProbe(), stepGatesEnabled: () => false);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        // The gate has a probe and the step is dirty and unreviewed, but the preference switched it off: done still goes
+        // through. Had the host dropped the StepGatesEnabled func, the same update would be refused for lack of a verdict.
+        var result = Assert.Single(root.History.SelectMany(message => message.Content.OfType<ToolResultBlock>()));
+        Assert.False(result.IsError, result.Content);
+        Assert.Contains($"[x] #{item.Id} Step", result.Content, StringComparison.Ordinal);
+        Assert.Equal(TodoStatus.Done, Assert.Single(await store.ListAsync(Session, default)).Status);
+    }
+
+    /// <summary>The parent asks for one step review, then marks that step done, then tries a second, unreviewed step.</summary>
+
+    private static FakeProvider ReviewThenTwoDonesScript(string stepId, string otherId) =>
+        new((request, index) =>
+            Turn.LastUserText(request).StartsWith("This is a review request:", StringComparison.Ordinal)
+                ? Turn.Say("No blocking findings.\n\nverdict: approve")
+                : index == 0
+                    ? Turn.Call(("call-1", RequestReviewTool.Name, $$"""{"step_id":"{{stepId}}"}"""))
+                    : index == 2
+                        ? Turn.Call(("call-2", "todo", $$"""{"operation":"update","id":"{{stepId}}","status":"done","verification":"dotnet test: 12 passed"}"""))
+                        : index == 3
+                            ? Turn.Call(("call-3", "todo", $$"""{"operation":"update","id":"{{otherId}}","status":"done","verification":"dotnet test: 12 passed"}"""))
+                            : Turn.Say("parent done"));
 
     /// <summary>A reviewer read that blocks until its token is cancelled, signalling when it was entered.</summary>
     private static FakeTool BlockingRead(TaskCompletionSource entered, TaskCompletionSource? cancelled = null) =>

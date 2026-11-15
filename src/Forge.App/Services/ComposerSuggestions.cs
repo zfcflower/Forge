@@ -25,13 +25,14 @@ internal readonly record struct ComposerToken(ComposerTokenKind Kind, int Start,
 internal sealed record SlashEntry(string Name, string Description, bool IsSkill, string Path = "", SkillScope Scope = SkillScope.None);
 
 /// <summary>
-/// The folder a discovered skill came from, as the settings page badges it. The three real values are the scope convention
-/// the prompts section already uses (see <c>PromptTemplateScope</c>), so a skill and a template of the same origin read the
-/// same; <see cref="None"/> is a command entry, which has no folder to come from.
+/// The folder a discovered skill came from, as the settings page badges it. <see cref="BuiltIn"/>, <see cref="Global"/> and
+/// <see cref="Project"/> are the scope convention the prompts section already uses (see <c>PromptTemplateScope</c>), so a
+/// skill and a template of the same origin read the same; <see cref="Product"/> is the set FORGE itself ships and has no
+/// prompt counterpart, and <see cref="None"/> is a command entry, which has no folder to come from.
 /// </summary>
 internal enum SkillScope
 {
-    /// <summary>Not a discovered skill (a command), or a skill whose folder is not one of the three below.</summary>
+    /// <summary>Not a discovered skill (a command), or a skill whose folder is not one of the four below.</summary>
     None,
 
     /// <summary>The workspace's <c>.github/skills</c>: the skills the repository itself carries.</summary>
@@ -42,6 +43,12 @@ internal enum SkillScope
 
     /// <summary>The workspace's <c>.forge/skills</c>: this project's own skills.</summary>
     Project,
+
+    /// <summary>
+    /// The skills the FORGE product ships, materialized under <c>&lt;UserData&gt;/builtin-skills</c> by
+    /// <c>BuiltInSkills.Materialize</c>. The lowest priority of the four: a workspace or user copy of the same name shadows it.
+    /// </summary>
+    Product,
 }
 
 /// <summary>
@@ -208,14 +215,26 @@ internal static class ComposerSuggestions
 
 /// <summary>
 /// Skills the composer's slash picker offers: every <c>SKILL.md</c> one level under <c>.github/skills</c> and
-/// <c>.forge/skills</c> of the workspace and under <c>skills</c> of the user directory. The name comes from the
-/// front matter's <c>name:</c> (else the folder name), the description from <c>description:</c>. Each entry carries the
-/// <see cref="SkillScope"/> of the folder it was found in, and the first folder that names a skill keeps it — so the scope
-/// of a shadowed skill is the scope of the copy that wins, exactly like the prompts layering.
+/// <c>.forge/skills</c> of the workspace, under <c>skills</c> of the user directory, and under the product's materialized
+/// skill root. The name comes from the front matter's <c>name:</c> (else the folder name), the description from
+/// <c>description:</c>. Each entry carries the <see cref="SkillScope"/> of the folder it was found in, and the first folder
+/// that names a skill keeps it — so the scope of a shadowed skill is the scope of the copy that wins, exactly like the
+/// prompts layering.
+/// <para>There are four sources and only three of them belong to the workspace or the user: the fourth is the version
+/// directory <c>BuiltInSkills.Materialize</c> returned, whose subdirectories are the skills the FORGE product ships. It is
+/// appended last, so it has the lowest priority of the four: a workspace or user copy of the same name shadows it.</para>
 /// </summary>
 internal static class SkillCatalog
 {
-    public static IReadOnlyList<SlashEntry> Discover(string? workspace, string? userDirectory)
+    /// <summary>
+    /// Every discoverable skill, in the order the picker lays them out: the workspace's <c>.github/skills</c>, the workspace's
+    /// <c>.forge/skills</c>, the user directory's <c>skills</c>, then the product's materialized skills when
+    /// <paramref name="productDirectory"/> is given. The first folder that names a skill keeps it.
+    /// <para><paramref name="productDirectory"/> is the product's version directory itself (its subdirectories are the
+    /// skills), not the folder above it; null or blank adds no source, which is what a build that embedded no skill and a
+    /// materialization that failed both look like.</para>
+    /// </summary>
+    public static IReadOnlyList<SlashEntry> Discover(string? workspace, string? userDirectory, string? productDirectory = null)
     {
         var roots = new List<(string Path, SkillScope Scope)>();
         if (!string.IsNullOrWhiteSpace(workspace))
@@ -227,6 +246,11 @@ internal static class SkillCatalog
         if (!string.IsNullOrWhiteSpace(userDirectory))
         {
             roots.Add((Path.Combine(userDirectory, "skills"), SkillScope.Global));
+        }
+
+        if (!string.IsNullOrWhiteSpace(productDirectory))
+        {
+            roots.Add((productDirectory, SkillScope.Product));
         }
 
         var found = new List<SlashEntry>();

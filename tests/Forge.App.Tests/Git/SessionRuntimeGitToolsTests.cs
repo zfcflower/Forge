@@ -16,6 +16,8 @@ namespace Forge.App.Tests.Git;
 /// git surface); and with the app's approval policy (<see cref="DefaultApprovalPolicy"/> as configured in
 /// <see cref="SessionRuntime"/>, no handler) the four read-only tools evaluate to <see cref="ApprovalMode.Allow"/>
 /// while git_branch/git_sync do not.
+/// <para>The <c>skill</c> tool is always present, right after the git and file tools in the collection's order, and a
+/// suite pins the exact order, so every expected list below carries it.</para>
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class SessionRuntimeGitToolsTests
@@ -28,6 +30,7 @@ public sealed class SessionRuntimeGitToolsTests
         GitTools.FetchName,
         GitTools.BranchName,
         GitTools.SyncName,
+        SkillTool.Name,
     ];
 
     [Fact]
@@ -38,8 +41,8 @@ public sealed class SessionRuntimeGitToolsTests
 
         var names = runtime.BuildTools().Select(static tool => tool.Definition.Name).ToList();
 
-        // "extension-host tools plus run_code, then the git tools": with no host client the surface is
-        // exactly GitTools.All, in registration order (status, log, diff, fetch, branch, sync).
+        // The git tools of GitTools.All in registration order (status, log, diff, fetch, branch, sync), then the
+        // always-present skill tool, which the collection adds after the git and file tools.
         Assert.Equal(ExpectedGitTools, names);
     }
 
@@ -50,7 +53,8 @@ public sealed class SessionRuntimeGitToolsTests
 
         var names = runtime.BuildTools().Select(static tool => tool.Definition.Name).ToList();
 
-        Assert.Empty(names);
+        // Only the always-present skill tool: no git tool appears without a Git surface.
+        Assert.Equal([SkillTool.Name], names);
         Assert.DoesNotContain(GitTools.StatusName, names);
         Assert.DoesNotContain(GitTools.BranchName, names);
         Assert.DoesNotContain(GitTools.SyncName, names);

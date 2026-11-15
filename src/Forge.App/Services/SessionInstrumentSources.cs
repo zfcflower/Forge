@@ -115,7 +115,7 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
         composition.Mcp is { } mcp ? (mcp.ReadyCount(), mcp.ConfiguredServers) : (0, 0);
 
     public IReadOnlyList<SlashEntry> Skills(string workspacePath) =>
-        SkillCatalog.Discover(workspacePath, AgentRuntimeServices.UserDirectory());
+        SkillCatalog.Discover(workspacePath, AgentRuntimeServices.UserDirectory(), AgentRuntimeServices.ProductSkillsDirectory);
 
     public ModelMetadata ModelMetadata(string modelId, string? providerId = null) =>
         composition.Providers.Catalog.MetadataFor(modelId, providerId);

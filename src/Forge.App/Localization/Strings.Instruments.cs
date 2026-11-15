@@ -89,6 +89,7 @@ internal static class InstrumentsStrings
     public const string ApprovalsSectionUnavailableKey = "settings.approvals.unavailable";
     public const string SkillsSectionHintKey = "settings.skills.hint";
     public const string SkillsSectionEmptyKey = "settings.skills.empty";
+    public const string SkillsScopeProductKey = "settings.skills.scope.product";
     public const string ToolsSectionHintKey = "settings.tools.hint";
     public const string ToolsSectionEmptyKey = "settings.tools.empty";
     public const string ToolsSectionNoSessionKey = "settings.tools.noSession";
@@ -453,9 +454,10 @@ internal static class InstrumentsStrings
 
         Loc.Register(
             SkillsSectionHintKey,
-            "工作区 .github/skills、.forge/skills 与用户目录 skills 下发现的技能（只读）。",
-            "Skills discovered in the workspace's .github/skills and .forge/skills and in the user directory's skills (read-only).");
+            "工作区 .github/skills、.forge/skills、用户目录 skills 与随 FORGE 发布的内置技能（只读）；同名时工作区或用户目录的技能覆盖内置。",
+            "Skills found in the workspace's .github/skills and .forge/skills, in the user directory's skills and in the skills shipped with Forge (read-only); a workspace or user copy of the same name shadows the built-in one.");
         Loc.Register(SkillsSectionEmptyKey, "没有发现技能", "No skills discovered");
+        Loc.Register(SkillsScopeProductKey, "产品内置", "Shipped with Forge");
 
         Loc.Register(
             ToolsSectionHintKey,

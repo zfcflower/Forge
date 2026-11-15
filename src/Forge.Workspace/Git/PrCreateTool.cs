@@ -6,36 +6,42 @@ using Forge.Abstractions;
 namespace Forge.Workspace;
 
 /// <summary>
-/// Opens a pull request for the session branch after four gates that code enforces, then pushes with a lease and creates
-/// it. Nothing is changed when a gate refuses; each refusal names the gate and the next step.
+/// Opens a pull request for the session branch after five gates that code enforces, then pushes with a lease and creates
+/// it. Nothing is changed when a gate refuses; each refusal names the gate and the next step. The plan-steps gate only
+/// counts grouped steps: loose todo items (no group) are the user's queued raw input, not steps of this plan.
 /// </summary>
 internal sealed class PrCreateTool(
     GitCli git,
     IPrPlatform platform,
     GitToolSettings settings,
     GitReviewLedger ledger,
-    ITodoStore todos) : PrLifecycleToolBase(
+    ITodoStore todos,
+    Func<bool>? gatesEnabled = null) : PrLifecycleToolBase(
     git,
     platform,
     PrTools.CreateName,
-    "Open a pull request for the current branch. Read pr_workflow with phase 'creating' first. Four gates are checked in " +
+    "Open a pull request for the current branch. Read pr_workflow with phase 'creating' first. Five gates are checked in " +
     "code, in order, and any failure refuses the call and says what to do: (1) the working tree is clean, untracked " +
     "files included; (2) after a fresh fetch, origin/<base> is an ancestor of HEAD, otherwise bring the branch up to " +
     "date first (pr_sync); (3) the full git_diff (no paths, not stat_only) was read at this exact HEAD - code can " +
     "only enforce that the diff was re-read, whether you actually cleaned up debug output, scratch files and unrelated " +
     "edits is your own judgement and nothing here checks it; (4) the body has a '## Testing' section that is not empty " +
     "and not a platitude such as 'tests pass', so say what you ran and what it showed (code cannot verify that it " +
-    "happened - be honest). body defaults to the plan summary plus a generated '## Plan' section; base defaults to the " +
-    "repository's default branch; draft only when true. After the gates the state is read once more, an existing pull " +
-    "request for the branch is reported instead of creating another, the branch is pushed with a lease read fresh from " +
-    "the remote (the refspec names the audited HEAD, so a commit that lands while the checks run is refused as a " +
-    "gate-to-push race instead of being published), and the pull request is created. It is never merged.",
+    "happened - be honest); (5) every step of the session's plan (todo items with a group) is done - finish the " +
+    "unfinished steps or remove the ones you will not do; loose queue items without a group are the user's queued " +
+    "input, not plan steps, and do not block. body defaults to the plan summary plus a generated '## Plan' section; " +
+    "base defaults to the repository's default branch; draft only when true. After the gates the state is read once " +
+    "more, an existing pull request for the branch is reported instead of creating another, the branch is pushed with " +
+    "a lease read fresh from the remote (the refspec names the audited HEAD, so a commit that lands while the checks " +
+    "run is refused as a gate-to-push race instead of being published), and the pull request is created. It is never merged.",
     """
     {"type":"object","properties":{"title":{"type":"string","description":"Pull request title (one line)."},"body":{"type":"string","description":"Description in Markdown with a non-trivial '## Testing' section; default the plan summary plus a generated '## Plan' section."},"base":{"type":"string","description":"Branch to merge into; default the repository's default branch."},"draft":{"type":"boolean","description":"Open as a draft; default false."}},"required":["title"],"additionalProperties":false}
     """,
     ToolSideEffect.Write)
 {
     private const string Tool = PrTools.CreateName;
+    private const int ListedSteps = 10;
+    private const int MaxStepTitleLength = 120;
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(
         JsonElement arguments,
@@ -113,7 +119,7 @@ internal sealed class PrCreateTool(
             return gate2;
         }
 
-        // Gate 3 (and 5): the diff of exactly this HEAD was read.
+        // Gate 3: the diff of exactly this HEAD was read; the push pin re-checks it right before the push.
         var reviewed = ledger.LastReviewed(context.SessionId, directory);
         if (!string.Equals(reviewed, head, StringComparison.Ordinal))
         {
@@ -140,6 +146,12 @@ internal sealed class PrCreateTool(
                 "Run the project's tests, then write under '## Testing' what you ran and what it showed (the command and " +
                 "its outcome, or the manual check and its result) - in the plan summary, or pass body. Do not claim runs " +
                 "that did not happen.");
+        }
+
+        // Gate 5: every step of the session's plan is done before the branch is proposed.
+        if (await CheckPlanStepsDoneAsync(context.SessionId, ct).ConfigureAwait(false) is { } unfinishedPlan)
+        {
+            return unfinishedPlan;
         }
 
         if (body.Length > PrBodyEditor.MaxBodyLength)
@@ -279,6 +291,78 @@ internal sealed class PrCreateTool(
                 "gate 2: up to date with the base",
                 $"the branch has no commits beyond {baseRef}; there is nothing to propose.",
                 "Make and commit the change first (finishing a todo step commits for you), then retry.");
+    }
+
+    /// <summary>
+    /// Gate 5: every grouped step of the session's plan is done. Loose items (<see cref="TodoItem.GroupId"/> null) are
+    /// the user's queued raw input, not steps of this plan, so they never block. Skipped when the gates preference
+    /// (the constructor's <c>gatesEnabled</c>) returns false; null keeps the gate enabled.
+    /// </summary>
+    private async Task<ToolResult?> CheckPlanStepsDoneAsync(string sessionId, CancellationToken ct)
+    {
+        if (gatesEnabled is not null && !gatesEnabled())
+        {
+            return null;
+        }
+
+        var items = await todos.ListAsync(sessionId, ct).ConfigureAwait(false);
+        List<TodoItem> unfinished = [];
+        foreach (var item in items)
+        {
+            if (item.GroupId is not null && item.Status != TodoStatus.Done)
+            {
+                unfinished.Add(item);
+            }
+        }
+
+        if (unfinished.Count == 0)
+        {
+            return null;
+        }
+
+        return PrLifecycleFailure.Refuse(
+            Tool,
+            "gate 5: every plan step is done",
+            $"{unfinished.Count.ToString(CultureInfo.InvariantCulture)} plan step(s) are not done:" + ListUnfinishedSteps(unfinished),
+            "Finish these steps (todo update with status=done; for a step that changed code, first get an approve from " +
+            "request_review and write its verification), or todo remove the steps that will genuinely not be done, " +
+            "then call pr_create again.");
+    }
+
+    /// <summary>Up to ten unfinished steps, one per line (id and title), with a count of the rest.</summary>
+    private static string ListUnfinishedSteps(IReadOnlyList<TodoItem> steps)
+    {
+        var text = new StringBuilder(256);
+        for (var i = 0; i < steps.Count && i < ListedSteps; i++)
+        {
+            text.Append("\n  ").Append(steps[i].Id).Append(": ").Append(StepTitle(steps[i].Title));
+        }
+
+        if (steps.Count > ListedSteps)
+        {
+            text.Append("\n  ... and ").Append((steps.Count - ListedSteps).ToString(CultureInfo.InvariantCulture)).Append(" more");
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>One line of at most 120 characters: newlines become spaces and an over-long title is cut short.</summary>
+    private static string StepTitle(string title)
+    {
+        var line = title.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
+        if (line.Length <= MaxStepTitleLength)
+        {
+            return line;
+        }
+
+        // Room for the ellipsis, and one more character back when the cut would land inside a surrogate pair.
+        var cut = MaxStepTitleLength - 3;
+        if (char.IsHighSurrogate(line[cut - 1]))
+        {
+            cut--;
+        }
+
+        return line[..cut] + "...";
     }
 
     private async Task<(string Body, string Source)> ResolveBodyAsync(string sessionId, string? supplied, CancellationToken ct)

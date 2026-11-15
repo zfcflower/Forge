@@ -229,7 +229,8 @@ public sealed class WebToolsTests : IDisposable
         };
         var runtime = new SessionRuntime(runtimeServices, new SessionInfo("s", dir, "t", DateTimeOffset.UtcNow));
 
-        Assert.Equal([WebFetchTool.Name, WebSearchTool.Name], runtime.BuildTools().Select(t => t.Definition.Name));
+        // The skill tool is always in the surface; the web tools follow in registration order.
+        Assert.Equal([SkillTool.Name, WebFetchTool.Name, WebSearchTool.Name], runtime.BuildTools().Select(t => t.Definition.Name));
 
         var field = typeof(SessionRuntime).GetField("SessionPolicy", BindingFlags.NonPublic | BindingFlags.Static)!;
         var policy = (IApprovalPolicy)field.GetValue(null)!;
@@ -245,7 +246,8 @@ public sealed class WebToolsTests : IDisposable
         var runtimeServices = new AgentRuntimeServices(
             static _ => throw new InvalidOperationException("unused"), null, null!, null!, null!, new ModelSettings("test"));
         var runtime = new SessionRuntime(runtimeServices, new SessionInfo("s", dir, "t", DateTimeOffset.UtcNow));
-        Assert.Empty(runtime.BuildTools());
+        // No web factory means no web tool; the always-present skill tool is the only thing left.
+        Assert.Equal([SkillTool.Name], runtime.BuildTools().Select(t => t.Definition.Name));
     }
 
     [Fact]

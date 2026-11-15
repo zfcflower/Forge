@@ -339,15 +339,20 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
     }
 
     /// <summary>
-    /// <c>request_review</c> spawns a Reviewer child, so it is a spawning tool too: with spawning switched off it must leave
-    /// the tool set together with <c>spawn_agent</c>, or the switch would be a promise the model can walk around.
+    /// <c>request_review</c> spawns a Reviewer child, so it is a spawning tool too: with spawning switched off it leaves the
+    /// tool set together with <c>spawn_agent</c>, or the switch would be a promise the model can walk around - <b>unless the
+    /// workflow gates are on</b>. The step completion gate demands an approving step review for every step that changed code,
+    /// so removing the only tool that can earn one would make such a step impossible to finish and <c>pr_create</c>'s gate 5
+    /// refuse forever; the two switches must not add up to a dead end. <c>spawn_agent</c> is still taken out in every row.
     /// </summary>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Request_review_follows_the_spawning_switch(bool enabled)
+    [InlineData(true, true)]    // spawning on: everything present
+    [InlineData(false, true)]   // spawning off, gates on: request_review stays (the gate needs it)
+    [InlineData(false, false)]  // spawning off, gates off: request_review leaves with spawn_agent
+    public async Task Request_review_leaves_with_the_spawning_switch_only_when_the_gates_are_off(bool enabled, bool gates)
     {
         limits = new SubAgentLimits(2, Enabled: enabled);
+        var reviewOffered = enabled || gates;
         await using var rig = new SessionRuntimeRig(
             root,
             services =>
@@ -355,14 +360,15 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
                 services.SubAgents = () => limits;
                 services.DisabledTools = static () => [];
                 services.Reviews = new NoChangesReviewSource();
+                services.WorkflowGatesEnabled = () => gates;
             });
 
         await rig.TurnAsync();
 
-        Assert.Equal(enabled, ToolNames(rig.Provider.Requests[^1]).Contains(RequestReviewTool.Name));
+        Assert.Equal(reviewOffered, ToolNames(rig.Provider.Requests[^1]).Contains(RequestReviewTool.Name));
         var published = rig.Runtime.PublishedTools;
         Assert.NotNull(published);
-        Assert.Equal(enabled, published.Definitions.Any(static definition => definition.Name == RequestReviewTool.Name));
+        Assert.Equal(reviewOffered, published.Definitions.Any(static definition => definition.Name == RequestReviewTool.Name));
         AssertSpawnAgentOffered(rig, enabled);
     }
 

@@ -10,3 +10,4 @@ publish/
 dist/
 TestResults/
 artifacts/
+.forge/context/

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
+using Forge.Core.Tools;
 
 namespace Forge.Core.Agents;
 
@@ -9,6 +10,9 @@ namespace Forge.Core.Agents;
 /// writing the plan summary change state, so the approval policy sees the side effect of the call instead of the tool's
 /// worst case. When a step committer is configured, marking an item done also commits that step; the commit is a local,
 /// undoable write to the session's own worktree and so rides along with the <c>todo</c> call instead of asking again.
+/// When a <see cref="StepGate"/> is configured, marking an item done is first checked by it: a step that changed code needs
+/// an approving review verdict and a real verification, while a step that changed nothing is let through. A refused step
+/// keeps its state and is not committed.
 /// </summary>
 public sealed class TodoTool : ITool, IToolSideEffectResolver
 {
@@ -19,7 +23,7 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
     private const int ListErrorLimit = 200;
 
     private const string SchemaJson =
-        """{"type":"object","properties":{"operation":{"type":"string","enum":["list","add","update","remove","promote","plan_summary_get","plan_summary_set"],"description":"list reads the checklist; add, update, remove and promote change it; plan_summary_get reads the session's plan summary and plan_summary_set replaces it."},"id":{"type":"string","description":"Item id from a previous list; required by update, remove and promote."},"title":{"type":"string","description":"Item title for add, or the new title for update; for promote the group title when it should differ from the item title."},"status":{"type":"string","enum":["pending","in_progress","paused","done"],"description":"New status for update. in_progress returns the session's previous in-progress step to pending; paused waits for something outside the agent and never commits; done commits every uncommitted change in the worktree as this step."},"note":{"type":"string","description":"Short note for add or update."},"group":{"type":"string","description":"Title of the plan group an added step belongs to: an existing group with that title is reused, a missing one is created. Without group the item joins the loose queue."},"commit_subject":{"type":"string","description":"Commit subject line of the step, written in the repo's commit style (read git_log first); the item title is used when absent. Update only; an empty string clears it."},"summary":{"type":"string","description":"What the step changed; becomes the commit body and the step's entry in the PR plan. Update only; an empty string clears it."},"verification":{"type":"string","description":"How the step was verified (tests run, checks made); kept on the item and in the PR plan, not part of the commit message. Update only; an empty string clears it."},"text":{"type":"string","description":"Plan summary for plan_summary_set, with Summary, Changes and Testing sections; it becomes the PR description."},"after_id":{"type":"string","description":"Insert a new item right after this item of the same layer (the same group, or the loose queue); default appends."}},"required":["operation"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"operation":{"type":"string","enum":["list","add","update","remove","promote","plan_summary_get","plan_summary_set"],"description":"list reads the checklist; add, update, remove and promote change it; plan_summary_get reads the session's plan summary and plan_summary_set replaces it."},"id":{"type":"string","description":"Item id from a previous list; required by update, remove and promote."},"title":{"type":"string","description":"Item title for add, or the new title for update; for promote the group title when it should differ from the item title."},"status":{"type":"string","enum":["pending","in_progress","paused","done"],"description":"New status for update. in_progress returns the session's previous in-progress step to pending; paused waits for something outside the agent and never commits; done commits every uncommitted change in the worktree as this step. done is refused for a step that changed code until it has an approving review verdict and a real verification; a step that changed nothing is let through."},"note":{"type":"string","description":"Short note for add or update."},"group":{"type":"string","description":"Title of the plan group an added step belongs to: an existing group with that title is reused, a missing one is created. Without group the item joins the loose queue."},"commit_subject":{"type":"string","description":"Commit subject line of the step, written in the repo's commit style (read git_log first); the item title is used when absent. Update only; an empty string clears it."},"summary":{"type":"string","description":"What the step changed; becomes the commit body and the step's entry in the PR plan. Update only; an empty string clears it."},"verification":{"type":"string","description":"How the step was verified (tests run, checks made); kept on the item and in the PR plan, not part of the commit message. Required for a step that changed code: a missing value or 'not verified' fails the completion gate. Update only; an empty string clears it."},"text":{"type":"string","description":"Plan summary for plan_summary_set, with Summary, Changes and Testing sections; it becomes the PR description."},"after_id":{"type":"string","description":"Insert a new item right after this item of the same layer (the same group, or the loose queue); default appends."}},"required":["operation"],"additionalProperties":false}""";
 
     private const string Description =
         "Read and edit the checklist of this session, which the user sees and edits too. Operations: list, add, update (title, status, note, commit_subject, summary, verification), remove, promote, plan_summary_get, plan_summary_set. "
@@ -30,16 +34,22 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
         + "Before you write a commit_subject, call git_log to read the last ~20 commits and follow the repo's style (Conventional Commits if it uses them); without a commit_subject the item title is the commit subject. "
         + "The summary becomes the commit body and the step's entry in the PR plan; verification records how the step was verified and is not part of the commit message. "
         + "A failed step commit does not undo done: fix the cause and call update with status done again. "
+        + "Where the host runs the workflow gates, marking a step done is checked first: a step that changed code (an uncommitted worktree, or a commit of its own) needs an approving review verdict from request_review with its step_id plus a real verification, while a step that changed nothing is let through; a step that leaves done must pass a new review before it can be done again. "
         + "plan_summary_set stores the session's plan summary (Summary, Changes and Testing sections) that becomes the PR description; plan_summary_get reads it.";
 
     private readonly ITodoStore store;
     private readonly IStepCommitter? committer;
+    private readonly StepGate? gate;
 
-    public TodoTool(ITodoStore store, IStepCommitter? committer = null)
+    /// <param name="store">The session's checklist.</param>
+    /// <param name="committer">Commits a step when it is marked done; null leaves step commits to the host application.</param>
+    /// <param name="gate">Checks that a step changing code was reviewed and verified before it can be done; null = no gate.</param>
+    public TodoTool(ITodoStore store, IStepCommitter? committer = null, StepGate? gate = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         this.store = store;
         this.committer = committer;
+        this.gate = gate;
         Definition = new ToolDefinition(Name, Description, SchemaJson);
     }
 
@@ -106,7 +116,18 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             {
                 "list" => await ListAsync(context.SessionId, ct).ConfigureAwait(false),
                 "add" => await AddAsync(context.SessionId, title, note, afterId, group, ct).ConfigureAwait(false),
-                "update" => await UpdateAsync(context.SessionId, id, title, status, note, commitSubject, summary, verification, ct).ConfigureAwait(false),
+                "update" => await UpdateAsync(
+                        context.SessionId,
+                        id,
+                        title,
+                        status,
+                        note,
+                        commitSubject,
+                        summary,
+                        verification,
+                        context.WorkingDirectory,
+                        ct)
+                    .ConfigureAwait(false),
                 "remove" => await RemoveAsync(context.SessionId, id, ct).ConfigureAwait(false),
                 "promote" => await PromoteAsync(context.SessionId, id, title, ct).ConfigureAwait(false),
                 "plan_summary_get" => await PlanSummaryGetAsync(context.SessionId, ct).ConfigureAwait(false),
@@ -289,6 +310,7 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
         string? commitSubject,
         string? summary,
         string? verification,
+        string workingDirectory,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(id))
@@ -321,6 +343,20 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             return NotInSession(id);
         }
 
+        var finishes = parsed == TodoStatus.Done
+                       && (before.Status != TodoStatus.Done || before.CommitError is not null);
+
+        // The gate runs before the write: a refusal leaves the item exactly as it was, with no status change and no commit.
+        // The verification it judges is the one the step will hold, so an update that sets none is judged on the stored one.
+        if (gate is not null && finishes)
+        {
+            var decision = await gate.CheckAsync(before, verification ?? before.Verification, workingDirectory, ct).ConfigureAwait(false);
+            if (!decision.Allowed)
+            {
+                return new ToolResult(GateRefusal(decision), IsError: true);
+            }
+        }
+
         var step = commitSubject is null && summary is null && verification is null
             ? null
             : new TodoStepFields(commitSubject, summary, verification);
@@ -330,20 +366,39 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             return new ToolResult($"No checklist item '#{id}' exists.", IsError: true);
         }
 
+        // A step that leaves done loses the approval it had: the code changed, so the fix has to be reviewed again.
+        if (gate is not null && before.Status == TodoStatus.Done && parsed is not null && parsed != TodoStatus.Done)
+        {
+            gate.Ledger.Forget(sessionId, item.Id);
+        }
+
         var builder = new StringBuilder(96);
         builder.Append("Updated #").Append(item.Id).Append(": ");
         AppendItemLine(builder, item);
 
         // A step commits when it becomes done; an already-done step with a failed commit is retried by saying done again.
-        if (committer is not null
-            && parsed == TodoStatus.Done
-            && item.Status == TodoStatus.Done
-            && (before.Status != TodoStatus.Done || before.CommitError is not null))
+        if (committer is not null && finishes && item.Status == TodoStatus.Done)
         {
             await AppendStepCommitAsync(builder, committer, item, ct).ConfigureAwait(false);
         }
 
         return new ToolResult(builder.ToString());
+    }
+
+    /// <summary>
+    /// The gate's refusal as the tool's error text: the reason, then what the model has to do instead. Both are already
+    /// model-facing English, so they are joined and never reworded here.
+    /// </summary>
+    private static string GateRefusal(StepGateDecision decision)
+    {
+        var builder = new StringBuilder(256);
+        builder.Append(decision.Reason ?? "The step gate refused to mark this step done.");
+        if (!string.IsNullOrWhiteSpace(decision.NextStep))
+        {
+            builder.Append('\n').Append(decision.NextStep);
+        }
+
+        return builder.ToString();
     }
 
     private async ValueTask AppendStepCommitAsync(StringBuilder builder, IStepCommitter stepCommitter, TodoItem item, CancellationToken ct)

@@ -11,6 +11,10 @@
     <AvaloniaResource Include="Assets\**" />
     <None Update="Assets\forge.ico" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- The skills the product ships: embedded, materialized under <UserData>/builtin-skills at startup (see Skills/BuiltInSkills.cs). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Skills\BuiltIn\**\*.md" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Forge.App.Tests" />
     <InternalsVisibleTo Include="Forge.App.LiveSwitch.Tests" />

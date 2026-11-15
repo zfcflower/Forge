@@ -20,13 +20,15 @@ internal static class ToolCatalog
 
     /// <summary>
     /// Tools another feature cannot run without: <c>read_artifact</c> is how the model reads back output the loop moved into
-    /// the artifact store, and the sub-agent control tools are how a parent reaches the children it already spawned
+    /// the artifact store, the sub-agent control tools are how a parent reaches the children it already spawned
     /// (switching off <c>spawn_agent</c>, here or through the <c>agents</c> section's sub-agent switch, is the way to stop
-    /// spawning). A stored switch for one of them is ignored.
+    /// spawning), and <c>skill</c> is how the orchestration's skill index is made good on - the root prompt tells the model
+    /// to load a skill by name, so leaving the tool switchable would point it at a tool that answers "unknown tool". A
+    /// stored switch for one of them is ignored.
     /// </summary>
     private static readonly FrozenSet<string> Required = FrozenSet.Create(
         StringComparer.Ordinal,
-        [ReadArtifactTool.Name, SubAgentSteerTool.Name, SubAgentFollowUpTool.Name, SubAgentStopTool.Name]);
+        [ReadArtifactTool.Name, SubAgentSteerTool.Name, SubAgentFollowUpTool.Name, SubAgentStopTool.Name, SkillTool.Name]);
 
     private static readonly FrozenDictionary<string, string> CoreGroups = new Dictionary<string, string>(StringComparer.Ordinal)
     {
