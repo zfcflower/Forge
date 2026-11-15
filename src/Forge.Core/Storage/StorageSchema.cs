@@ -210,6 +210,19 @@ internal static class StorageSchema
     private const string UnsearchedMessagesSql = AllMessagesSql + " WHERE " + UnsearchedMessagesPredicate;
 
     /// <summary>
+    /// What a message row of <c>messages</c> does not yet have a row in the FTS index for: the mirror image of
+    /// <see cref="UnsearchedMessagesPredicate"/>, for the messages a build without FTS5 appended while the index sat
+    /// idle. Written as a correlated <c>NOT EXISTS</c>, never <c>NOT IN</c>, so a NULL comparison cannot hide a message
+    /// that still needs an index row, and the top-up cannot insert the same row twice.
+    /// </summary>
+    private const string UnindexedMessagesPredicate =
+        "NOT EXISTS (SELECT 1 FROM messages_fts WHERE messages_fts.session_id = messages.session_id " +
+        "AND messages_fts.seq = messages.seq)";
+
+    /// <summary>The messages the FTS index still lacks; a top-up reads exactly these.</summary>
+    private const string UnindexedMessagesSql = AllMessagesSql + " WHERE " + UnindexedMessagesPredicate;
+
+    /// <summary>
     /// What a row of <c>messages_fts</c> has no message behind: the mark a purge leaves when the build running it could
     /// not read the index. Written as a correlated <c>NOT EXISTS</c>, never <c>NOT IN</c>, so a row whose session id
     /// cannot be read is dropped as well instead of surviving on a NULL comparison.
@@ -1017,13 +1030,15 @@ internal static class StorageSchema
     /// build whose SQLite had the FTS5 module, this one's has not - reads and writes <c>messages_text</c> instead, so
     /// that table is made ready here: without it every append would write its search row into a table that does not
     /// exist (and search would read the same missing table), which fails the whole write batch instead of degrading.
-    /// A build that can read the index trims whatever a degraded one could not delete from it.
+    /// A build that can read the index trims whatever a degraded one could not delete from it and fills what one
+    /// appended while it was idle, so search sees the same messages a degraded build did.
     /// </summary>
     private static async Task<bool> ReadFtsOrDegradeAsync(SqliteConnection connection, CancellationToken ct)
     {
         if (await CanReadFtsAsync(connection, ct).ConfigureAwait(false))
         {
             await PruneOrphanedSearchRowsAsync(connection, ct).ConfigureAwait(false);
+            await BackfillMissingIndexRowsAsync(connection, ct).ConfigureAwait(false);
             return true;
         }
 
@@ -1052,6 +1067,30 @@ internal static class StorageSchema
     }
 
     /// <summary>
+    /// Adds the index rows a degraded build could not write, the mirror image of <see cref="PruneOrphanedSearchRowsAsync"/>.
+    /// A build without FTS5 appends to <c>messages</c> and <c>messages_text</c> only, so the next build that can read the
+    /// index would otherwise not find those messages in full-text search. The fallback table is what marks that history -
+    /// a database with an index has one only if a degraded build opened it - so a database FTS5 was never missing from
+    /// is neither scanned nor written. An index with nothing missing is left alone too, keeping a normal open a read.
+    /// </summary>
+    private static async Task BackfillMissingIndexRowsAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        if (!await SearchTableExistsAsync(connection, "messages_text", null, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (!await HasUnindexedMessagesAsync(connection, null, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        using var transaction = connection.BeginTransaction(deferred: false);
+        await BackfillSearchAsync(connection, transaction, fts5: true, onlyMissing: true, ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Creates <c>messages_text</c> and fills it from <c>messages</c> in one transaction, like the first run does. An
     /// existing table is only topped up with the messages it lacks - the ones an FTS5-capable build stored in
     /// <c>messages_fts</c> in between - and a complete one is left alone, so opening a degraded database stays a read.
@@ -1070,6 +1109,18 @@ internal static class StorageSchema
         await ExecuteAsync(connection, transaction, FallbackSchemaSql, ct).ConfigureAwait(false);
         await BackfillSearchAsync(connection, transaction, fts5: false, onlyMissing: exists, ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>True when <c>messages</c> holds a row the FTS index does not.</summary>
+    private static async Task<bool> HasUnindexedMessagesAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        await using var command = StorageDb.Command(
+            connection, transaction, "SELECT 1 FROM messages WHERE " + UnindexedMessagesPredicate + " LIMIT 1");
+        var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return value is not null and not DBNull;
     }
 
     /// <summary>True when <c>messages</c> holds a row the fallback search table does not.</summary>
@@ -1125,8 +1176,9 @@ internal static class StorageSchema
     {
         await using var select = connection.CreateCommand();
         select.Transaction = transaction;
-        // A top-up is a fallback-table notion: messages_text has a primary key, the FTS index would take a row twice.
-        select.CommandText = onlyMissing && !fts5 ? UnsearchedMessagesSql : AllMessagesSql;
+        // Either top-up selects what the target table lacks, so the FTS index (which has no primary key) never takes a
+        // row twice; a first fill of either table reads every message.
+        select.CommandText = onlyMissing ? (fts5 ? UnindexedMessagesSql : UnsearchedMessagesSql) : AllMessagesSql;
         await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {

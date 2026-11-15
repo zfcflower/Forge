@@ -259,6 +259,104 @@ public sealed class SearchFallbackSchemaTests
         Assert.Equal([1L, 2L], (await store.SearchAsync(sessionId, "message", 10, default)).Select(static hit => hit.Seq));
     }
 
+    [Fact]
+    public async Task A_message_a_degraded_build_appended_is_searchable_again_when_an_fts5_build_reopens_the_database()
+    {
+        using var directory = new TempDirectory();
+        string sessionId;
+        await using (var ftsBuild = new SqliteSessionStore(directory.Path))
+        {
+            var session = await ftsBuild.CreateSessionAsync("D:/ws", "t", default);
+            sessionId = session.Id;
+            Assert.Equal(1, await ftsBuild.AppendAsync(session.Id, Text("first message"), null, default));
+        }
+
+        await SetFtsModuleAsync(directory, AbsentModule);
+        await using (var degraded = new SqliteSessionStore(directory.Path))
+        {
+            Assert.Equal(2, await degraded.AppendAsync(sessionId, Text("degraded second message"), null, default));
+            Assert.False(degraded.Fts5Available);
+            Assert.Equal([2L], (await degraded.SearchAsync(sessionId, "degraded", 10, default)).Select(static hit => hit.Seq));
+        }
+
+        await SetFtsModuleAsync(directory, Fts5Module);
+        await using var store = new SqliteSessionStore(directory.Path);
+        Assert.Equal(2, await store.LastSeqAsync(sessionId, default));
+        Assert.True(store.Fts5Available);
+
+        // Opening fills the index from messages, so full-text search finds what only the fallback table had.
+        Assert.Equal(2L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{sessionId}'"));
+        Assert.Equal([2L], (await store.SearchAsync(sessionId, "degraded", 10, default)).Select(static hit => hit.Seq));
+        Assert.Equal([1L, 2L], (await store.SearchAsync(sessionId, "message", 10, default)).Select(static hit => hit.Seq));
+    }
+
+    [Fact]
+    public async Task The_index_top_up_inserts_each_missing_message_once_and_leaves_the_index_whole_on_a_later_open()
+    {
+        using var directory = new TempDirectory();
+        string sessionId;
+        await using (var ftsBuild = new SqliteSessionStore(directory.Path))
+        {
+            var session = await ftsBuild.CreateSessionAsync("D:/ws", "t", default);
+            sessionId = session.Id;
+            await ftsBuild.AppendAsync(session.Id, Text("first message"), null, default);
+        }
+
+        await SetFtsModuleAsync(directory, AbsentModule);
+        await using (var degraded = new SqliteSessionStore(directory.Path))
+        {
+            await degraded.AppendAsync(sessionId, Text("degraded second message"), null, default);
+            Assert.False(degraded.Fts5Available);
+        }
+
+        await SetFtsModuleAsync(directory, Fts5Module);
+        await using (var firstOpen = new SqliteSessionStore(directory.Path))
+        {
+            Assert.Equal(2, await firstOpen.LastSeqAsync(sessionId, default));
+            Assert.True(firstOpen.Fts5Available);
+            // One index row per message: the already indexed first message is not inserted a second time.
+            Assert.Equal(2L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{sessionId}'"));
+            Assert.Equal([1L, 2L], (await firstOpen.SearchAsync(sessionId, "message", 10, default)).Select(static hit => hit.Seq));
+        }
+
+        // Nothing is missing on the next open, so the complete index is left exactly as it was.
+        await using (var secondOpen = new SqliteSessionStore(directory.Path))
+        {
+            Assert.Equal(2, await secondOpen.LastSeqAsync(sessionId, default));
+            Assert.Equal(2L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{sessionId}'"));
+            Assert.Equal([1L, 2L], (await secondOpen.SearchAsync(sessionId, "message", 10, default)).Select(static hit => hit.Seq));
+        }
+    }
+
+    [Fact]
+    public async Task An_fts5_build_reopening_a_database_that_never_degraded_does_not_create_the_fallback_table_or_fill_a_gap()
+    {
+        using var directory = new TempDirectory();
+        string sessionId;
+        await using (var ftsBuild = new SqliteSessionStore(directory.Path))
+        {
+            var session = await ftsBuild.CreateSessionAsync("D:/ws", "t", default);
+            sessionId = session.Id;
+            await ftsBuild.AppendAsync(session.Id, Text("first message"), null, default);
+        }
+
+        // No degraded open ever happened, so there is no fallback table - the mark the index top-up goes by.
+        Assert.Equal(0L, await CountAsync(directory, "SELECT count(*) FROM sqlite_master WHERE name = 'messages_text'"));
+        // Remove the index row by hand: a top-up that scanned every FTS5 database would put it back.
+        await ExecuteAsync(
+            directory.ConnectionString.ToString(),
+            $"DELETE FROM messages_fts WHERE session_id = '{sessionId}' AND seq = 1");
+        Assert.Equal(0L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{sessionId}'"));
+
+        await using var store = new SqliteSessionStore(directory.Path);
+        Assert.Equal(1, await store.LastSeqAsync(sessionId, default));
+        Assert.True(store.Fts5Available);
+
+        Assert.Equal(0L, await CountAsync(directory, "SELECT count(*) FROM sqlite_master WHERE name = 'messages_text'"));
+        Assert.Equal(0L, await CountAsync(directory, $"SELECT count(*) FROM messages_fts WHERE session_id = '{sessionId}'"));
+        Assert.Empty(await store.SearchAsync(sessionId, "message", 10, default));
+    }
+
     /// <summary>
     /// Points the stored DDL of <c>messages_fts</c> at <paramref name="module"/>, changing nothing else about the table,
     /// so restoring <c>fts5</c> gives back byte-for-byte the DDL the store itself wrote.
