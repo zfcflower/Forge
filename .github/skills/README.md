@@ -1,4 +1,4 @@
-# 开发 Skills(第三方来源,已筛选)
+﻿# 开发 Skills(第三方来源,已筛选)
 
 本目录存放**约束本仓库开发实践**的 agent 技能文件(Markdown + frontmatter),不是 Forge 的运行时能力,也不参与构建。
 
@@ -45,7 +45,6 @@
 | `csharp-scripts` | `dotnet/skills` `plugins/dotnet-advanced/skills/csharp-scripts` | .NET 10 文件式 C# 应用(`dotnet run app.cs`,`#:package`/`#:property`/`#:sdk`/`#:ref`/`#:include`/`#:exclude`);在 `architecture.md` 中对应 "T3" 可选执行能力,不是 codemode 前提 |
 | `avalonia-*`(34 份) | `linuxdevel/Avalonia-skills` | Avalonia 11.3/12.0/12.1 全套子 skill;引入范围与包依赖见下节 |
 | `blazing-fast-dotnet` | `EgorBo/BlazingFastDotnet` | .NET 10/11 性能技巧;**本地为裁剪版** |
-| `forge-dispatch` | 本地新增(无上游,不参与再同步) | 主 Agent 派活模板:副本创建、预期测试过滤器、skill 路径、收据要求 |
 
 固定到上游提交,便于复核与再同步:
 
