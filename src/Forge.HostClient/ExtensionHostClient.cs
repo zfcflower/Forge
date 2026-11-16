@@ -181,6 +181,14 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
 
     public event Action? ContributionsChanged;
 
+    /// <summary>
+    /// Raised when the host reports something about a plugin the user should hear about even though the call that hit it
+    /// already has a result (a workflow run terminated by a revoke, a worker that exhausted its failure budget). The
+    /// payload carries the stable code and the host's own English sentence; the caller maps known codes to its own
+    /// language and falls back to the sentence.
+    /// </summary>
+    public event Action<HostPluginProblem>? PluginProblemReported;
+
     public event Action<HostStatus, string?>? StatusChanged;
 
     /// <summary>Creates the AOT-safe <c>run_code</c> proxy. The description and schema are generated from
@@ -1100,6 +1108,35 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         {
             OnTerminalExit(generation, message);
         }
+        else if (string.Equals(message.Operation, Sdk.ExtensionProtocol.PluginProblem, StringComparison.Ordinal))
+        {
+            ReportPluginProblem(message);
+        }
+    }
+
+    /// <summary>
+    /// Turns one <c>plugin.problem</c> notification into <see cref="PluginProblemReported"/>: a notification, not a
+    /// request, so there is nothing to answer and an unusable payload is only diagnosed - the host already surfaced the
+    /// same failure to the call that hit it, and the surface must keep working when a sentence cannot be decoded.
+    /// </summary>
+    private void ReportPluginProblem(IpcMessage message)
+    {
+        if (!HostAnswerRules.TryRead<PluginProblemNotification>(message, out var notification, out var problem) ||
+            string.IsNullOrWhiteSpace(notification.PluginId) ||
+            string.IsNullOrWhiteSpace(notification.Code))
+        {
+            Diagnose($"plugin.problem carried no usable plugin id or code; it was ignored. {problem}");
+            return;
+        }
+
+        var reported = new HostPluginProblem(
+            notification.PluginId,
+            notification.Code,
+            notification.Message ?? string.Empty,
+            Math.Max(0, notification.Count));
+
+        Diagnose($"plugin '{reported.PluginId}' reported {reported.Code}: {reported.Message}");
+        PluginProblemReported?.Invoke(reported);
     }
 
     private void RegisterTools(long generation, IpcMessage message)

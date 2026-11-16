@@ -32,12 +32,37 @@ public sealed class WorkerPromptFailureTests
 
         // Each throwing evaluation is a soft null to the main program, but charges one failure on the host.
         var contributor = new PluginPromptReference("boom", "boom");
-        for (var attempt = 0; attempt < FailureBudget; attempt++)
+
+        // The transition into "stopped until the plugins are refreshed" is reported to the main program as a
+        // plugin.problem notification: nobody awaits the refused call, so without it the failure budget would be silent.
+        var problem = new TaskCompletionSource<HostPluginProblem>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnProblem(HostPluginProblem reported)
         {
-            var text = await fx.Client.GetPluginPromptAsync(
-                contributor, new ToolContext("prompt-fail-" + attempt, fx.Root), fx.Ct);
-            Assert.Null(text);
+            if (string.Equals(reported.PluginId, "boom", StringComparison.Ordinal))
+            {
+                problem.TrySetResult(reported);
+            }
         }
+
+        fx.Client.PluginProblemReported += OnProblem;
+        try
+        {
+            for (var attempt = 0; attempt < FailureBudget; attempt++)
+            {
+                var text = await fx.Client.GetPluginPromptAsync(
+                    contributor, new ToolContext("prompt-fail-" + attempt, fx.Root), fx.Ct);
+                Assert.Null(text);
+            }
+        }
+        finally
+        {
+            fx.Client.PluginProblemReported -= OnProblem;
+        }
+
+        var reported = await problem.Task.WaitAsync(TimeSpan.FromSeconds(15), fx.Ct);
+        Assert.Equal("worker-disabled", reported.Code);
+        Assert.Equal(FailureBudget, reported.Count);
+        Assert.Contains("failed", reported.Message, StringComparison.OrdinalIgnoreCase);
 
         // The budget is now exhausted: the same plugin's healthy tool is refused with worker_disabled until a refresh,
         // which is the observable proof that the prompt failures were charged against the plugin's failure budget.

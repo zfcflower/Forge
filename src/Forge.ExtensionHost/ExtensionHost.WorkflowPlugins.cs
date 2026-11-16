@@ -117,15 +117,53 @@ public sealed partial class ExtensionHost
         var cancelled = workflowRuns.CancelForPlugin(pluginId);
         if (cancelled > 0)
         {
-            // stderr is the only channel the host has for a plugin problem (no protocol operation pushes plugin problems
-            // to the main program), so the termination is reported there; the cancelled run's own caller separately sees
-            // the cancellation in its tool result.
-            Console.Error.WriteLine(
-                $"forge-extension-host: {cancelled} in-flight workflow run(s) of plugin '{pluginId}' were terminated "
-                + "because the plugin was revoked or disabled.");
+            // The cancelled run's own caller sees the cancellation in its tool result, but nobody is waiting on a revoke,
+            // so the termination would otherwise be invisible. A workflow package has no worker process tree for the
+            // stop to kill either, which makes this notification the only evidence that the revoke did something.
+            _ = ReportProblemAsync(
+                pluginId,
+                "workflow-terminated",
+                $"{cancelled} in-flight workflow run(s) were terminated because the plugin was revoked or disabled.",
+                cancelled);
         }
 
         return cancelled;
+    }
+
+    /// <summary>How long a <c>plugin.problem</c> notification may take before the caller stops waiting for it.</summary>
+    private static readonly TimeSpan ProblemSendWindow = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Sends one <c>plugin.problem</c> notification so a plugin problem reaches the user even though the call that hit it
+    /// already has a result or no call is waiting at all. Never throws and never blocks the caller past
+    /// <see cref="ProblemSendWindow"/>: reporting a problem must not be able to fail the operation that noticed it. A
+    /// frame that could not be written leaves one stderr line as the last trace; a frame cancelled half way retires the
+    /// connection through the same supervised shutdown every other notification write uses.
+    /// </summary>
+    private async Task ReportProblemAsync(string pluginId, string code, string message, int count)
+    {
+        try
+        {
+            if (stop.IsStopping || mainPeer is not { } peer)
+            {
+                return;
+            }
+
+            using var deadline = new CancellationTokenSource(ProblemSendWindow);
+            if (!await SendAsync(
+                    peer,
+                    ExtensionProtocol.PluginProblem,
+                    new PluginProblemNotification(pluginId, code, message, count),
+                    deadline.Token).ConfigureAwait(false))
+            {
+                Console.Error.WriteLine($"forge-extension-host: plugin '{pluginId}' reported {code}: {message}");
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Console.Error.WriteLine(
+                $"forge-extension-host: plugin '{pluginId}' reported {code}: {message} ({exception.GetType().Name}: {exception.Message})");
+        }
     }
 
     private static readonly byte[] EmptyArguments = "{}"u8.ToArray();

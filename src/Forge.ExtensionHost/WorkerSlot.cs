@@ -13,6 +13,11 @@ internal sealed record WorkerLoadout(
     bool Started,
     long Generation);
 
+/// <summary>A plugin problem the host turns into a <c>plugin.problem</c> notification: the stable English code, the
+/// host's own sentence for the log and for codes the main program does not know, and the number the code quantifies
+/// (zero when it quantifies nothing).</summary>
+internal sealed record WorkerProblem(string PluginId, string Code, string Message, int Count);
+
 /// <summary>
 /// One <c>Forge.PluginWorker</c> process for one plugin. Loads are serialized, executions run concurrently up to
 /// <see cref="HostOptions.MaxConcurrentExecutionsPerWorker"/>, and a timeout, a crash, a cancelled call that does not
@@ -75,6 +80,10 @@ internal sealed class WorkerSlot(
 
     /// <summary>Raised after a crashed worker was restarted and re-loaded, so the host re-publishes its contributions.</summary>
     public Func<WorkerLoadout, CancellationToken, Task>? Reloaded { get; set; }
+
+    /// <summary>Raised once at the transition that exhausts the plugin's failure budget, so the host can tell the user the
+    /// plugin stayed stopped. Assigned by the host; the failing call never waits for it.</summary>
+    public Func<WorkerProblem, Task>? Problem { get; set; }
 
     public IReadOnlyList<ToolDeclaration> Tools => Volatile.Read(ref current)?.Tools ?? [];
 
@@ -495,6 +504,17 @@ internal sealed class WorkerSlot(
             // the same abnormal event and failure budget" requires. The worker answered, so it is not a crash: leave the
             // responsive process running instead of killing a healthy tree, and surface the worker's own error code.
             var failures = state.ChargeFailure();
+            if (failures == PluginState.FailureBudget)
+            {
+                // The transition into "stopped until the plugins are refreshed" is exactly what the user needs to hear
+                // about: every later call is refused with worker_disabled without charging anything, so this fires once
+                // per exhaustion and not once per refused call.
+                _ = Problem?.Invoke(new WorkerProblem(
+                    PluginId,
+                    "worker-disabled",
+                    $"The plugin failed {failures} times in a row and stays stopped until the plugins are refreshed.",
+                    failures));
+            }
             throw new HostOperationException(
                 exception.Code,
                 $"{description} failed in the plugin worker: {exception.Message}"

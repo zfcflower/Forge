@@ -105,6 +105,7 @@ depends-on: [forge-ipc]
   run,因此旧连接的迟到 `Closed` 回调(以及连接重试期间被丢弃的候选 peer 的关闭)不会改写新连接的状态。崩溃后的
   自动、有上限的重启策略不属于本模块,由组合根(Forge.App)实现:它观察 `StatusChanged == Failed` 并调用同一实例
   的 `StartAsync`。
+- **插件问题通知转成事件,不回答、不抛错。** `plugin.problem` 是 Host 发来的**通知**(Id=0):客户端把它解码成 `HostPluginProblem(PluginId, Code, Message, Count)` 并抬 `PluginProblemReported`,没有应答也没有重试。载荷缺插件 id 或代号时只写一条 `Diagnostics` 丢弃(与 `tools.register` 同口径),句子里缺的字一律归为空串、`Count` 夹到非负;所以一个坏帧不会打断 IPC 事件循环,也不会把“宿主升级变了形”变成抛到调用方的异常。事件只在收到帧时抬,不缓存也不重放——它描述的是“刚发生的事”,不是状态(状态在 `plugins.status`)。
 - **Running 与关闭回调同一把锁。** 连上之后提交 `Running` 必须在关闭回调用的同一把状态锁(`statusGate`)内,并在锁内
   复核三件事:该连接的世代仍是当前世代、对端尚未关闭、状态仍是 `Starting`。连接若在“连上→Running”这段窗口里关闭,
   关闭回调写下的 `Failed` 不会被覆盖:客户端保持/变为 `Failed` 并带上关闭原因,本次 `StartAsync` 抛

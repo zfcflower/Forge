@@ -1970,6 +1970,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             var slot = new WorkerSlot(pluginId, options, StateOf(pluginId), ForwardToolCallAsync, stop, waits, cleanup)
             {
                 Reloaded = (loadout, token) => RepublishAfterRecoveryAsync(pluginId, loadout, token),
+                Problem = problem => ReportProblemAsync(problem.PluginId, problem.Code, problem.Message, problem.Count),
             };
             workers[pluginId] = slot;
             return slot;

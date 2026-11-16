@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
+using Forge.HostClient;
 using Forge.Ipc;
 using Forge.Ipc.Protocol;
 using Xunit;
@@ -381,6 +382,18 @@ public sealed class ExtensionWorkflowPluginTests
         await CommitWorkflowAsync(fx, "wfc", ExtensionAuthoringSupport.SingleStepWorkflow("probe"), "run-it");
         await fx.WaitForToolsAsync("wfc", 1, "wfc tool");
 
+        // The termination is invisible to the caller of the revoke (nobody waits on it), so the host reports it as a
+        // plugin.problem notification; this is the user-visible half of decision 2.
+        var problem = new TaskCompletionSource<HostPluginProblem>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnProblem(HostPluginProblem reported)
+        {
+            if (string.Equals(reported.PluginId, "wfc", StringComparison.Ordinal))
+            {
+                problem.TrySetResult(reported);
+            }
+        }
+
+        fx.Client.PluginProblemReported += OnProblem;
         try
         {
             var running = fx.InvokeAsync("wfc", "run-it", "{}");
@@ -400,9 +413,15 @@ public sealed class ExtensionWorkflowPluginTests
             Assert.Contains("cancel", result.Content, StringComparison.OrdinalIgnoreCase);
             Assert.Equal("Draft", fx.ReadRecord("wfc", "1.0.0")!.Status);
             Assert.Empty(fx.ToolsOf("wfc"));
+
+            var reported = await problem.Task.WaitAsync(TimeSpan.FromSeconds(30), fx.Ct);
+            Assert.Equal("workflow-terminated", reported.Code);
+            Assert.Equal(1, reported.Count);
+            Assert.Contains("terminated", reported.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
+            fx.Client.PluginProblemReported -= OnProblem;
             gate.TrySetResult("release");
         }
     }

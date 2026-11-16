@@ -12,6 +12,10 @@ public static class ExtensionProtocol
     public const string ContributionsRegister = "contributions.register"; // PluginContributionsNotification; replaces the complete snapshot for this plugin
     public const string ContributionsUnregister = "contributions.unregister"; // ExtensionIdRequest; removes every non-tool contribution
 
+    // Something went wrong with a plugin that the user should hear about even though the call that hit it already
+    // returned: a workflow run terminated by a revoke or a worker that exhausted its failure budget.
+    public const string PluginProblem = "plugin.problem"; // PluginProblemNotification
+
     // Main program → Host
     public const string PluginsStatus = "plugins.status"; // IpcEmpty → PluginStatusResponse; no direct database access by the main program
     public const string CodeExecute = "code.execute"; // CodeExecutionRequest → CodeExecutionResult

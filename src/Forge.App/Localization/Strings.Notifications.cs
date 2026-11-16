@@ -47,6 +47,7 @@ internal static class NotificationsStrings
     public const string McpFailedTitleKey = "notifications.title.mcpFailed";
     public const string PreferencesProblemTitleKey = "notifications.title.preferencesProblem";
     public const string StartupProblemTitleKey = "notifications.title.startupProblem";
+    public const string PluginProblemTitleKey = "notifications.title.pluginProblem";
     public const string TerminalExitedTitleKey = "notifications.title.terminalExited";
     public const string SaveFailedTitleKey = "notifications.title.saveFailed";
     public const string EditorFailedTitleKey = "notifications.title.editorFailed";
@@ -56,6 +57,8 @@ internal static class NotificationsStrings
     public const string ApprovalWaitingRestoredBody = "notifications.body.approvalRestored";
     public const string SubAgentFinishedBody = "notifications.body.subAgentFinished";
     public const string TerminalExitedBody = "notifications.body.terminalExited";
+    public const string PluginWorkflowTerminatedBody = "notifications.body.pluginWorkflowTerminated";
+    public const string PluginWorkerDisabledBody = "notifications.body.pluginWorkerDisabled";
 
     /// <summary>Headline of the "approval waiting" notification.</summary>
     public static LocText ApprovalWaitingTitle => new(ApprovalWaitingTitleKey);
@@ -77,6 +80,9 @@ internal static class NotificationsStrings
 
     /// <summary>Headline of the "host unavailable" notification.</summary>
     public static LocText HostUnavailableTitle => new(HostUnavailableTitleKey);
+
+    /// <summary>Headline of the "plugin problem" notification: the body says which plugin and what happened.</summary>
+    public static LocText PluginProblemTitle => new(PluginProblemTitleKey);
 
     /// <summary>Headline of the "mcp failed" notification.</summary>
     public static LocText McpFailedTitle => new(McpFailedTitleKey);
@@ -172,6 +178,7 @@ internal static class NotificationsStrings
         Loc.Register(StepCommitFailedTitleKey, "步骤提交失败", "Step commit failed");
         Loc.Register(GitOperationFailedTitleKey, "Git 操作失败", "Git operation failed");
         Loc.Register(HostUnavailableTitleKey, "扩展宿主不可用", "Extension host unavailable");
+        Loc.Register(PluginProblemTitleKey, "插件问题", "A plugin problem");
         Loc.Register(McpFailedTitleKey, "MCP 服务器异常", "MCP server failed");
         Loc.Register(PreferencesProblemTitleKey, "设置未能读取", "Settings could not be read");
         Loc.Register(StartupProblemTitleKey, "启动未完成", "Startup did not finish");
@@ -183,5 +190,13 @@ internal static class NotificationsStrings
         Loc.Register(ApprovalWaitingRestoredBody, "「{0}」等待审批", "{0} is waiting for approval");
         Loc.Register(SubAgentFinishedBody, "{0} · {1}", "{0} · {1}");
         Loc.Register(TerminalExitedBody, "{0} · 退出码 {1}", "{0} · exit code {1}");
+        Loc.Register(
+            PluginWorkflowTerminatedBody,
+            "「{0}」被撤销或停用，{1} 个在途工作流运行已终止。",
+            "“{0}” was revoked or disabled; {1} in-flight workflow run(s) were terminated.");
+        Loc.Register(
+            PluginWorkerDisabledBody,
+            "「{0}」连续失败 {1} 次，已停止，直到刷新插件。",
+            "“{0}” failed {1} times in a row and stays stopped until the plugins are refreshed.");
     }
 }

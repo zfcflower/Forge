@@ -36,6 +36,18 @@ public sealed partial record ToolsRegisterNotification(
     [property: Key(0)] string PluginId,
     [property: Key(1)] IReadOnlyList<ToolDeclaration> Tools);
 
+/// <summary><c>plugin.problem</c> (host → main program, notification): something went wrong with a plugin that the user
+/// should hear about even though the call that hit it already has a result. <see cref="Code"/> is a stable English token
+/// (<c>workflow-terminated</c>, <c>worker-disabled</c>); <see cref="Message"/> is the host's own English sentence for the
+/// log and for codes the main program does not know; <see cref="Count"/> is the number the code quantifies (runs
+/// terminated, failures recorded) and zero when it quantifies nothing.</summary>
+[MessagePackObject]
+public sealed partial record PluginProblemNotification(
+    [property: Key(0)] string PluginId,
+    [property: Key(1)] string Code,
+    [property: Key(2)] string Message,
+    [property: Key(3)] int Count = 0);
+
 /// <summary><c>host.tool_call</c> from a worker or a script executor to the host: the run it was bound to and the target
 /// tool. Session, directory, depth and plugin identity are deliberately absent - the host takes them from its active-run
 /// table. The result of every tool call on the wire is <see cref="ToolResult"/>.</summary>

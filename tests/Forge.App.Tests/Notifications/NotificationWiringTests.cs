@@ -394,6 +394,54 @@ public sealed class NotificationWiringTests : IDisposable
     }
 
     [Fact]
+    public async Task A_plugin_problem_from_the_host_is_announced_as_a_warning_keyed_by_the_plugin()
+    {
+        var notifications = new RecordingNotifications();
+        var connection = new HostConnection
+        {
+            PipeName = "forge-test-" + Guid.NewGuid().ToString("N")[..20],
+            StartTimeout = TimeSpan.FromMilliseconds(300),
+        };
+        await using var client = new ExtensionHostClient(connection);
+        await using var supervisor = ExtensionHostSupervisor.WrapClient(client, notifications);
+
+        // A code this build knows becomes a localized sentence; the plugin id and the number ride the format arguments.
+        supervisor.OnPluginProblem(new HostPluginProblem("alpha", "workflow-terminated", "1 run terminated", 1));
+
+        Assert.True(
+            await TestPump.UntilAsync(() => notifications.WithKey("plugin:problem:alpha").Count > 0),
+            "the terminated workflow run was not announced");
+        var call = notifications.WithKey("plugin:problem:alpha")[0];
+        Assert.Equal(NotificationLevel.Warning, call.Level);
+        Assert.Equal(NotificationsStrings.PluginProblemTitleKey, call.TitleKey);
+        Assert.Equal(NotificationsStrings.PluginWorkflowTerminatedBody, call.BodyKey);
+    }
+
+    [Fact]
+    public async Task A_plugin_problem_with_an_unknown_code_keeps_the_hosts_own_sentence()
+    {
+        var notifications = new RecordingNotifications();
+        var connection = new HostConnection
+        {
+            PipeName = "forge-test-" + Guid.NewGuid().ToString("N")[..20],
+            StartTimeout = TimeSpan.FromMilliseconds(300),
+        };
+        await using var client = new ExtensionHostClient(connection);
+        await using var supervisor = ExtensionHostSupervisor.WrapClient(client, notifications);
+
+        // A host newer than this build still says something instead of nothing: no string table should lose the message.
+        supervisor.OnPluginProblem(new HostPluginProblem("alpha", "some-future-code", "the host said so", 0));
+
+        Assert.True(
+            await TestPump.UntilAsync(() => notifications.WithKey("plugin:problem:alpha").Count > 0),
+            "the unknown plugin problem was not announced");
+        var call = notifications.WithKey("plugin:problem:alpha")[0];
+        Assert.Equal(NotificationLevel.Warning, call.Level);
+        Assert.Equal(NotificationsStrings.PluginProblemTitleKey, call.TitleKey);
+        Assert.Null(call.BodyKey);
+    }
+
+    [Fact]
     public async Task A_model_list_that_cannot_be_fetched_is_announced_as_a_warning_keyed_by_the_fetch()
     {
         var post = new QueuedPost();

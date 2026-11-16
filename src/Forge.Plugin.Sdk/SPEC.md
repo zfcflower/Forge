@@ -14,7 +14,7 @@ parent: forge-architecture
 
 - 只依赖 BCL 与 MessagePack(线上类型标注 `[MessagePackObject]`,源生成格式化器),`IsAotCompatible=true`。
 - 定义:`ExtensionCallContext`、`ToolDeclaration`、`CommandDeclaration`/`IPluginCommand`、`WorkflowDeclaration`、`AgentDeclaration`、`IPluginPromptContributor`、`PanelDeclaration`、`PluginContributionSet`、`Permission`、`PluginStatusResponse`、`CodeExecutionRequest/Result`、`Command/PromptExecutionRequest/Output`,以及 `IHostFacade`、`IPlugin` 等插件侧入口。
-- 定义 `ExtensionProtocol` 的 IPC 操作名及每个操作的参数 → 结果类型(工具/贡献注册、状态、命令、提示词、插件执行、批准/撤销/刷新、Agent 编写扩展的 `extensions.stage/pending/commit/discard`、仓库/本地包安装的 `extensions.install` 与 `plugin.disable/enable/delete`、host.tool_call、worker.load/execute/command/prompt/unload/stop)。`run_code` 的一次性执行器协议(`executor.load/run/stop`)在 `forge-script-runtime`,不在这里。
+- 定义 `ExtensionProtocol` 的 IPC 操作名及每个操作的参数 → 结果类型(工具/贡献注册、状态、命令、提示词、插件执行、批准/撤销/刷新、Agent 编写扩展的 `extensions.stage/pending/commit/discard`、仓库/本地包安装的 `extensions.install` 与 `plugin.disable/enable/delete`、host.tool_call、Host → 主程序的 `plugin.problem` 通知、worker.load/execute/command/prompt/unload/stop)。`run_code` 的一次性执行器协议(`executor.load/run/stop`)在 `forge-script-runtime`,不在这里。
 - 不含 Roslyn、Ipc 实现、P/Invoke、Avalonia。
 
 ## 关键决策

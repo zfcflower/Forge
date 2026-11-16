@@ -34,6 +34,7 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
         client.StatusChanged += OnStatusChanged;
         client.ToolsChanged += OnSurfaceChanged;
         client.ContributionsChanged += OnSurfaceChanged;
+        client.PluginProblemReported += OnPluginProblem;
     }
 
     public HostStatus Status => client.Status;
@@ -200,6 +201,35 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
     }
 
     private void OnSurfaceChanged() => SurfaceChanged?.Invoke();
+
+    /// <summary>
+    /// Maps one host-reported plugin problem onto a toast. A code this build knows becomes a localized sentence; an
+    /// unknown one keeps the host's own English text, so a newer host still says something instead of nothing. The key is
+    /// per plugin: a plugin that keeps failing is one toast counting its repeats, not a stack of identical ones.
+    /// <para>Internal so the mapping can be pinned without a host process, through the same <see cref="WrapClient"/> seam
+    /// the host-failure path uses.</para>
+    /// </summary>
+    internal void OnPluginProblem(HostPluginProblem problem)
+    {
+        LocText body = problem.Code switch
+        {
+            "workflow-terminated" => new LocText(
+                NotificationsStrings.PluginWorkflowTerminatedBody,
+                problem.PluginId,
+                TextFormat.Number(problem.Count)),
+            "worker-disabled" => new LocText(
+                NotificationsStrings.PluginWorkerDisabledBody,
+                problem.PluginId,
+                TextFormat.Number(problem.Count)),
+            _ => LocText.Literal(problem.Message),
+        };
+
+        notifications.Notify(
+            NotificationLevel.Warning,
+            NotificationsStrings.PluginProblemTitle,
+            body,
+            "plugin:problem:" + problem.PluginId);
+    }
 
     private void OnStatusChanged(HostStatus status, string? detail)
     {
