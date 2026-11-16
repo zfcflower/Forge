@@ -1,16 +1,17 @@
 <#
-生成 updates.json(schema 1,冻结于 docs/research/2026-11-15-w10-implementation.md §1.2)。
-逐个产物计算 SHA-256,按 RID 登记 url / sha256 / sizeBytes,供 Forge.App 的自动更新阶段 A 使用。
+生成 updates.json(schema 1,契约冻结于 src/Forge.App/SPEC.md「自动更新」)。
+逐个产物计算 SHA-256,按 RID 登记 url / sha256 / sizeBytes,供 Forge.App 的自动更新检查与「安装并重启」使用。
 
-本地可测:
+本地/发布流程调用:
   pwsh scripts/make-update-manifest.ps1 -ArtifactsDir dist -Version 1.2.0 -Channel stable -Output updates.json
-CI 调用(tag 发布段)传入 -BaseUrl(真实 release 资产根)、-Notes(发布说明)与 -MergeFrom(上一份 updates.json)。
+发布时传入 -BaseUrl(真实 release 资产根)、-Notes(发布说明)与 -MergeFrom(上一份 updates.json)。
+契约与 App 侧消费口径以 src/Forge.App/SPEC.md「自动更新」为唯一权威;按 RID 打包与上传的 workflow 尚未接入(见该 SPEC 未决),所以目前只有手工发版会跑这个脚本。
 
-产物命名:Forge-<version>-<rid>.zip(Windows)或 Forge-<version>-<rid>.tar.gz(Linux/macOS),
-与 dotnet-desktop.yml 的 Package 段一致。找不到任何匹配产物即失败,不静默产出空 manifest。
+产物命名:Forge-<version>-<rid>.zip(Windows)或 Forge-<version>-<rid>.tar.gz(Linux/macOS)。
+找不到任何匹配产物即失败,不静默产出空 manifest。
 
 渠道合并(-MergeFrom):一份 manifest 必须能回答每个渠道。beta 发布若只写 beta 键,
-stable 用户的默认地址(最新 release 的 updates.json)就查不到自己的渠道。故发布时先取上一份 manifest,
+stable 用户的默认地址(滚动 manifest tag 上的 updates.json)就查不到自己的渠道。故发布时先取上一份 manifest,
 把它的渠道原样带入,再用本次发布的渠道覆盖自己那一键 —— stable/beta 两键共存。
 -MergeFrom 指定的文件不存在或无法解析即失败(调用方负责在"上一份不存在"时不传该参数),
 不让一次断掉的合并悄悄产出一份缺渠道的 manifest。

@@ -48,8 +48,8 @@ internal sealed record UpdateApplyResult(UpdateApplyStatus Status, string Reason
 }
 
 /// <summary>
-/// Wave W10c's install state machine, the single owner of the directory swap. The steps are the ones recorded in
-/// <c>docs/research/2026-11-15-w10-implementation.md</c> §4:
+/// Wave W10c's install state machine, the single owner of the directory swap. The steps are the ones the module SPEC
+/// records under「自动更新」:
 /// <list type="number">
 /// <item>wait for the process being replaced to exit (bounded — a Windows install directory cannot be renamed while its
 /// executable is running);</item>

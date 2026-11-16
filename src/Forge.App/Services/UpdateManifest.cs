@@ -24,7 +24,7 @@ internal sealed record UpdateManifest(IReadOnlyDictionary<string, UpdateChannel>
 }
 
 /// <summary>
-/// Reads the <c>updates.json</c> manifest (schema 1, frozen in the W10 implementation note §1.2). It is someone else's
+/// Reads the <c>updates.json</c> manifest (schema 1, frozen in <c>src/Forge.App/SPEC.md</c>「自动更新」). It is someone else's
 /// file shape, so parsing goes through <see cref="JsonDocument"/> with no reflection and no source-generated model; the
 /// schema number is the compatibility gate, and every field is read defensively with a readable error instead of a
 /// half-populated channel.
