@@ -24,7 +24,10 @@
             <Panel Grid.Row="0" Height="{DynamicResource TimelineNodeTopGap}">
               <Border x:Name="PART_TopLine" Classes="timeline-line" IsVisible="{TemplateBinding ShowTopLine}" />
             </Panel>
-            <Panel Grid.Row="1" Height="{DynamicResource TimelineNodeSize}">
+            <Panel Grid.Row="1"
+                   Width="{DynamicResource TimelineNodeSize}"
+                   Height="{DynamicResource TimelineNodeSize}"
+                   HorizontalAlignment="Left">
               <Border x:Name="PART_MidLine" Classes="timeline-line" IsVisible="False" />
               <wc:FluentIcon x:Name="PART_Icon"
                              Classes="timeline-node"
@@ -41,10 +44,14 @@
     </ControlTheme>
   </Styles.Resources>
 
+  <!-- The axis rides on the left edge of the gutter instead of down its middle: the node is the anchor, the text column keeps
+       its full 26 px, and the rail therefore sits 6 px further left than a centred one would. TimelineAxisOffset is the node's
+       own centre inside that left-anchored slot, so the segments and the node stay on one line. -->
   <Style Selector="Border.timeline-line">
     <Setter Property="Width" Value="{DynamicResource TimelineAxisWidth}" />
     <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
-    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Margin" Value="{DynamicResource TimelineAxisOffset}" />
     <Setter Property="VerticalAlignment" Value="Stretch" />
   </Style>
 

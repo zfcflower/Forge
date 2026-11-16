@@ -44,11 +44,14 @@
   <sys:Double x:Key="TimelineNodeSize">14</sys:Double>
   <sys:Double x:Key="TimelineNodeTopGap">6</sys:Double>
   <sys:Double x:Key="TimelineAxisWidth">1</sys:Double>
+  <!-- Where the axis sits inside the gutter: half of a node minus half of the axis, i.e. the node's own centre when the
+       node is pinned to the gutter's left edge (which leaves the text column its full width). -->
+  <Thickness x:Key="TimelineAxisOffset">6.5,0,0,0</Thickness>
 
   <!-- 聊天区与窗口边缘的同一档内边距(左右都取 16 = PaddingPage):转录列表、输入卡、自动化横幅三处从这里取。
        上下两个方向同样对齐:列表底部 8 + 输入卡顶部 8 = 16,与窗口左右边距同档。 -->
-  <Thickness x:Key="ChatTranscriptPadding">12,6,12,6</Thickness>
-  <Thickness x:Key="ChatComposerMargin">12,6,12,6</Thickness>
+  <Thickness x:Key="ChatTranscriptPadding">12</Thickness>
+  <Thickness x:Key="ChatComposerMargin">12</Thickness>
   <Thickness x:Key="ChatBannerMargin">12,6,12,0</Thickness>
 
   <CornerRadius x:Key="RadiusSm">4</CornerRadius>

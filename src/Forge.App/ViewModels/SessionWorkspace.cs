@@ -56,7 +56,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private readonly TurnCheckpointService? checkpoints;
     private readonly ISessionStore? store;
     private readonly Action<SubAgentViewModel>? subAgentOpened;
-    private readonly Action<string>? focusTree;
     private readonly Action? openSession;
     private readonly string providerModel;
 
@@ -135,8 +134,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// output-tail limit from; <see langword="null"/> (a standalone view) lists every model and uses the defaults.</param>
     /// <param name="openInspector">Opens the window's resource inspector; the strip's resources menu carries the row, and
     /// <see langword="null"/> (a standalone view) leaves that row out instead of offering a dead entry.</param>
-    /// <param name="focusTree">Selects a row of the shell's project tree by node key (the breadcrumb's project and workspace
-    /// segments); <see langword="null"/> (a standalone view) leaves those segments as plain text.</param>
     /// <param name="openSession">Brings this session's own tab to the front; the sub-agent breadcrumb's way back to its
     /// parent, and <see langword="null"/> hides that action.</param>
     public SessionWorkspaceViewModel(
@@ -153,7 +150,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         INotifications? notifications = null,
         AppPreferences? preferences = null,
         Action? openInspector = null,
-        Action<string>? focusTree = null,
         Action? openSession = null)
     {
         Info = session;
@@ -163,7 +159,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         this.store = store;
         this.notifications = notifications;
         this.subAgentOpened = subAgentOpened;
-        this.focusTree = focusTree;
         this.openSession = openSession;
         appPreferences = preferences;
         providerModel = providers.Catalog.Default?.DefaultModel ?? string.Empty;
@@ -196,9 +191,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             () => Composer.Model,
             () => Composer.ProviderId,
             openInspector);
-        Instruments.PropertyChanged += OnInstrumentsChanged;
-        FocusProjectCommand = new RelayCommand(FocusProjectInTree, () => HasBreadcrumbProject);
-        FocusWorkspaceCommand = new RelayCommand(FocusWorkspaceInTree, () => focusTree is not null && WorkspaceNodeKey.Length > 0);
         if (!providers.IsConfigured)
         {
             var missing = SessionStrings.ProviderMissing(providers.StatusText.Resolve());
@@ -228,105 +220,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public string WorkDir => Info.WorkspacePath;
 
     public string BranchText => string.IsNullOrEmpty(Info.Branch) ? string.Empty : Info.Branch;
-
-    // ---------------------------------------------------------------- breadcrumb
-
-    /// <summary>
-    /// True when the session belongs to a registered repository: the breadcrumb then starts with the project. The general
-    /// workspace is not a project the user names, so its sessions read "workspace › title" only.
-    /// </summary>
-    public bool HasBreadcrumbProject => Instruments.HasRepositoryProject;
-
-    /// <summary>The breadcrumb's first segment: the repository's own name.</summary>
-    public string BreadcrumbProject => Instruments.ProjectName;
-
-    /// <summary>
-    /// The breadcrumb's middle segment: the workspace folder, plus the branch when it is a repository checkout. Derived on
-    /// every read, so a language switch re-renders it like every other text of this session.
-    /// </summary>
-    public string BreadcrumbWorkspace => string.IsNullOrEmpty(Info.Branch)
-        ? Instruments.WorkspaceName
-        : SessionStrings.BreadcrumbWorkspace(Instruments.WorkspaceName, Info.Branch);
-
-    /// <summary>Clicking the project segment selects that row of the shell's project tree.</summary>
-    public RelayCommand FocusProjectCommand { get; }
-
-    /// <summary>Clicking the workspace segment selects that worktree row of the shell's project tree.</summary>
-    public RelayCommand FocusWorkspaceCommand { get; }
-
-    /// <summary>The project segment's tooltip (and accessible name): "show this project in the tree".</summary>
-    public string BreadcrumbProjectHint => SessionStrings.BreadcrumbProjectHint(Instruments.ProjectName);
-
-    /// <summary>The workspace segment's tooltip (and accessible name).</summary>
-    public string BreadcrumbWorkspaceHint => SessionStrings.BreadcrumbWorkspaceHint(Instruments.WorkspaceName);
-
-    /// <summary>The key of the project row: a repository row, or the general section for the general workspace.</summary>
-    private string ProjectNodeKey => Info.ProjectId is { Length: > 0 } project
-        ? (Instruments.IsGeneralProject ? "general:" + project : "project:" + project)
-        : string.Empty;
-
-    /// <summary>
-    /// The key of the workspace row: the worktree the session runs in. A session without one falls back to its project row,
-    /// so the segment never points at a row that does not exist.
-    /// </summary>
-    private string WorkspaceNodeKey
-    {
-        get
-        {
-            var path = Info.WorktreePath is { Length: > 0 } worktree ? worktree : Info.WorkspacePath;
-            return Info.ProjectId is { Length: > 0 } project && !Instruments.IsGeneralProject && path.Length > 0
-                ? "worktree:" + project + "|" + path
-                : ProjectNodeKey;
-        }
-    }
-
-    private void FocusProjectInTree()
-    {
-        if (!HasBreadcrumbProject || ProjectNodeKey.Length == 0)
-        {
-            return;
-        }
-
-        focusTree?.Invoke(ProjectNodeKey);
-    }
-
-    private void FocusWorkspaceInTree()
-    {
-        if (WorkspaceNodeKey.Length == 0)
-        {
-            return;
-        }
-
-        focusTree?.Invoke(WorkspaceNodeKey);
-    }
-
-    /// <summary>The project cache landed (or the language changed): the tree the breadcrumb points at may have changed too.</summary>
-    private void OnInstrumentsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is not (nameof(SessionInstrumentsViewModel.HasRepositoryProject)
-            or nameof(SessionInstrumentsViewModel.ProjectName)
-            or nameof(SessionInstrumentsViewModel.WorkspaceName)
-            or nameof(SessionInstrumentsViewModel.IsGeneralProject)))
-        {
-            return;
-        }
-
-        OnPropertyChanged(nameof(HasBreadcrumbProject));
-        OnPropertyChanged(nameof(BreadcrumbProject));
-        OnPropertyChanged(nameof(BreadcrumbWorkspace));
-        OnPropertyChanged(nameof(BreadcrumbProjectHint));
-        OnPropertyChanged(nameof(BreadcrumbWorkspaceHint));
-        FocusProjectCommand.NotifyCanExecuteChanged();
-        FocusWorkspaceCommand.NotifyCanExecuteChanged();
-    }
-
-    private void RefreshBreadcrumbText()
-    {
-        OnPropertyChanged(nameof(BreadcrumbProject));
-        OnPropertyChanged(nameof(BreadcrumbWorkspace));
-        OnPropertyChanged(nameof(BreadcrumbProjectHint));
-        OnPropertyChanged(nameof(BreadcrumbWorkspaceHint));
-    }
 
     public TranscriptViewModel Transcript { get; }
 
@@ -891,6 +784,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// </summary>
     public void OpenFinished(SubAgentViewModel agent)
     {
+        // Picking one from the finished list is an explicit "show me": a minimized bottom group opens.
+        SubAgentsCollapsed = false;
         agent.IsReadOnly = true;
         OpenSubAgent(agent);
         if (agent.Transcript.IsEmpty)
@@ -2173,7 +2068,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         ClearLiveTools();
         ReleaseInspectorListeners();
-        Instruments.PropertyChanged -= OnInstrumentsChanged;
         Instruments.Dispose();
         Composer.Dispose();
         foreach (var message in queued.ToArray())
@@ -2204,7 +2098,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         OnPropertyChanged(nameof(ReadOnlyBanner));
         OnPropertyChanged(nameof(ContinueLabel));
-        RefreshBreadcrumbText();
         OnPropertyChanged(nameof(SubAgentLabel));
         OnPropertyChanged(nameof(SubAgentToggleName));
         OnPropertyChanged(nameof(SubAgentToggleTooltip));

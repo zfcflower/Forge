@@ -992,7 +992,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             instrumentSources: instruments,
             preferences: composition.Preferences,
             openInspector: OpenInspector,
-            focusTree: key => _ = FocusProjectTreeNodeAsync(key),
             openSession: () => ActivateSessionTab(info.Id))
         {
             ChildQuery = readOnly
@@ -2999,25 +2998,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         var root = projectId is { } rooted && projectRoots.TryGetValue(rooted, out var foundRoot) ? foundRoot : null;
         var isGeneral = projectId is { } general && generalProjects.Contains(general);
         session.Instruments.SetProject(name, root, isGeneral);
-    }
-
-    /// <summary>
-    /// Selects a row of the left column by node key - the breadcrumb's project and workspace segments are the only callers.
-    /// Both trees are asked, because the general chats and the registered projects are two panels over the same sessions; a
-    /// key neither has yet (a row a pending refresh has not produced) is retried once after the trees reload.
-    /// </summary>
-    private async Task FocusProjectTreeNodeAsync(string key)
-    {
-        if (Projects.FocusNode(key) || GeneralChats.FocusNode(key))
-        {
-            return;
-        }
-
-        await RefreshTreesAsync(CancellationToken.None).ConfigureAwait(true);
-        if (!Projects.FocusNode(key))
-        {
-            GeneralChats.FocusNode(key);
-        }
     }
 
     /// <summary>Hands the active session's strip the Git panel's live branch, ahead/behind and CI marker.</summary>

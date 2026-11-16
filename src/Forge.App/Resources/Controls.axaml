@@ -536,10 +536,10 @@
     <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
 
-  <!-- A project row is a heading, not a pick: clicking it expands the subtree, so leaving the selection colour behind would
-       mark it as "the row you are on" when the row you are on is the session below it. The selection itself stays — the
-       tree's keyboard navigation and its refresh restore both read it — only the background is withheld. -->
-  <Style Selector="ListBoxItem:selected Border.tree-row-content.project-row">
+  <!-- A project or workspace row heads a subtree, it is not something you are "on": clicking it expands, and the row you
+       are on is the session below it, so the selection colour would lie about which row is current. The selection itself
+       stays — the tree's keyboard navigation and its refresh restore both read it — only the background is withheld. -->
+  <Style Selector="ListBoxItem:selected Border.tree-row-content.heading-row">
     <Setter Property="Background" Value="Transparent" />
   </Style>
 

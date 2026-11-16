@@ -52,7 +52,7 @@
             </ItemsControl>
             <Border Grid.Column="1"
                     Classes="tree-row-content"
-                    Classes.project-row="{Binding IsProject}"
+                    Classes.heading-row="{Binding IsHeadingRow}"
                     Classes.active-row="{Binding IsActiveRow}"
                     Classes.recycled="{Binding IsRecycled}">
               <!-- No shared ContextMenu: each row's menu is generated when it opens (lifecycle 5.4 rule 1), from the row's

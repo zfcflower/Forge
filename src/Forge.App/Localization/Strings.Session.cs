@@ -31,9 +31,6 @@ internal static class SessionStrings
     public const string ProviderMissingKey = "session.providerMissing";
 
     // ---------------------------------------------------------------- breadcrumb
-    public const string BreadcrumbWorkspaceKey = "session.breadcrumb.workspace";
-    public const string BreadcrumbProjectHintKey = "session.breadcrumb.projectHint";
-    public const string BreadcrumbWorkspaceHintKey = "session.breadcrumb.workspaceHint";
     public const string BreadcrumbBackToParentKey = "session.breadcrumb.backToParent";
 
     // ---------------------------------------------------------------- composer
@@ -144,18 +141,6 @@ internal static class SessionStrings
     public static string StartConversation => Loc.Instance[StartConversationKey];
 
     public static string ChatHint => Loc.Instance[ChatHintKey];
-
-    /// <summary>"workspace（分支 x）" / "workspace (branch x)": the breadcrumb's middle segment, naming the branch too.</summary>
-    public static string BreadcrumbWorkspace(string workspace, string branch) =>
-        Loc.Instance.Format(BreadcrumbWorkspaceKey, workspace, branch);
-
-    /// <summary>The project segment's tooltip: what clicking it does.</summary>
-    public static string BreadcrumbProjectHint(string project) =>
-        Loc.Instance.Format(BreadcrumbProjectHintKey, project);
-
-    /// <summary>The workspace segment's tooltip: what clicking it does.</summary>
-    public static string BreadcrumbWorkspaceHint(string workspace) =>
-        Loc.Instance.Format(BreadcrumbWorkspaceHintKey, workspace);
 
     /// <summary>The sub-agent breadcrumb's parent segment: its tooltip and its accessible name.</summary>
     public static string BreadcrumbBackToParent(string parent) =>
@@ -475,9 +460,6 @@ internal static class SessionStrings
         Loc.Register(StoppedKey, "已停止", "Stopped");
         Loc.Register(ReadFailedKey, "读取会话失败：{0}", "Could not read the session: {0}");
         Loc.Register(ProviderMissingKey, "尚未配置模型提供商：{0}", "No model provider is configured: {0}");
-        Loc.Register(BreadcrumbWorkspaceKey, "{0}（分支 {1}）", "{0} (branch {1})");
-        Loc.Register(BreadcrumbProjectHintKey, "在项目树中定位项目 {0}", "Show project {0} in the tree");
-        Loc.Register(BreadcrumbWorkspaceHintKey, "在项目树中定位工作区 {0}", "Show workspace {0} in the tree");
         Loc.Register(BreadcrumbBackToParentKey, "返回父会话 {0}", "Back to {0}");
 
         // turn card and its notices

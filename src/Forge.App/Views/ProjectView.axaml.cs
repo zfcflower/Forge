@@ -47,29 +47,16 @@ public partial class ProjectView : UserControl
         if (tree is not null)
         {
             tree.ActiveRowChanged -= OnActiveRowChanged;
-            tree.NodeFocusRequested -= OnNodeFocusRequested;
         }
 
         tree = DataContext as ProjectTreeViewModel;
         if (tree is not null)
         {
             tree.ActiveRowChanged += OnActiveRowChanged;
-            tree.NodeFocusRequested += OnNodeFocusRequested;
         }
     }
 
     private void OnActiveRowChanged(object? sender, EventArgs e) => ClearSelection();
-
-    /// <summary>
-    /// The shell asked for one row by key (a breadcrumb segment): select it and scroll the list to it. The row is already
-    /// expanded into the list by the view model, so it is found by identity here; the view keeps no second notion of focus.
-    /// </summary>
-    private void OnNodeFocusRequested(object? sender, TreeNodeViewModel node)
-    {
-        selectedKey = node.Key;
-        TreeList.SelectedItem = node;
-        TreeList.ScrollIntoView(node);
-    }
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
