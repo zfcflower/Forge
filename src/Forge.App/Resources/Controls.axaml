@@ -267,11 +267,22 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
-    <Setter Property="HorizontalAlignment" Value="Right" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
   </Style>
 
   <Style Selector="Border.turn-card">
     <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+  </Style>
+
+  <!-- The reply's own surface: a card on the text column's left edge, matching the user bubble opposite it. White rather than
+       the window's off-white, so the reply sits on top of the page instead of blending into it. -->
+  <Style Selector="Border.assistant-card">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />

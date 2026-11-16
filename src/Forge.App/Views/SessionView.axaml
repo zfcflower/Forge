@@ -26,7 +26,8 @@
       <Setter Property="Padding" Value="11,0,11,10" />
       <!-- Square bottom corners: square is what lets the side borders reach past the seam without curving inwards. -->
       <Setter Property="CornerRadius" Value="10,10,0,0" />
-      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+      <!-- The same surface as the side panels: the strip is a header band over the input, not part of the writing area. -->
+      <Setter Property="Background" Value="{DynamicResource SidebarBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <!-- No bottom edge: the grey panel's top edge is the seam, and two 1 px strokes there would read as a thick line. -->
       <Setter Property="BorderThickness" Value="1,1,1,0" />

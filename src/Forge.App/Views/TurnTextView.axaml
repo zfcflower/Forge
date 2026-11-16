@@ -9,10 +9,14 @@
   <!-- The reply text of a turn, rendered as Markdown (wave W4b), plus the placeholder of a reply that never arrived and the
        copy button of the whole text. The Markdown tree itself lives in ChatMarkdownView. -->
   <StackPanel>
-    <views:ChatMarkdownView />
-    <TextBlock Classes="caption"
-               Text="{Binding PlaceholderText}"
-               IsVisible="{Binding HasPlaceholder}" />
+    <Border Classes="assistant-card">
+      <StackPanel>
+        <views:ChatMarkdownView />
+        <TextBlock Classes="caption"
+                   Text="{Binding PlaceholderText}"
+                   IsVisible="{Binding HasPlaceholder}" />
+      </StackPanel>
+    </Border>
     <views:CopyTextButton Classes="ghost icon"
                           Width="26"
                           Height="22"

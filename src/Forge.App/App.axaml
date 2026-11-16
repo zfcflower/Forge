@@ -592,18 +592,18 @@
       </StackPanel>
     </DataTemplate>
 
-    <!-- User message: a timeline node with an IM-style bubble aligned right. -->
+    <!-- User message: a timeline node with a bubble on the text column's left edge, in line with the reply cards below. -->
     <DataTemplate DataType="vm:UserMessageViewModel" x:DataType="vm:UserMessageViewModel">
       <Grid ColumnDefinitions="Auto,*">
         <views:TimelineGutter Kind="User" />
-        <StackPanel Grid.Column="1" Margin="0,4,0,10" HorizontalAlignment="Right" Spacing="2">
-        <!-- Attached images: small thumbnails above the bubble, right-aligned like it. -->
+        <StackPanel Grid.Column="1" Margin="0,4,0,10" HorizontalAlignment="Left" Spacing="2">
+        <!-- Attached images: small thumbnails above the bubble, aligned with it. -->
         <ItemsControl ItemsSource="{Binding Images}"
                       IsVisible="{Binding HasImages}"
-                      HorizontalAlignment="Right">
+                      HorizontalAlignment="Left">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
-              <WrapPanel HorizontalAlignment="Right" />
+              <WrapPanel HorizontalAlignment="Left" />
             </ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
@@ -625,10 +625,10 @@
         <!-- Other attachments (PDF, audio, video, text files): a chip each with icon, name and size. -->
         <ItemsControl ItemsSource="{Binding Files}"
                       IsVisible="{Binding HasFiles}"
-                      HorizontalAlignment="Right">
+                      HorizontalAlignment="Left">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
-              <WrapPanel HorizontalAlignment="Right" />
+              <WrapPanel HorizontalAlignment="Left" />
             </ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
@@ -656,7 +656,7 @@
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource TextPrimaryBrush}" />
         </Border>
-        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Left">
           <views:CopyTextButton Classes="ghost icon"
                                 Width="26"
                                 Height="22"
