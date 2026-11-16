@@ -1,0 +1,60 @@
+name: CI
+
+# The gates the specs name for cross-platform confidence:
+#   * three-OS JIT build + full test matrix (ubuntu / windows / macos) - this is the only place the
+#     POSIX process-ownership, PTY and shell paths, and the macOS-only branches, are ever executed.
+#   * a Windows Native AOT publish smoke check (AOT analyzer warnings are errors; the artifact must exist).
+# The three-platform AOT publish matrix the specs also name is NOT wired yet: macOS/Linux publish has never
+# run anywhere, so it stays an explicit follow-up rather than a permanently red job here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.0.x'
+      - name: Report SDK
+        run: dotnet --info
+      # Build then test without rebuilding: TreatWarningsAsErrors is on, so a single warning fails here.
+      - name: Build
+        run: dotnet build Forge.slnx -v m
+      - name: Test
+        run: dotnet test Forge.slnx --no-build --logger "console;verbosity=normal"
+
+  publish-aot:
+    name: aot publish (windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.0.x'
+      - name: Publish Forge.App (Native AOT)
+        run: dotnet publish src/Forge.App -c Release
+      - name: Verify the published executable
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path src/Forge.App/bin/Release -Recurse -Filter Forge.App.exe |
+            Where-Object { $_.FullName -like '*publish*' } | Select-Object -First 1
+          if ($null -eq $exe) { throw 'AOT publish produced no Forge.App.exe' }
+          "{0} ({1:N1} MiB)" -f $exe.FullName, ($exe.Length / 1MB) | Write-Host
+          if ($exe.Length -lt 10MB) { throw "published executable is implausibly small: $($exe.Length) bytes" }

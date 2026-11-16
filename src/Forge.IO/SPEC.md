@@ -133,7 +133,7 @@ parent: forge-architecture
 - 相对裸 `Process.Start` + `BaseStream` 排空的额外开销:`dotnet --info` 20 次 p50 差值 2.3–10.1 ms(0.9–3.7 %);`cmd /c echo` 落在噪声带内(-2.6…+0.8 ms)。
 - 托管 grep 与 rg(`15.2.0`)在 fixture 仓库上 11 组查询的 `path:line` 集合逐条相等;`build/`、`drop.log`、`.git`、二进制、`work/*` + `!work/keep.txt` 两侧都被同样处理。
 - 10 万文件(100×1000)的目录:`find`(limit 10000)19 ms / 分配 3.6 MiB;全树无命中遍历 136 ms / 峰值工作集 70 MiB。
-- 待跑:Linux/macOS 由 CI 冒烟(ShellResolver 的 `/bin/bash`→`/bin/sh`、进程组杀树、rg parity 均只在本机 Windows 验过)。
+- 待跑:Linux/macOS 由 CI 的三 OS 测试矩阵冒烟(`.github/workflows/ci.yml` 已接线,首跑通过前仍算未验证);(ShellResolver 的 `/bin/bash`→`/bin/sh`、进程组杀树、rg parity 均只在本机 Windows 验过)。
 
 ### 基准(`tools/Forge.Bench`,win-x64 32 逻辑核,Release,两次全量 18/18 验收通过)
 
