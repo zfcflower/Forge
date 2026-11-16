@@ -23,8 +23,6 @@
           <wc:FluentIcon Grid.Column="1"
                          Classes="tree-icon"
                          Data="{StaticResource IconBranch}"
-                         Width="12"
-                         Height="12"
                          HorizontalAlignment="Left" />
           <TextBlock Grid.Column="2"
                      Text="{Binding ShortName}"

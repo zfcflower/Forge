@@ -85,10 +85,9 @@
 
     <ListBox x:Name="TreeList"
              Grid.Row="1"
-             Margin="0,6,0,0"
              ItemsSource="{Binding Rows}"
              ItemTemplate="{StaticResource SpecNodeTemplate}"
-             Padding="0"
+             Padding="8"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
              AutomationProperties.AutomationId="spec-tree"
              AutomationProperties.Name="{Binding [spec.tree.name], Source={x:Static loc:Loc.Instance}}">

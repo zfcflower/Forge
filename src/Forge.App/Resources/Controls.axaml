@@ -552,11 +552,18 @@
     <Setter Property="RenderTransform" Value="rotate(90deg)" />
   </Style>
 
+  <!-- A tree row's icon is the same size as the text beside it: rows set no font size of their own, so the icon follows the
+       13px row text, and the one heavier row (a project's own name, 14px) says so with the project-icon class. -->
   <Style Selector="wc|FluentIcon.tree-icon">
-    <Setter Property="Width" Value="14" />
-    <Setter Property="Height" Value="14" />
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Height" Value="13" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tree-icon.project-icon">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="14" />
   </Style>
 
   <!-- The active session's row takes the primary colour: the tree's own "this is the conversation you are in" mark. Every

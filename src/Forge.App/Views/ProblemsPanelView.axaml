@@ -22,7 +22,7 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="Auto,*,Auto" Background="Transparent" Margin="8,6">
+  <Grid RowDefinitions="Auto,*,Auto" Background="Transparent" Margin="8">
     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
       <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
         <CheckBox Classes="filter"

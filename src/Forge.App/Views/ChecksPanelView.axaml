@@ -136,7 +136,7 @@
                     MaxHeight="420"
                     VerticalScrollBarVisibility="Auto"
                     HorizontalScrollBarVisibility="Disabled"
-                    Padding="8,0">
+                    Padding="8">
         <Grid RowDefinitions="Auto,Auto">
           <StackPanel IsVisible="{Binding IsEmpty}" Spacing="4" Margin="4,14">
             <TextBlock FontWeight="SemiBold" Text="{Binding EmptyTitleText}" />

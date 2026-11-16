@@ -445,7 +445,7 @@
              IsVisible="{Binding IsAllTab}"
              ItemsSource="{Binding Rows}"
              ItemTemplate="{StaticResource FileNodeTemplate}"
-             Padding="4,2"
+             Padding="8"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
              AutomationProperties.AutomationId="files-tree"
              AutomationProperties.Name="{Binding [files.tree.name], Source={x:Static loc:Loc.Instance}}">
@@ -461,7 +461,7 @@
              IsVisible="{Binding ShowSharedChanges}"
              ItemsSource="{Binding ChangedRows}"
              ItemTemplate="{StaticResource ChangedNodeTemplate}"
-             Padding="4,2"
+             Padding="8"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
              AutomationProperties.AutomationId="changed-files"
              AutomationProperties.Name="{Binding [files.changedList.name], Source={x:Static loc:Loc.Instance}}">
@@ -477,7 +477,7 @@
              IsVisible="{Binding ShowFallbackChanges}"
              ItemsSource="{Binding Changes}"
              SelectionChanged="OnChangedSelection"
-             Padding="2,2"
+             Padding="8"
              AutomationProperties.AutomationId="changed-files-fallback"
              AutomationProperties.Name="{Binding [files.changedList.name], Source={x:Static loc:Loc.Instance}}">
       <ListBox.ItemTemplate>

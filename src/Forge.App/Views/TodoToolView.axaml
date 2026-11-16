@@ -343,7 +343,7 @@
                Text="{Binding StatusText}"
                AutomationProperties.AutomationId="todo-status" />
 
-    <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,2,0,8">
+    <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="8">
       <StackPanel>
         <ItemsControl ItemsSource="{Binding Groups}" ItemTemplate="{StaticResource TodoGroupTemplate}" />
         <ItemsControl ItemsSource="{Binding Loose}" ItemTemplate="{StaticResource TodoRowTemplate}" />

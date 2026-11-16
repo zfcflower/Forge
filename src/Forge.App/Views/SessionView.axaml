@@ -383,7 +383,7 @@
     <!-- Where this session is: project › workspace (branch) › title. The two left segments select the matching row of the
          project tree; the general workspace has no project segment, so those sessions read workspace › title only. -->
     <Border Grid.Row="0"
-            Padding="14,5"
+            Padding="12,6"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,0,0,1"
             AutomationProperties.AutomationId="session-breadcrumb">

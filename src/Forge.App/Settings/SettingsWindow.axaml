@@ -148,7 +148,7 @@
       </Border>
 
       <ScrollViewer Grid.Column="1"
-                    Padding="24,18,24,24"
+                    Padding="12,6,12,6"
                     VerticalScrollBarVisibility="Auto"
                     AutomationProperties.AutomationId="settings-body">
         <ContentControl Content="{Binding SelectedSection.ViewModel}" />

@@ -190,6 +190,9 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     /// <summary>True for a project row: the heading of one registered project's subtree.</summary>
     public bool IsProject => Kind == TreeNodeKind.Project;
 
+    /// <summary>True for a workspace row, the row that names its branch (the main checkout included).</summary>
+    public bool IsWorktree => Kind == TreeNodeKind.Worktree;
+
     public void SetDepth(int depth)
     {
         if (Depth == depth)

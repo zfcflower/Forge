@@ -47,9 +47,9 @@
 
   <!-- 聊天区与窗口边缘的同一档内边距(左右都取 16 = PaddingPage):转录列表、输入卡、自动化横幅三处从这里取。
        上下两个方向同样对齐:列表底部 8 + 输入卡顶部 8 = 16,与窗口左右边距同档。 -->
-  <Thickness x:Key="ChatTranscriptPadding">16,16,16,8</Thickness>
-  <Thickness x:Key="ChatComposerMargin">16,8,16,16</Thickness>
-  <Thickness x:Key="ChatBannerMargin">16,8,16,0</Thickness>
+  <Thickness x:Key="ChatTranscriptPadding">12,6,12,6</Thickness>
+  <Thickness x:Key="ChatComposerMargin">12,6,12,6</Thickness>
+  <Thickness x:Key="ChatBannerMargin">12,6,12,0</Thickness>
 
   <CornerRadius x:Key="RadiusSm">4</CornerRadius>
   <CornerRadius x:Key="RadiusMd">8</CornerRadius>
