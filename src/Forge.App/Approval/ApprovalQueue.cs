@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Forge.App.ViewModels;
 using Forge.App.Logging;
@@ -15,8 +16,10 @@ internal sealed class ApprovalQueue
 {
     private readonly RangeObservableCollection<ApprovalCardViewModel> items = [];
 
-    // Question cards are shown one at a time per session; the others wait here (FIFO, UI thread only) and never reach Items
-    // until promoted. Approval cards are independent of questions and are never held back.
+    // Question cards are shown one at a time per session, in the workbench's bottom group and not in the approval overlay:
+    // the shown ones live in questions, the others wait here (FIFO, UI thread only) until promoted. Approval cards are
+    // independent of questions and are never held back.
+    private readonly ObservableCollection<UserQuestionCardViewModel> questions = [];
     private readonly List<UserQuestionCardViewModel> waitingQuestions = [];
 
     public ApprovalQueue(IApprovalDispatcher? dispatcher = null) => Dispatcher = dispatcher ?? UiThreadDispatcher.Instance;
@@ -31,6 +34,9 @@ internal sealed class ApprovalQueue
 
     /// <summary>The queued cards; UI thread only.</summary>
     public RangeObservableCollection<ApprovalCardViewModel> Items => items;
+
+    /// <summary>The question cards being shown (at most one per session); UI thread only. The workbench docks one tab per card.</summary>
+    public ObservableCollection<UserQuestionCardViewModel> Questions => questions;
 
     /// <summary>
     /// Adds a card on the UI thread and reports whether it was added; a card whose id is already queued is not added
@@ -50,7 +56,8 @@ internal sealed class ApprovalQueue
 
                     if (card is UserQuestionCardViewModel question)
                     {
-                        if (waitingQuestions.Exists(other => string.Equals(other.Id, card.Id, StringComparison.Ordinal)))
+                        if (waitingQuestions.Exists(other => string.Equals(other.Id, card.Id, StringComparison.Ordinal))
+                            || IndexOfQuestion(card.Id) >= 0)
                         {
                             return false;
                         }
@@ -61,14 +68,14 @@ internal sealed class ApprovalQueue
                             RefreshWaiting(question.SessionId);
                             return true;
                         }
+
+                        questions.Add(question);
+                        RefreshWaiting(question.SessionId);
+                        RaiseChanged();
+                        return true;
                     }
 
                     items.Add(card);
-                    if (card is UserQuestionCardViewModel shown)
-                    {
-                        RefreshWaiting(shown.SessionId);
-                    }
-
                     RaiseCardAdded(card);
                     RaiseChanged();
                     return true;
@@ -96,6 +103,23 @@ internal sealed class ApprovalQueue
                     return;
                 }
 
+                if (card is UserQuestionCardViewModel shown)
+                {
+                    var shownIndex = IndexOfQuestion(shown.Id);
+                    if (shownIndex < 0 || !ReferenceEquals(questions[shownIndex], shown))
+                    {
+                        card.Dispose();
+                        return;
+                    }
+
+                    questions.RemoveAt(shownIndex);
+                    shown.TryComplete(outcome ?? shown.WithdrawnOutcome);
+                    shown.Dispose();
+                    PromoteNextQuestion(shown.SessionId);
+                    RaiseChanged();
+                    return;
+                }
+
                 var index = IndexOf(card.Id);
                 if (index < 0 || !ReferenceEquals(items[index], card))
                 {
@@ -106,11 +130,6 @@ internal sealed class ApprovalQueue
                 items.RemoveAt(index);
                 card.TryComplete(outcome ?? card.WithdrawnOutcome);
                 card.Dispose();
-                if (card is UserQuestionCardViewModel gone)
-                {
-                    PromoteNextQuestion(gone.SessionId);
-                }
-
                 RaiseChanged();
             });
     }
@@ -134,6 +153,20 @@ internal sealed class ApprovalQueue
                     waitingQuestions.RemoveAt(index);
                     queued.TryComplete(queued.WithdrawnOutcome);
                     queued.Dispose();
+                }
+
+                for (var index = questions.Count - 1; index >= 0; index--)
+                {
+                    if (!string.Equals(questions[index].SessionId, sessionId, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var shown = questions[index];
+                    questions.RemoveAt(index);
+                    shown.TryComplete(shown.WithdrawnOutcome);
+                    shown.Dispose();
+                    removed++;
                 }
 
                 for (var index = items.Count - 1; index >= 0; index--)
@@ -172,8 +205,21 @@ internal sealed class ApprovalQueue
                     card.Dispose();
                 }
 
+                var shownQuestions = questions.ToArray();
+                questions.Clear();
+                foreach (var card in shownQuestions)
+                {
+                    card.TryComplete(card.WithdrawnOutcome);
+                    card.Dispose();
+                }
+
                 if (items.Count == 0)
                 {
+                    if (shownQuestions.Length > 0)
+                    {
+                        RaiseChanged();
+                    }
+
                     return;
                 }
 
@@ -206,9 +252,9 @@ internal sealed class ApprovalQueue
 
     private bool HasShownQuestion(string sessionId)
     {
-        foreach (var item in items)
+        foreach (var question in questions)
         {
-            if (item is UserQuestionCardViewModel question && string.Equals(question.SessionId, sessionId, StringComparison.Ordinal))
+            if (string.Equals(question.SessionId, sessionId, StringComparison.Ordinal))
             {
                 return true;
             }
@@ -229,9 +275,8 @@ internal sealed class ApprovalQueue
             }
 
             waitingQuestions.RemoveAt(index);
-            items.Add(next);
+            questions.Add(next);
             RefreshWaiting(sessionId);
-            RaiseCardAdded(next);
             return;
         }
 
@@ -250,9 +295,9 @@ internal sealed class ApprovalQueue
             }
         }
 
-        foreach (var item in items)
+        foreach (var question in questions)
         {
-            if (item is UserQuestionCardViewModel question && string.Equals(question.SessionId, sessionId, StringComparison.Ordinal))
+            if (string.Equals(question.SessionId, sessionId, StringComparison.Ordinal))
             {
                 question.WaitingCount = count;
             }
@@ -264,6 +309,19 @@ internal sealed class ApprovalQueue
         for (var index = 0; index < items.Count; index++)
         {
             if (string.Equals(items[index].Id, id, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private int IndexOfQuestion(string id)
+    {
+        for (var index = 0; index < questions.Count; index++)
+        {
+            if (string.Equals(questions[index].Id, id, StringComparison.Ordinal))
             {
                 return index;
             }

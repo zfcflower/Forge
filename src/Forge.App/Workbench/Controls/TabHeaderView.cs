@@ -141,7 +141,8 @@ internal sealed class TabHeaderView : TemplatedControl
         IsActive = ReferenceEquals(tab, tab.Group?.ActiveTab);
         ApplyIcon();
         AutomationProperties.SetName(this, tab.Title);
-        ToolTip.SetTip(this, tab.Title);
+        // The bottom group's tabs show no tip: it would sit over the strip right where the next click lands.
+        ToolTip.SetTip(this, string.Equals(tab.Group?.Id, WorkbenchIds.BottomTabs, StringComparison.Ordinal) ? null : tab.Title);
     }
 
     /// <summary>
@@ -155,6 +156,7 @@ internal sealed class TabHeaderView : TemplatedControl
             TabKind.Session or TabKind.SubAgent =>
                 (WorkbenchIcons.Find(this, "IconChat"), WorkbenchIcons.Find(this, "IconChatFilled")),
             TabKind.FilePreview => (TreeIcons.File, null),
+            TabKind.Question => (WorkbenchIcons.Find(this, "IconInfo"), null),
             _ => (null, null),
         };
 

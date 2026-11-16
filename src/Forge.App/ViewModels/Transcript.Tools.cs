@@ -149,12 +149,14 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         OnPropertyChanged(nameof(IsRunning));
         OnPropertyChanged(nameof(Result));
         OnPropertyChanged(nameof(HasResult));
+        RaiseQuestionCard();
     }
 
     public override void RefreshText()
     {
         OnPropertyChanged(nameof(Result));
         OnPropertyChanged(nameof(HasResult));
+        RaiseQuestionCard();
         OnPropertyChanged(nameof(LiveElapsedText));
     }
 

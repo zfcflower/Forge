@@ -31,15 +31,43 @@ public sealed record UserQuestionRequest(
     string? AgentName,
     IReadOnlyList<UserQuestion> Questions);
 
+/// <summary>Why the user wants to talk about a question before answering it.</summary>
+public enum UserQuestionDiscussReason
+{
+    /// <summary>The question is not clear enough.</summary>
+    Unclear,
+
+    /// <summary>The question has nothing to do with the task.</summary>
+    Unrelated,
+
+    /// <summary>The user needs more context to answer.</summary>
+    NeedsContext,
+}
+
+/// <summary>
+/// The user chose to discuss a question instead of answering it. <paramref name="Reason"/> and <paramref name="Note"/> (what
+/// the user would like explained) are both optional.
+/// </summary>
+public sealed record UserQuestionDiscussion(UserQuestionDiscussReason? Reason = null, string? Note = null);
+
 /// <summary>
 /// The answer to one question: the labels picked (in option order) and the free text, if any. <paramref name="Skipped"/>
 /// means the user chose not to answer this question while answering others; Selected is then empty and FreeText null.
+/// <paramref name="Discussion"/> means the user wants to discuss the question first; Selected is then empty and FreeText null.
 /// </summary>
-public sealed record UserQuestionAnswer(string QuestionId, IReadOnlyList<string> Selected, string? FreeText = null, bool Skipped = false);
+public sealed record UserQuestionAnswer(
+    string QuestionId,
+    IReadOnlyList<string> Selected,
+    string? FreeText = null,
+    bool Skipped = false,
+    UserQuestionDiscussion? Discussion = null);
 
 public enum UserQuestionOutcome
 {
-    /// <summary>The user answered; <see cref="UserQuestionResponse.Answers"/> has one entry per question.</summary>
+    /// <summary>
+    /// The user responded; <see cref="UserQuestionResponse.Answers"/> has one entry per question, each answered, skipped or
+    /// (<see cref="UserQuestionAnswer.Discussion"/>) marked for discussion.
+    /// </summary>
     Answered,
 
     /// <summary>The user dismissed the card without answering; the agent should continue on its own judgment.</summary>

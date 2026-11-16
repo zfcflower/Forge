@@ -207,7 +207,10 @@ internal sealed class PanelSplitter : WorkbenchSplitter
 
         startValue = kind switch
         {
-            PanelSplitterKind.Bottom => layout.BottomHeight,
+            // The stored height can exceed what the window shows (a question panel opens tall); drag from what is on screen.
+            PanelSplitterKind.Bottom => TrackLength > 0
+                ? Math.Min(layout.BottomHeight, Math.Max(WorkbenchMetrics.PanelMinHeight, TrackLength - WorkbenchMetrics.PanelMinHeight))
+                : layout.BottomHeight,
             PanelSplitterKind.Preview => TrackLength > 0
                 ? RegionPresenter.PreviewColumnWidth(layout, TrackLength, true)
                 : layout.PreviewWidth,

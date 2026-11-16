@@ -5,7 +5,33 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.ToolRowView"
              x:DataType="vm:ToolRowViewModel">
-  <Border Classes="tool-row" Classes.expanded="{Binding IsExpanded}">
+  <Panel>
+  <!-- ask_user: the question-and-answer card. -->
+  <Border Classes="turn-card" Padding="10" Margin="0,2" IsVisible="{Binding IsQuestionCard}">
+    <StackPanel Spacing="6">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="label" Text="{Binding [questions.card.title], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Grid.Column="1" Classes="caption" Text="{Binding QuestionStatusText}" />
+      </Grid>
+      <ItemsControl ItemsSource="{Binding QuestionItems}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:QuestionCardItem">
+            <StackPanel Spacing="2" Margin="0,4,0,0">
+              <Border Classes="notice" HorizontalAlignment="Left" Padding="6,1">
+                <TextBlock Classes="caption" Text="{Binding Header}" />
+              </Border>
+              <TextBlock Text="{Binding Prompt}" TextWrapping="Wrap" />
+              <SelectableTextBlock Text="{Binding Answer}"
+                                   TextWrapping="Wrap"
+                                   FontWeight="SemiBold"
+                                   IsVisible="{Binding HasAnswer}" />
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </Border>
+  <Border Classes="tool-row" Classes.expanded="{Binding IsExpanded}" IsVisible="{Binding !IsQuestionCard}">
     <StackPanel Spacing="2">
       <Button Classes="link"
               Command="{Binding ToggleCommand}"
@@ -42,4 +68,5 @@
       </StackPanel>
     </StackPanel>
   </Border>
+  </Panel>
 </UserControl>

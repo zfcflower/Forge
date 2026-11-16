@@ -1,0 +1,232 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ap="using:Forge.App.Approval"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Approval.QuestionPanelView"
+             x:DataType="ap:UserQuestionCardViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.chip">
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Margin" Value="0,0,6,6" />
+    </Style>
+    <Style Selector="Border.chip.current">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+    </Style>
+    <Style Selector="Border.choice">
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="Border.choice:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
+    <Style Selector="Border.choice.selected">
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
+    </Style>
+    <Style Selector="Border.choice > StackPanel > :is(ToggleButton)">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="10,6" />
+    </Style>
+    <Style Selector="StackPanel.dim">
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource WindowBackgroundBrush}">
+    <StackPanel x:Name="HeaderPart" Grid.Row="0" Margin="12,8,12,4" Spacing="2">
+      <TextBlock Classes="label"
+                 Text="{Binding HeaderText}"
+                 TextTrimming="CharacterEllipsis"
+                 AutomationProperties.AutomationId="question-panel-title" />
+      <TextBlock Classes="caption"
+                 Text="{Binding SessionTitle}"
+                 TextTrimming="CharacterEllipsis"
+                 ToolTip.Tip="{Binding SessionTitle}" />
+    </StackPanel>
+
+    <ItemsControl x:Name="ChipsPart"
+                  Grid.Row="1"
+                  Margin="12,2,12,0"
+                  IsVisible="{Binding HasMultipleQuestions}"
+                  ItemsSource="{Binding Questions}">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <WrapPanel />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="ap:QuestionItemViewModel">
+          <Border Classes="chip" Classes.current="{Binding IsCurrent}">
+            <Button Classes="ghost"
+                    Padding="10,3"
+                    Command="{Binding SelectCommand}"
+                    Content="{Binding ChipText}"
+                    AutomationProperties.AutomationId="question-chip" />
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <ItemsControl x:Name="BodyPart" Margin="12,4,12,4" ItemsSource="{Binding Questions}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="ap:QuestionItemViewModel">
+            <StackPanel Spacing="6" IsVisible="{Binding IsCurrent}">
+              <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding Prompt}"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center" />
+                <ToggleButton Grid.Column="1"
+                              Classes="ghost"
+                              Margin="8,0,0,0"
+                              IsChecked="{Binding IsDiscussing, Mode=TwoWay}"
+                              AutomationProperties.AutomationId="question-discuss">
+                  <Panel>
+                    <TextBlock IsVisible="{Binding !IsDiscussing}"
+                               Text="{Binding [questions.discuss.button], Source={x:Static loc:Loc.Instance}}" />
+                    <TextBlock IsVisible="{Binding IsDiscussing}"
+                               Text="{Binding [questions.discuss.active], Source={x:Static loc:Loc.Instance}}" />
+                  </Panel>
+                </ToggleButton>
+                <ToggleButton Grid.Column="2"
+                              Classes="ghost"
+                              IsChecked="{Binding IsSkipped, Mode=TwoWay}"
+                              Content="{Binding [questions.card.skip], Source={x:Static loc:Loc.Instance}}"
+                              AutomationProperties.AutomationId="question-skip" />
+              </Grid>
+
+              <TextBlock Classes="caption"
+                         IsVisible="{Binding MultiSelect}"
+                         Text="{Binding BoundsHint}" />
+
+              <!-- Discussion request: why, and what the agent should explain. -->
+              <Border Background="{DynamicResource BrandTintBrush}"
+                      CornerRadius="{DynamicResource RadiusMd}"
+                      Padding="10"
+                      IsVisible="{Binding IsDiscussing}">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{Binding [questions.discuss.banner], Source={x:Static loc:Loc.Instance}}"
+                             TextWrapping="Wrap" />
+                  <TextBlock Classes="caption"
+                             Text="{Binding [questions.discuss.reasonLabel], Source={x:Static loc:Loc.Instance}}" />
+                  <ItemsControl ItemsSource="{Binding Reasons}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <WrapPanel />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="ap:DiscussReasonViewModel">
+                        <ToggleButton Classes="ghost"
+                                      Margin="0,0,6,6"
+                                      IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                      Content="{Binding Label}"
+                                      AutomationProperties.AutomationId="question-discuss-reason" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBox Text="{Binding DiscussNote, Mode=TwoWay}"
+                           AcceptsReturn="False"
+                           PlaceholderText="{Binding [questions.discuss.note], Source={x:Static loc:Loc.Instance}}"
+                           AutomationProperties.AutomationId="question-discuss-note" />
+                  <TextBlock Classes="caption"
+                             Text="{Binding [questions.discuss.cancelHint], Source={x:Static loc:Loc.Instance}}"
+                             TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+
+              <StackPanel Classes.dim="{Binding IsDiscussing}">
+                <ItemsControl ItemsSource="{Binding Options}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="ap:QuestionOptionViewModel">
+                      <Border Classes="choice" Classes.selected="{Binding IsSelected}">
+                        <StackPanel>
+                          <RadioButton IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                       IsEnabled="{Binding IsEnabled}"
+                                       IsVisible="{Binding IsSingle}">
+                            <StackPanel>
+                              <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+                              <TextBlock Classes="caption"
+                                         IsVisible="{Binding HasDescription}"
+                                         Text="{Binding Description}"
+                                         TextWrapping="Wrap" />
+                            </StackPanel>
+                          </RadioButton>
+                          <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                    IsEnabled="{Binding IsEnabled}"
+                                    IsVisible="{Binding IsMulti}">
+                            <StackPanel>
+                              <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+                              <TextBlock Classes="caption"
+                                         IsVisible="{Binding HasDescription}"
+                                         Text="{Binding Description}"
+                                         TextWrapping="Wrap" />
+                            </StackPanel>
+                          </CheckBox>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- "Other": picked automatically once the user types; the user may also pick it by hand. -->
+                <Border Classes="choice" Classes.selected="{Binding IsOtherSelected}" IsVisible="{Binding AllowFreeText}">
+                  <StackPanel>
+                    <RadioButton IsChecked="{Binding IsOtherSelected, Mode=TwoWay}"
+                                 IsEnabled="{Binding IsFreeTextEnabled}"
+                                 Content="{Binding [questions.card.other], Source={x:Static loc:Loc.Instance}}"
+                                 IsVisible="{Binding IsSingleSelect}"
+                                 AutomationProperties.AutomationId="question-other-radio" />
+                    <CheckBox IsChecked="{Binding IsOtherSelected, Mode=TwoWay}"
+                              IsEnabled="{Binding IsFreeTextEnabled}"
+                              Content="{Binding [questions.card.other], Source={x:Static loc:Loc.Instance}}"
+                              IsVisible="{Binding MultiSelect}"
+                              AutomationProperties.AutomationId="question-other-check" />
+                    <TextBox Margin="38,0,10,8"
+                             IsEnabled="{Binding IsFreeTextEnabled}"
+                             Text="{Binding FreeText, Mode=TwoWay}"
+                             AcceptsReturn="False"
+                             PlaceholderText="{Binding [questions.card.freeText], Source={x:Static loc:Loc.Instance}}"
+                             AutomationProperties.AutomationId="question-other-text" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <StackPanel x:Name="FooterPart" Grid.Row="3" Margin="12,4,12,10" Spacing="4">
+      <TextBlock Classes="caption"
+                 IsVisible="{Binding AllSkipped}"
+                 Text="{Binding AllSkippedHint}"
+                 TextWrapping="Wrap" />
+      <TextBlock Classes="caption"
+                 IsVisible="{Binding HasWaiting}"
+                 Text="{Binding WaitingText}"
+                 AutomationProperties.AutomationId="question-waiting" />
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <Button Classes="primary"
+                Command="{Binding SubmitCommand}"
+                Content="{Binding SubmitText}"
+                AutomationProperties.AutomationId="question-submit"
+                AutomationProperties.Name="{Binding SubmitText}" />
+        <Button Classes="ghost"
+                Command="{Binding DismissCommand}"
+                Content="{Binding [questions.card.dismiss], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="question-dismiss" />
+      </StackPanel>
+    </StackPanel>
+  </Grid>
+</UserControl>

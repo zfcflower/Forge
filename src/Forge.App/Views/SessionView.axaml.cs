@@ -25,6 +25,11 @@ public partial class SessionView : UserControl
             input.LostFocus += OnInputLostFocus;
             AttachImageInput(input);
         }
+
+        if (this.FindControl<ListBox>("Transcript") is { } transcript)
+        {
+            TranscriptFollower.Attach(transcript);
+        }
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -51,10 +56,7 @@ public partial class SessionView : UserControl
 
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == NotifyCollectionChangedAction.Add)
-        {
-            Dispatcher.UIThread.Post(ScrollToEnd, DispatcherPriority.Background);
-        }
+        // Scrolling after an add is the transcript follower's job (it stops following once the user scrolls away).
     }
 
     private void ScrollToEnd()
@@ -106,14 +108,33 @@ public partial class SessionView : UserControl
             }
         }
 
-        if (e.Key != Key.Enter || !e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        if (e.Key != Key.Enter)
         {
             return;
         }
 
-        // Ctrl+Enter sends; while a turn runs it queues the message instead.
+        // Idle: Enter and Ctrl+Enter send. Running: Enter interjects, Ctrl+Enter queues, Ctrl+Shift+Enter redirects.
+        // Shift+Enter (and Alt+Enter) fall through to the text box, which inserts a line break.
+        var modifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+        System.Windows.Input.ICommand command;
+        if (modifiers == KeyModifiers.None)
+        {
+            command = viewModel.IsRunning ? viewModel.InterjectCommand : viewModel.SendCommand;
+        }
+        else if (modifiers == KeyModifiers.Control)
+        {
+            command = viewModel.IsRunning ? viewModel.QueueCommand : viewModel.SendCommand;
+        }
+        else if (modifiers == (KeyModifiers.Control | KeyModifiers.Shift) && viewModel.IsRunning)
+        {
+            command = viewModel.RedirectCommand;
+        }
+        else
+        {
+            return;
+        }
+
         e.Handled = true;
-        var command = viewModel.IsRunning ? (System.Windows.Input.ICommand)viewModel.QueueCommand : viewModel.SendCommand;
         if (command.CanExecute(null))
         {
             command.Execute(null);

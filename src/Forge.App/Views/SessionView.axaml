@@ -1062,6 +1062,7 @@
                       <MenuFlyout Placement="TopEdgeAlignedRight">
                         <MenuItem Header="{Binding [session.composer.interject], Source={x:Static loc:Loc.Instance}}"
                                   Command="{Binding InterjectCommand}"
+                                  InputGesture="Enter"
                                   ToolTip.Tip="{Binding [session.composer.interjectHint], Source={x:Static loc:Loc.Instance}}"
                                   AutomationProperties.AutomationId="composer-interject" />
                         <MenuItem Header="{Binding [session.composer.queue], Source={x:Static loc:Loc.Instance}}"
@@ -1071,6 +1072,7 @@
                                   AutomationProperties.AutomationId="composer-queue-item" />
                         <MenuItem Header="{Binding [session.composer.redirect], Source={x:Static loc:Loc.Instance}}"
                                   Command="{Binding RedirectCommand}"
+                                  InputGesture="Ctrl+Shift+Enter"
                                   ToolTip.Tip="{Binding [session.composer.redirectHint], Source={x:Static loc:Loc.Instance}}"
                                   AutomationProperties.AutomationId="composer-redirect" />
                         <Separator />

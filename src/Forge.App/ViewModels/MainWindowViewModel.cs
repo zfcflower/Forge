@@ -169,6 +169,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly DispatcherTimer clock;
     private readonly DispatcherTimer layoutSaveTimer;
     private readonly TerminalWorkbench terminals;
+    private readonly QuestionWorkbench? questionPanels;
     private readonly WorkspaceDiagnostics? problemsDiagnostics;
     private PanelToolButton newTerminalButton;
     private ReviewStore reviews;
@@ -294,6 +295,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Preferences,
             composition.Host?.Client,
             () => RevealBottomGroup(activeSession));
+        if (ApprovalServices.Current is { } questionServices)
+        {
+            questionPanels = new QuestionWorkbench(Workbench, questionServices.Queue, () => RevealBottomGroup(activeSession));
+        }
+
         newTerminalButton = CreateNewTerminalButton();
 
         GitSync.PropertyChanged += OnGitSyncPropertyChanged;
@@ -440,6 +446,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 ApplyPanelContext();
                 PushGitText();
                 terminals.OnActiveSessionChanged(activeSession?.SessionId, activeSession?.WorkDir);
+                questionPanels?.OnActiveSessionChanged(activeSession?.SessionId);
             }
         }
     }
@@ -2911,6 +2918,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             }
         }
 
+        foreach (var card in approvals.Queue.Questions)
+        {
+            if (string.Equals(card.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                pending++;
+            }
+        }
+
         return pending;
     }
 
@@ -3236,6 +3251,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// </summary>
     private void ShutdownTerminals()
     {
+        questionPanels?.Dispose();
         try
         {
             if (!terminals.DisposeAsync().AsTask().Wait(TerminalShutdownBudget))

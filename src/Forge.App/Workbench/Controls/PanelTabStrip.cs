@@ -76,7 +76,7 @@ internal sealed class PanelTabStrip : TemplatedControl
     }
 
     /// <summary>Activates a tab of this strip (keyboard activation of a focused header).</summary>
-    public void Activate(TabModel tab) => Layout?.ActivateTab(tab);
+    public void Activate(TabModel tab) => Layout?.ActivateTabByUser(tab);
 
     /// <summary>
     /// Closes a tab of this strip (the header's close button, middle click and the context menu all come through here).
@@ -238,7 +238,7 @@ internal sealed class PanelTabStrip : TemplatedControl
         }
         else if (completed == TabDragMode.None)
         {
-            Layout?.ActivateTab(tab);
+            Layout?.ActivateTabByUser(tab);
         }
     }
 
@@ -507,7 +507,7 @@ internal sealed class PanelTabStrip : TemplatedControl
     /// <summary>Activates a tab picked from the clipped list and scrolls it into the strip, so the click has a visible effect.</summary>
     private void ActivateAndReveal(TabModel tab)
     {
-        Layout?.ActivateTab(tab);
+        Layout?.ActivateTabByUser(tab);
         for (var i = 0; i < headers.Count; i++)
         {
             if (ReferenceEquals(headers[i].Model, tab))

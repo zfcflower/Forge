@@ -89,6 +89,11 @@
       <term:TerminalView />
     </DataTemplate>
 
+    <!-- ask_user question: the tab body of a question card in the bottom group. -->
+    <DataTemplate DataType="ap:UserQuestionCardViewModel" x:DataType="ap:UserQuestionCardViewModel">
+      <ap:QuestionPanelView />
+    </DataTemplate>
+
 
     <!-- Settings sections added by later waves: registered through SectionViewTemplate.Register from their composition module. -->
     <views:SectionViewTemplate />

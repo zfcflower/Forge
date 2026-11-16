@@ -406,12 +406,12 @@ internal static class SessionStrings
         Loc.Register(StartConversationKey, "开始对话", "Start a conversation");
         Loc.Register(
             ChatHintKey,
-            "输入消息后按 Ctrl+Enter 发送。工具调用与每一轮都会显示为卡片。",
-            "Type a message and press Ctrl+Enter to send. Tool calls and every turn appear as cards.");
+            "输入消息后按 Enter 发送，Shift+Enter 换行。工具调用与每一轮都会显示为卡片。",
+            "Type a message and press Enter to send, Shift+Enter for a new line. Tool calls and every turn appear as cards.");
         Loc.Register(MessagePlaceholderKey, "描述要完成的任务…", "Describe the task…");
         Loc.Register(MessageNameKey, "消息", "Message");
         Loc.Register(SendKey, "发送", "Send");
-        Loc.Register(SendTooltipKey, "发送 (Ctrl+Enter)", "Send (Ctrl+Enter)");
+        Loc.Register(SendTooltipKey, "发送 (Enter)", "Send (Enter)");
         Loc.Register(StopTurnKey, "停止本轮", "Stop this turn");
         Loc.Register(StopNameKey, "停止", "Stop");
         Loc.Register(ComposerAgentKey, "代理", "Agent");
@@ -437,11 +437,11 @@ internal static class SessionStrings
         Loc.Register(ComposerModelFetchFailedKey, "拉取模型失败：{0}", "Could not fetch models: {0}");
         Loc.Register(ComposerRunningMenuKey, "本轮运行中：选择如何发送", "A turn is running: choose how to send");
         Loc.Register(ComposerInterjectKey, "插话", "Interject");
-        Loc.Register(ComposerInterjectHintKey, "在下一批工具调用后交给正在运行的代理", "Hand to the running agent after its next tool batch");
+        Loc.Register(ComposerInterjectHintKey, "在下一批工具调用后交给正在运行的代理 (Enter)", "Hand to the running agent after its next tool batch (Enter)");
         Loc.Register(ComposerQueueKey, "排队", "Queue");
         Loc.Register(ComposerQueueHintKey, "本轮结束后自动发送 (Ctrl+Enter)", "Send automatically when this turn ends (Ctrl+Enter)");
         Loc.Register(ComposerRedirectKey, "转弯", "Redirect");
-        Loc.Register(ComposerRedirectHintKey, "停止本轮并立即发送", "Stop this turn and send right away");
+        Loc.Register(ComposerRedirectHintKey, "停止本轮并立即发送 (Ctrl+Shift+Enter)", "Stop this turn and send right away (Ctrl+Shift+Enter)");
         Loc.Register(ComposerStopHintKey, "停止本轮，暂停队列", "Stop this turn and pause the queue");
         Loc.Register(ComposerQueuedKey, "排队", "Queued");
         Loc.Register(ComposerInterjectingKey, "插话", "Interjecting");

@@ -25,7 +25,7 @@ public sealed class AskUserTool : ITool
     private const string Description =
         "Ask the user one to four multiple-choice questions and wait for the answers. Use it only for genuine decisions that only the user can make and that you cannot settle by reading the code or the project: a preference between valid designs, a missing requirement, a choice with different costs for them. "
         + "Do not use it to confirm obvious next steps, to ask permission for work you were already asked to do, or for anything you can decide or look up yourself; prefer a sensible default and say so. "
-        + "Batch related questions into one call instead of asking one by one. Give each question a short header (at most 12 characters) and two to six distinct options with a one-line description each; list your recommended option first. Set multiSelect when several options may apply; the user can also type a free-text answer unless allowFreeText is false. With multiSelect you may bound the picks with minSelect/maxSelect (free text counts as one pick); they are an error on a single-select question. The user may skip individual questions; a skipped one is reported as (skipped). "
+        + "Batch related questions into one call instead of asking one by one. Give each question a short header (at most 12 characters) and two to six distinct options with a one-line description each; list your recommended option first. Set multiSelect when several options may apply; the user can also type a free-text answer unless allowFreeText is false. With multiSelect you may bound the picks with minSelect/maxSelect (free text counts as one pick); they are an error on a single-select question. The user may skip individual questions; a skipped one is reported as (skipped). The user may also ask to discuss a question first (it is unclear, irrelevant, or needs more context): the result then marks it (discussion requested), with the reason and the user's note, and you must explain in plain text and then ask again. "
         + "The result lists each question's chosen labels and any free text. If the user dismisses the questions, continue on your best judgment or ask in plain text.";
 
     private readonly IUserQuestionHandler handler;
@@ -275,6 +275,7 @@ public sealed class AskUserTool : ITool
         }
 
         var builder = new StringBuilder();
+        var discussing = false;
         foreach (var question in questions)
         {
             UserQuestionAnswer? answer = null;
@@ -296,6 +297,24 @@ public sealed class AskUserTool : ITool
             if (answer is { Skipped: true })
             {
                 builder.Append("(skipped)");
+                continue;
+            }
+
+            if (answer is { Discussion: { } discussion })
+            {
+                discussing = true;
+                builder.Append("(discussion requested");
+                if (discussion.Reason is { } reason)
+                {
+                    builder.Append(", reason: ").Append(DescribeReason(reason));
+                }
+
+                builder.Append(')');
+                if (!string.IsNullOrWhiteSpace(discussion.Note))
+                {
+                    builder.Append(' ').Append(SingleLine(discussion.Note));
+                }
+
                 continue;
             }
 
@@ -323,6 +342,25 @@ public sealed class AskUserTool : ITool
             }
         }
 
+        if (discussing)
+        {
+            builder.Append(
+                "\nThe user did not answer the question(s) marked for discussion. Discuss with the user in plain text first: address their note and reason, "
+                + "explain or add the context they need, and do not call ask_user again in the same message. Once that is cleared up, call ask_user again "
+                + "with only the unresolved question(s), reworded if they were unclear; keep the answers already given above.");
+        }
+
         return new ToolResult(builder.ToString());
     }
+
+    private static string DescribeReason(UserQuestionDiscussReason reason) => reason switch
+    {
+        UserQuestionDiscussReason.Unclear => "the question is not clear enough",
+        UserQuestionDiscussReason.Unrelated => "the question is not relevant",
+        _ => "the user needs more context",
+    };
+
+    /// <summary>The note on one line, so a result line always starts with its question's header.</summary>
+    private static string SingleLine(string text) =>
+        text.Trim().Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 }

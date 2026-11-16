@@ -787,6 +787,20 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         return null;
     }
 
+    /// <summary>
+    /// A click on a tab header: activates the tab and, when it sits in a minimized bottom group, restores that group's body
+    /// (also for the already-active tab). Programmatic activation stays <see cref="ActivateTab"/>, which never changes the
+    /// minimized state - the sub-agent sync re-opens its tabs all the time.
+    /// </summary>
+    public void ActivateTabByUser(TabModel tab)
+    {
+        ActivateTab(tab);
+        if (tab is { IsFloating: false } && ReferenceEquals(tab.Group, BottomTabs) && IsBottomMinimized)
+        {
+            IsBottomMinimized = false;
+        }
+    }
+
     public void ActivateTab(TabModel tab)
     {
         if (tab is null || tab.IsFloating || tab.Group is not { } group || group.ActiveTab == tab)

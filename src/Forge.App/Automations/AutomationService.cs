@@ -370,6 +370,15 @@ internal sealed class AutomationService : IAsyncDisposable
             }
         }
 
+        // A shown question waits on the user exactly like an approval card does.
+        foreach (var question in services.Queue.Questions)
+        {
+            if (question.SessionId is { Length: > 0 } id)
+            {
+                list.Add((id, question.CreatedAt));
+            }
+        }
+
         return list;
     }
 

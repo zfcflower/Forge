@@ -32,6 +32,9 @@ internal enum TabKind
     /// <summary>An interactive terminal of the active session; it lives in the bottom group and is never persisted.</summary>
     Terminal,
     Git,
+
+    /// <summary>An <c>ask_user</c> question card of the active session; it lives in the bottom group and is never persisted.</summary>
+    Question,
 }
 
 /// <summary>Position, size and state of a floating window in screen pixels (DIPs).</summary>
@@ -69,6 +72,9 @@ internal static class WorkbenchIds
     /// <summary>A terminal of any session; the suffix is <c>TerminalViewModel.Id</c> and is not written to <c>open-tabs</c>.</summary>
     public const string TerminalTabPrefix = "terminal:";
 
+    /// <summary>An <c>ask_user</c> question card; the suffix is the card id and is not written to <c>open-tabs</c>.</summary>
+    public const string QuestionTabPrefix = "question:";
+
     /// <summary>A preview tab the user opened with "open in new tab"; the suffix is the file path.</summary>
     public const string PinnedFileTabPrefix = "file:";
 
@@ -77,6 +83,8 @@ internal static class WorkbenchIds
     public static string SubAgentTab(string agentId) => SubAgentTabPrefix + agentId;
 
     public static string TerminalTab(string terminalId) => TerminalTabPrefix + terminalId;
+
+    public static string QuestionTab(string cardId) => QuestionTabPrefix + cardId;
 
     public static string PinnedFileTab(string path) => PinnedFileTabPrefix + path;
 }

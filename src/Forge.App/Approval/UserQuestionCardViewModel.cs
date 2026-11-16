@@ -52,17 +52,70 @@ internal sealed class QuestionOptionViewModel : NotifyingObject
     }
 }
 
-/// <summary>One question of a card: header chip, prompt, options (single or multi select) and the optional free text.</summary>
+/// <summary>One "why do you want to discuss" chip; at most one is on, and none is fine.</summary>
+internal sealed class DiscussReasonViewModel : NotifyingObject
+{
+    private readonly QuestionItemViewModel owner;
+    private readonly string labelKey;
+    private bool isSelected;
+
+    public DiscussReasonViewModel(QuestionItemViewModel owner, UserQuestionDiscussReason reason, string labelKey)
+    {
+        this.owner = owner;
+        this.labelKey = labelKey;
+        Reason = reason;
+    }
+
+    public UserQuestionDiscussReason Reason { get; }
+
+    public string Label => Loc.Instance[labelKey];
+
+    internal void RefreshLanguage() => OnPropertyChanged(nameof(Label));
+
+    public bool IsSelected
+    {
+        get => isSelected;
+        set
+        {
+            if (Set(ref isSelected, value))
+            {
+                owner.OnReasonChanged(this);
+            }
+        }
+    }
+
+    internal void SetSilently(bool value)
+    {
+        if (isSelected != value)
+        {
+            isSelected = value;
+            OnPropertyChanged(nameof(IsSelected));
+        }
+    }
+}
+
+/// <summary>
+/// One question of a card: header chip, prompt, options (single or multi select), the "other, your own answer" row (selected
+/// automatically once the user types) and the optional discussion request.
+/// </summary>
 internal sealed class QuestionItemViewModel : NotifyingObject
 {
     private readonly Action changed;
+    private readonly Action<QuestionItemViewModel> select;
     private string freeText = string.Empty;
+    private string discussNote = string.Empty;
     private bool updating;
     private bool skipped;
+    private bool otherSelected;
+    private bool discussing;
+    private bool isCurrent;
+    private int ordinal;
 
-    public QuestionItemViewModel(UserQuestion question, Action changed)
+    public QuestionItemViewModel(UserQuestion question, int ordinal, Action changed, Action<QuestionItemViewModel> select)
     {
         this.changed = changed;
+        this.select = select;
+        this.ordinal = ordinal;
         Id = question.Id;
         Header = question.Header;
         Prompt = question.Prompt;
@@ -81,6 +134,13 @@ internal sealed class QuestionItemViewModel : NotifyingObject
         }
 
         Options = [.. question.Options.Select(option => new QuestionOptionViewModel(this, option))];
+        Reasons =
+        [
+            new(this, UserQuestionDiscussReason.Unclear, QuestionsStrings.ReasonUnclearKey),
+            new(this, UserQuestionDiscussReason.Unrelated, QuestionsStrings.ReasonUnrelatedKey),
+            new(this, UserQuestionDiscussReason.NeedsContext, QuestionsStrings.ReasonContextKey),
+        ];
+        SelectCommand = new RelayCommand(() => this.select(this));
     }
 
     public string Id { get; }
@@ -97,14 +157,28 @@ internal sealed class QuestionItemViewModel : NotifyingObject
 
     public IReadOnlyList<QuestionOptionViewModel> Options { get; }
 
+    public IReadOnlyList<DiscussReasonViewModel> Reasons { get; }
+
+    /// <summary>Makes this the visible question (the chips strip of a multi-question card).</summary>
+    public RelayCommand SelectCommand { get; }
+
     /// <summary>Fewest picks that answer a multi-select question (free text counts as one); 1 for single-select.</summary>
     public int MinSelect { get; }
 
     /// <summary>Most picks allowed for a multi-select question (free text counts as one); 1 for single-select.</summary>
     public int MaxSelect { get; }
 
-    /// <summary>Picked options plus one when free text is typed.</summary>
-    public int PickCount => Options.Count(option => option.IsSelected) + (HasFreeText ? 1 : 0);
+    /// <summary>Chip caption: the 1-based number, a check mark once resolved, then the header.</summary>
+    public string ChipText => (IsResolved ? "✓ " : (ordinal + 1) + ". ") + Header;
+
+    public bool IsCurrent
+    {
+        get => isCurrent;
+        internal set => Set(ref isCurrent, value);
+    }
+
+    /// <summary>Picked options plus one when the "other" row is picked.</summary>
+    public int PickCount => Options.Count(option => option.IsSelected) + (otherSelected ? 1 : 0);
 
     private bool HasFreeText => AllowFreeText && !string.IsNullOrWhiteSpace(freeText);
 
@@ -116,8 +190,31 @@ internal sealed class QuestionItemViewModel : NotifyingObject
 
     public bool IsEditable => !skipped;
 
-    /// <summary>The free-text box is off while skipped, or when a multi-select question is full and the box is empty.</summary>
-    public bool IsFreeTextEnabled => !skipped && (!MultiSelect || HasFreeText || PickCount < MaxSelect);
+    /// <summary>The "other" row is off while skipped, or when a multi-select question is full and the row is not picked.</summary>
+    public bool IsFreeTextEnabled => !skipped && (!MultiSelect || otherSelected || PickCount < MaxSelect);
+
+    /// <summary>The "other, your own answer" row is picked; typing into its box picks it automatically.</summary>
+    public bool IsOtherSelected
+    {
+        get => otherSelected;
+        set
+        {
+            if (value && !otherSelected && MultiSelect && IsAtMax)
+            {
+                OnPropertyChanged();
+                return;
+            }
+
+            SetOther(value);
+            if (otherSelected)
+            {
+                OnPicked();
+            }
+
+            RefreshState();
+            changed();
+        }
+    }
 
     /// <summary>The user chose not to answer this question; it counts as resolved but not as answered.</summary>
     public bool IsSkipped
@@ -127,18 +224,69 @@ internal sealed class QuestionItemViewModel : NotifyingObject
         {
             if (SetAndNotify(ref skipped, value, nameof(IsEditable)))
             {
-                OnPropertyChanged(nameof(IsFreeTextEnabled));
-                OnPropertyChanged(nameof(IsAnswered));
-                RefreshOptions();
+                if (skipped)
+                {
+                    SetDiscussing(false);
+                }
+
+                RefreshState();
                 changed();
             }
         }
     }
 
-    /// <summary>The question is skipped, or its pick count is within bounds.</summary>
-    public bool IsResolved => skipped || IsAnswered;
+    /// <summary>The user wants to talk about this question before answering it; counts as resolved.</summary>
+    public bool IsDiscussing
+    {
+        get => discussing;
+        set
+        {
+            if (value == discussing)
+            {
+                return;
+            }
 
-    internal void RefreshLanguage() => OnPropertyChanged(nameof(BoundsHint));
+            if (value)
+            {
+                ClearPicks();
+                if (skipped)
+                {
+                    skipped = false;
+                    OnPropertyChanged(nameof(IsSkipped));
+                    OnPropertyChanged(nameof(IsEditable));
+                }
+            }
+
+            SetDiscussing(value);
+            RefreshState();
+            changed();
+        }
+    }
+
+    public string DiscussNote
+    {
+        get => discussNote;
+        set => Set(ref discussNote, value ?? string.Empty);
+    }
+
+    /// <summary>The question is skipped, discussed, or its pick count is within bounds.</summary>
+    public bool IsResolved => skipped || discussing || IsAnswered;
+
+    internal void RefreshLanguage()
+    {
+        OnPropertyChanged(nameof(BoundsHint));
+        OnPropertyChanged(nameof(ChipText));
+        foreach (var reason in Reasons)
+        {
+            reason.RefreshLanguage();
+        }
+    }
+
+    internal void SetOrdinal(int value)
+    {
+        ordinal = value;
+        OnPropertyChanged(nameof(ChipText));
+    }
 
     private void RefreshOptions()
     {
@@ -148,21 +296,32 @@ internal sealed class QuestionItemViewModel : NotifyingObject
         }
     }
 
+    /// <summary>Typing picks the "other" row on its own (when it may still be picked) and cancels a discussion request.</summary>
     public string FreeText
     {
         get => freeText;
         set
         {
-            if (Set(ref freeText, value ?? string.Empty))
+            if (!Set(ref freeText, value ?? string.Empty))
             {
-                RefreshState();
-                changed();
+                return;
             }
+
+            if (HasFreeText && !otherSelected && !skipped && (!MultiSelect || !IsAtMax))
+            {
+                SetOther(true);
+                OnPicked();
+            }
+
+            RefreshState();
+            changed();
         }
     }
 
-    /// <summary>Not skipped and the pick count (options plus non-blank free text) is within [min, max].</summary>
-    public bool IsAnswered => !skipped && (MultiSelect ? PickCount >= MinSelect && PickCount <= MaxSelect : PickCount >= 1);
+    /// <summary>Not skipped, not discussed, and the pick count is within [min, max] (the "other" row needs non-blank text).</summary>
+    public bool IsAnswered =>
+        !skipped && !discussing && (!otherSelected || HasFreeText)
+        && (MultiSelect ? PickCount >= MinSelect && PickCount <= MaxSelect : PickCount >= 1);
 
     internal void OnOptionChanged(QuestionOptionViewModel changedOption)
     {
@@ -171,17 +330,75 @@ internal sealed class QuestionItemViewModel : NotifyingObject
             return;
         }
 
-        if (!MultiSelect && changedOption.IsSelected)
+        if (changedOption.IsSelected)
         {
-            // Single select: picking one clears the others (a radio group does the same visually).
+            OnPicked();
+            if (!MultiSelect)
+            {
+                // Single select: picking one clears the others (the "other" row too; its text stays).
+                updating = true;
+                try
+                {
+                    foreach (var other in Options)
+                    {
+                        if (!ReferenceEquals(other, changedOption) && other.IsSelected)
+                        {
+                            other.IsSelected = false;
+                        }
+                    }
+
+                    SetOther(false);
+                }
+                finally
+                {
+                    updating = false;
+                }
+            }
+        }
+
+        RefreshState();
+        changed();
+    }
+
+    internal void OnReasonChanged(DiscussReasonViewModel changedReason)
+    {
+        if (updating)
+        {
+            return;
+        }
+
+        if (changedReason.IsSelected)
+        {
+            foreach (var other in Reasons)
+            {
+                if (!ReferenceEquals(other, changedReason))
+                {
+                    other.SetSilently(false);
+                }
+            }
+        }
+    }
+
+    /// <summary>A real pick (option or "other") was made: a pending discussion request is cancelled.</summary>
+    private void OnPicked() => SetDiscussing(false);
+
+    private void SetOther(bool value)
+    {
+        if (otherSelected == value)
+        {
+            return;
+        }
+
+        if (value && !MultiSelect)
+        {
             updating = true;
             try
             {
-                foreach (var other in Options)
+                foreach (var option in Options)
                 {
-                    if (!ReferenceEquals(other, changedOption) && other.IsSelected)
+                    if (option.IsSelected)
                     {
-                        other.IsSelected = false;
+                        option.IsSelected = false;
                     }
                 }
             }
@@ -191,14 +408,51 @@ internal sealed class QuestionItemViewModel : NotifyingObject
             }
         }
 
-        RefreshState();
-        changed();
+        otherSelected = value;
+        OnPropertyChanged(nameof(IsOtherSelected));
+    }
+
+    private void SetDiscussing(bool value)
+    {
+        if (discussing == value)
+        {
+            return;
+        }
+
+        discussing = value;
+        OnPropertyChanged(nameof(IsDiscussing));
+    }
+
+    private void ClearPicks()
+    {
+        updating = true;
+        try
+        {
+            foreach (var option in Options)
+            {
+                if (option.IsSelected)
+                {
+                    option.IsSelected = false;
+                }
+            }
+        }
+        finally
+        {
+            updating = false;
+        }
+
+        if (otherSelected)
+        {
+            otherSelected = false;
+            OnPropertyChanged(nameof(IsOtherSelected));
+        }
     }
 
     private void RefreshState()
     {
         OnPropertyChanged(nameof(IsAnswered));
         OnPropertyChanged(nameof(IsResolved));
+        OnPropertyChanged(nameof(ChipText));
         OnPropertyChanged(nameof(PickCount));
         OnPropertyChanged(nameof(IsAtMax));
         OnPropertyChanged(nameof(IsFreeTextEnabled));
@@ -212,34 +466,61 @@ internal sealed class QuestionItemViewModel : NotifyingObject
             return new UserQuestionAnswer(Id, [], null, Skipped: true);
         }
 
+        if (discussing)
+        {
+            var reason = Reasons.FirstOrDefault(item => item.IsSelected)?.Reason;
+            var note = string.IsNullOrWhiteSpace(discussNote) ? null : discussNote.Trim();
+            return new UserQuestionAnswer(Id, [], null, Discussion: new UserQuestionDiscussion(reason, note));
+        }
+
         var selected = Options.Where(option => option.IsSelected).Select(option => option.Label).ToArray();
-        var text = AllowFreeText && !string.IsNullOrWhiteSpace(freeText) ? freeText.Trim() : null;
+        var text = otherSelected && HasFreeText ? freeText.Trim() : null;
         return new UserQuestionAnswer(Id, selected, text);
     }
 }
 
 /// <summary>
-/// An <c>ask_user</c> question card in the approval queue. Submit completes it as <see cref="ApprovalCardDecision.Allow"/>
-/// with <see cref="Response"/> set; Dismiss completes it as a denial; a withdrawal (turn cancelled, session released,
-/// shutdown) completes it as <see cref="ApprovalCardDecision.Withdrawn"/>, which the handler reports as cancelled.
+/// An <c>ask_user</c> question card. It is shown as a tab of the workbench's bottom group (not in the approval overlay).
+/// Submit completes it as <see cref="ApprovalCardDecision.Allow"/> with <see cref="Response"/> set; Dismiss completes it as a
+/// denial; a withdrawal (turn cancelled, session released, shutdown) completes it as <see cref="ApprovalCardDecision.Withdrawn"/>,
+/// which the handler reports as cancelled.
 /// </summary>
 internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
 {
     private readonly string agentName;
     private UserQuestionResponse? response;
+    private QuestionItemViewModel current;
 
     public UserQuestionCardViewModel(UserQuestionRequest request, string sessionTitle)
         : base("ask:" + Guid.NewGuid().ToString("N"), request.SessionId, sessionTitle, DateTimeOffset.UtcNow)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Questions.Count == 0)
+        {
+            throw new ArgumentException("A question card needs at least one question.", nameof(request));
+        }
+
         agentName = string.IsNullOrWhiteSpace(request.AgentName) ? "main" : request.AgentName;
-        Questions = [.. request.Questions.Select(question => new QuestionItemViewModel(question, OnAnswerChanged))];
+        Questions = [.. request.Questions.Select((question, index) => new QuestionItemViewModel(question, index, OnAnswerChanged, Select))];
+        current = Questions[0];
+        current.IsCurrent = true;
         SubmitCommand = new RelayCommand(Submit, () => CanSubmit);
         DismissCommand = new RelayCommand(Dismiss, () => !IsDecided);
         AttachLanguageChanged(OnLanguageChanged);
     }
 
     public IReadOnlyList<QuestionItemViewModel> Questions { get; }
+
+    /// <summary>
+    /// Raised by the panel view with the height its content needs (header, chips, current question, footer), so the bottom
+    /// group can open tall enough to show every option without scrolling.
+    /// </summary>
+    public event Action<double>? ContentHeightReported;
+
+    internal void ReportContentHeight(double height) => ContentHeightReported?.Invoke(height);
+
+    /// <summary>The chips strip is only useful with more than one question.</summary>
+    public bool HasMultipleQuestions => Questions.Count > 1;
 
     public RelayCommand SubmitCommand { get; }
 
@@ -251,10 +532,23 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
 
     public string Title => QuestionsStrings.CardTitle;
 
+    /// <summary>The bottom-group tab title.</summary>
+    public string TabTitle => QuestionsStrings.TabTitle(agentName);
+
+    /// <summary>"Needs your input · the agent is waiting".</summary>
+    public string HeaderText => QuestionsStrings.NeedsInput(agentName);
+
     private int waitingCount;
 
-    /// <summary>Every question is answered or skipped, at least one is answered, and the card is still open.</summary>
-    public bool CanSubmit => !IsDecided && Questions.All(question => question.IsResolved) && Questions.Any(question => question.IsAnswered);
+    /// <summary>Every question is resolved (answered, skipped or discussed), one is answered or discussed, and the card is open.</summary>
+    public bool CanSubmit => !IsDecided
+        && Questions.All(question => question.IsResolved)
+        && Questions.Any(question => question.IsAnswered || question.IsDiscussing);
+
+    /// <summary>At least one question asks for a discussion: submitting starts it instead of finishing the questions.</summary>
+    public bool IsDiscussionRequested => Questions.Any(question => question.IsDiscussing);
+
+    public string SubmitText => IsDiscussionRequested ? QuestionsStrings.SubmitDiscuss : QuestionsStrings.Submit;
 
     /// <summary>True when every question is skipped: nothing to submit, the user should dismiss instead.</summary>
     public bool AllSkipped => Questions.All(question => question.IsSkipped);
@@ -285,6 +579,18 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
     /// <summary>A withdrawal is "cancelled", not a refusal: the waiter must tell the model which one it was.</summary>
     protected override ApprovalCardOutcome WithdrawalOutcome => new(ApprovalCardDecision.Withdrawn);
 
+    private void Select(QuestionItemViewModel question)
+    {
+        if (ReferenceEquals(current, question))
+        {
+            return;
+        }
+
+        current.IsCurrent = false;
+        current = question;
+        current.IsCurrent = true;
+    }
+
     private void Submit()
     {
         if (!CanSubmit)
@@ -305,6 +611,8 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
     {
         SubmitCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanSubmit));
+        OnPropertyChanged(nameof(IsDiscussionRequested));
+        OnPropertyChanged(nameof(SubmitText));
         OnPropertyChanged(nameof(AllSkipped));
         OnPropertyChanged(nameof(AllSkippedHint));
     }
@@ -313,6 +621,9 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
     {
         OnPropertyChanged(nameof(AskedByText));
         OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(TabTitle));
+        OnPropertyChanged(nameof(HeaderText));
+        OnPropertyChanged(nameof(SubmitText));
         OnPropertyChanged(nameof(WaitingText));
         OnPropertyChanged(nameof(AllSkippedHint));
         foreach (var question in Questions)

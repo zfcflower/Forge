@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Shapes;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -76,6 +77,7 @@ internal sealed class TimelineGutter : TemplatedControl
 
     private FluentIcon? icon;
     private Border? middleLine;
+    private Ellipse? ring;
     private ItemsControl? owner;
     private Control? container;
     private ItemsControl? outer;
@@ -153,6 +155,7 @@ internal sealed class TimelineGutter : TemplatedControl
         base.OnApplyTemplate(e);
         icon = e.NameScope.Find<FluentIcon>("PART_Icon");
         middleLine = e.NameScope.Find<Border>("PART_MidLine");
+        ring = e.NameScope.Find<Ellipse>("PART_Ring");
         appliedNode = null;
         appliedName = null;
         Recompute();
@@ -536,6 +539,29 @@ internal sealed class TimelineGutter : TemplatedControl
         icon.Classes.Set("failed", state == TimelineNodeState.Failed);
         icon.Classes.Set("warning", state == TimelineNodeState.Warning);
         icon.Classes.Set("pulsing", state == TimelineNodeState.Running && !TreeMotion.ReducedMotion);
+        ApplyRing(kind, state);
+    }
+
+    /// <summary>
+    /// The ring behind the node, the second signal besides the pulse: a running reasoning stretch breathes a slow halo, and a
+    /// node that waits for the user (a pending question or approval) sends ripples outward. With motion reduced the ring does
+    /// not move but stays as a still outline for the waiting node, so the state reads without animation.
+    /// </summary>
+    private void ApplyRing(TimelineNodeKind kind, TimelineNodeState state)
+    {
+        if (ring is null)
+        {
+            return;
+        }
+
+        var running = state == TimelineNodeState.Running && ShowNode;
+        var waiting = running && kind is TimelineNodeKind.Approval or TimelineNodeKind.Notice;
+        var thinking = running && kind == TimelineNodeKind.Thinking;
+        var animated = !TreeMotion.ReducedMotion;
+        ring.Classes.Set("waiting", waiting && animated);
+        ring.Classes.Set("thinking", thinking && animated);
+        ring.Classes.Set("still", waiting && !animated);
+        ring.IsVisible = waiting || thinking;
     }
 
     /// <summary>Renames the node; skipped while the name's inputs are unchanged, forced by a language switch.</summary>
