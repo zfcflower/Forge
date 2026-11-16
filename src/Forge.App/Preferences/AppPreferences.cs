@@ -92,8 +92,8 @@ internal sealed class AppPreferences : ObservableObject
     public const string EditorThemeDark = "dark";
     public const string DefaultEditorTheme = EditorThemeAuto;
 
-    // Settings the thinkrail-gap waves read (registered in docs/research/2026-11-13-thinkrail-gap-plan.md, section 6.2).
-    // They all live here so no wave edits this file again; each wave only reads them and adds its settings page.
+    // Settings the thinkrail-gap waves read. They all live here so no wave edits this file again; each wave only reads
+    // them and adds its settings page.
     public const int MinAgentsMaxParallelSubAgents = 1;
     public const int MaxAgentsMaxParallelSubAgents = 16;
     public const int DefaultAgentsMaxParallelSubAgents = 4;

@@ -30,8 +30,8 @@ copied material is `src/Forge.App/THIRD_PARTY_NOTICES.md` (Fluent System Icons g
   lets the caller tell "wait a moment" apart from "waiting will never help".
 - What was **not** taken: its implementation. Upstream publishes an immutable state record per operation; that allocates on
   every authorized request, which the acceptance row of the `ratelimit.*` measurements forbids (0 bytes per acquire), so
-  Forge's bucket publishes two 64-bit words by compare-exchange instead (see
-  `docs/research/2026-11-13-w15-implementation.md`). The provenance here is an influence, not a license obligation.
+  Forge's bucket publishes two 64-bit words by compare-exchange instead (see the rate-limiting decisions in
+  `src/Forge.Core/SPEC.md`). The provenance here is an influence, not a license obligation.
 
 ## Provider endpoints and authentication
 
