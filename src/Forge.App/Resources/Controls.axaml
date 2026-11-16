@@ -536,6 +536,13 @@
     <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
 
+  <!-- A project row is a heading, not a pick: clicking it expands the subtree, so leaving the selection colour behind would
+       mark it as "the row you are on" when the row you are on is the session below it. The selection itself stays — the
+       tree's keyboard navigation and its refresh restore both read it — only the background is withheld. -->
+  <Style Selector="ListBoxItem:selected Border.tree-row-content.project-row">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
   <!-- The row the shell is showing: the active session in the main region, or the sub-agent whose tab the bottom group has. -->
   <Style Selector="Border.tree-row-content.active-row">
     <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
@@ -564,6 +571,9 @@
   <Style Selector="wc|FluentIcon.tree-icon.project-icon">
     <Setter Property="Width" Value="14" />
     <Setter Property="Height" Value="14" />
+    <!-- The one coloured icon in the tree: a project row heads a subtree rather than naming a session, and the brand tier
+         that carries readable pixels keeps it distinguishable from the muted rows underneath. -->
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <!-- The active session's row takes the primary colour: the tree's own "this is the conversation you are in" mark. Every

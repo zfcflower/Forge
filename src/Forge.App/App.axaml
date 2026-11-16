@@ -24,7 +24,6 @@
         <ResourceInclude Source="avares://Forge.App/Resources/Icons.axaml" />
         <ResourceInclude Source="avares://Forge.App/Resources/Tokens.axaml" />
         <ResourceInclude Source="avares://Forge.App/Resources/Workbench.axaml" />
-        <ResourceInclude Source="avares://Forge.App/Resources/ScrollViewer.axaml" />
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>
