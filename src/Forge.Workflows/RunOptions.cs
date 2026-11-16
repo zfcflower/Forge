@@ -17,7 +17,7 @@ public sealed record RunOptions
     /// <summary>Whole-run budget. When it elapses, scheduling stops and the run reports <see cref="WorkflowRunStatus.TimedOut"/>.</summary>
     public TimeSpan? Timeout { get; init; }
 
-    /// <summary>Clock and timer source. Inject a fake to control timestamps and timeouts in tests.</summary>
+    /// <summary>Clock and timer source. Inject a clock to control timestamps and timeouts.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 
     /// <summary>

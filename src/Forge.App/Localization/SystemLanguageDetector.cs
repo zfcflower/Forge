@@ -30,7 +30,7 @@ internal static class SystemLanguageDetector
     /// <summary>The <c>HKCU</c> subkey that holds the regional format settings.</summary>
     private const string InternationalKey = @"Control Panel\International";
 
-    /// <summary>Everything the decision depends on, read once by <see cref="ReadCurrent"/>; tests build it by hand.</summary>
+    /// <summary>Everything the decision depends on, read once by <see cref="ReadCurrent"/>. </summary>
     /// <param name="CurrentUiCulture"><c>CultureInfo.CurrentUICulture.Name</c> (empty under invariant globalization).</param>
     /// <param name="InstalledUiCulture"><c>CultureInfo.InstalledUICulture.Name</c>.</param>
     /// <param name="WindowsUiLanguage">

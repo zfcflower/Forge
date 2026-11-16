@@ -66,7 +66,7 @@ public sealed class McpServerManagerOptions
 
     public int StderrCapacityChars { get; init; } = 8192;
 
-    /// <summary>Replaces the built-in transport creation, e.g. for tests or a custom socket.</summary>
+    /// <summary>Replaces the built-in transport creation (a custom socket).</summary>
     public Func<McpServerConfig, IMcpTransport>? TransportFactory { get; init; }
 
     /// <summary>
@@ -81,6 +81,6 @@ public sealed class McpServerManagerOptions
     /// <summary>The browser side of the OAuth sign-in; required with <see cref="TokenStore"/> for the interactive flow.</summary>
     public IMcpOAuthUi? OAuthUi { get; init; }
 
-    /// <summary>Clock for token lifetimes and the sign-in timeout; tests inject a fake instead of waiting five minutes.</summary>
+    /// <summary>Clock for token lifetimes and the sign-in timeout.</summary>
     public TimeProvider? TimeProvider { get; init; }
 }

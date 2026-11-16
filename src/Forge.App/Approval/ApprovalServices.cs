@@ -10,7 +10,7 @@ using ZLogger;
 
 namespace Forge.App.Approval;
 
-/// <summary>What the extensions settings section needs to know about the host connection; a test can fake it.</summary>
+/// <summary>What the extensions settings section needs to know about the host connection.</summary>
 internal interface IExtensionHostState
 {
     bool HasHost { get; }
@@ -224,7 +224,7 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
         QueueViewModel.Dispose();
 
         // Every waiter sees a denial instead of hanging on a card nobody can click any more. Tearing the graph down may
-        // happen where no dispatcher loop runs (a test host, the very last shutdown step), so the withdrawal is queued
+        // happen where no dispatcher loop runs (the very last shutdown step), so the withdrawal is queued
         // rather than awaited when this is not the UI thread.
         if (Queue.Dispatcher.CheckAccess())
         {

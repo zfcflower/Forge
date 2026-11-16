@@ -52,7 +52,7 @@ public sealed class SwappableNetworkHandler : HttpMessageHandler
     /// <summary>Replaced inner handlers (whether or not already disposed).</summary>
     public int RetiredInnerCount => Volatile.Read(ref retired);
 
-    /// <summary>The current inner handler's identity, for tests.</summary>
+    /// <summary>The current inner handler's identity.</summary>
     public object? CurrentInner => Volatile.Read(ref current)?.Handler;
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

@@ -80,7 +80,7 @@ internal sealed class ScriptExecutorSupervisor : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(cleanup);
         this.options = options;
 
-        // An in-process host (a test, an embedder) may leave the path unset; the same discovery the command line uses
+        // An in-process host (an embedder) may leave the path unset; the same discovery the command line uses
         // then applies, so a host never silently loses its executor. A path that was named explicitly (--executor or the
         // environment variable) never falls back to discovery: when it does not exist the call fails closed instead of
         // running an executor nobody asked for.

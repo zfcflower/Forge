@@ -374,7 +374,7 @@ internal sealed class PromptsSettingsViewModel : NotifyingObject, IDisposable, I
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the list and the editor are
+        // A switch raised on another thread belongs to a window that is gone: the list and the editor are
         // bound on the thread that built the section.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

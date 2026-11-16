@@ -20,7 +20,7 @@ internal sealed class ImageDiffViewModel : ObservableObject
     private ImageFilePreviewViewModel? after;
     private bool loading;
 
-    /// <param name="decoder">Overrides the real bitmap decoder (headless tests have no Skia); null uses the preview's.</param>
+    /// <param name="decoder">Overrides the real bitmap decoder (a host without Skia); null uses the preview's.</param>
     public ImageDiffViewModel(IDiffFileItem file, Func<byte[], Bitmap?>? decoder = null)
     {
         ArgumentNullException.ThrowIfNull(file);

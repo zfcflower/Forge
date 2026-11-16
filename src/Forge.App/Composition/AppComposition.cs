@@ -266,7 +266,7 @@ internal sealed class AppComposition : IAsyncDisposable
 
     /// <summary>
     /// The handover sequence (lifecycle 6.2) over the real store, git, step committer, provider and review store; set by
-    /// <see cref="Create"/>. Settable so shell tests can run the handover against substitutes.
+    /// <see cref="Create"/>. Settable so the handover can run against substitutes.
     /// </summary>
     internal HandoverFlow Handover { get; set; } = null!;
 
@@ -277,7 +277,7 @@ internal sealed class AppComposition : IAsyncDisposable
     internal MergeFlow Merge { get; set; } = null!;
 
     /// <summary>
-    /// The platform trash (lifecycle 7.1): the only way a workspace directory is removed. Settable so tests move into a
+    /// The platform trash (lifecycle 7.1): the only way a workspace directory is removed. Settable so a workspace can move into a
     /// temporary folder instead of the real recycle bin.
     /// </summary>
     internal ITrashService Trash { get; set; } = TrashService.CreateDefault();
@@ -1051,7 +1051,7 @@ internal sealed class AppComposition : IAsyncDisposable
     /// <summary>
     /// The font feature's two pieces: the settings section (always) and the applier that writes the font tokens into the
     /// application resources (only when an <see cref="Application"/> exists and this is its thread - a composition built
-    /// by a plain unit test has neither, and the static defaults in <c>Tokens.axaml</c> then stand).
+    /// by a plain host has neither, and the static defaults in <c>Tokens.axaml</c> then stand).
     /// </summary>
     private sealed class AppearanceFeature : IDisposable
     {
@@ -1095,7 +1095,7 @@ internal sealed class AppComposition : IAsyncDisposable
         {
             if (dispatcher is null)
             {
-                // No UI thread (a unit-test composition): nothing is bound, so the editors are synced right here.
+                // No UI thread (a headless composition): nothing is bound, so the editors are synced right here.
                 SyncAndApply();
                 return;
             }

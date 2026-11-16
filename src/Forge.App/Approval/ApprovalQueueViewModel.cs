@@ -75,7 +75,7 @@ internal sealed class ApprovalQueueViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the header text is bound on
+        // A switch raised on another thread belongs to a window that is gone: the header text is bound on
         // the thread that built the queue.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

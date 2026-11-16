@@ -7,7 +7,7 @@ namespace Forge.App.ViewModels.Preview;
 /// instance, mirroring <see cref="Forge.App.Editing.EditorSettings.Current"/>. The composition root replaces
 /// <see cref="Current"/> with an instance bound to the loaded preferences before the first window opens; every getter
 /// reads through to the preferences, so a change in the settings page applies to the next preview without a restart.
-/// <see cref="FileDocumentViewModel.Create"/> can also pin one instance (e.g. for a test).
+/// <see cref="FileDocumentViewModel.Create"/> can also pin one instance .
 /// </summary>
 internal sealed class FilePreviewSettings
 {
@@ -27,7 +27,7 @@ internal sealed class FilePreviewSettings
     /// <summary>What a preview shows before the composition root binds the real preferences.</summary>
     private static FilePreviewSettings current = new();
 
-    /// <summary>The live preferences; null keeps the built-in defaults (a host without preferences, a test).</summary>
+    /// <summary>The live preferences; null keeps the built-in defaults (a host without preferences).</summary>
     private readonly AppPreferences? preferences;
 
     public FilePreviewSettings(AppPreferences? preferences = null) => this.preferences = preferences;

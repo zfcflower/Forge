@@ -290,7 +290,7 @@ internal sealed class ProblemsPanelViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the row cache is read on the
+        // A switch raised on another thread belongs to a window that is gone: the row cache is read on the
         // thread that built the panel, so dropping it from anywhere else would race that thread's own refresh.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

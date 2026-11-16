@@ -27,7 +27,7 @@ internal static class AppLogSetup
         return Configure(paths.UserDataDirectory);
     }
 
-    /// <summary>The same as <see cref="Configure(AppPaths)"/> for an explicit data root, so tests never touch the real one.</summary>
+    /// <summary>The same as <see cref="Configure(AppPaths)"/> for an explicit data root, so an alternate root never touches the real one.</summary>
     internal static IDisposable Configure(string dataRoot)
     {
         var directory = Path.Combine(dataRoot, LogsDirectoryName);

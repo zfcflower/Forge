@@ -91,13 +91,6 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Test seam: a supervisor over a client the caller built (production builds its own in <see cref="Create"/>), so the
-    /// "host failed" announcement can be pinned against a host that never comes up without a resolved JIT layout.
-    /// </summary>
-    internal static ExtensionHostSupervisor WrapClient(ExtensionHostClient client, INotifications? notifications) =>
-        new(client, notifications);
-
-    /// <summary>
     /// The plugin-root switches of one app layout (wave W10a): bundled plugins ship next to the app and are copied into the
     /// plugins directory on first run, while the read-only built-in directory is discovered without ever being written to.
     /// Both are empty for now, so a switch is passed only when its directory exists - the host treats a missing directory
@@ -206,8 +199,7 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
     /// Maps one host-reported plugin problem onto a toast. A code this build knows becomes a localized sentence; an
     /// unknown one keeps the host's own English text, so a newer host still says something instead of nothing. The key is
     /// per plugin: a plugin that keeps failing is one toast counting its repeats, not a stack of identical ones.
-    /// <para>Internal so the mapping can be pinned without a host process, through the same <see cref="WrapClient"/> seam
-    /// the host-failure path uses.</para>
+    /// <para>Internal so the mapping can be exercised without a host process.</para>
     /// </summary>
     internal void OnPluginProblem(HostPluginProblem problem)
     {

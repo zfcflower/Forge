@@ -25,7 +25,7 @@ internal sealed class ModelMetadataMemo
     private readonly Lock gate = new();
     private readonly Dictionary<Key, ModelMetadata> entries = [];
 
-    /// <summary>How many resolved models are held (tests and diagnostics).</summary>
+    /// <summary>How many resolved models are held (diagnostics).</summary>
     public int Count
     {
         get

@@ -79,9 +79,9 @@ internal sealed class McpServices : IAsyncDisposable
             tokenStore: new McpTokenStore(paths.UserDataDirectory),
             oauthUi: new McpOAuthUi());
 
-    /// <summary>Same wiring over explicit files, for a test that has no user profile to read.</summary>
+    /// <summary>Same wiring over explicit files, for a host with no user profile to read.</summary>
     /// <param name="transportFactory">
-    /// Replaces the transport a server would spawn. A test uses it to answer the handshake in memory, which is the only way to
+    /// Replaces the transport a server would spawn. It lets the handshake be answered in memory, which is the only way to
     /// reach a ready server (and therefore a ready server's tools and their server lookup) without launching a process.
     /// </param>
     public static McpServices Create(

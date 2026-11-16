@@ -206,7 +206,7 @@ internal sealed class AgentDefaultsStore
     /// </summary>
     /// <param name="levels">
     /// The accepted steps per model and provider; defaults to the live catalogue (compiled table first, then the fetched
-    /// catalog). A test can pass a restricted one.
+    /// catalog). A restricted set can be passed instead.
     /// </param>
     public ModelSettings? Resolve(
         string agentId,

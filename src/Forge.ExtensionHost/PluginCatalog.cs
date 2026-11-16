@@ -44,9 +44,6 @@ internal sealed class PluginCatalog
 
     public string PluginsDirectory { get; }
 
-    /// <summary>The compilation cache every prepared source plugin lands in; a test seam for the eviction wiring.</summary>
-    internal CompilationCache Cache => compiler.Cache;
-
     /// <summary>
     /// Drops one cached compilation result, keyed by <see cref="PluginEntry.CacheKey"/>. Pure memory hygiene: the cache
     /// never carried correctness (its key covers the source and references, so changed content can never hit a stale

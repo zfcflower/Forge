@@ -37,7 +37,7 @@ public sealed class WindowsRecycleBinTrash : ITrashService
     {
     }
 
-    /// <summary>For tests: the drive type of a path root (<c>C:\</c>) and the <c>subst</c> mappings (none by default).</summary>
+    /// <summary>Substitutes the drive-type probe of a path root (<c>C:\</c>) and the <c>subst</c> mappings (none by default).</summary>
     public WindowsRecycleBinTrash(Func<string, DriveType> driveTypeOf, Func<IReadOnlyDictionary<char, string>>? substMappings = null)
     {
         ArgumentNullException.ThrowIfNull(driveTypeOf);

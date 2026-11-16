@@ -68,16 +68,9 @@ public sealed class ScriptCodeCompiler
 
     private readonly ScriptCompilationCache cache = new();
     private readonly ConcurrentDictionary<string, CompileFlight<ScriptCompilation>> inFlight = new(StringComparer.Ordinal);
-    private readonly Func<string, CodeExecutionOptions, string, CancellationToken, CompiledScript>? compileOverride;
 
     public ScriptCodeCompiler()
     {
-    }
-
-    internal ScriptCodeCompiler(Func<string, CodeExecutionOptions, string, CancellationToken, CompiledScript> compile)
-    {
-        ArgumentNullException.ThrowIfNull(compile);
-        compileOverride = compile;
     }
 
     /// <summary>
@@ -147,9 +140,7 @@ public sealed class ScriptCodeCompiler
         try
         {
             var compiled = await Task.Run(
-                () => compiler.compileOverride is { } compile
-                    ? compile(code, options, key, flight.Token)
-                    : Compile(code, options, key, flight.Token),
+                () => Compile(code, options, key, flight.Token),
                 flight.Token).ConfigureAwait(false);
             compiler.cache.Set(key, compiled, options.CompilationCacheCapacity);
             flight.Complete(compiled.Compilation);

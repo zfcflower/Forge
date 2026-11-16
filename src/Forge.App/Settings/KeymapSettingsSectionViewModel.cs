@@ -413,7 +413,7 @@ internal sealed class KeymapSettingsSectionViewModel : ObservableObject, IDispos
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): every property re-raised
+        // A switch raised on another thread belongs to a window that is gone: every property re-raised
         // here, and every row it refreshes, is bound on the thread that built the section.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

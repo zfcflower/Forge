@@ -102,11 +102,8 @@ internal sealed partial class MermaidRenderService
 
     internal const int MaxConcurrentRenders = 2;
 
-    /// <summary>The service the views use; replaced by tests and by hosts that want their own cache.</summary>
+    /// <summary>The service the views use.</summary>
     internal static MermaidRenderService Current { get; set; } = new();
-
-    /// <summary>The render itself; a test seam (a slow or failing renderer without a pathological diagram), production keeps <see cref="RenderCore"/>.</summary>
-    internal Func<MermaidRenderRequest, MermaidRenderResult> Renderer { get; init; } = RenderCore;
 
     private readonly Lock cacheLock = new();
     private readonly Dictionary<CacheKey, Lazy<Task<MermaidRenderResult>>> cache = [];
@@ -140,7 +137,7 @@ internal sealed partial class MermaidRenderService
         return result;
     }
 
-    /// <summary>Drops every cached picture (tests and a theme purge); renders that are still running finish into an empty cache.</summary>
+    /// <summary>Drops every cached picture (a theme purge); renders that are still running finish into an empty cache.</summary>
     internal void ClearCache()
     {
         lock (cacheLock)
@@ -197,7 +194,7 @@ internal sealed partial class MermaidRenderService
         try
         {
             // RenderCore catches its own failures, so this task cannot fault and a timeout leaves nothing unobserved.
-            var work = Task.Run(() => Renderer(request));
+            var work = Task.Run(() => RenderCore(request));
             try
             {
                 return await work.WaitAsync(request.Timeout).ConfigureAwait(false);
@@ -223,7 +220,7 @@ internal sealed partial class MermaidRenderService
 
     /// <summary>
     /// Everything after Mermaider: colour resolution, the external-reference refusal and the Svg.Skia parse. Separate so a
-    /// crafted SVG (which Mermaider's own sanitizer would never hand over) can be fed to the second line of defence in a test.
+    /// crafted SVG (which Mermaider's own sanitizer would never hand over) can be fed to the second line of defence.
     /// </summary>
     internal static MermaidRenderResult FromSvg(string svg, MermaidPalette palette)
     {

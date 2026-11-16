@@ -135,7 +135,7 @@ internal sealed class NotificationPermissionSettingsViewModel : ObservableObject
     /// <summary>Re-reads the texts this section computes in C#; the switch's labels are <see cref="Loc"/> keys bound in XAML.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a window that is gone (a test host); the section bound to these
+        // A notification from another thread belongs to a window that is gone; the section bound to these
         // properties lives on its own thread.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

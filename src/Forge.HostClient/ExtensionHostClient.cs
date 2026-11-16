@@ -113,12 +113,6 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         this.router = router;
     }
 
-#if DEBUG
-    /// <summary>Seam for tests: runs on the starting task after the pipe connected and before the Running transition is
-    /// committed, so a test can close the connection inside that window.</summary>
-    internal Func<Task>? AfterConnectedHook { get; set; }
-#endif
-
     public HostStatus Status => (HostStatus)Volatile.Read(ref status);
 
     public IReadOnlyList<ITool> Tools => Volatile.Read(ref tools);
@@ -402,13 +396,6 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                     peer = connected.Peer;
                     transport = connected.Transport;
                 }
-
-#if DEBUG
-                if (AfterConnectedHook is { } hook)
-                {
-                    await hook().ConfigureAwait(false);
-                }
-#endif
 
                 Interlocked.Exchange(ref registeredGeneration, connected.Generation);
                 if (!TryCommitRunning(connected, out var closeFailure))

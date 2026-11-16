@@ -50,8 +50,7 @@ internal sealed class ProviderModelCache
     /// <summary>
     /// A cache over one provider's <c>/models</c> answers. With a <paramref name="path"/> the answers survive a restart:
     /// the file is read on the pool at construction and rewritten after each refresh, so prices a provider reports are
-    /// still there tomorrow instead of falling back to the table until somebody presses refresh. Without a path (tests,
-    /// the transient editor provider) it stays in memory.
+    /// still there tomorrow instead of falling back to the table until somebody presses refresh. Without a path (the transient editor provider) it stays in memory.
     /// </summary>
     public ProviderModelCache(string? path = null)
     {
@@ -158,7 +157,7 @@ internal sealed class ProviderModelCache
     /// <summary>
     /// Writes the cache off the caller's thread. Awaiting it is part of a model-list refresh, so "the refresh finished" means
     /// "the file is on disk": a fire-and-forget write used to outlive the call and race anything that removed the data
-    /// directory (a test, a profile reset). A failed write only costs the persistence, never the in-memory answers.
+    /// directory (a profile reset). A failed write only costs the persistence, never the in-memory answers.
     /// </summary>
     public Task SaveAsync(CancellationToken cancellationToken = default) => Task.Run(SaveNow, cancellationToken);
 
@@ -585,7 +584,7 @@ internal sealed class ProviderCatalog
 
     public ProviderModelCache Models => cache;
 
-    /// <summary>The fetched catalog layer (null in tests that do not build one).</summary>
+    /// <summary>The fetched catalog layer (null when no catalogue is built).</summary>
     public ModelCatalogStore? ModelCatalog => modelCatalog;
 
     /// <summary>

@@ -64,7 +64,7 @@ public sealed class NetworkStack : INetworkStack, IDisposable
     private int routeVersion;
 
     /// <param name="settings">The initial settings; null is <see cref="NetworkSettings.Default"/>.</param>
-    /// <param name="resolverFactory">Replaces the built-in resolver choice (tests).</param>
+    /// <param name="resolverFactory">Replaces the built-in resolver choice.</param>
     /// <param name="time">The clock of the DNS caches.</param>
     public NetworkStack(NetworkSettings? settings = null, Func<NetworkSettings, IDnsResolver>? resolverFactory = null, TimeProvider? time = null)
     {

@@ -197,7 +197,7 @@ internal sealed class NotebookOutputViewModel : ObservableObject
 
     /// <summary>
     /// The decoded PNG, decoded lazily off the UI thread the first time a view asks for it (by the image preview's bounded
-    /// decoder unless one was injected); null while decoding, when the decoder fails, or when a test's stub returns null
+    /// decoder unless one was injected); null while decoding, when the decoder fails, or when the decoder returns null
     /// (then nothing renders).
     /// </summary>
     public Bitmap? Image

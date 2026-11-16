@@ -33,8 +33,7 @@ public sealed class AnthropicProvider : HttpChatProvider
     /// </summary>
     /// <summary>
     /// Forgets which providers refused their announced betas. Called when the account or its settings change (a reloaded provider
-    /// catalogue, a re-signed-in credential) so an account that was fixed is not stuck on the reduced shape for the whole run; tests
-    /// use it to isolate one case from the next.
+    /// catalogue, a re-signed-in credential) so an account that was fixed is not stuck on the reduced shape for the whole run.
     /// </summary>
     public static void ForgetDegradations() => ProviderDegradations.Clear();
 
@@ -44,7 +43,7 @@ public sealed class AnthropicProvider : HttpChatProvider
 
     /// <param name="runtimeBuild">
     /// The build suffix to claim when settings do not pin one. Defaults to asking the locally installed CLI once per process;
-    /// injectable so a test can answer without a 300 MB program on the machine.
+    /// injectable so the request does not need the CLI installed on the machine.
     /// </param>
     /// <param name="runtimeBetas">
     /// The <c>anthropic-beta</c> list to announce. Defaults to the list the same local CLI announces — the set is version specific,

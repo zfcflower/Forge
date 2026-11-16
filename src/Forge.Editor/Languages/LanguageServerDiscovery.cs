@@ -13,7 +13,7 @@ public sealed record DiscoveredLanguageServer(
     string Origin,
     System.Text.Json.Nodes.JsonNode? InitializationOptions = null);
 
-/// <summary>Where discovery looks. The defaults are this machine; a test passes a temporary tree instead.</summary>
+/// <summary>Where discovery looks. The defaults are this machine; a caller may pass a temporary tree instead.</summary>
 public sealed record LanguageServerDiscoveryOptions(
     IReadOnlyList<string> ExtensionRoots,
     IReadOnlyList<string> InstallationRoots,

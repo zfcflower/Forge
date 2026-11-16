@@ -357,7 +357,7 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a page whose window is gone (a test host).
+        // A notification from another thread belongs to a page whose window is gone.
         if (!disposed && Environment.CurrentManagedThreadId == uiThread)
         {
             Reload();

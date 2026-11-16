@@ -25,7 +25,7 @@ public enum CiPushRefusal
 /// <summary>Outcome of pushing a fix.</summary>
 internal sealed record CiPushResult(bool Success, string? Error, CiPushRefusal Refusal = CiPushRefusal.None);
 
-/// <summary>The two git operations the CI chain needs; a seam so tests need no repository.</summary>
+/// <summary>The two git operations the CI chain needs; a seam so the chain needs no repository.</summary>
 internal interface ICiGit
 {
     /// <summary>The commit HEAD points at, or null when it cannot be read.</summary>

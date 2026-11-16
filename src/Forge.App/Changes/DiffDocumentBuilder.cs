@@ -211,7 +211,7 @@ internal sealed record DiffDocumentModel(string Text, DiffRowMap Map);
 internal sealed record DiffBuildResult(DiffDocumentModel Primary, DiffDocumentModel? Secondary);
 
 /// <summary>
-/// What the builder needs to know about one file; independent of the view model so it can be tested alone.
+/// What the builder needs to know about one file; independent of the view model.
 /// <see cref="Embed"/> covers every row whose content is a control instead of text: a rendered Markdown preview or the two
 /// pictures of an image change.
 /// </summary>

@@ -35,13 +35,13 @@ public sealed class RetryingChatProvider : IChatProvider
     private readonly ITokenCounter _tokens;
 
     /// <param name="inner">The endpoint; its <see cref="IChatProvider.Id"/> names the budget the request is charged to.</param>
-    /// <param name="delayAsync">How to wait; a test hook. Defaults to a delay on <paramref name="timeProvider"/>'s clock.</param>
+    /// <param name="delayAsync">How to wait; defaults to a delay on <paramref name="timeProvider"/>'s clock.</param>
     /// <param name="timeProvider">
-    /// The clock for backoff, for the quota reading of a failure, and for budget waits. A test moves it instead of waiting.
+    /// The clock for backoff, for the quota reading of a failure, and for budget waits. A caller may move it instead of waiting.
     /// </param>
     /// <param name="rateLimiter">
     /// The budget to acquire from before each attempt. Null (the default) charges nothing: a caller that has no shell
-    /// wiring — a unit test, an embedded host — must not inherit a process-wide ceiling it never asked for.
+    /// wiring — an embedded host — must not inherit a process-wide ceiling it never asked for.
     /// </param>
     public RetryingChatProvider(
         IChatProvider inner,
@@ -310,7 +310,7 @@ public sealed class RetryingChatProvider : IChatProvider
         return half + (half * Random.Shared.NextDouble());
     }
 
-    /// <summary>The default wait: on the injected clock, so a test that moved the clock is not left sleeping in real time.</summary>
+    /// <summary>The default wait: on the injected clock, so a caller that moved the clock is not left sleeping in real time.</summary>
     private ValueTask DefaultDelayAsync(TimeSpan delay, CancellationToken ct) =>
         new(Task.Delay(delay, _time, ct));
 

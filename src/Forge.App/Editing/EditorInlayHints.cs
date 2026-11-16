@@ -33,7 +33,7 @@ internal sealed class EditorInlayHints : VisualLineElementGenerator, IDisposable
         this.document = document;
     }
 
-    /// <summary>The index being drawn; a test reads it to see which build the view kept.</summary>
+    /// <summary>The index being drawn; the view's currently kept build.</summary>
     public InlayHintLineIndex Index => index;
 
     public bool Enabled => enabled;

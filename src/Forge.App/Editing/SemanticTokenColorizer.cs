@@ -36,7 +36,7 @@ internal sealed class SemanticTokenColorizer : DocumentColorizingTransformer
         this.isDarkTheme = isDarkTheme;
     }
 
-    /// <summary>The index currently painted; a test reads it to see which build the view kept.</summary>
+    /// <summary>The index currently painted; the view's currently painted build.</summary>
     public SemanticLineIndex Index => index;
 
     /// <summary>Publishes a new index and redraws what is on screen; the caller posts this to the UI thread.</summary>

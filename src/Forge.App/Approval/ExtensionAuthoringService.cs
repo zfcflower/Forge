@@ -412,7 +412,7 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         return true;
     }
 
-    /// <summary>Number of submissions currently waiting for the user; used by tests.</summary>
+    /// <summary>Number of submissions currently waiting for the user.</summary>
     internal int SubmissionsInFlight
     {
         get

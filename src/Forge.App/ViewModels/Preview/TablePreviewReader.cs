@@ -13,7 +13,7 @@ internal readonly record struct TablePreviewParse(int TotalRows, IReadOnlyList<I
 /// them as skipped. A kept field holds at most <see cref="MaxFieldChars"/> characters and a kept row at most
 /// <see cref="MaxColumns"/> fields — safety bounds, not display ones: a binary file named <c>.csv</c> or a one-line dump
 /// must not become a multi-gigabyte string. The stream is cancellable throughout. Runs off the UI thread; pure logic
-/// over a <see cref="TextReader"/>, so tests feed it strings.
+/// over a <see cref="TextReader"/>, so a caller can feed it strings.
 /// </summary>
 internal static class TablePreviewReader
 {

@@ -156,7 +156,7 @@ internal sealed partial class DiffEditorView : UserControl
 
     internal bool IsSplit => split;
 
-    /// <summary>How many per-file row sets the builder produced since creation; lets tests prove a change touched one file only.</summary>
+    /// <summary>How many per-file row sets the builder produced since creation; one increment per file a change touched.</summary>
     internal int FilesBuilt { get; private set; }
 
     internal TextEditor ReviewEditor => split ? SecondaryEditor : PrimaryEditor;
@@ -181,15 +181,6 @@ internal sealed partial class DiffEditorView : UserControl
         PrimeDirty();
         ScrollTo(primary.Editor.TextArea.TextView.GetVisualTopByDocumentLine(line));
     }
-
-    /// <summary>Rebuilds the documents now instead of at the next dispatcher turn.</summary>
-    internal void RebuildNow() => Rebuild();
-
-    /// <summary>Re-runs the post-layout steps (height priming, scroll restore, overlay placement); for tests.</summary>
-    internal void SettleNow() => AfterLayout();
-
-    /// <summary>Places the overlay controls over the visible rows; for tests.</summary>
-    internal void UpdateOverlayNow() => UpdateOverlay();
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -666,7 +657,7 @@ internal sealed partial class DiffEditorView : UserControl
             control.Height = double.NaN;
         }
 
-        UpdateOverlayNow();
+        UpdateOverlay();
     }
 
     /// <summary>Releases the decoded pictures an embed holds before the cache is thrown away (one native bitmap per side;
@@ -788,9 +779,6 @@ internal sealed partial class DiffEditorView : UserControl
             editor.ScrollToVerticalOffset(y);
         }
     }
-
-    /// <summary>Scrolls the shown document to vertical offset <paramref name="y"/>; for tests.</summary>
-    internal void ScrollToOffset(double y) => ScrollTo(y);
 
     private void ScrollTo(double y)
     {
@@ -1221,7 +1209,7 @@ internal sealed partial class DiffEditorView : UserControl
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A control of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // A control of a window whose session is gone still sits in the subscriber list of the process-wide
         // table; recycling its editors from another thread would queue a layout pass on the wrong dispatcher.
         if (Environment.CurrentManagedThreadId != attachedThread)
         {

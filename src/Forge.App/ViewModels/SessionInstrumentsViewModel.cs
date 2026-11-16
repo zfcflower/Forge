@@ -885,7 +885,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     // ---------------------------------------------------------------- the resources menu's inspector row
 
-    /// <summary>False only when no window wired the overlay (a test, a standalone view), which hides the row instead of disabling it.</summary>
+    /// <summary>False only when no window wired the overlay (a standalone view), which hides the row instead of disabling it.</summary>
     public bool CanOpenInspector => openInspector is not null;
 
     /// <summary>Opens the window's resource inspector; the row lives in the strip's resources menu.</summary>
@@ -1119,7 +1119,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a window that is gone (a test host); re-reading here would touch
+        // A notification from another thread belongs to a window that is gone; re-reading here would touch
         // bound controls off their thread.
         if (Environment.CurrentManagedThreadId != uiThread || disposed)
         {

@@ -92,7 +92,7 @@ internal sealed class UsageLogSettingsViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the row's texts are bound on
+        // A switch raised on another thread belongs to a window that is gone: the row's texts are bound on
         // the thread that built it.
         if (Environment.CurrentManagedThreadId != uiThread)
         {

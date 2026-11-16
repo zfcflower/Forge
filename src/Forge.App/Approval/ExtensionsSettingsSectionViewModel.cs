@@ -674,7 +674,7 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): this section's lists are bound
+        // A switch raised on another thread belongs to a window that is gone: this section's lists are bound
         // on the thread that built it, and the dispatcher below only reaches the app's UI thread.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

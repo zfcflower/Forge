@@ -26,8 +26,7 @@ internal enum CaptionPress
 internal static class WindowCaption
 {
     /// <summary>
-    /// Starts the window move. A test seam: the headless platform does not move windows, so replacing this delegate is
-    /// how a test observes that a press started one.
+    /// Starts the window move; replacing the delegate substitutes the platform drag.
     /// </summary>
     internal static Action<Window, PointerPressedEventArgs> BeginMove { get; set; } =
         static (window, e) => window.BeginMoveDrag(e);

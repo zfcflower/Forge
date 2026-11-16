@@ -61,9 +61,6 @@ internal sealed class MiddleEllipsisText : Control
         set => SetValue(ForegroundProperty, value);
     }
 
-    /// <summary>The text actually drawn (with the ellipsis when shortened); for tests.</summary>
-    internal string DisplayedText => shown;
-
     protected override Size MeasureOverride(Size availableSize)
     {
         var text = Text ?? string.Empty;

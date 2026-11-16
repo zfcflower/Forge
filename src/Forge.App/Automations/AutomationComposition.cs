@@ -43,7 +43,7 @@ internal static class AutomationComposition
         Prompts.PromptTemplateService? promptTemplates = null,
         Func<IdleArchiveSettings>? idleArchive = null)
     {
-        // Without the composition's service (a test) the user's ~/.forge and the workspace's .forge are still honoured.
+        // Without the composition's service the user's ~/.forge and the workspace's .forge are still honoured.
         promptTemplates ??= new Prompts.PromptTemplateService(Agents.AgentRuntimeServices.UserDirectory());
         var service = new AutomationService(
             Path.Combine(settingsDirectory, DefinitionsFileName),

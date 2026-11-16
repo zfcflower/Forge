@@ -4,8 +4,8 @@ namespace Forge.App.Approval;
 
 /// <summary>
 /// The seam between the approval queue (which belongs to the UI thread) and everything that produces approval work
-/// (agent loops, host events, background reads). The app uses <see cref="UiThreadDispatcher"/>; a test can pass an inline
-/// implementation so the queue, the handler and the services are exercised without Avalonia at all.
+/// (agent loops, host events, background reads). The app uses <see cref="UiThreadDispatcher"/>; an inline implementation
+/// exercises the queue, the handler and the services without Avalonia at all.
 /// </summary>
 internal interface IApprovalDispatcher
 {
@@ -24,7 +24,7 @@ internal interface IApprovalDispatcher
 }
 
 /// <summary>
-/// The default dispatcher: Avalonia's UI thread. A dispatcher that cannot be resolved - a unit test process without
+/// The default dispatcher: Avalonia's UI thread. A dispatcher that cannot be resolved - a process without
 /// Avalonia, or a thread that is not running a loop any more - is treated as "the caller is the UI thread", so a queue
 /// operation degrades to an inline call instead of deadlocking on a thread nobody pumps.
 /// </summary>

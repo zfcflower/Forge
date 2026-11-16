@@ -98,7 +98,7 @@ public partial class FileDocumentView : UserControl
     /// <summary>Folding for the open document, or null before a document is bound.</summary>
     internal EditorFoldingController? Folding => bridge?.Folding;
 
-    /// <summary>The review overlay of this view; tests raise its own language handler, which the view does not forward.</summary>
+    /// <summary>The review overlay of this view; its own language handler can be raised, which the view does not forward.</summary>
     internal ReviewOverlay? Review => review;
 
     /// <summary>The editor options this view's toolbar and menus edit.</summary>
@@ -110,7 +110,7 @@ public partial class FileDocumentView : UserControl
     /// <summary>The end-of-line and tab glyphs of the bound document, or null before one is bound.</summary>
     internal EditorWhitespaceAdornments? Whitespace => bridge?.Whitespace;
 
-    /// <summary>The open completion popup, or null; tests need it to look at what the list is doing.</summary>
+    /// <summary>The open completion popup, or null; so the list's state can be inspected.</summary>
     internal AvaloniaEdit.CodeCompletion.CompletionWindow? CompletionPopup => completionWindow;
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -185,7 +185,7 @@ public partial class FileDocumentView : UserControl
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A view of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // A view of a window whose session is gone still sits in the subscriber list of the process-wide
         // table; refreshing the document's tab title and notices from another thread would raise them into bindings that
         // live on the thread that attached this view.
         if (Environment.CurrentManagedThreadId == attachedThread)
@@ -248,7 +248,7 @@ public partial class FileDocumentView : UserControl
         RefreshEditorMenu();
     }
 
-    /// <summary>Rebuilds both hosts from the settings as they are now; exposed so a test can do what a click does.</summary>
+    /// <summary>Rebuilds both hosts from the settings as they are now; exposed so a click's work can be replayed.</summary>
     internal void RefreshEditorMenu()
     {
         if (builder is null)

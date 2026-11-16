@@ -5,7 +5,7 @@ namespace Forge.Workspace;
 
 /// <summary>
 /// How a project takes its own screenshots, declared in <c>.forge/screenshots.json</c> on the session branch:
-/// <see cref="Command"/> writes PNG files into <see cref="OutputDirectory"/> (a headless or end-to-end test, for example).
+/// <see cref="Command"/> writes PNG files into <see cref="OutputDirectory"/> (a headless or end-to-end run, for example).
 /// </summary>
 /// <param name="Command">Shell command line, run in the worktree root.</param>
 /// <param name="OutputDirectory">Directory the command writes PNG files into, relative to the worktree root, with forward slashes.</param>

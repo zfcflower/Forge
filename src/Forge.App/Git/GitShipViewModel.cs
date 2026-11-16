@@ -50,7 +50,7 @@ internal sealed class ShipActionViewModel(
     Func<string> label,
     Func<string> hint)
 {
-    /// <summary>Stable identity for tests and for the view's AutomationId (<c>git-ship-&lt;key&gt;</c>).</summary>
+    /// <summary>Stable identity, also used by the view's AutomationId (<c>git-ship-&lt;key&gt;</c>).</summary>
     public string Key { get; } = key;
 
     public RelayCommand Command { get; } = command;

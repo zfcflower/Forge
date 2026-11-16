@@ -30,7 +30,7 @@ internal sealed record CodeModeSettings(
     /// with no settings store must be bounded exactly like one that never touched the fields.</summary>
     private static readonly Sdk.CodeExecutionOptions Defaults = new();
 
-    /// <summary>The values in force when the runtime was assembled without the settings store (a unit test).</summary>
+    /// <summary>The values in force when the runtime was assembled without the settings store.</summary>
     public static CodeModeSettings Default { get; } = new(
         Defaults.MaxConcurrentToolCalls,
         Defaults.MaxResultChars,

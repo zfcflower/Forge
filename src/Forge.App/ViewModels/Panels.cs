@@ -293,26 +293,10 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
         Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
-    /// <summary>Test seam: builds the panel already attached to a context, without starting the watcher or a background refresh.</summary>
-    internal FilesPanelViewModel(
-        GitCli git,
-        Action<string> openFile,
-        Action<string> openFileInNewTab,
-        Action<string> openChanges,
-        Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory,
-        PanelContext context)
-        : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory, changeReview: null)
-    {
-        Context = context;
-    }
-
-    /// <summary>The last atomically published fingerprint/result pair; exposed for the cache race tests.</summary>
-    internal CountsSnapshot? CountsSnapshotForTests => Volatile.Read(ref countsSnapshot);
-
     /// <summary>The visible rows of the "全部" tree, in display order; the view virtualizes this one list.</summary>
     public RangeObservableCollection<FileNodeViewModel> Rows => tree.Rows;
 
-    /// <summary>The legacy status rows are used only by standalone panel tests; the app binds to the shared diff view model.</summary>
+    /// <summary>The legacy status rows; the shared diff view model is the review surface.</summary>
     public ObservableCollection<ChangedFileViewModel> Changes { get; } = [];
 
     public ChangesViewModel? ChangeReview => changeReview;
@@ -839,7 +823,7 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the flat tree and the changed
+        // A switch raised on another thread belongs to a window that is gone: the flat tree and the changed
         // rows are spliced and bound on the thread that built the panel.
         if (Environment.CurrentManagedThreadId != uiThread)
         {
@@ -1359,7 +1343,7 @@ internal sealed partial class ChangesViewModel : NotifyingObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the turn entries and diff rows
+        // A switch raised on another thread belongs to a window that is gone: the turn entries and diff rows
         // are bound on the thread that built the document.
         if (Environment.CurrentManagedThreadId != uiThread)
         {
@@ -1800,7 +1784,7 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
 
     /// <param name="store">The checklist the panel reads and edits.</param>
     /// <param name="committer">
-    /// Commits a step again when its row's "Retry commit" button runs; null (a unit test) means the panel only reads and
+    /// Commits a step again when its row's "Retry commit" button runs; null means the panel only reads and
     /// edits the checklist. The agent's own updates commit inside Core, never through here.
     /// </param>
     public TodoListViewModel(ITodoStore store, IStepCommitter? committer = null)
@@ -2037,7 +2021,7 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
     /// <summary>The status line and the rows' derived texts are resolved when they are read; a language switch re-reads them.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the groups and rows are bound on
+        // A switch raised on another thread belongs to a window that is gone: the groups and rows are bound on
         // the thread that built the panel.
         if (Environment.CurrentManagedThreadId != uiThread)
         {
@@ -2193,7 +2177,7 @@ internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the comment rows are bound on the
+        // A switch raised on another thread belongs to a window that is gone: the comment rows are bound on the
         // thread that built the panel.
         if (Environment.CurrentManagedThreadId != uiThread)
         {
@@ -2408,7 +2392,7 @@ internal sealed class SpecTreeViewModel : ObservableObject, IDisposable
     /// <summary>The rows carry the graph's own titles; only the summary is resolved from the string table.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the summary is bound on the
+        // A switch raised on another thread belongs to a window that is gone: the summary is bound on the
         // thread that built the tree.
         if (Environment.CurrentManagedThreadId == uiThread)
         {

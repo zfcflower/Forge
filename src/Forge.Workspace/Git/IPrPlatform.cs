@@ -45,7 +45,7 @@ public interface IPrPlatform
     /// <summary>
     /// Merges the pull request with the strategy the user confirmed, optionally deleting the head branch on the platform
     /// afterwards. The platform enforces its own protection rules; a refusal comes back as a failed result, never as an
-    /// exception. The default implementation refuses, so a platform that cannot merge (a test double, a future host) needs
+    /// exception. The default implementation refuses, so a platform that cannot merge (a future host) needs
     /// no boilerplate — callers must therefore treat "not supported" as a real answer.
     /// </summary>
     Task<PrResult<PrReference>> MergePullRequestAsync(
@@ -62,7 +62,7 @@ public interface IPrPlatform
     /// Marks the pull request ready for review, i.e. takes it out of draft. Nothing else about it changes: the title, the
     /// body, the head branch and its commits stay as they are, and no review is requested. Marking a pull request that is
     /// already ready is a success, not an error. The default implementation refuses, so a platform that cannot do this (a
-    /// test double, a future host) needs no boilerplate – callers must therefore treat "not supported" as a real answer.
+    /// future host) needs no boilerplate – callers must therefore treat "not supported" as a real answer.
     /// </summary>
     Task<PrResult<PrReference>> MarkPullRequestReadyAsync(
         string workingDirectory,

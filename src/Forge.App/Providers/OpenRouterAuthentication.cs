@@ -63,7 +63,7 @@ internal sealed class OpenRouterAuthentication
     private readonly TimeProvider time;
 
     /// <param name="http">Must be the same client the API calls use, so its handler pool is shared.</param>
-    /// <param name="time">Clock for the five-minute limit; tests inject one instead of waiting for a real five minutes.</param>
+    /// <param name="time">Clock for the five-minute limit.</param>
     public OpenRouterAuthentication(HttpClient http, TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(http);

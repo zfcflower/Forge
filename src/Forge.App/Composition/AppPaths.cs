@@ -11,7 +11,7 @@ internal sealed record AppPaths
 
     public const string GeneralVariable = "FORGE_GENERAL_WORKSPACE";
 
-    /// <summary>Overrides the whole data root, so a test run never touches the user's real database.</summary>
+    /// <summary>Overrides the whole data root, so an alternate data root never touches the user's real database.</summary>
     public const string DataVariable = "FORGE_DATA_DIR";
 
     private AppPaths(

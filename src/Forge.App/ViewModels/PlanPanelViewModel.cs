@@ -650,7 +650,7 @@ internal sealed class PlanPanelViewModel : NotifyingObject, IDisposable, ICopyab
     /// <summary>The derived texts are resolved when they are read, so a language switch re-reads them without a new load.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the rows and the status line
+        // A switch raised on another thread belongs to a window that is gone: the rows and the status line
         // are bound on the thread that built the panel.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

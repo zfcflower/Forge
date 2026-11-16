@@ -40,7 +40,7 @@ public sealed record ProviderOptions
     public IUsageRecorder? UsageRecorder { get; init; }
 
     /// <summary>
-    /// The clock a provider reads when it turns a relative reset in a response header into an instant. Injectable so a test
+    /// The clock a provider reads when it turns a relative reset in a response header into an instant. Injectable so a caller
     /// can pin it; the system clock otherwise.
     /// </summary>
     public TimeProvider Time { get; init; } = TimeProvider.System;

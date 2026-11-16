@@ -52,7 +52,7 @@ parent: forge-architecture
 
 **revert 的破坏面(如实记录)。** schema 阶梯只向前、不前向容忍:`user_version = 2` 的库在 v1 程序(版本上限 1、表无 `origin` 列)眼里是“被更新版本写过”,构造期即 fail-closed 抛 `InvalidDataException`,不做降级读。因此把 W10a(连同 `PluginRecord.Origin` 与 ApprovalStore v2)整体 revert 时**必须删掉 `<data>/approvals.db`**——审批记录随之清空,已装插件回落到 `Draft` 重新审批;留着库 revert 则审批引擎在 App 与 Host 两侧都不可用。反过来,`origin` 列本身可以留在库里(旧代码读不到它),拦住 revert 的是版本号而不是列。
 
-**测试接缝(仅 Debug)。** 让并发与失效路径的测试不依赖机器计时:`ApprovalStoreOptions` 在 `DEBUG` 构建里多两个 `internal` 钩子——`AfterInitialSnapshotRead`(构造期整表读之后、快照与版本赋值之前调用,与版本/行读取顺序无关)与 `SnapshotRead`(每次真实整表读后调用一次:构造、`Reload()`、失效重读)。两者经 `src/Forge.Approval/AssemblyInfo.cs` 的 `InternalsVisibleTo("Forge.Approval.Tests")`(同样只在 `DEBUG`)对测试可见;`Release` 构建里既无属性也无 `InternalsVisibleTo`,不引入环境变量、静态可变全局状态或公共 API。钩子抛异常等同该路径失败:构造期释放连接并上抛,`Reload()`/读路径不换快照。用它们可以“在初始快照加载后立刻外部 Revoke”,并数出真实整表读次数。跨进程压力测试的子进程把 `BusyTimeout` 提到 60 秒:默认 5 秒是产品策略,慢盘或杀毒扫描使一次写锁的持有超过 5 秒是已文档化的合法结果(`SqliteException 5`),不应被压测读成丢更新;真正的死锁仍会在父进程 3 分钟的等待里失败。
+**选项。** `ApprovalStoreOptions` 只有 `BusyTimeout` 与 `ImportLegacyJson` 两个开关。默认 5 秒的 `BusyTimeout` 是产品策略:慢盘或杀毒扫描使一次写锁的持有超过 5 秒是已文档化的合法结果(`SqliteException 5`),不是丢更新。
 
 ## 未决
 

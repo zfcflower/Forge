@@ -67,7 +67,7 @@ internal sealed record UpdateApplyResult(UpdateApplyStatus Status, string Reason
 /// <para>
 /// This runs in a process of its own — the staged new <c>Forge.App</c>, started by the installed one — so it holds no UI,
 /// no Avalonia application and no data-root lock. The state machine is pure file and process work, which is also why the
-/// tests can drive it with fake directories and a scripted process seam.
+/// it can be driven with fake directories and a scripted process seam.
 /// </para>
 /// </summary>
 internal sealed class UpdateApplyRunner

@@ -26,7 +26,7 @@ internal enum PlanHandoff
 
 /// <summary>
 /// The shell's side of the plan panel: everything that needs a window, a session or the git row lives behind this seam, so
-/// <see cref="PlanPanelViewModel"/> stays a read-only projection of the store a test can drive without a shell.
+/// <see cref="PlanPanelViewModel"/> stays a read-only projection of the store with no shell dependency.
 /// </summary>
 internal interface IPlanPanelHost
 {

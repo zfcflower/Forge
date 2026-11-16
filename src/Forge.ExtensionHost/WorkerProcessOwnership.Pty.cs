@@ -83,7 +83,7 @@ internal sealed partial class WorkerProcessOwnership
 
     /// <summary><c>POSIX_SPAWN_SETSID</c>: the child calls <c>setsid()</c> in the spawn call, so it is a session leader -
     /// and therefore the leader of its own process group - before it runs its first instruction. glibc needs 2.26, Darwin
-    /// spells it differently. CI-to-validate: the Darwin value has never been executed by the tests behind this file.</summary>
+    /// spells it differently. CI-to-validate: the Darwin value has never been executed on macOS.</summary>
     private static readonly short PosixSpawnSetSid = OperatingSystem.IsMacOS() ? (short)0x0400 : (short)0x80;
 
     /// <summary>Offset of <c>si_status</c> inside a <c>siginfo_t</c>: it follows <c>si_pid</c> and <c>si_uid</c>, whose

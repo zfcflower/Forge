@@ -60,15 +60,6 @@ internal sealed class TerminalSession
     /// queue without bound. The refusal drops that chunk (a keystroke flood of over 1024 unread chunks), never part of one.</summary>
     private const int InputQueueChunks = 1024;
 
-#if DEBUG
-    /// <summary>Debug-only seam: when <c>FORGE_HOST_TEST_FAIL_TERMINAL_KILL=1</c>, a terminal whose kill reported no
-    /// problem is handed an injected one, so a test can prove the cleanup report records a kill problem even when the
-    /// shell's own exit code is observable (&gt;= 0) - the POSIX descendant-residue case the report must never hide
-    /// behind a clean shell exit. A Release host contains neither the field nor the read.</summary>
-    private static readonly bool FailTerminalKill =
-        string.Equals(Environment.GetEnvironmentVariable("FORGE_HOST_TEST_FAIL_TERMINAL_KILL"), "1", StringComparison.Ordinal);
-#endif
-
     private readonly ITerminalNotifier notifier;
     private readonly HostCleanupReport cleanup;
     private readonly WorkerProcessOwnership.PtyProcess process;
@@ -354,12 +345,6 @@ internal sealed class TerminalSession
             // running and discarding until it sees end of file. On POSIX the same drain reaches the EIO the kernel reports
             // once the slaves are gone.
             var killProblem = process.KillTree();
-#if DEBUG
-            if (killProblem is null && FailTerminalKill)
-            {
-                killProblem = "an injected kill-tree problem (FORGE_HOST_TEST_FAIL_TERMINAL_KILL)";
-            }
-#endif
             exitCode = await WaitForExitAsync().ConfigureAwait(false);
 
             // Now - and not before - the console may be released: closing it while a client is still attached is what the

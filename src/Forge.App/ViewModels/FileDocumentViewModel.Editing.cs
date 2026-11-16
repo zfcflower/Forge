@@ -129,7 +129,7 @@ internal sealed partial class FileDocumentViewModel
 
     /// <summary>
     /// <paramref name="imageDecoder"/> gates the bitmap decoding of the image and notebook previews (the real Avalonia
-    /// decoder by default) so headless tests can skip decoding; <paramref name="previewSettings"/> pins the preview
+    /// decoder by default) so a decoder-less host can skip decoding; <paramref name="previewSettings"/> pins the preview
     /// limits instead of the ambient <see cref="FilePreviewSettings.Current"/>.
     /// </summary>
     public static FileDocumentViewModel Create(

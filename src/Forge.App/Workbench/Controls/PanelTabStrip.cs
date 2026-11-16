@@ -169,7 +169,7 @@ internal sealed class PanelTabStrip : TemplatedControl
     /// <summary>
     /// Every tab owns a context menu whose headers are built in code, so the strip re-reads them by rebuilding the
     /// headers on a language switch instead of subscribing each menu to the process-wide table. A notification that
-    /// arrives on another thread belongs to a session whose window is gone (a test host) and is ignored: this control
+    /// arrives on another thread belongs to a session whose window is gone and is ignored: this control
     /// only ever lives on the thread it was attached on.
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -480,8 +480,7 @@ internal sealed class PanelTabStrip : TemplatedControl
     }
 
     /// <summary>
-    /// Builds the menu of the tabs the strip had to clip, or null when nothing is clipped. A test seam as well: a headless
-    /// host has no popup surface, so a test reads the menu here instead of pressing the ellipsis button.
+    /// Builds the menu of the tabs the strip had to clip, or null when nothing is clipped.
     /// </summary>
     internal MenuFlyout? BuildClippedMenu()
     {

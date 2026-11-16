@@ -141,7 +141,7 @@ internal sealed class UpdatesSettingsSectionViewModel : ObservableObject, IReloa
     public AsyncRelayCommand InstallAndRestartCommand { get; }
 
     /// <summary>
-    /// The confirmation the view supplies before the app is closed. Null (a headless host, a test) means the section installs
+    /// The confirmation the view supplies before the app is closed. Null (a headless host) means the section installs
     /// without asking — the only caller that can reach this state is the product's own view, which always sets it.
     /// </summary>
     internal Func<string, Task<bool>>? ConfirmInstallAsync { get; set; }
@@ -374,7 +374,7 @@ internal sealed class UpdatesSettingsSectionViewModel : ObservableObject, IReloa
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a window that is gone (a test host): the section bound to these
+        // A notification from another thread belongs to a window that is gone: the section bound to these
         // properties lives on its own thread.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

@@ -46,7 +46,7 @@ public sealed class FrameCodec
     }
 
     /// <summary>Encodes a header followed by payload bytes the caller already encoded (a relayed frame, or a protocol
-    /// test that deliberately builds a value no formatter would produce). The bytes are appended verbatim.</summary>
+    /// caller that deliberately builds a value no formatter would produce). The bytes are appended verbatim.</summary>
     internal IpcFrameBuffer EncodeRaw(in IpcHeader header, ReadOnlyMemory<byte> payload)
     {
         var buffer = new IpcFrameBuffer();
@@ -86,13 +86,6 @@ public sealed class FrameCodec
             buffer.Dispose();
             throw;
         }
-    }
-
-    /// <summary>Encodes into a standalone array, for tests and tools that keep the frame.</summary>
-    public byte[] EncodeToArray<T>(in IpcHeader header, T payload)
-    {
-        using var buffer = Encode(header, payload);
-        return buffer.WrittenMemory.ToArray();
     }
 
     /// <summary>Decodes a frame body (with or without its length prefix). The returned message's payload is a slice

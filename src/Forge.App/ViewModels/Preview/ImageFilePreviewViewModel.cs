@@ -8,7 +8,7 @@ namespace Forge.App.ViewModels.Preview;
 
 /// <summary>
 /// A decoded image preview. The decode runs off the UI thread and is gated behind an injectable decoder (default the
-/// real Avalonia decoder) so headless tests can skip it; the long edge is bound to <see cref="MaxLongEdge"/> pixels — the
+/// real Avalonia decoder) so a decoder-less host can skip it; the long edge is bound to <see cref="MaxLongEdge"/> pixels — the
 /// default decoder decodes straight to that bound, and a decoder that returns a larger bitmap is scaled down with
 /// <c>CreateScaledBitmap</c> and its big bitmap disposed. A decode failure is a notice, never an exception.
 /// </summary>
@@ -27,7 +27,7 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
         PixelHeight = pixelHeight;
     }
 
-    /// <summary>The decoded (and possibly scaled) bitmap; null when decoding failed or a test stubbed the decoder.</summary>
+    /// <summary>The decoded (and possibly scaled) bitmap; null when decoding failed or the decoder was stubbed.</summary>
     public Bitmap? Image => image;
 
     public int PixelWidth { get; }

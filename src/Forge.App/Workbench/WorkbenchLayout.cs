@@ -77,7 +77,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <param name="review">View model of the review tab.</param>
     /// <param name="specs">View model of the spec tree tab.</param>
     /// <param name="generalContent">View model of the general-chats panel, stacked above the projects panel; null leaves the panel out.</param>
-    /// <param name="problems">View model of the problems tab, after the spec tree; null leaves the tab out (layout tests and hosts without an editor layer).</param>
+    /// <param name="problems">View model of the problems tab, after the spec tree; null leaves the tab out (hosts without an editor layer).</param>
     public WorkbenchLayout(
         object projectContent,
         object filesContent,
@@ -210,7 +210,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
     /// <summary>
     /// Re-reads the fixed titles after a language switch. A notification from another thread belongs to a layout whose
-    /// window is gone (a test host); applying it would touch bound controls off their thread, so it is ignored - this
+    /// window is gone; applying it would touch bound controls off their thread, so it is ignored - this
     /// layout lives on the thread that built it.
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)

@@ -6,7 +6,7 @@ namespace Forge.App.Services;
 
 /// <summary>
 /// One process the applier started (the new app it must confirm, or the version it restores). Wrapped so the state machine
-/// can be driven in tests without spawning anything, and so the two platform facts it needs — "has it exited" and "kill it"
+/// can be driven without spawning anything, and so the two platform facts it needs — "has it exited" and "kill it"
 /// — have one implementation.
 /// </summary>
 internal interface IUpdateApplierProcess : IDisposable
@@ -27,7 +27,7 @@ internal interface IUpdateApplierProcess : IDisposable
 
 /// <summary>
 /// The two operating-system interactions of the applier: waiting for the process it replaces to exit, and starting the app
-/// again. The default implementation is <see cref="SystemUpdateApplyProcesses"/>; the tests supply a scripted one.
+/// again. The default implementation is <see cref="SystemUpdateApplyProcesses"/>; a scripted one can be supplied.
 /// </summary>
 internal interface IUpdateApplyProcesses
 {

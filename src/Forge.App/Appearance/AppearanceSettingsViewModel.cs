@@ -17,16 +17,15 @@ namespace Forge.App.Appearance;
 /// UI thread only. Edits go through the <see cref="AppPreferences"/> setters (validation and persistence belong to the
 /// preferences foundation); external changes to the preferences are echoed back into the editors.
 /// <para>The installed font list is enumerated once, in the background, and published to both groups on the UI thread
-/// (<see cref="PublishFamilies"/>); <see cref="FamiliesLoaded"/> completes right after that, for tests.</para>
+/// (<see cref="PublishFamilies"/>).</para>
 /// </summary>
 internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly AppPreferences preferences;
-    private readonly TaskCompletionSource familiesLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     /// The dispatcher of the running application's UI thread when this view model was built on it, otherwise null (a plain
-    /// unit test or pool thread, whose own dispatcher may be stale and unpumped, so a post to it would never run).
+    /// host or pool thread, whose own dispatcher may be stale and unpumped, so a post to it would never run).
     /// Deliberately not <c>Dispatcher.UIThread</c>: reading that property off the UI thread creates a UI dispatcher
     /// on the calling thread, which then hijacks the platform the next headless session sets up.
     /// </summary>
@@ -49,7 +48,7 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
         Loc.Instance.LanguageChanged += OnLanguageChanged;
 
         // The load is started, not awaited: the constructor runs on the UI thread and must not block on font
-        // enumeration. Nothing observes the task except FamiliesLoaded, and LoadFamiliesAsync never faults.
+        // enumeration. Nothing observes the task, and LoadFamiliesAsync never faults.
         _ = LoadFamiliesAsync(catalog);
     }
 
@@ -66,9 +65,6 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
         get => preferences.ReduceMotion;
         set => preferences.ReduceMotion = value;
     }
-
-    /// <summary>Completes when the font list has been loaded into both groups (for tests).</summary>
-    internal Task FamiliesLoaded => familiesLoaded.Task;
 
     /// <summary>Unsubscribes from the preferences and <c>Loc.LanguageChanged</c>. Idempotent.</summary>
     public void Dispose()
@@ -89,7 +85,7 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
         try
         {
             // Resume on the thread that constructed the view model when it has a synchronization context (the app's UI
-            // thread); a context-less host - a plain unit test - resumes on the pool, which PublishFamilies handles.
+            // thread); a context-less host resumes on the pool, which PublishFamilies handles.
             families = await catalog.GetFamiliesAsync().ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -105,8 +101,8 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
     /// <summary>
     /// Hands the list over on the constructing thread: bound controls may only be told from their own thread, and the
     /// continuation after the background enumeration is only back on that thread when it has a synchronization context.
-    /// A thread without a dispatcher (a unit test) assigns straight away; with a dispatcher the list is only posted and
-    /// <see cref="FamiliesLoaded"/> completes from the posted action.
+    /// A thread without a dispatcher assigns straight away; with a dispatcher the list is only posted and the completion comes
+    /// from the posted action.
     /// </summary>
     private void PublishFamilies(IReadOnlyList<string> families)
     {
@@ -142,7 +138,6 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
     {
         Ui.SetFamilies(families);
         Code.SetFamilies(families);
-        familiesLoaded.TrySetResult();
     }
 
     /// <summary>Echoes an external edit (another view, a reset elsewhere) into the editors.</summary>
@@ -170,7 +165,7 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): both groups are bound on the
+        // A switch raised on another thread belongs to a window that is gone: both groups are bound on the
         // thread that built the section.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

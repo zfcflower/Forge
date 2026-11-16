@@ -62,6 +62,6 @@ public sealed record AgentOptions
     /// <summary>How long a gap makes <c>"auto"</c> move to the hour; the short lifetime's own expiry, with a little slack.</summary>
     public TimeSpan CacheTtlPromotionGap { get; init; } = TimeSpan.FromMinutes(5);
 
-    /// <summary>Clock for the cache-lifetime decision only; tests move it instead of sleeping.</summary>
+    /// <summary>Clock for the cache-lifetime decision only.</summary>
     public TimeProvider CacheTtlClock { get; init; } = TimeProvider.System;
 }

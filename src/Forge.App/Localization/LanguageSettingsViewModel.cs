@@ -15,7 +15,7 @@ namespace Forge.App.Localization;
 /// properties are re-raised on <see cref="Loc.LanguageChanged"/>, so a switch updates the section in place.</para>
 /// <para>A language keeps the name the section gives it (<c>中文</c> / <c>Chinese</c>, <c>English</c> /
 /// <c>English</c>), so the English option stays readable when the UI is Chinese. Long-lived: the section lives as long as
-/// the settings page, and <see cref="Dispose"/> exists so a test (and the composition root, should it ever rebuild the
+/// the settings page, and <see cref="Dispose"/> exists so the composition root (should it ever rebuild the
 /// page) can drop the subscriptions instead of leaking them.</para>
 /// </summary>
 internal sealed class LanguageSettingsViewModel : ObservableObject, IDisposable
@@ -123,7 +123,7 @@ internal sealed class LanguageSettingsViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): these properties are bound
+        // A switch raised on another thread belongs to a window that is gone: these properties are bound
         // on the thread that built the section.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

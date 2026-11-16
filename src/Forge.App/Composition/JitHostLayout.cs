@@ -4,8 +4,8 @@ namespace Forge.App.Composition;
 
 /// <summary>
 /// The JIT-side executables the extension host needs: itself, the plugin worker it spawns and the single-use script
-/// executor. Located the same way <c>tools/Forge.Smoke</c> does it - an explicit directory first, then the sibling build
-/// layout under the repository root - so the AOT app never hard-codes a machine path.
+/// executor. Located by an explicit directory first (<c>FORGE_JIT_DIR</c>), then the sibling build layout under the
+/// repository root - so the AOT app never hard-codes a machine path.
 /// </summary>
 internal sealed record JitHostLayout(string HostPath, string WorkerPath, string ExecutorPath)
 {

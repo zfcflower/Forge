@@ -508,7 +508,7 @@ internal sealed class MermaidBlockView : Border, ICopyableText
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A block of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // A block of a window whose session is gone still sits in the subscriber list of the process-wide
         // table; re-applying its state from another thread would touch this control off the dispatcher that owns it.
         if (attached && Environment.CurrentManagedThreadId == attachedThread)
         {
@@ -607,20 +607,9 @@ internal sealed class MermaidBlockView : Border, ICopyableText
 /// </summary>
 internal static class MermaidFixHost
 {
-    /// <summary>
-    /// A test seam: a unit test hosts a block outside a real session and hands it a fake host. Production never sets it, and the
-    /// tree resolution below is what the app uses.
-    /// </summary>
-    internal static Func<Visual, IAgentMessageHost?>? ResolveOverride { get; set; }
-
     internal static IAgentMessageHost? Resolve(Visual element)
     {
         ArgumentNullException.ThrowIfNull(element);
-        if (ResolveOverride is { } resolve)
-        {
-            return resolve(element);
-        }
-
         // A block inside a session's transcript belongs to that session only: when it cannot take the hand-off the block has
         // no host, it must not fall back to whichever session happens to be active.
         if (element.FindAncestorOfType<SessionView>() is { } sessionView)

@@ -387,7 +387,7 @@ internal sealed partial class ChangesViewModel
         });
     }
 
-    /// <summary>Completes when every mark write queued so far has reached the store (tests, shutdown).</summary>
+    /// <summary>Completes when every mark write queued so far has reached the store (shutdown).</summary>
     internal Task FlushMarksAsync() => persistTail;
 
     /// <summary>True when the loaded set can be re-read per file with whole-file context (its refs are known).</summary>

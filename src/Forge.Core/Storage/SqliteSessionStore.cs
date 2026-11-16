@@ -66,7 +66,7 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         _initialization = new Lazy<Task>(InitializeAsync, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    /// <summary>Creates a store over an existing connection string; used by tests and by hosts that own the database file.</summary>
+    /// <summary>Creates a store over an existing connection string; used by hosts that own the database file.</summary>
     public SqliteSessionStore(SqliteConnectionStringBuilder connectionString)
     {
         ArgumentNullException.ThrowIfNull(connectionString);

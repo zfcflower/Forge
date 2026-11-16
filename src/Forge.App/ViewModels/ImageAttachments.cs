@@ -102,7 +102,7 @@ internal static class ImageAttachmentRules
 /// <summary>An image ready for a message: its final media type and encoded bytes, plus a small preview when one was made.</summary>
 internal sealed record PreparedImage(string MediaType, byte[] Bytes, Bitmap? Thumbnail);
 
-/// <summary>Decoding, scaling and re-encoding behind the composer; a test swaps it for one without a renderer.</summary>
+/// <summary>Decoding, scaling and re-encoding behind the composer; it can be swapped for one without a renderer.</summary>
 internal interface IImageCodec
 {
     /// <summary>
@@ -117,7 +117,7 @@ internal interface IImageCodec
 
     /// <summary>
     /// A preview whose long edge is at most <paramref name="maxLongEdge"/> pixels, or null when it cannot be decoded.
-    /// The default member falls back to the codec's own default size, so existing implementors and test fakes keep
+    /// The default member falls back to the codec's own default size, so existing implementors keep
     /// compiling and behave as before. Called off the UI thread.
     /// </summary>
     Bitmap? Thumbnail(byte[] data, int maxLongEdge) => Thumbnail(data);
@@ -233,7 +233,7 @@ internal abstract class ImageThumbnailViewModel : ObservableObject
         this.maxLongEdge = maxLongEdge;
     }
 
-    /// <summary>The decoder behind lazily loaded previews; a test may replace it.</summary>
+    /// <summary>The decoder behind lazily loaded previews; it may be replaced.</summary>
     internal static IImageCodec Codec { get; set; } = AvaloniaImageCodec.Instance;
 
     public ImageBlock Block { get; }

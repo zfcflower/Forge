@@ -60,7 +60,7 @@ internal sealed class ModelCatalogStore
 
     /// <summary>
     /// Reads the file on the calling thread. Construction reads on the pool; a caller that must have the catalog before it
-    /// continues (a test, or a future synchronous startup path) uses this.
+    /// continues (or a future synchronous startup path) uses this.
     /// </summary>
     internal void LoadNow()
     {
@@ -68,7 +68,7 @@ internal sealed class ModelCatalogStore
         loaded.GetAwaiter().GetResult();
     }
 
-    /// <summary>The clock the "is today's catalog already here?" test uses, and the fetch timestamp.</summary>
+    /// <summary>The clock the "is today's catalog already here?" decision uses, and the fetch timestamp.</summary>
     public DateTimeOffset Now => time.GetUtcNow();
 
     /// <summary>True once the constructor's background read has finished (found, missing or damaged).</summary>

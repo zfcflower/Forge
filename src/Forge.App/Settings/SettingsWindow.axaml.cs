@@ -35,7 +35,7 @@ internal sealed partial class SettingsWindow : Window
         Closed += OnClosed;
     }
 
-    /// <summary>Where this column folds by itself; the page model owns the threshold so tests can assert it.</summary>
+    /// <summary>Where this column folds by itself; the page model owns the threshold.</summary>
     internal double AutoCollapseWidth => SettingsViewModel.AutoCollapseWidth;
 
     private void OnOpened(object? sender, EventArgs e)

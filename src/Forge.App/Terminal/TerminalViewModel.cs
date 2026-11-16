@@ -375,7 +375,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
 
     /// <summary>
     /// Scans the buffer now for the current query and applies the result before it returns. The debounced path calls the same
-    /// scan; this entry point is what the view and the tests use when they need the result synchronously.
+    /// scan; this entry point is what the view uses when it needs the result synchronously.
     /// </summary>
     public Task RunSearchAsync() => RunSearchCoreAsync();
 
@@ -452,7 +452,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
             return;
         }
 
-        // The caller is the UI thread (or a test): applying here keeps the result of an awaited scan observable.
+        // The caller is the UI thread (or a bare host): applying here keeps the result of an awaited scan observable.
         if (generation == Volatile.Read(ref searchGeneration) && Volatile.Read(ref disposed) == 0)
         {
             ApplySearchResults(matches);
@@ -1029,7 +1029,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the tab and the close prompt
+        // A switch raised on another thread belongs to a window that is gone: the tab and the close prompt
         // are bound on the thread that built the terminal.
         if (Volatile.Read(ref disposed) != 0 || Environment.CurrentManagedThreadId != uiThread)
         {

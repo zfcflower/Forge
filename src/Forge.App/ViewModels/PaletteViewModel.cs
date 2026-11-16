@@ -391,7 +391,7 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the strip and its rows are
+        // A switch raised on another thread belongs to a window that is gone: the strip and its rows are
         // bound on the thread that built the palette.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

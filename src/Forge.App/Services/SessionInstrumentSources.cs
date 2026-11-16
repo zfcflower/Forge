@@ -11,8 +11,8 @@ namespace Forge.App.Services;
 /// <summary>
 /// Everything the composer's instrument strip reads that does not belong to one session: the app-wide counts it shows
 /// next to the session's own ones, the model metadata chain, and the two ways to open the session's project folder.
-/// <para>The shell implements it once per window; a test can fake it. The blocking members (<see cref="Skills"/>) are only
-/// ever called from a pool thread, the async ones come back on the caller's context.</para>
+/// <para>The shell implements it once per window. The blocking members (<see cref="Skills"/>) are only ever called from a
+/// pool thread, the async ones come back on the caller's context.</para>
 /// </summary>
 internal interface ISessionInstrumentSources
 {
@@ -232,7 +232,7 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
 }
 
 /// <summary>
-/// The null object: a session opened by a test or by a shell without the instrument wiring still has a strip, whose counters
+/// The null object: a session opened without the instrument wiring still has a strip, whose counters
 /// read zero and whose buttons do nothing, instead of a broken binding.
 /// </summary>
 internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources

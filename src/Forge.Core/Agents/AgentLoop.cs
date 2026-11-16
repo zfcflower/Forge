@@ -86,8 +86,6 @@ public sealed class AgentLoop(AgentLoopServices services)
     /// </summary>
     internal bool CancelToolCall(string agentId, string callId) => toolCalls.Cancel(agentId, callId);
 
-    /// <summary>Calls registered for <see cref="CancelToolCall"/> right now; zero between calls (tests check for leaks).</summary>
-    internal int RunningToolCallCount => toolCalls.Count;
     private CompactionPolicy compactionPolicy = services.Options.Compaction;
 
     /// <summary>

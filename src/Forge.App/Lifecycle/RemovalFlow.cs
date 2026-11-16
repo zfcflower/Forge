@@ -27,7 +27,7 @@ internal enum DirectoryFate
     Trash,
 }
 
-/// <summary>The git reads and writes the removal, restore and purge flows (7.2-7.5) need; real or substituted in tests.</summary>
+/// <summary>The git reads and writes the removal, restore and purge flows (7.2-7.5) need; real or substituted.</summary>
 internal interface IRemovalGit
 {
     /// <summary>The reasons removing the worktree would discard work (<see cref="WorktreeManager.CheckRemovableAsync"/>), verbatim.</summary>

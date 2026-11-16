@@ -30,7 +30,7 @@ internal sealed partial class MainWindowViewModel
     private void InitializeInspector()
     {
         // The window-level opener is not bound to a control (the strip's resources menu row reaches
-        // <see cref="OpenInspector"/> through the session), but it is the one gesture a test or a future host can drive
+        // <see cref="OpenInspector"/> through the session), but it is the one gesture a future host can drive
         // without a session view.
         OpenInspectorCommand = new RelayCommand(OpenInspector, () => sessions.Count > 0);
         PropertyChanged += OnInspectorActiveSessionChanged;

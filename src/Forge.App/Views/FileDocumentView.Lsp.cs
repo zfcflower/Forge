@@ -294,7 +294,7 @@ public partial class FileDocumentView
 
     /// <summary>
     /// Moves the completion list's selection from the editor's key handler. The library forwards arrows through a stacked
-    /// input handler, which in the real window did not move the selection (the headless tests did not catch it because the
+    /// input handler, which in the real window did not move the selection (a headless run did not catch it because the
     /// synthetic path works there); doing it here is deterministic, and marking the event handled keeps the library from
     /// stepping twice. Modifier-free keys only: Ctrl+Home and friends stay with the editor.
     /// </summary>
@@ -801,7 +801,7 @@ public partial class FileDocumentView
         }
     }
 
-    /// <summary>The light bulb, exposed for a test to read what the server offered without driving the mouse.</summary>
+    /// <summary>The light bulb, exposed to read what the server offered without driving the mouse.</summary>
     internal EditorCodeActionMargin? CodeActionBulb => codeActionMargin;
 
     internal IReadOnlyList<LspCodeAction> AvailableCodeActions => codeActions;
@@ -1189,14 +1189,6 @@ public partial class FileDocumentView
                 box.SelectAll();
             }
         });
-    }
-
-    /// <summary>Confirms the open rename box the way Enter does; a headless test cannot type into a popup root's text box.</summary>
-    internal void SubmitRenameForTest(string newName)
-    {
-        var offset = renameOffset;
-        CloseRenamePrompt();
-        _ = ConfirmRenameAsync(offset, newName);
     }
 
     private void OnRenameBoxKeyDown(object? sender, KeyEventArgs e)

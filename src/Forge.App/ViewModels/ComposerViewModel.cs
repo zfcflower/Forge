@@ -243,7 +243,7 @@ internal sealed class ComposerSuggestionItem : ObservableObject
 /// the configured model and effort hands over null, so a session nobody touched runs exactly as before.
 /// <para>The model list skips every model <see cref="AppPreferences.ModelsHidden"/> hides; the model the session is on
 /// stays listed (it is the state, not a choice), and a hidden flag raised by the settings page re-filters this list without
-/// a restart. Without preferences (a test, a standalone composer) nothing is filtered.</para>
+/// a restart. Without preferences (a standalone composer) nothing is filtered.</para>
 /// </summary>
 internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 {
@@ -319,7 +319,7 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         this.skillSource = skillSource ?? DiscoverSkills;
         this.templateSource = templateSource ??
                               (() => new PromptTemplateService(AgentRuntimeServices.UserDirectory()).Resolve(this.workspace));
-        // The picker's 刷新 re-fetches every provider that can list models; a test can pass its own.
+        // The picker's 刷新 re-fetches every provider that can list models; the refresh itself is injectable.
         this.modelRefresh = modelRefresh ?? RefreshAllProvidersAsync;
         this.thinkingLevels = thinkingLevels ?? ((modelId, provider) => services.Catalog.ThinkingStepsFor(modelId, provider));
         this.imageCodec = imageCodec ?? AvaloniaImageCodec.Instance;

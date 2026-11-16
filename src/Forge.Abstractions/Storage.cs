@@ -133,7 +133,7 @@ public interface ISessionCatalog
     // WorktreeOccupiedException and does not fail unrelated writes batched with it. Regular queries (QueryAsync,
     // ListSessionsAsync) never return Deleted sessions; ListHistoryAsync and GetSessionAsync do.
     //
-    // The defaults below exist so test doubles compile; real stores (and decorators, which must forward) override them.
+    // The defaults below exist so implementing stores compile; real stores (and decorators, which must forward) override them.
 
     /// <summary>
     /// <see cref="SessionStatus.Archived"/> or <see cref="SessionStatus.Deleted"/> to <see cref="SessionStatus.Active"/>,

@@ -75,7 +75,7 @@ internal sealed record HandoverAttempt(SessionInfo? Session, string? Error, stri
     public static HandoverAttempt Failed(string error, string? commitSha) => new(null, error, commitSha, null);
 }
 
-/// <summary>The git half of a handover; <see cref="HandoverGit"/> is the real one, tests substitute their own.</summary>
+/// <summary>The git half of a handover; <see cref="HandoverGit"/> is the real one, a host substitutes its own.</summary>
 internal interface IHandoverGit
 {
     /// <summary>Uncommitted paths, untracked included; null when the directory is not a git working tree.</summary>

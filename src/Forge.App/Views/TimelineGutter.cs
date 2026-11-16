@@ -142,7 +142,7 @@ internal sealed class TimelineGutter : TemplatedControl
         private set => SetValue(ShowBottomLineProperty, value);
     }
 
-    /// <summary>How many placement retries the current attach has used (bounded by <c>MaxPlacementRetries</c>); a test hook.</summary>
+    /// <summary>How many placement retries the current attach has used (bounded by <c>MaxPlacementRetries</c>).</summary>
     internal int PlacementRetriesUsed => placementRetries;
 
     /// <summary>The node's readable name for the current language; empty while the row draws no node.</summary>
@@ -396,7 +396,7 @@ internal sealed class TimelineGutter : TemplatedControl
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A gutter of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // A gutter of a window whose session is gone still sits in the subscriber list of the process-wide
         // table; re-applying its read-screen name from another thread would touch this control off the dispatcher that owns
         // it.
         if (Environment.CurrentManagedThreadId == hookedThread)
@@ -405,7 +405,7 @@ internal sealed class TimelineGutter : TemplatedControl
         }
     }
 
-    /// <summary>How many times any gutter recomputed its place (all instances, UI thread only); a test hook for the append cost.</summary>
+    /// <summary>How many times any gutter recomputed its place (all instances, UI thread only); the append cost.</summary>
     internal static long RecomputeCount { get; private set; }
 
     /// <summary>Recomputes the row's place and repaints only the parts that changed.</summary>

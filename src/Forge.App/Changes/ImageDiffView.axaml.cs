@@ -21,7 +21,7 @@ internal sealed partial class ImageDiffView : UserControl
         DataContext = viewModel;
     }
 
-    /// <summary>The view model behind the two pictures, for tests and for the host's height measurement.</summary>
+    /// <summary>The view model behind the two pictures; the host releases its decoded pictures when the row leaves the screen.</summary>
     internal ImageDiffViewModel ViewModel => viewModel;
 
     /// <summary>

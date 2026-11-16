@@ -47,7 +47,6 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
     private readonly TimeProvider time;
 
     private CancellationTokenSource? watchSource;
-    private Task watch = Task.CompletedTask;
 
     /// <summary>
     /// The panel's own lifetime: every platform call outside the poll (a row's log, the hand-off's logs, mark-ready) runs
@@ -276,12 +275,6 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
     /// <summary>Opens the pull request in the browser (the header's address line).</summary>
     public RelayCommand OpenPullRequestCommand { get; }
 
-    /// <summary>
-    /// The read in flight. Completed once the reading settled (or the panel closed); exposed so the window can drive it and
-    /// so a test can await one read deterministically.
-    /// </summary>
-    public Task Watch => watch;
-
     /// <summary>Starts the first read. The window calls this once after opening the panel.</summary>
     public void Start() => RefreshCommand.Execute(null);
 
@@ -328,8 +321,7 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
         watchSource = source;
         var generation = ++watchGeneration;
         IsReading = true;
-        watch = WatchAsync(source.Token, generation);
-        return watch;
+        return WatchAsync(source.Token, generation);
     }
 
     private async Task WatchAsync(CancellationToken ct, int generation)

@@ -2301,7 +2301,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         }
         catch (NotSupportedException)
         {
-            // A catalog without the lifecycle history (a test double) has no removed sessions to draw; the real stores
+            // A catalog without the lifecycle history (an alternate implementation) has no removed sessions to draw; the real stores
             // and their decorators all implement it.
             return live;
         }
@@ -2315,7 +2315,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// <summary>A language switch re-renders the stored status line and every row's label; the rows compute their text on read.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the flat row list is spliced and
+        // A switch raised on another thread belongs to a window that is gone: the flat row list is spliced and
         // bound on the thread that built the tree, so a refresh from anywhere else would mutate it under that thread.
         if (Environment.CurrentManagedThreadId != uiThread)
         {

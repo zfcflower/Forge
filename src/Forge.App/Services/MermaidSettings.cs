@@ -6,7 +6,7 @@ namespace Forge.App.Services;
 /// <summary>
 /// The live preferences a Mermaid block reads, ambient like <c>ToolImageSettings</c>: blocks are built by the Markdown
 /// renderer deep inside a transcript and cannot be handed the composition root, so the composition root replaces the two
-/// readers with projections of <see cref="AppPreferences"/> before the first window opens. Tests and any host without
+/// readers with projections of <see cref="AppPreferences"/> before the first window opens. Any host without
 /// preferences keep the built-in defaults (the same values the preferences ship with).
 /// </summary>
 internal static class MermaidSettings
@@ -51,7 +51,7 @@ internal static class MermaidSettings
         return TimeSpan.FromMilliseconds(milliseconds);
     }
 
-    /// <summary>Restores the defaults (tests); the composition root re-binds the projections on the next start.</summary>
+    /// <summary>Restores the defaults; the composition root re-binds the projections on the next start.</summary>
     internal static void Reset()
     {
         DiagramTypes = static () => AppPreferences.DefaultChatMermaidDiagramTypes;

@@ -63,7 +63,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
     /// Opens the dialog for a new provider (<paramref name="startPreset"/> is the built-in vendor, or the custom entry) or for an
     /// existing one (<paramref name="definition"/>). <paramref name="existingProviderIds"/> keeps a new id unique.
     /// <paramref name="persist"/> writes the definition to the settings and returns the failure to show, or <c>null</c> on
-    /// success; without it a save only raises <see cref="Saved"/> (tests use that).
+    /// success; without it a save only raises <see cref="Saved"/>.
     /// </summary>
     public ProviderEditorViewModel(
         ProviderServices services,
@@ -490,8 +490,8 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
     }
 
     /// <summary>
-    /// Writes the typed key under a draft reference for the test to read. Empty or variable mode writes nothing; the test then
-    /// uses the provider's own reference (its stored key, if any).
+    /// Writes the typed key under a draft reference. Empty or variable mode writes nothing; the provider's own reference
+    /// (its stored key, if any) is used instead.
     /// </summary>
     private async Task<string?> WriteDraftKeyAsync(ProviderDefinition definition)
     {

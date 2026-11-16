@@ -144,7 +144,7 @@ internal sealed class WebServices : IDisposable
     private readonly ITool[] fetchOnly;
     private readonly ITool[] withSearch;
 
-    /// <summary>One client for both tools (tests); a client passed in stays the caller's.</summary>
+    /// <summary>One client for both tools; a client passed in stays the caller's.</summary>
     public WebServices(WebSettingsStore store, ProviderSecretStore secrets, HttpClient? http = null)
     {
         ArgumentNullException.ThrowIfNull(store);

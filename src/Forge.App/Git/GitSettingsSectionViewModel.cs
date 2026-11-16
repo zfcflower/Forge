@@ -244,7 +244,7 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a window that is gone (a test host): the picker bound to
+        // A notification from another thread belongs to a window that is gone: the picker bound to
         // these properties lives on its own thread.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

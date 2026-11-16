@@ -66,7 +66,7 @@ internal interface IAutomationHost
     Task OnSessionsArchivedAsync(IReadOnlyList<string> sessionIds);
 }
 
-/// <summary>Runs work on the UI thread; the product uses the Avalonia dispatcher, tests run it inline.</summary>
+/// <summary>Runs work on the UI thread; the product uses the Avalonia dispatcher; an inline dispatcher keeps the automation free of Avalonia.</summary>
 internal interface IUiThread
 {
     Task<T> InvokeAsync<T>(Func<Task<T>> work);

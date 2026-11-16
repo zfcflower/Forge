@@ -23,7 +23,7 @@ internal sealed partial class MainWindowViewModel
 
     /// <summary>
     /// Whether a window that finishes initializing asks for the first-run wizard. Set by the application when it creates the
-    /// real window and left off by every host that builds its own (a headless test, a recorder): those assert on the
+    /// real window and left off by every host that builds its own (a recorder): those assert on the
     /// workbench, and an overlay in front of it would only be in the way. The overlay itself — and whether this database has
     /// already seen it — is decided by <see cref="ShowFirstRunWizardIfNeededAsync"/>.
     /// </summary>
@@ -33,7 +33,7 @@ internal sealed partial class MainWindowViewModel
     /// Shows the wizard when this is a genuine first run: the database holds no "seen" record yet <em>and</em> no repository
     /// project. An install that already has one is not a first run — it gets the record written silently, so upgrading never
     /// puts a working user through setup — and a store that cannot be read is treated the same way. Called once by the
-    /// window after <see cref="InitializeAsync"/>, never by the view model's own startup: a headless host (a test, a
+    /// window after <see cref="InitializeAsync"/>, never by the view model's own startup: a headless host (a recorder, a
     /// recorder) has no overlay to show it in.
     /// </summary>
     internal async Task ShowFirstRunWizardIfNeededAsync(CancellationToken ct)

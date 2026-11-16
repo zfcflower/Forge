@@ -101,7 +101,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>The thread the session was built on (the UI thread); a language notification from another one is not ours.</summary>
     private readonly int uiThread = Environment.CurrentManagedThreadId;
 
-    /// <summary>The shell's notification entry; null (a test, a standalone session) means the session says nothing outside its own transcript.</summary>
+    /// <summary>The shell's notification entry; null (a standalone session) means the session says nothing outside its own transcript.</summary>
     private readonly INotifications? notifications;
 
     /// <summary>Set while the turn-start check reads the store, so a second send cannot slip in before the turn starts.</summary>
@@ -132,11 +132,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <param name="runtime">The live runtime, or <see langword="null"/> for a read-only view of a session that is not
     /// <see cref="SessionStatus.Active"/>: the transcript is replayed from the store and nothing can be sent.</param>
     /// <param name="preferences">The live preferences the composer filters hidden models with and the inspector reads its
-    /// output-tail limit from; <see langword="null"/> (a test, a standalone view) lists every model and uses the defaults.</param>
+    /// output-tail limit from; <see langword="null"/> (a standalone view) lists every model and uses the defaults.</param>
     /// <param name="openInspector">Opens the window's resource inspector; the strip's resources menu carries the row, and
-    /// <see langword="null"/> (a test, a standalone view) leaves that row out instead of offering a dead entry.</param>
+    /// <see langword="null"/> (a standalone view) leaves that row out instead of offering a dead entry.</param>
     /// <param name="focusTree">Selects a row of the shell's project tree by node key (the breadcrumb's project and workspace
-    /// segments); <see langword="null"/> (a test, a standalone view) leaves those segments as plain text.</param>
+    /// segments); <see langword="null"/> (a standalone view) leaves those segments as plain text.</param>
     /// <param name="openSession">Brings this session's own tab to the front; the sub-agent breadcrumb's way back to its
     /// parent, and <see langword="null"/> hides that action.</param>
     public SessionWorkspaceViewModel(
@@ -484,7 +484,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     /// <summary>
     /// Read before every turn starts (6.3): the store still has this session as <see cref="SessionStatus.Active"/>, and its
-    /// workspace is not in a merge conflict. Null (a headless host, a test) lets every turn start.
+    /// workspace is not in a merge conflict. Null (a headless host) lets every turn start.
     /// </summary>
     internal Func<CancellationToken, Task<TurnRejection>>? TurnGate { get; set; }
 
@@ -2195,7 +2195,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the transcript, the cards and
+        // A switch raised on another thread belongs to a window that is gone: the transcript, the cards and
         // the sub-agent tabs are all bound on the thread that built the session.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

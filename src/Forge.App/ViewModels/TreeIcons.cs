@@ -8,7 +8,7 @@ namespace Forge.App.ViewModels;
 /// The tree icons, as geometry so the shell ships no icon package and no font dependency. Every glyph is the 24 px
 /// regular variant of the same Fluent System Icon the chrome uses (see <c>Resources/Icons.axaml</c>); the view paints it
 /// with the built-in <c>PathIcon</c>, which fills with <c>Foreground</c>. Geometries are thread-affine Avalonia objects,
-/// so they are cached per thread: each UI thread (and each headless test session) gets its own set.
+/// so they are cached per thread: each UI thread (and each headless session) gets its own set.
 /// </summary>
 internal static class TreeIcons
 {

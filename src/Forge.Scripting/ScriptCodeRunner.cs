@@ -13,7 +13,7 @@ namespace Forge.Scripting;
 /// <remarks>
 /// <para>
 /// The instance is reusable and thread-safe, but the caller owns the process lease: the host runs one script in a fresh
-/// executor process and never reuses an executed one, so this class is what a single-use executor (or a test) runs once
+/// executor process and never reuses an executed one, so this class is what a single-use executor runs once
 /// the artifact is loaded. Only compiled images and the fixed compile surface are cached (the cache key covers the whole
 /// surface and every option that shapes a cached result); the facade, log and cancellation token are rebuilt per
 /// invocation, so no request's capabilities survive into the next.

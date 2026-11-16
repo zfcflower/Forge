@@ -58,8 +58,8 @@ public sealed record ScreenshotCaptureOptions
 {
     /// <summary>
     /// Overrides the time one run of the command may take. Without it the value from <c>.forge/screenshots.json</c> applies,
-    /// else five minutes. The configuration file itself cannot go below ten seconds; this override exists so callers and
-    /// tests can set a shorter limit deliberately.
+    /// else five minutes. The configuration file itself cannot go below ten seconds; this override exists so a caller
+    /// can set a shorter limit deliberately.
     /// </summary>
     public TimeSpan? Timeout { get; init; }
 

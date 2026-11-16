@@ -413,7 +413,7 @@ internal sealed class NewBranchDialogViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the dialog's texts are bound
+        // A switch raised on another thread belongs to a window that is gone: the dialog's texts are bound
         // on the thread that opened it, and re-validating from anywhere else would race the dialog's own keystrokes.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

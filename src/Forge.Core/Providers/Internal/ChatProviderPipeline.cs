@@ -40,7 +40,7 @@ public static class ChatProviderPipeline
 /// <para>
 /// It also charges the provider's local budget, through the limiter it was given: the shell passes
 /// <see cref="ProviderRateLimiter.Shared"/> (the one the user's numbers are published into) explicitly, and a null limiter
-/// means no budget at all, so a unit test never inherits process-wide state. Retry is the outermost middleware and therefore the only place that sees every
+/// means no budget at all, so a caller never inherits process-wide state. Retry is the outermost middleware and therefore the only place that sees every
 /// attempt (including the retries it decides on), which is exactly where a per-request budget belongs; putting it inside the
 /// endpoint would charge once for a request that was sent three times.
 /// </para>
@@ -49,7 +49,7 @@ public sealed class RetryMiddleware : IChatProviderMiddleware
 {
     private readonly ProviderRateLimiter? rateLimiter;
 
-    /// <param name="rateLimiter">The budget to charge, or null for none (a test that builds a provider without a shell).</param>
+    /// <param name="rateLimiter">The budget to charge, or null for none (a provider built without a shell).</param>
     public RetryMiddleware(ProviderRateLimiter? rateLimiter = null) => this.rateLimiter = rateLimiter;
 
     public IChatProvider Apply(IChatProvider next)

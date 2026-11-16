@@ -183,13 +183,6 @@ internal sealed partial class PaletteViewModel
             string.Equals(left.Title, right.Title, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// Test seam: installs an exact row list. A source never emits a list that mixes a notice with a result - a notice is
-    /// the whole list - so the code that steps over rows cannot be proven for a mixed list through the palette's own
-    /// surface. Everything after installing the rows goes through the public members.
-    /// </summary>
-    internal void InstallRowsForTest(IReadOnlyList<PaletteItem> next) => Replace(next, keepSelection: false);
-
     /// <summary>Starts the snapshot refresh of <paramref name="target"/>; the cached snapshot is shown meanwhile.</summary>
     private void Refresh(PaletteSource target)
     {

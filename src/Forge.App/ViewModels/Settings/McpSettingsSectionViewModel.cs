@@ -82,7 +82,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     }
 
     /// <summary>
-    /// The same page over its four inputs. The public entry point is the composition one; this overload is what a headless test
+    /// The same page over its four inputs. The public entry point is the composition one; this overload is what a headless host
     /// uses, because a page whose MCP servers are answered by an in-memory transport has no composition to build.
     /// </summary>
     internal McpSettingsSectionViewModel(
@@ -1172,7 +1172,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a page whose window is gone (a test host).
+        // A notification from another thread belongs to a page whose window is gone.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {
             return;

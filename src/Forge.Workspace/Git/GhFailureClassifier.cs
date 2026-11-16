@@ -1,7 +1,7 @@
 namespace Forge.Workspace;
 
 /// <summary>
-/// Maps a failed gh invocation to a <see cref="GitRemoteFailureKind"/>; pure, so it is unit-tested on captured text. gh
+/// Maps a failed gh invocation to a <see cref="GitRemoteFailureKind"/>; pure, so it can be exercised on captured text. gh
 /// runs under <c>LC_ALL=C</c> and its messages are stable English. Order matters: the first category that matches wins,
 /// because one message can mention several (an expired token reports both "HTTP 401" and "authentication"). Text that gh
 /// forwards from git (a failed push inside <c>gh pr create</c>) falls through to <see cref="GitFailureClassifier"/>.

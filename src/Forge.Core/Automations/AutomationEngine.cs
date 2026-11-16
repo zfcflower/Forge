@@ -343,7 +343,7 @@ public sealed class AutomationEngine : IAutomationEngine, IAsyncDisposable
     public Task ResetTargetBudgetAsync(string targetKey, CancellationToken ct) =>
         _runs.SetStateAsync(BudgetPrefix + targetKey, null, ct);
 
-    /// <summary>Completes when no start or run is in flight (for tests and orderly shutdown).</summary>
+    /// <summary>Completes when no start or run is in flight (for orderly shutdown).</summary>
     public async Task WhenIdleAsync()
     {
         while (true)

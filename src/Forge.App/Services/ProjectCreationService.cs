@@ -69,7 +69,7 @@ internal sealed record ProjectCreationResult(string? Directory, LocText? Error)
 /// <summary>
 /// Creates a project directory: validates the name, resolves the destination, then either runs <c>git init</c> in a new
 /// folder or clones a remote into it, cleaning up after itself when that fails. It holds no UI state and no registry: the
-/// shell registers the returned directory, so the same code serves the dialog, a headless host and a test.
+/// shell registers the returned directory, so the same code serves the dialog and a headless host.
 /// </summary>
 internal sealed class ProjectCreationService
 {

@@ -4,10 +4,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Forge.App.Logging;
 
 /// <summary>
-/// The process-wide logger factory. It defaults to <see cref="NullLoggerFactory"/> so tests and headless runs write
+/// The process-wide logger factory. It defaults to <see cref="NullLoggerFactory"/> so headless runs write
 /// nothing; <see cref="AppLogSetup"/> installs the file-backed factory before Avalonia starts. Callers keep a
 /// <c>static readonly ILogger</c> from <see cref="Create"/>, which resolves the current factory lazily, so a logger
-/// created before configuration (or before a test installs a capturing factory) still reaches the right sink.
+/// created before configuration (or before a capturing factory is installed) still reaches the right sink.
 /// </summary>
 internal static class AppLog
 {

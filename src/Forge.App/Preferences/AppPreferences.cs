@@ -1643,7 +1643,7 @@ internal sealed class PreferencesStore : IAsyncDisposable
     /// <summary>Where an unreadable <c>settings.json</c> is preserved before the first write replaces it.</summary>
     internal string BackupPath { get; }
 
-    /// <summary>Completed file writes; the debounce test pins that a burst of edits still lands as one write.</summary>
+    /// <summary>Completed file writes; a burst of edits still lands as one write.</summary>
     internal int SaveCount
     {
         get

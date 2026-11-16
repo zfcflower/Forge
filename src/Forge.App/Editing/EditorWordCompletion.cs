@@ -143,6 +143,4 @@ internal static class EditorWordCompletion
 
     private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
-    /// <summary>Diagnostics hook for tests: whether a character can appear inside an identifier.</summary>
-    internal static bool IsWordCharacter(char c) => IsWordChar(c);
 }

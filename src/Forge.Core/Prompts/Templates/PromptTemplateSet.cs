@@ -46,7 +46,7 @@ public sealed class PromptTemplateSet
         }
     }
 
-    /// <summary>The compiled-in templates only; what a test or a runtime without a store uses.</summary>
+    /// <summary>The compiled-in templates only; what a runtime without a store uses.</summary>
     public static PromptTemplateSet BuiltIn(PromptTemplateRegistry? registry = null) =>
         new PromptTemplateStore(registry ?? PromptTemplateRegistry.Core, userDirectory: null).Resolve(workspace: null);
 

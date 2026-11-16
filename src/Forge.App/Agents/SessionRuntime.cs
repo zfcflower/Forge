@@ -26,19 +26,19 @@ internal sealed record AgentRuntimeServices(
 {
     /// <summary>
     /// The shell's approval wiring (queue, remembered rules and the extension authoring adapter). Null when the runtime was
-    /// assembled without the composition root, as in a unit test: the session then has no approval handler and an ask is a
+    /// assembled without the composition root, : the session then has no approval handler and an ask is a
     /// denial, exactly as before the queue existed.
     /// </summary>
     public ApprovalServices? Approvals { get; set; }
 
     /// <summary>
     /// The prompt template store. A session resolves a snapshot from it (for its worktree) when its agent host is built:
-    /// the system slot, the agent kinds and the compaction prompt then stay fixed for that host. Null in a unit test: the
+    /// the system slot, the agent kinds and the compaction prompt then stay fixed for that host. Null without the composition root: the
     /// compiled-in texts are used.
     /// </summary>
     public Prompts.PromptTemplateService? PromptTemplates { get; set; }
 
-    /// <summary>Agent defaults resolved from settings.json; null when the runtime has no store (a unit test).</summary>
+    /// <summary>Agent defaults resolved from settings.json; null when the runtime has no store.</summary>
     public Func<string, ModelSettings?>? AgentDefaults { get; set; }
 
     /// <summary>
@@ -50,16 +50,16 @@ internal sealed record AgentRuntimeServices(
 
     /// <summary>
     /// Commits a TODO step when the agent marks it done (handed to <c>AgentHostOptions.StepCommitter</c>). Null when the
-    /// runtime was assembled without the composition root, as in a unit test: marking an item done then commits nothing.
+    /// runtime was assembled without the composition root, : marking an item done then commits nothing.
     /// </summary>
     public IStepCommitter? StepCommitter { get; set; }
 
-    /// <summary>The git side of <c>request_review</c> (handed to <c>AgentHostOptions.Reviews</c>, which registers the tool). Null in a unit test: the session then has no review tool.</summary>
+    /// <summary>The git side of <c>request_review</c> (handed to <c>AgentHostOptions.Reviews</c>, which registers the tool). Null without the composition root: the session then has no review tool.</summary>
     public IReviewChangeSetSource? Reviews { get; set; }
 
     /// <summary>
     /// The git side of the step-completion gate (handed to <c>AgentHostOptions.StepChanges</c>): whether the session's
-    /// worktree holds changes a step has to answer for. Null in a unit test, or in a runtime assembled without git: the
+    /// worktree holds changes a step has to answer for. Null without the composition root, or in a runtime assembled without git: the
     /// gate then does not exist and marking a step done behaves as it did before the gate.
     /// </summary>
     public IStepChangeProbe? StepChanges { get; set; }
@@ -98,7 +98,7 @@ internal sealed record AgentRuntimeServices(
 
     /// <summary>
     /// The pull request tools (<c>pr_*</c>, <c>pr_screenshots</c>, <c>review_comments</c>, <c>review_comment_resolve</c>),
-    /// registered after the git tools. Stateless across sessions like <see cref="Git"/>; empty in a unit test. Read-only ones
+    /// registered after the git tools. Stateless across sessions like <see cref="Git"/>; empty without the composition root. Read-only ones
     /// pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones always ask, and
     /// <c>pr_screenshots</c> – which runs a command from the repository and then pushes and edits the description – asks with
     /// its <see cref="ToolSideEffect.Execute"/>.
@@ -108,7 +108,7 @@ internal sealed record AgentRuntimeServices(
     /// <summary>
     /// The workspace file and shell tools (<c>read</c>, <c>write</c>, <c>edit</c>, <c>ls</c>, <c>find</c>, <c>grep</c>,
     /// <c>bash</c>) from <c>Forge.IO</c>. Stateless across sessions: every call takes the session's worktree from its
-    /// <see cref="ToolContext"/>. Empty in a unit test, where an agent therefore cannot touch files at all. The read-only
+    /// <see cref="ToolContext"/>. Empty without the composition root, where an agent therefore cannot touch files at all. The read-only
     /// ones pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>; <c>write</c>/<c>edit</c> ask and
     /// <c>bash</c> asks with <see cref="ToolSideEffect.Execute"/>. The read-only four are also the file half of a
     /// <c>run_code</c> script's tool surface (wave W14: read-only is the rule, so nothing a script reaches ever needed a
@@ -121,14 +121,14 @@ internal sealed record AgentRuntimeServices(
     /// Produces the web tools when a session assembles its tool surface: <c>web_fetch</c> always, <c>web_search</c> only
     /// while a backend is configured with its key or URL. Called again at the start of every turn: when the names it
     /// returns differ from what the session's host holds, the external set is republished (otherwise nothing changes,
-    /// so the prompt cache stays). Should be cheap and return shared instances. Null in a unit test: no web tools. Both
+    /// so the prompt cache stays). Should be cheap and return shared instances. Null without the composition root: no web tools. Both
     /// always ask for approval (see <c>CreateRules</c>): network egress can carry data out.
     /// </summary>
     public Func<IReadOnlyList<ITool>>? WebTools { get; set; }
     // --- end web tools ---
 
     /// <summary>
-    /// The MCP servers of the app; null when the runtime was assembled without the composition root (a unit test), which then
+    /// The MCP servers of the app; null when the runtime was assembled without the composition root, which then
     /// has no MCP tools at all. The catalog, the per-turn limit and the search tool all come from here.
     /// </summary>
     public Composition.McpServices? Mcp { get; set; }
@@ -137,19 +137,19 @@ internal sealed record AgentRuntimeServices(
     /// The <c>tools</c> section's four <c>run_code</c> dials (wave W14): the inner-call concurrency, the two result sizes and
     /// the visible-tool list. A lookup rather than a value because all four are settings, and every consumer reads them on
     /// use: the description states the numbers and the registry filters by the list, so a change reaches the next turn
-    /// without rebuilding a session host. Null = <see cref="CodeModeSettings.Default"/> (a unit test).
+    /// without rebuilding a session host. Null = <see cref="CodeModeSettings.Default"/>.
     /// </summary>
     public Func<CodeModeSettings>? CodeMode { get; set; }
 
     /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
-    /// tool set and approval handler here when its host is built. Null in a unit test: nothing is registered.
+    /// tool set and approval handler here when its host is built. Null without the composition root: nothing is registered.
     /// </summary>
     public SessionToolCallRouter? ToolRouter { get; set; }
 
     /// <summary>
     /// Names of the tools the user switched off in the Tools settings section; read before every turn and handed to
-    /// <see cref="AgentHost.SetDisabledTools"/> (a no-op when unchanged). Null = no stored switch (a unit test), in which case
+    /// <see cref="AgentHost.SetDisabledTools"/> (a no-op when unchanged). Null = no stored switch, in which case
     /// only <see cref="SubAgents"/>' switch can disable anything.
     /// </summary>
     public Func<IReadOnlyList<string>>? DisabledTools { get; set; }
@@ -160,7 +160,7 @@ internal sealed record AgentRuntimeServices(
     /// from its next turn: a raised cap lets agents that are already queued start at once, a lower one only stops new ones
     /// from starting, and switching spawning off takes <c>spawn_agent</c> and <c>request_review</c> (it runs a Reviewer
     /// sub-agent) out of the model's tool set while the control tools
-    /// a parent already needs (steer, follow-up, stop) stay. Null = <see cref="SubAgentLimits.Default"/> (a unit test, or
+    /// a parent already needs (steer, follow-up, stop) stay. Null = <see cref="SubAgentLimits.Default"/> (or
     /// a runtime assembled without the settings store).
     /// </summary>
     public Func<SubAgentLimits>? SubAgents { get; set; }
@@ -189,7 +189,7 @@ internal sealed record AgentRuntimeServices(
     /// <summary>
     /// Whether tool results may send their images to the model (the <c>chat</c> settings switch), handed to
     /// <see cref="AgentOptions.SendToolImagesToModel"/> as the live lookup it is — the loop asks it before every request, so
-    /// a flip applies from the next turn. Null (a unit test) means on.
+    /// a flip applies from the next turn. Null means on.
     /// </summary>
     public Func<bool>? SendToolImages { get; set; }
 
@@ -202,7 +202,7 @@ internal sealed record AgentRuntimeServices(
 
     /// <summary>
     /// The settings store whose <see cref="CompactionSettingsStore.Changed"/> makes every live session re-apply the settings
-    /// to its host at once, so a running turn uses them from its next model request. Null in a unit test that does not care.
+    /// to its host at once, so a running turn uses them from its next model request. Null without the composition root that does not care.
     /// </summary>
     public CompactionSettingsStore? CompactionChanges { get; set; }
 
@@ -699,7 +699,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         var spawning = subAgents.Enabled ? [] : GateAwareSpawningTools();
         if (services.DisabledTools is not { } disabled)
         {
-            // A runtime without the tools store (a unit test) still honours the sub-agent switch, in both directions.
+            // A runtime without the tools store still honours the sub-agent switch, in both directions.
             target.SetDisabledTools(spawning);
             return;
         }
@@ -853,19 +853,6 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         {
             AppLogs.Session.ZLogWarning($"the MCP tools could not be refreshed: {exception.Message}");
         }
-    }
-
-    /// <summary>The MCP tools this session offers right now; a test reads it instead of the host.</summary>
-    internal IReadOnlyList<ITool> McpToolsForTest()
-    {
-        if (services.Mcp is not { } mcp)
-        {
-            return [];
-        }
-
-        var tools = new List<ITool>(4);
-        AppendMcpTools(tools, mcp);
-        return tools;
     }
 
     /// <summary>
@@ -1024,18 +1011,6 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
-    /// <summary>The policy the session's host is using now; null before the host is built. For tests and diagnostics.</summary>
-    internal CompactionPolicy? CompactionPolicy
-    {
-        get
-        {
-            lock (gate)
-            {
-                return host?.CompactionPolicy;
-            }
-        }
-    }
-
     private AgentHost Build()
     {
         var handler = services.Approvals?.CreateHandler(Session);
@@ -1116,7 +1091,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// Every agent kind of the template snapshot (built-ins, possibly overridden, then user agents) with its
     /// <c>settings.json</c> defaults substituted for the placeholder <c>ModelSettings("default", ...)</c>. An agent whose file
     /// sets an explicit model keeps it. The substituted <see cref="ModelSettings"/> carries the entry's provider id, so an
-    /// agent pinned to another provider is routed there by the host's provider factory. Without the defaults store (a test)
+    /// agent pinned to another provider is routed there by the host's provider factory. Without the defaults store
     /// the snapshot's definitions are used as they are.
     /// </summary>
     private IReadOnlyList<AgentDefinition> ResolveAgentDefaults(PromptTemplateSet templates)
@@ -1457,12 +1432,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
-    /// <summary>The tool surface one session runs with (see <see cref="CollectExternalTools"/>); tests read it directly.</summary>
+    /// <summary>The tool surface one session runs with (see <see cref="CollectExternalTools"/>).</summary>
     internal IReadOnlyList<ITool> BuildTools() => CollectExternalTools();
 
     /// <summary>
-    /// The host's currently published tool registry: a new instance exactly when a new tool set was published, so tests
-    /// compare it across turns to prove that the prompt cache was (or was not) invalidated. Null before the first turn.
+    /// The host's currently published tool registry: a new instance exactly when a new tool set was published, so its identity
+    /// can be compared across turns to prove that the prompt cache was (or was not) invalidated. Null before the first turn.
     /// </summary>
     internal ToolRegistry? PublishedTools
     {

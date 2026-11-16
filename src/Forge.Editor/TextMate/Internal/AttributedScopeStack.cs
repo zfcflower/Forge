@@ -345,9 +345,6 @@ internal sealed class AttributedScopeStack : IEquatable<AttributedScopeStack>
         return node;
     }
 
-    // The number of cached children, for tests.
-    internal int CachedChildCount => (_smallChildren?.Length ?? 0) + Volatile.Read(ref _childMapCount);
-
     private static uint MergeAttributes(uint existing, BasicScopeAttributes basic)
         => EncodedTokenAttributes.Set(existing, basic.LanguageId, basic.TokenType, null, FontStyle.NotSet, 0, 0);
 

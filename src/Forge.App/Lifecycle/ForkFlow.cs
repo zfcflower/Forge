@@ -12,7 +12,7 @@ using ZLogger;
 
 namespace Forge.App.Lifecycle;
 
-/// <summary>The git half of a parallel fork; <see cref="ForkGit"/> is the real one, tests substitute their own.</summary>
+/// <summary>The git half of a parallel fork; <see cref="ForkGit"/> is the real one, a host substitutes its own.</summary>
 internal interface IForkGit : IHandoverGit
 {
     /// <summary>The live HEAD of the source workspace (6.5 step 1: never the stored branch).</summary>

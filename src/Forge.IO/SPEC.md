@@ -114,7 +114,7 @@ parent: forge-architecture
 ## 验证
 
 - Windows 10/11(`D:/FORGE/work37/harness`,throwaway 控制台):4 读者 + 1 写者、100 KB 负载、200 次改写 ×5 轮(1000 次改写)零读者错误/零半文件/零写失败,写延迟 p50 4.0–4.9 毫秒、p95 7.1–8.0 毫秒;异步路径 100 次改写同样全零。
-- 并发读者压测(`AtomicFileWriteTests`,在 2 核 CPU 限制下复现过写失败):读者在两次读取之间让出 1 毫秒。零间隙地连续重开同一路径会让 Windows 的“改名覆盖”在整个预算内都拿不到目标——那是“已知局限”里的场景,不是本测试要固定的契约;让出后仍能验证真正的不变量:改写进行中读者永远读不到缺失、半文件或混合内容。
+- 并发读者压测(在 2 核 CPU 限制下复现过写失败):读者在两次读取之间让出 1 毫秒。零间隙地连续重开同一路径会让 Windows 的“改名覆盖”在整个预算内都拿不到目标——那是“已知局限”里的场景,不是本测试要固定的契约;让出后仍能验证真正的不变量:改写进行中读者永远读不到缺失、半文件或混合内容。
 - 句柄长期持有:预算 300 毫秒 ⇒ 315 毫秒后抛出原始 `UnauthorizedAccessException`(HResult 0x0005),目标字节不变,无 `.tmp` 残留;目标为目录 ⇒ 2 毫秒内失败不重试。
 - 取消(100 毫秒后触发,读者全程持有目标):只计重试循环(`ReplaceFile`/`ReplaceFileAsync`,临时文件事先写好并落盘)时,从触发取消到 `OperationCanceledException` 的净延迟 ≤ 41 毫秒(20 次;Windows 11,2 核 affinity + 4 个并发 `Flush(true)` 写线程 + 2 个自旋线程)。同一条件下整条 `WriteAllBytes` 的取消延迟还包含不可取消的临时文件创建/写入/`fsync`,因此测试只对重试循环设毫秒级上限(5 秒,单次调用被杀毒软件卡住时不误报),对整条路径只断言“在预算之内抛出、且不是预算耗尽”。
 - 确定性失败(Windows 11,`dotnet test` 实测):目标为 `ReadOnly` 文件 ⇒ 6 毫秒(异步 98 毫秒)抛原 `UnauthorizedAccessException`,改造前 5007 毫秒;锁路径为目录 ⇒ 约 1 毫秒抛原 `UnauthorizedAccessException`,改造前 2012 毫秒后抛 `TimeoutException`;锁路径为 `ReadOnly` 文件 ⇒ 约 1 毫秒,改造前 2005 毫秒;目标为目录 ⇒ 约 6 毫秒抛 `IOException`(0xB7),原本就立即。

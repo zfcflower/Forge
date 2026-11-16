@@ -13,7 +13,7 @@ public sealed class XdgTrash : ITrashService
     private readonly Func<DateTime> clock;
 
     /// <param name="trashRoot">The <c>Trash</c> directory (normally <c>$XDG_DATA_HOME/Trash</c>).</param>
-    /// <param name="clock">Local time source for <c>DeletionDate</c>; tests inject a fixed one.</param>
+    /// <param name="clock">Local time source for <c>DeletionDate</c>.</param>
     public XdgTrash(string trashRoot, Func<DateTime>? clock = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(trashRoot);

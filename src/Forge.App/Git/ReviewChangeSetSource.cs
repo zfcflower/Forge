@@ -4,13 +4,12 @@ using Forge.Workspace;
 namespace Forge.App.Git;
 
 /// <summary>Builds the git side of a review request: what changed, in which commits, as the raw unified diff.</summary>
-internal sealed class ReviewChangeSetSource(GitCli git, int commitListLimit = ReviewChangeSetSource.DefaultCommitListLimit)
+internal sealed class ReviewChangeSetSource(GitCli git)
     : IReviewChangeSetSource
 {
     /// <summary>
     /// Commits listed for a branch review, newest first; one more than the cap is fetched so a truncated list is known to be
-    /// truncated instead of being presented as the branch's commit count. The constructor parameter exists for tests, which
-    /// cannot build a thousand-commit history cheaply.
+    /// truncated instead of being presented as the branch's commit count.
     /// </summary>
     internal const int DefaultCommitListLimit = 1_000;
 
@@ -21,7 +20,7 @@ internal sealed class ReviewChangeSetSource(GitCli git, int commitListLimit = Re
     /// </summary>
     internal const int UntrackedProbeBytes = 8_000;
 
-    private readonly int commitCap = Math.Max(1, commitListLimit);
+    private readonly int commitCap = DefaultCommitListLimit;
 
     /// <summary>
     /// Reads one change set: one commit against its first parent, or the branch plus the uncommitted tree against a base

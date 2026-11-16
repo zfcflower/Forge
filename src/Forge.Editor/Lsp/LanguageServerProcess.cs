@@ -142,7 +142,7 @@ public class LanguageServerProcess : IAsyncDisposable
     public StderrRing Stderr { get; }
 
     /// <summary>
-    /// Creates the process a session of a launch uses. Null starts a child process; a host or a test installs a factory
+    /// Creates the process a session of a launch uses. Null starts a child process; a host installs a factory
     /// here to supply its own transport, including for sessions a <see cref="LanguageSessionPool"/> creates.
     /// </summary>
     public static Func<LanguageServerLaunch, RestartPolicy, LanguageServerProcess>? DefaultFactory { get; set; }

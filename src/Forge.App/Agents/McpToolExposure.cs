@@ -42,7 +42,7 @@ internal sealed class McpToolExposure
     private long cachedVersion = -1;
     private bool cachedTruncated;
 
-    /// <summary>How many tools are pinned right now; the settings page and tests read it.</summary>
+    /// <summary>How many tools are pinned right now; the settings page reads it.</summary>
     public int PinnedCount
     {
         get

@@ -56,7 +56,7 @@ public sealed record GhRunOptions
 /// <see cref="ProcessStartInfo.ArgumentList"/> (never a shell), stdout and stderr are read as raw UTF-8 bytes with a
 /// capture cap, stdin is closed at once so nothing can wait for input, a timeout or cancellation kills the whole process
 /// tree, and the child environment is pinned so output stays English and parseable and no prompt, pager, colour or update
-/// notice can appear. The executable defaults to <c>gh</c> from PATH and is injectable, so tests point it at a fake.
+/// notice can appear. The executable defaults to <c>gh</c> from PATH and is injectable, so it can be pointed at a fake.
 /// </summary>
 public sealed class GhCli
 {

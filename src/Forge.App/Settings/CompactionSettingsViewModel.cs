@@ -177,7 +177,7 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the labels and the inline
+        // A switch raised on another thread belongs to a window that is gone: the labels and the inline
         // errors are bound on the thread that built the block.
         if (Environment.CurrentManagedThreadId != uiThread)
         {

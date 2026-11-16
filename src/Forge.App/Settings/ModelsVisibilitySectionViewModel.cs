@@ -270,7 +270,7 @@ internal sealed class ModelsVisibilitySectionViewModel : NotifyingObject, IDispo
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the column headings and the
+        // A switch raised on another thread belongs to a window that is gone: the column headings and the
         // rows are bound on the thread that built the section.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

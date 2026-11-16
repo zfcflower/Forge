@@ -301,7 +301,7 @@ internal sealed class TerminalControl : Control
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A surface of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // A surface of a window whose session is gone still sits in the subscriber list of the process-wide
         // table; setting its automation name and menu text from another thread would touch this control off the dispatcher
         // that owns it.
         if (Environment.CurrentManagedThreadId != attachedThread)
@@ -773,7 +773,7 @@ internal sealed class TerminalControl : Control
         if (underline || strike)
         {
             // Built per cell rather than cached in a static: Avalonia's TextDecoration/TextDecorations.Underline are
-            // AvaloniaObjects with thread affinity fixed at first read, and this control can be touched from a test
+            // AvaloniaObjects with thread affinity fixed at first read, and this control can be touched from a
             // host's background thread before any UI thread exists - which then poisons the process-wide underline for
             // AvaloniaEdit's links. Same reasoning as MarkdownRenderer's decorations.
             TextDecorationCollection decorations = [];

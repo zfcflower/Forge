@@ -84,7 +84,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     private bool disposed;
 
-    /// <param name="openFile">Opens a conflicted file in the editor; null leaves the banner's rows inert (tests).</param>
+    /// <param name="openFile">Opens a conflicted file in the editor; null leaves the banner's rows inert.</param>
     /// <param name="pullRequests">
     /// The pull-request platform behind the 提交目标 row: reading the branch's pull request and opening one. Null (a build
     /// without gh, or a row built on its own) keeps the row local — nothing is asked and the menu offers only local actions.
@@ -1956,7 +1956,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a row whose window is gone (a test host): the properties raised
+        // A notification from another thread belongs to a row whose window is gone: the properties raised
         // here are bound to controls that live on their own thread.
         if (!disposed && Environment.CurrentManagedThreadId == uiThread)
         {

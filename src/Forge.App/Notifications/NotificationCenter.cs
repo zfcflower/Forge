@@ -55,9 +55,9 @@ internal sealed class NotificationCenter : INotifications, IDisposable
     /// <param name="notifier">Raises the desktop notification; the only implementation talks to the platform's own tool.</param>
     /// <param name="post">
     /// Runs an action on the UI thread without waiting; null uses the app's dispatcher, which degrades to an inline call in a
-    /// process without a UI thread (a test).
+    /// process without a UI thread.
     /// </param>
-    /// <param name="time">Clock of every timer; a test passes a fake one so no test waits four seconds.</param>
+    /// <param name="time">Clock of every timer; a caller passes its own instead of waiting four seconds.</param>
     public NotificationCenter(
         Func<bool> enabled,
         ISystemNotifier notifier,

@@ -38,7 +38,7 @@ internal interface IDialogService
 
     /// <summary>
     /// Asks for the pull request's title, body and draft flag, prefilled from <paramref name="draft"/>; null means the user
-    /// cancelled and nothing is created. A host that cannot show it (a recording double, a headless test) answers null, so
+    /// cancelled and nothing is created. A host that cannot show it (a recording double) answers null, so
     /// the row reports "this host cannot show the dialog" instead of creating something nobody described.
     /// </summary>
     Task<Git.PullRequestDraft?> ComposePullRequestAsync(Git.PullRequestDraft draft, CancellationToken ct) =>
@@ -64,7 +64,7 @@ internal interface IDialogService
     /// <summary>
     /// The add-project dialog (wave W9): a clone or a brand-new repository, described and run by
     /// <paramref name="model"/>. Answers the created directory, or null when the user cancelled and nothing was created. A
-    /// host that cannot show it (a recording double, a headless test) answers null, so no project appears that nobody asked
+    /// host that cannot show it (a recording double) answers null, so no project appears that nobody asked
     /// for.
     /// </summary>
     Task<string?> RunProjectCreationAsync(ProjectCreationViewModel model, CancellationToken ct) =>
@@ -374,12 +374,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// window without holding a reference to the window it lives in (which would be a cycle).
     /// </summary>
     public Func<Avalonia.Controls.Window?>? SettingsOwner { get; set; }
-
-    /// <summary>
-    /// The settings window the shell created, or <c>null</c> while none is open. A test seam: a headless test has no way to
-    /// observe the window otherwise, and the alternative (a test-only public API on the window) would be worse.
-    /// </summary>
-    internal Avalonia.Controls.Window? SettingsWindow => settingsWindow;
 
     public ProjectTreeViewModel Projects { get; }
 
@@ -710,13 +704,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// The project-list read behind the tree's id→root cache; settable so a shell test can make it fail the way a store
+    /// The project-list read behind the tree's id→root cache; settable so it can be made to fail the way a store
     /// that cannot answer does, and pin the announcement of that failure. Null reads through the composition.
     /// </summary>
     internal Func<CancellationToken, Task<IReadOnlyList<ProjectInfo>>>? ProjectListRead { get; set; }
 
     /// <summary>
-    /// The initialization step the shell awaits on startup; settable so a shell test can inject a fault the database
+    /// The initialization step the shell awaits on startup; settable so a fault can be injected the way the database
     /// catch in <see cref="InitializeAsync"/> does not handle, exercising the shell's outer startup-failed fallback
     /// (MainWindow.InitializeAsync). Null awaits the composition's own initialization.
     /// </summary>
@@ -1434,7 +1428,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// <summary>
     /// Archives the fork session and removes its workspace after a merge back (6.6 step 6), through the removal pipeline
     /// (7.3) with <c>baseBranch</c> = the fork's source branch; returns null on success (or a cancel), else the reason.
-    /// Wired to <see cref="RemoveForkWorkspaceAsync"/>; settable so shell tests can substitute it.
+    /// Wired to <see cref="RemoveForkWorkspaceAsync"/>; settable so it can be substituted.
     /// </summary>
     internal Func<ForkRelation, string, CancellationToken, Task<string?>>? RemoveForkWorkspace { get; set; }
 

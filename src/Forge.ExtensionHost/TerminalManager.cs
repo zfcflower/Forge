@@ -51,18 +51,6 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
         this.send = send;
     }
 
-    /// <summary>The number of registered terminals; for diagnostics and tests.</summary>
-    internal int Count
-    {
-        get
-        {
-            lock (sync)
-            {
-                return sessions.Count;
-            }
-        }
-    }
-
     /// <summary>
     /// A closing host sends no frames at all: the connection ending is how a caller learns the terminals are gone, and a
     /// half-written notification would only be noise.

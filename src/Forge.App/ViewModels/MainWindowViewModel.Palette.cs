@@ -13,7 +13,7 @@ namespace Forge.App.ViewModels;
 /// The palette's place in the shell: it creates the view model, owns the four gestures that open it, and implements
 /// <see cref="IPaletteHost"/> - the snapshots the palette filters (files, sessions, symbols), the one search it runs on the
 /// workspace, and the three navigations a row can trigger. Everything that touches a window, a session or the language
-/// server lives here, so <see cref="PaletteViewModel"/> stays a state machine a test can drive without a window.
+/// server lives here, so <see cref="PaletteViewModel"/> stays a state machine with no window dependency.
 /// </summary>
 internal sealed partial class MainWindowViewModel : IPaletteHost
 {

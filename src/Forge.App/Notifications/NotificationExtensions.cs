@@ -10,7 +10,7 @@ namespace Forge.App.Notifications;
 /// finished something does not wait for the desktop notification to be over, and a notification that fails must never
 /// reach it as an exception.
 /// <para>The receiver is the nullable seam every feature holds (<c>INotifications?</c>), so a shell built without the
-/// notification wiring - a test, a panel constructed on its own - simply says nothing.</para>
+/// notification wiring - a panel constructed on its own - simply says nothing.</para>
 /// </summary>
 internal static class NotificationExtensions
 {

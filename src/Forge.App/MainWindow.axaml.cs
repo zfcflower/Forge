@@ -193,7 +193,7 @@ public partial class MainWindow : Window
     /// switch re-applies it here; every other caption text is a binding in the XAML.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A window of a session that is already gone (a test host) may still be subscribed; touching its buttons from
+        // A window of a session that is already gone may still be subscribed; touching its buttons from
         // another thread would queue a layout pass on the wrong dispatcher.
         if (Environment.CurrentManagedThreadId == uiThread)
         {
@@ -222,7 +222,7 @@ public partial class MainWindow : Window
 
     private void OnKeymapChanged() => ApplyKeymap();
 
-    /// <summary>Internal so a shell test can drive the startup-failed fallback with a faulted model.</summary>
+    /// <summary>Internal so the startup-failed fallback can be driven with a faulted model.</summary>
     internal static async Task InitializeAsync(MainWindowViewModel model)
     {
         try
@@ -235,7 +235,7 @@ public partial class MainWindow : Window
 
             // The first-run wizard is the real application's business (App sets the flag) and comes after the restore, so
             // its "is this install already in use" answer counts the projects the restore just loaded. A host that built
-            // this window itself (a headless test, a recorder) leaves the flag off and keeps the workbench unobstructed.
+            // this window itself (a recorder) leaves the flag off and keeps the workbench unobstructed.
             if (model.ShowFirstRunWizardOnStartup)
             {
                 await model.ShowFirstRunWizardIfNeededAsync(CancellationToken.None).ConfigureAwait(true);

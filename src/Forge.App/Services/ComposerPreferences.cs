@@ -33,7 +33,7 @@ internal sealed partial class ComposerPreferencesJsonContext : JsonSerializerCon
 /// <summary>
 /// What the chat composer remembers across sessions: the pinned models and the agent, model and effort a new session
 /// starts with. Kept in <c>composer.json</c> next to <c>settings.json</c>; a store without a path lives in memory only
-/// (tests). Reads happen once, writes go to the pool, and a broken file is treated as empty.
+/// Reads happen once, writes go to the pool, and a broken file is treated as empty.
 /// </summary>
 internal sealed class ComposerPreferences
 {

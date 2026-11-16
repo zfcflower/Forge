@@ -24,8 +24,8 @@ internal static class KeymapComposition
     }
 
     /// <summary>
-    /// The section, its view template and the applier wiring, without the composition root: the entry point the module calls
-    /// and the seam a test uses, so the registration and the live application are provable without building the whole graph.
+    /// The section, its view template and the applier wiring, without the composition root: the entry point the module calls,
+    /// so the registration and the live application are reachable without building the whole graph.
     /// </summary>
     internal static void RegisterSection(AppPreferences preferences, SettingsSections settings)
     {

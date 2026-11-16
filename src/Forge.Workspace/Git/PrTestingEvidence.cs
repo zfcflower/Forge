@@ -5,7 +5,7 @@ namespace Forge.Workspace;
 /// whether the claimed testing happened, but it can refuse an empty section and the stock one-liners ("tests pass",
 /// "tested", "n/a", "测试通过") that carry no evidence. After the banned phrases are taken out, the section must still hold
 /// a minimum amount of text (a command, a count, a manual check); CJK characters count double because they carry more
-/// per character. Pure, so it is unit-tested directly.
+/// per character. Pure, so it can be exercised directly.
 /// </summary>
 public static class PrTestingEvidence
 {
@@ -53,7 +53,7 @@ public static class PrTestingEvidence
               "does not say what was run or checked and what it showed";
     }
 
-    /// <summary>How much non-boilerplate text <paramref name="text"/> holds; exposed for tests.</summary>
+    /// <summary>How much non-boilerplate text <paramref name="text"/> holds.</summary>
     public static int Weigh(string text)
     {
         ArgumentNullException.ThrowIfNull(text);

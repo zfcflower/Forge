@@ -231,7 +231,7 @@ internal sealed class StatusBarViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(HostTooltip));
     }
 
-    /// <summary>A notification from another thread belongs to a status bar whose window is gone (a test host).</summary>
+    /// <summary>A notification from another thread belongs to a status bar whose window is gone.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         if (Environment.CurrentManagedThreadId == uiThread)

@@ -66,7 +66,7 @@ public sealed class IpcPeer : IIpcPeer
         RequestCoreAsync(operation, new ArgsPayload<TArgs>(args), ct);
 
     /// <summary>Sends a request whose payload the caller encoded itself. The payload bytes are placed in the frame
-    /// verbatim; the receiver decodes them like any other payload. Used by protocol tests that need a value no formatter
+    /// verbatim; the receiver decodes them like any other payload. Used by callers that need a value no formatter
     /// would produce (a missing member, a nil where the shape forbids one).</summary>
     internal Task<IpcMessage> RequestRawAsync(string operation, ReadOnlyMemory<byte> payload, CancellationToken ct) =>
         RequestCoreAsync(operation, new RawArgsPayload(payload), ct);

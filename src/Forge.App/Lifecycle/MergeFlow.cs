@@ -21,7 +21,7 @@ internal enum MergeDirection
 /// </summary>
 internal sealed record ForkRelation(ProjectInfo Project, string ForkDirectory, string? ForkBranch, string SourceBranch, string? ForkBaseSha);
 
-/// <summary>The git half of a merge-back / sync; <see cref="MergeGit"/> is the real one, tests substitute their own.</summary>
+/// <summary>The git half of a merge-back / sync; <see cref="MergeGit"/> is the real one, a host substitutes its own.</summary>
 internal interface IMergeGit
 {
     Task<IReadOnlyList<GitWorktree>> ListWorktreesAsync(string repositoryRoot, CancellationToken ct);

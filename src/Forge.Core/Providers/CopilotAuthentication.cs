@@ -90,7 +90,7 @@ public sealed class CopilotAuthentication
     private readonly TimeProvider _time;
 
     /// <param name="http">Must be the same client the API calls use, so its handler pool is shared.</param>
-    /// <param name="time">Clock for the device-code and session lifetimes; tests inject a manual one instead of sleeping.</param>
+    /// <param name="time">Clock for the device-code and session lifetimes.</param>
     public CopilotAuthentication(HttpClient http, TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(http);

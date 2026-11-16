@@ -253,9 +253,6 @@ public sealed class AgentHost
     public bool CancelToolCall(string agentId, string callId) =>
         !string.IsNullOrEmpty(agentId) && !string.IsNullOrEmpty(callId) && loop.CancelToolCall(agentId, callId);
 
-    /// <summary>Tool calls of this tree that can be stopped right now; zero between calls. For tests and diagnostics.</summary>
-    internal int RunningToolCallCount => loop.RunningToolCallCount;
-
     /// <summary>
     /// Host side of <c>spawn_agent</c>: starts a <paramref name="kind"/> sub-agent under <paramref name="root"/> outside a
     /// model turn (automations). The child takes a run slot from the same per-tree pool, gets its own sub-agent session
@@ -305,7 +302,7 @@ public sealed class AgentHost
     public bool SetMaxParallelSubAgents(int limit) => loop.SetMaxParallelSubAgents(limit);
 
     /// <summary>
-    /// The cap in force on how many agents of this host run at once. For tests and diagnostics: the settings page edits the
+    /// The cap in force on how many agents of this host run at once. For diagnostics: the settings page edits the
     /// value, no product code reads it back.
     /// </summary>
     public int MaxParallelSubAgents => loop.MaxParallelSubAgents;

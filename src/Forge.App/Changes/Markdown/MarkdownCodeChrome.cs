@@ -85,7 +85,7 @@ internal sealed class MarkdownCodeHeader : Grid
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A header of a window whose session is gone (a test host) still sits in the subscriber list of the process-wide
+        // A header of a window whose session is gone still sits in the subscriber list of the process-wide
         // table; setting its tooltip from another thread would touch this control off the dispatcher that owns it.
         if (Environment.CurrentManagedThreadId == attachedThread)
         {

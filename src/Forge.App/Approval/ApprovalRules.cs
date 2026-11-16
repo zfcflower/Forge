@@ -330,7 +330,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
         return false;
     }
 
-    /// <summary>Writes a pending change now instead of waiting for the debounce; used by tests and on shutdown.</summary>
+    /// <summary>Writes a pending change now instead of waiting for the debounce; used on shutdown.</summary>
     public async Task SaveAsync(CancellationToken ct)
     {
         CancellationTokenSource? pending;

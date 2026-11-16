@@ -57,7 +57,7 @@ public sealed class GitHubPlatform : IPrPlatform
 
     /// <summary>
     /// Safety bound on the pages of review threads read for one pull request (100 threads per page); a pull request that
-    /// needs more is refused instead of returning a partial list. Overridable so the refusal can be tested without
+    /// needs more is refused instead of returning a partial list. Overridable so the refusal can be exercised without
     /// producing 100 pages.
     /// </summary>
     public int MaxThreadPages { get; init; } = 100;

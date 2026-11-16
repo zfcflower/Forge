@@ -176,7 +176,7 @@ internal sealed class ReviewOverlay : IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): this overlay's markers, composer
+        // A switch raised on another thread belongs to a window that is gone: this overlay's markers, composer
         // and status texts are bound on the thread that built it, so the notification is ignored rather than marshalled onto
         // a live window's dispatcher (App SPEC 61).
         if (disposed || Environment.CurrentManagedThreadId != uiThread)

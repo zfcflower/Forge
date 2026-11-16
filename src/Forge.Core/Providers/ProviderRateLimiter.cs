@@ -25,7 +25,7 @@ public enum RateLimitDecision
 /// <summary>
 /// The per-provider request and token budget every model request is acquired from before it leaves, plus the spacing of
 /// automated resumes. One instance serves the whole process (<see cref="Shared"/> is the one the shell publishes the user's
-/// settings into); a test may build its own with its own <see cref="TimeProvider"/>.
+/// settings into); a caller may build its own with its own <see cref="TimeProvider"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -65,7 +65,7 @@ public sealed class ProviderRateLimiter
     private readonly TimeProvider time;
     private ProviderRateLimitPolicy policy;
 
-    /// <param name="time">The clock; a test supplies one it can move instead of waiting in real time.</param>
+    /// <param name="time">The clock; a caller may supply one it can move instead of waiting in real time.</param>
     public ProviderRateLimiter(TimeProvider? time = null)
     {
         this.time = time ?? TimeProvider.System;

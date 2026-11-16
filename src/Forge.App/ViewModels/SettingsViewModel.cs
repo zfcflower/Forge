@@ -306,7 +306,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a settings page whose window is gone (a test host): rebuilding
+        // A notification from another thread belongs to a settings page whose window is gone: rebuilding
         // its rows there would touch bound controls off their thread.
         if (Environment.CurrentManagedThreadId != uiThread)
         {

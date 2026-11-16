@@ -18,8 +18,8 @@ internal static class PaletteComposition
     }
 
     /// <summary>
-    /// The section itself, without the composition root: the entry point the module calls and the seam a test uses, so the
-    /// registration and its view template are provable without building the whole graph.
+    /// The section itself, without the composition root: the entry point the module calls, so the registration and its view
+    /// template are reachable without building the whole graph.
     /// </summary>
     internal static void RegisterSection(AppPreferences preferences, SettingsSections settings)
     {

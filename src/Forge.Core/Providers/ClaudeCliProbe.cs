@@ -151,7 +151,7 @@ public static partial class ClaudeCliProbe
 
     /// <summary>
     /// The <c>cc_version</c> suffix in <paramref name="requestBody"/>: the JSON body of a Messages request, as its first system
-    /// block. Public and separate from the socket work so the parsing has a test that does not need a CLI on the machine.
+    /// block. Public and separate from the socket work so the parsing can be exercised without a CLI on the machine.
     /// </summary>
     public static string? ExtractBuild(ReadOnlySpan<byte> requestBody)
     {
@@ -360,6 +360,7 @@ public static partial class ClaudeCliProbe
     private static partial Regex BillingRegex();
 
     /// <summary>The beta list header, whose name is case-insensitive on the wire.</summary>
-    [GeneratedRegex(@"(?im)^anthropic-beta:[ 	]*(.+?)?$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?im)^anthropic-beta:[ 	]*(.+?)
+?$", RegexOptions.CultureInvariant)]
     private static partial Regex BetasRegex();
 }

@@ -14,12 +14,6 @@ namespace Forge.ExtensionHost;
 /// </summary>
 internal sealed partial class WorkerProcessOwnership : IDisposable
 {
-#if DEBUG
-    /// <summary>Set to <c>1</c> to make <see cref="Assign"/> fail; read only by this class, read only by a Debug build, and
-    /// used by the integration tests to exercise the fail-closed start path.</summary>
-    internal const string FailAssignmentEnvironmentVariable = "FORGE_HOST_TEST_FAIL_JOB_ASSIGN";
-#endif
-
     /// <summary><c>JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE</c>: every process in the job dies when the last handle to it
     /// closes, which includes the host process ending for any reason.</summary>
     private const uint JobObjectLimitKillOnJobClose = 0x0000_2000;
@@ -71,8 +65,8 @@ internal sealed partial class WorkerProcessOwnership : IDisposable
 
     /// <summary><c>WNOWAIT</c> for <c>waitid</c>: report the child's exit but leave it waitable, so its pid - and with it
     /// its process group id - is not released yet. Linux uses <c>0x0100_0000</c>, Darwin <c>0x20</c>.
-    /// <para>CI-to-validate: the Darwin value is taken from <c>sys/wait.h</c> and has never been executed by the tests
-    /// behind this file (they run on Linux and Windows). A macOS run may also reveal that the <c>waitid</c> declaration
+    /// <para>CI-to-validate: the Darwin value is taken from <c>sys/wait.h</c> and has never been executed on Linux
+    /// or Windows. A macOS run may also reveal that the <c>waitid</c> declaration
     /// below needs a different entry point, in which case the reaper must fall back to the plain <c>waitpid</c> order.</para>
     /// </summary>
     private static readonly int WaitLeaveChild = OperatingSystem.IsMacOS() ? 0x20 : 0x0100_0000;
@@ -82,8 +76,8 @@ internal sealed partial class WorkerProcessOwnership : IDisposable
 
     /// <summary>Offset of <c>siginfo_t.si_pid</c>, the field <c>waitid</c> uses to name the child whose state changed.
     /// glibc places the signal's union of fields at 16 on both x86-64 and aarch64; Darwin's <c>__siginfo</c> places the pid
-    /// at 12, right after signo/errno/code. CI-to-validate: the Darwin offset has never been executed by the tests behind
-    /// this file, so it is the first thing a macOS run would have to confirm.</summary>
+    /// at 12, right after signo/errno/code. CI-to-validate: the Darwin offset has never been executed
+    /// here, so it is the first thing a macOS run would have to confirm.</summary>
     private static readonly int ReportedChildOffset = OperatingSystem.IsMacOS() ? 12 : 16;
 
     /// <summary>A clean <c>siginfo_t</c>. <c>waitid</c> with <c>WNOHANG</c> reports "no child changed state" as a zero
@@ -168,7 +162,6 @@ internal sealed partial class WorkerProcessOwnership : IDisposable
     internal void Assign(Process process)
     {
         ArgumentNullException.ThrowIfNull(process);
-        ThrowIfAssignmentMustFail();
 
         processId = process.Id;
         if (job is null)
@@ -193,7 +186,6 @@ internal sealed partial class WorkerProcessOwnership : IDisposable
     /// handed back as contained, because <see cref="Kill"/> would then signal the host's own group.</summary>
     internal void Assign(int childProcessId)
     {
-        ThrowIfAssignmentMustFail();
         processId = childProcessId;
         var groupId = getpgid(childProcessId);
         if (groupId != childProcessId)
@@ -207,24 +199,6 @@ internal sealed partial class WorkerProcessOwnership : IDisposable
 
         reapStop = new CancellationTokenSource();
         reaper = ReapAsync(processId, reapStop.Token);
-    }
-
-    /// <summary>The fail-closed hook both <see cref="Assign(Process)"/> and <see cref="Assign(int)"/> honour, so the
-    /// integration tests can exercise "a worker that cannot be contained never runs" on every platform. Does nothing
-    /// in a Release build.</summary>
-    private static void ThrowIfAssignmentMustFail()
-    {
-#if DEBUG
-        if (string.Equals(
-                Environment.GetEnvironmentVariable(FailAssignmentEnvironmentVariable),
-                "1",
-                StringComparison.Ordinal))
-        {
-            throw new HostOperationException(
-                "worker_start_failed",
-                $"The plugin worker could not be assigned to its containment ({FailAssignmentEnvironmentVariable}=1).");
-        }
-#endif
     }
 
     /// <summary>True when starting a worker is this class's job rather than <see cref="Process.Start(ProcessStartInfo)"/>'s:

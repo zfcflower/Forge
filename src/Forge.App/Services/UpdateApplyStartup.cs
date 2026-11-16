@@ -527,7 +527,7 @@ internal static class UpdateApplyStartup
         }
     }
 
-    /// <summary>Appends to the bounded install log and to the diagnostic log; the sink is how a test reads it back.</summary>
+    /// <summary>Appends to the bounded install log and to the diagnostic log; the sink is where it can be read back.</summary>
     private static void LogTo(string logPath, string message, Action<string>? sink)
     {
         UpdateInstallLog.Append(logPath, message);

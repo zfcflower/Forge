@@ -35,15 +35,6 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private readonly HostCleanupReport cleanup = new();
     private readonly RootWaitGraph waits = new();
-#if DEBUG
-    private readonly IHostTestHook? testHook;
-
-    /// <summary>Debug-only seam: when <see cref="FailCleanupEnvironmentVariable"/> names this host's pipe, the shutdown
-    /// records one injected cleanup failure so a test can exercise the <c>host_shutdown_failed</c> branch (non-zero exit
-    /// from <see cref="RunAsync"/> and a throw from <see cref="DisposeAsync"/>) deterministically. Scoping to the pipe name
-    /// keeps a concurrently running host of another test unaffected. Release builds contain neither the field nor the read.</summary>
-    private readonly bool injectCleanupFailure;
-#endif
     private readonly ScriptCodeCompiler scriptCompiler = new();
     private readonly ScriptExecutorSupervisor scriptExecutors;
     private readonly TerminalManager terminals;
@@ -73,25 +64,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         CopyBundledPlugins();
         scriptExecutors = new ScriptExecutorSupervisor(options, scriptCompiler, ForwardToolCallAsync, stop, cleanup);
         terminals = new TerminalManager(stop, cleanup, new TerminalNotifier(this));
-#if DEBUG
-        testHook = FileHostTestHook.Activate(options.PipeName);
-        var failCleanup = Environment.GetEnvironmentVariable(FailCleanupEnvironmentVariable);
-        // "1" arms it for a host started as an isolated child process (the variable is set on that process only); naming
-        // a pipe arms exactly one in-process host so a concurrently running host of another test is never affected.
-        injectCleanupFailure =
-            string.Equals(failCleanup, "1", StringComparison.Ordinal)
-            || string.Equals(failCleanup, options.PipeName, StringComparison.Ordinal);
-#endif
     }
-
-#if DEBUG
-    /// <summary>Environment variable that arms the injected cleanup failure for the one host whose pipe name it equals.</summary>
-    internal const string FailCleanupEnvironmentVariable = "FORGE_HOST_TEST_FAIL_CLEANUP";
-#endif
-
-    /// <summary>The catalog whose compiler owns the plugin compilation cache; a test seam for the eviction wiring
-    /// (Debug-only <c>InternalsVisibleTo</c>, see <c>AssemblyInfo.cs</c>).</summary>
-    internal PluginCatalog Catalog => catalog;
 
     /// <summary>Every issue the last discovery reported, newest last.</summary>
     internal IReadOnlyList<PluginIssue> Issues
@@ -696,9 +669,9 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         entry.Issues.Count == 0 ? null : string.Join("; ", entry.Issues.Select(static issue => issue.Message));
 
     /// <summary>
-    /// Enters one call: the Debug-only capture seam, then the plugin's dispatch gate, both under the call's absolute
-    /// deadline. A deadline that expires here is reported as a queue timeout - the call never reached a worker - while
-    /// the caller's own cancellation and the shutdown fence keep their existing meaning.
+    /// Enters one call through the plugin's dispatch gate, under the call's absolute deadline. A deadline that expires
+    /// here is reported as a queue timeout - the call never reached a worker - while the caller's own cancellation and
+    /// the shutdown fence keep their existing meaning.
     /// </summary>
     private async Task EnterCallAsync(
         PluginEntry captured,
@@ -711,7 +684,6 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     {
         try
         {
-            await CaptureAsync(captured.Id, budget.Token).ConfigureAwait(false);
             await EnterPluginAsync(state, context, nested, captured.Id, budget.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (BudgetEndedBeforeDispatch(budget, ct))
@@ -1857,19 +1829,6 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         // Kills every terminal's process tree. This sends nothing: the connection ending is what tells the main program
         // that its terminals are gone, and a terminal that cannot be verified as gone is recorded in the cleanup report.
         await terminals.DisposeAsync().ConfigureAwait(false);
-
-#if DEBUG
-        if (injectCleanupFailure)
-        {
-            // Test seam: a real, unverifiable cleanup failure cannot be forced deterministically (Windows job containment
-            // and POSIX group kills both succeed on a cooperative process), so this injects one to prove the contract that
-            // a failed cleanup is never a silent success: RunAsync returns non-zero and DisposeAsync throws
-            // host_shutdown_failed. Debug builds only; a Release host never reads the variable.
-            cleanup.Record(
-                "an injected cleanup failure (FORGE_HOST_TEST_FAIL_CLEANUP) was recorded to exercise the "
-                + "host_shutdown_failed path");
-        }
-#endif
     }
 
     private async Task DrainWorkersAsync()
@@ -2034,13 +1993,6 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             return plugins.TryGetValue(pluginId, out var entry) ? entry : null;
         }
     }
-
-#if DEBUG
-    private ValueTask CaptureAsync(string pluginId, CancellationToken ct) =>
-        testHook is { } hook ? hook.AfterEntryCapturedAsync(pluginId, ct) : ValueTask.CompletedTask;
-#else
-    private static ValueTask CaptureAsync(string pluginId, CancellationToken ct) => ValueTask.CompletedTask;
-#endif
 
     /// <summary>
     /// Resolves the entry a request must use once it holds the plugin's gate: a refresh that replaced or removed the

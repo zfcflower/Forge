@@ -163,7 +163,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
         }
     }
 
-    /// <summary>One load problem: the English text (logs, tests) plus the key the settings page shows in the UI language.</summary>
+    /// <summary>One load problem: the English text (logs) plus the key the settings page shows in the UI language.</summary>
     private static AutomationDefinitionError Problem(int index, string? id, string key, string english, params string[] args) =>
         new(index, id, string.Format(CultureInfo.InvariantCulture, english, args))
         {

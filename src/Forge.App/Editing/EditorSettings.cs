@@ -7,8 +7,8 @@ namespace Forge.App.Editing;
 /// The live editor options every open editor reads: a projection of <see cref="AppPreferences"/> with a settable static
 /// instance, because editors are built by a data template and cannot be handed the composition root.
 /// <para>The composition root replaces <see cref="Current"/> with an instance bound to the loaded preferences before the
-/// first window opens; a setter then writes through to the preferences, and their store persists it on its debounce. Tests
-/// and any host without preferences keep the built-in defaults. Every setter raises <see cref="ObservableObject.PropertyChanged"/>,
+/// first window opens; a setter then writes through to the preferences, and their store persists it on its debounce.
+/// Any host without preferences keeps the built-in defaults. Every setter raises <see cref="ObservableObject.PropertyChanged"/>,
 /// which is what makes a change reach an editor that is already open.</para>
 /// </summary>
 internal sealed class EditorSettings : ObservableObject

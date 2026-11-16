@@ -599,7 +599,7 @@ internal sealed class PanelChrome : TemplatedControl
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A control of a window whose session is gone (a test host) still sits in the subscriber list of the
+        // A control of a window whose session is gone still sits in the subscriber list of the
         // process-wide table; touching its properties from another thread would queue a layout pass on the wrong
         // dispatcher. This control lives on the thread it was attached on.
         if (Environment.CurrentManagedThreadId != attachedThread)

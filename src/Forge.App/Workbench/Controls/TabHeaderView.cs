@@ -121,7 +121,7 @@ internal sealed class TabHeaderView : TemplatedControl
         set => SetValue(IconProperty, value);
     }
 
-    /// <summary>Automation id of the close button, so tests can click the tab's own close box.</summary>
+    /// <summary>Automation id of the close button, so the tab's own close box can be clicked.</summary>
     public string? CloseAutomationId
     {
         get => GetValue(CloseAutomationIdProperty);

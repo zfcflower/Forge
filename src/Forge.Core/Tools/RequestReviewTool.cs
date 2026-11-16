@@ -43,7 +43,7 @@ public sealed class RequestReviewTool : ITool
     /// <param name="limits">Reads how much of a change set the package carries.</param>
     /// <param name="conclusions">
     /// Where each finished review is recorded (wave W17b). Null records nothing: the tool behaves exactly as it did before
-    /// conclusions were stored, which is what a host without a store and every unit test gets.
+    /// conclusions were stored, which is what a host without a store gets.
     /// </param>
     /// <param name="ledger">Where a step review's verdict is recorded for the step completion gate; null = nothing records verdicts.</param>
     public RequestReviewTool(

@@ -169,7 +169,7 @@ internal sealed class AgentSlotPool
         cancelledQueued = 0;
     }
 
-    /// <summary>Entries in the wait queue, live or cancelled; a test reads it to see that cancelled waiters do not pile up.</summary>
+    /// <summary>Entries in the wait queue, live or cancelled; cancelled waiters must not pile up.</summary>
     internal int QueuedEntries
     {
         get

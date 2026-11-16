@@ -54,7 +54,7 @@ internal sealed class RateLimitBucket
     /// <summary>Credit added per second, in <see cref="Units"/> of a token; zero means the bucket never refills.</summary>
     private long perSecond;
 
-    /// <param name="time">The clock; a test moves it instead of waiting in real time.</param>
+    /// <param name="time">The clock; a caller may move it instead of waiting in real time.</param>
     /// <param name="capacityTokens">The most the bucket can hold, in tokens.</param>
     /// <param name="perSecondTokens">How much credit one second adds, in tokens (may be fractional).</param>
     public RateLimitBucket(TimeProvider time, double capacityTokens, double perSecondTokens)

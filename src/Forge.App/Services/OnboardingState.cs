@@ -15,7 +15,7 @@ namespace Forge.App.Services;
 /// </summary>
 internal sealed class OnboardingState
 {
-    /// <summary>The UI state key; also the unit of the on/off switch in a test.</summary>
+    /// <summary>The UI state key; also the unit of the on/off switch.</summary>
     public const string Key = "onboarding";
 
     public const int CurrentVersion = 1;

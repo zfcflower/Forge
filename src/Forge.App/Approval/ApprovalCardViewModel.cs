@@ -133,7 +133,7 @@ internal abstract class ApprovalCardViewModel : NotifyingObject, IDisposable
         ArgumentNullException.ThrowIfNull(handler);
         languageChanged = handler;
         // The subscription is the guarded method below, not the card's own handler: a switch raised on another thread
-        // belongs to a window that is gone (a test host), and this card's formatted text is bound on the thread that
+        // belongs to a window that is gone, and this card's formatted text is bound on the thread that
         // built it.
         Loc.Instance.LanguageChanged += OnLanguageChangedOnCreatingThread;
     }

@@ -29,7 +29,7 @@ internal sealed class ProviderServices
     private ProviderCatalog catalog;
 
     /// <param name="claudeCredentialsPath">Where the local Claude Code login is read from; <c>null</c> is the real
-    /// <c>~/.claude/.credentials.json</c>. Named so a test can point at its own file.</param>
+    /// <c>~/.claude/.credentials.json</c>. Named so a different login file can be read.</param>
     public ProviderServices(
         string settingsPath,
         string dataDirectory,

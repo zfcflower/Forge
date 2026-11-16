@@ -53,7 +53,6 @@ internal sealed class PrCommentsViewModel : ObservableObject, IDisposable
 
     /// <summary>Which read the fields belong to; a read replaced by a refresh may not overwrite the newer one.</summary>
     private int generation;
-    private Task watch = Task.CompletedTask;
 
     /// <summary>Every thread of the latest reading, in the platform's order (oldest first); the filters select from it.</summary>
     private readonly List<PrCommentThreadViewModel> all = [];
@@ -173,9 +172,6 @@ internal sealed class PrCommentsViewModel : ObservableObject, IDisposable
 
     public RelayCommand ShowOutdatedCommand { get; }
 
-    /// <summary>The read in flight (or the last one); exposed so the window can drive it and a test can await one read.</summary>
-    public Task Watch => watch;
-
     /// <summary>Starts the first read. The window calls this once after opening the panel.</summary>
     public void Start() => RefreshCommand.Execute(null);
 
@@ -211,8 +207,7 @@ internal sealed class PrCommentsViewModel : ObservableObject, IDisposable
     {
         var current = ++generation;
         IsReading = true;
-        watch = ReadAsync(current);
-        return watch;
+        return ReadAsync(current);
     }
 
     private async Task ReadAsync(int current)
@@ -594,7 +589,7 @@ internal sealed class PrCommentThreadViewModel : NotifyingObject, IDisposable
 
     /// <summary>
     /// The task of the last action this row started. The commands are <see cref="AsyncRelayCommand"/>s, whose execution is
-    /// <c>async void</c>; a test awaits this instead of racing the dispatcher.
+    /// <c>async void</c>; awaiting this avoids racing the dispatcher.
     /// </summary>
     public Task Pending { get; private set; } = Task.CompletedTask;
 

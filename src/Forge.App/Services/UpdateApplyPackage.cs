@@ -5,7 +5,7 @@ using System.IO.Compression;
 namespace Forge.App.Services;
 
 /// <summary>
-/// The bounds of one unpack. The shipped values are the constants of <see cref="UpdatePackages"/>; a test passes tighter ones
+/// The bounds of one unpack. The shipped values are the constants of <see cref="UpdatePackages"/>; a caller passes tighter ones
 /// so that "an entry that lies about its declared size" can be proven to be refused at the byte that breaks the bound,
 /// without first writing half a gigabyte.
 /// </summary>

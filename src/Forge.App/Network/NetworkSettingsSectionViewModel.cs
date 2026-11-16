@@ -372,7 +372,7 @@ internal sealed class NetworkSettingsSectionViewModel : NotifyingObject, IDispos
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the section's labels and
+        // A switch raised on another thread belongs to a window that is gone: the section's labels and
         // inline errors are bound on the thread that built it.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

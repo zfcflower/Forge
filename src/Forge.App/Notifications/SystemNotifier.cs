@@ -28,7 +28,7 @@ internal interface ISystemNotifier
     Task<bool> TryNotifyAsync(string title, string body, CancellationToken ct);
 }
 
-/// <summary>The desktop families the notifier knows how to talk to; the seam that lets a test pick one on any machine.</summary>
+/// <summary>The desktop families the notifier knows how to talk to; the seam that lets a host pick one on any machine.</summary>
 internal enum NotifyPlatform
 {
     /// <summary>No supported notification mechanism: the notification is skipped.</summary>
@@ -94,10 +94,10 @@ internal sealed class SystemNotifier : ISystemNotifier
 
     /// <param name="run">
     /// Starts the process and returns its exit code. It must honour the token (cancel = kill the process tree) and may throw
-    /// when the tool cannot be started; the default does both. A test passes a recording fake.
+    /// when the tool cannot be started; the default does both. A caller can pass a recording fake.
     /// </param>
     /// <param name="platform">The family to talk to; the running OS when null.</param>
-    /// <param name="time">Clock of the 5 second limit; a test passes a fake one.</param>
+    /// <param name="time">Clock of the 5 second limit; a caller passes its own.</param>
     public SystemNotifier(
         Func<ProcessStartInfo, CancellationToken, Task<int>>? run = null,
         NotifyPlatform? platform = null,

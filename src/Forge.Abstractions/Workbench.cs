@@ -123,7 +123,7 @@ public interface ITodoStore
     /// <see cref="UpdateAsync(string, string?, TodoStatus?, string?, CancellationToken)"/> plus the step fields, in one
     /// write. A null <paramref name="step"/> (or a null property of it) leaves those fields unchanged.
     /// </summary>
-    /// <para>The default body serves stores that predate step fields (test doubles): without step values it is the plain
+    /// <para>The default body serves stores that predate step fields (alternate implementations): without step values it is the plain
     /// update, with them it throws <see cref="NotSupportedException"/>. <c>SqliteTodoStore</c> overrides every new member.</para>
     Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, TodoStepFields? step, CancellationToken ct) =>
         step is null || (step.CommitSubject is null && step.Summary is null && step.Verification is null)
@@ -139,7 +139,7 @@ public interface ITodoStore
 
     /// <summary>
     /// Adds an item to the loose queue or to a group, recording who added it. The default body serves stores that predate
-    /// groups (test doubles): a loose agent item goes to the plain <see cref="AddAsync(string, string, string?, string?, CancellationToken)"/>
+    /// groups (alternate implementations): a loose agent item goes to the plain <see cref="AddAsync(string, string, string?, string?, CancellationToken)"/>
     /// and everything else throws <see cref="NotSupportedException"/>.
     /// </summary>
     Task<TodoItem> AddAsync(TodoAddRequest request, CancellationToken ct) =>
@@ -182,7 +182,7 @@ public interface ITodoStore
 
     /// <summary>
     /// The session's replaced plan summaries, newest first, at most <paramref name="limit"/>. A store without plan history
-    /// returns none; the default body is that answer, so a test double keeps working.
+    /// returns none; the default body is that answer, so an existing implementation keeps working.
     /// </summary>
     Task<IReadOnlyList<PlanRevision>> ListPlanRevisionsAsync(string sessionId, int limit, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<PlanRevision>>([]);

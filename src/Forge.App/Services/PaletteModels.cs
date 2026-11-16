@@ -133,8 +133,8 @@ internal sealed record PaletteSymbolSnapshot(IReadOnlyList<PaletteSymbol> Symbol
 
 /// <summary>
 /// What the palette asks the shell for: the snapshots it filters, the background refreshes it starts, and the two
-/// navigations a row can trigger. Implemented by <c>MainWindowViewModel</c> (its <c>Palette</c> partial files) and
-/// replaced by a test double in unit tests, so the view model itself holds no dependency on the window.
+/// navigations a row can trigger. Implemented by <c>MainWindowViewModel</c> (its <c>Palette</c> partial files), so the
+/// view model itself holds no dependency on the window.
 /// </summary>
 internal interface IPaletteHost
 {

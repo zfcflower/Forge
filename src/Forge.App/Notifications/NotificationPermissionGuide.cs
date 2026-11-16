@@ -9,7 +9,7 @@ namespace Forge.App.Notifications;
 /// What the settings section needs on top of the frozen seam wave W0 declared: the state it can bind synchronously, whether
 /// there is a settings page to offer, and the test notification that is the only way to learn the state at all.
 /// <para>It extends <see cref="INotificationPermissionGuide"/> instead of adding members to it, because that interface is the
-/// contract wave W9 already calls; the section asks for this wider facet, a test fakes it, and the wizard never sees it.</para>
+/// contract wave W9 already calls; the section asks for this wider facet, a bare composition supplies it, and the wizard never sees it.</para>
 /// </summary>
 internal interface INotificationPermissionSection : INotificationPermissionGuide
 {
@@ -74,11 +74,11 @@ internal sealed class SystemNotificationPermissionGuide : INotificationPermissio
 
     /// <param name="notifier">Raises the test notification.</param>
     /// <param name="open">
-    /// Opens a URI and reports whether it could be opened; null starts the shell with <c>UseShellExecute</c>. A test passes
+    /// Opens a URI and reports whether it could be opened; null starts the shell with <c>UseShellExecute</c>. A caller can pass
     /// a recording fake, so nothing leaves the process.
     /// </param>
     /// <param name="platform">The family to talk to; the running OS when null.</param>
-    /// <param name="time">Clock of <see cref="OpenTimeout"/>; a test passes a fake one.</param>
+    /// <param name="time">Clock of <see cref="OpenTimeout"/>; a caller passes its own.</param>
     public SystemNotificationPermissionGuide(
         ISystemNotifier notifier,
         Func<Uri, CancellationToken, Task<bool>>? open = null,
@@ -175,7 +175,7 @@ internal sealed class SystemNotificationPermissionGuide : INotificationPermissio
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, limit.Token);
         try
         {
-            // WaitAsync bounds the wait even when a (test) opener ignores the token it was handed.
+            // WaitAsync bounds the wait even when an opener ignores the token it was handed.
             return await open(uri, linked.Token).WaitAsync(linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

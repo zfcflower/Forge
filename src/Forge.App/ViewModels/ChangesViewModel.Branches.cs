@@ -8,7 +8,7 @@ namespace Forge.App.ViewModels;
 /// <summary>
 /// The compare-base side of the changes panel. The branch list itself lives in <see cref="BranchPickerViewModel"/>,
 /// because the new-branch dialog shows the very same picker; every member here forwards to <see cref="Picker"/> so the
-/// panel's own bindings and its tests keep reading the list, the search and the selection from this view model.
+/// panel's own bindings the list, the search and the selection stay on this view model.
 /// </summary>
 internal sealed partial class ChangesViewModel
 {
@@ -182,7 +182,7 @@ internal sealed partial class ChangesViewModel
 
     /// <summary>
     /// The picker notifies its own members (selection, search, list flags); this view model forwards them so its bindings
-    /// and the existing tests see the same events they saw when the list lived here.
+    /// and the same events keep arriving as when the list lived here.
     /// </summary>
     private void OnPickerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) =>
         OnPropertyChanged(e.PropertyName);

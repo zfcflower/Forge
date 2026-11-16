@@ -24,11 +24,11 @@ internal sealed class ProviderStore
 
     /// <param name="claudeVersion">
     /// What version to claim when the section is first written. Defaults to asking the locally installed CLI, so the claim names a
-    /// build the user actually has; a machine without the CLI falls back to the shipped default. Injectable so a test asserts the
-    /// section's shape without a 300 MB program on the test machine.
+    /// build the user actually has; a machine without the CLI falls back to the shipped default. Injectable so the
+    /// section's shape can be exercised without a 300 MB program on the machine.
     /// </param>
     /// <param name="usageRecorder">
-    /// Where model requests are recorded once the user turns the usage log on; null in a test or a build without the composition root.
+    /// Where model requests are recorded once the user turns the usage log on; null in a build without the composition root.
     /// </param>
     public ProviderStore(string settingsPath, Func<string?>? claudeVersion = null, IUsageRecorder? usageRecorder = null)
     {

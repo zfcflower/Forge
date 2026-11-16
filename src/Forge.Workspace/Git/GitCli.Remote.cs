@@ -1091,7 +1091,7 @@ public sealed partial class GitCli
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out count);
 }
 
-/// <summary>Maps a failed git invocation to a <see cref="GitRemoteFailureKind"/>; pure, so it is unit-tested on captured stderr.</summary>
+/// <summary>Maps a failed git invocation to a <see cref="GitRemoteFailureKind"/>; pure, so it can be exercised on captured stderr.</summary>
 public static class GitFailureClassifier
 {
     // git runs under LC_ALL=C, so these are its stable English messages. Ordered: the first category that matches wins,

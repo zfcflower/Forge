@@ -7,7 +7,7 @@ namespace Forge.App.Services;
 
 /// <summary>
 /// Turns one source's snapshot into rows: matching, ranking and taking the configured limit. The functions are pure
-/// (no window, no file system, no language server) so the ranking each source uses is pinned by unit tests, and each one
+/// (no window, no file system, no language server) so the ranking each source uses is independent of any UI, and each one
 /// runs a single pass over its snapshot with pooled LINQ buffers - a keystroke over a 20 000-entry file list allocates the
 /// ranked pairs and the result rows, nothing else.
 /// </summary>

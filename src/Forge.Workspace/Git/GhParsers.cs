@@ -21,7 +21,7 @@ internal sealed record GhCommentsPage(IReadOnlyList<PrReviewComment> Comments, b
 /// <summary>
 /// Pure parsers over gh's output: text in, platform-neutral model out, no process and no I/O. Malformed or empty input
 /// yields null (never an exception) and an unknown enum string yields the <c>Unknown</c> member, so a gh upgrade that
-/// adds a state cannot break a read. Method names are unique (no overloads) so tests can reach them by name.
+/// adds a state cannot break a read. Method names are unique (no overloads) so each is reachable by name.
 /// </summary>
 internal static class GhParsers
 {

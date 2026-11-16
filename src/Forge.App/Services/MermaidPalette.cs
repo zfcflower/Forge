@@ -7,7 +7,7 @@ namespace Forge.App.Services;
 /// <summary>
 /// The colours one Mermaid diagram is painted in, as <c>#RRGGBB</c> strings: what Mermaider's <c>RenderOptions</c> takes and
 /// what <see cref="MermaidSvgColors"/> resolves the SVG's CSS variables against. Derived from the host's theme tokens so a
-/// diagram follows light/dark like every other block, with opaque fallbacks for a host that has no theme resources (tests).
+/// diagram follows light/dark like every other block, with opaque fallbacks for a host that has no theme resources.
 /// </summary>
 internal readonly record struct MermaidPalette(
     string Background,

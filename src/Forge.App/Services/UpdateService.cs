@@ -131,7 +131,7 @@ internal sealed class UpdateService : IDisposable
     /// </summary>
     private readonly string installDirectory;
 
-    /// <summary>Starts the staged executable as the applier; the seam the tests use instead of spawning a process.</summary>
+    /// <summary>Starts the staged executable as the applier; settable so the applier can be substituted without spawning a process.</summary>
     private readonly Func<UpdateApplyRequest, bool> startApplier;
 
     public UpdateService(

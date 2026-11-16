@@ -11,7 +11,7 @@ namespace Forge.App.Views;
 /// <summary>
 /// The in-window toast stack. Like the approval overlay it carries no dependency on the root view model: it resolves the
 /// shell's <see cref="NotificationCenter"/> from <see cref="NotificationCenter.Current"/>, which the composition root
-/// creates before the window, and shows nothing at all when there is none (a test window or a shell built without the
+/// creates before the window, and shows nothing at all when there is none (a window built without the
 /// notification wiring).
 /// <para>The center decides <em>whether</em> a notification becomes a toast; this view only decides where the toasts sit
 /// and how they come and go (the stack panel slides them, the styles fade them). It also keeps
@@ -219,7 +219,7 @@ public partial class NotificationOverlay : UserControl
 
         if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Without a desktop lifetime (a test) there is no window state to follow and the app is never in the background.
+            // Without a desktop lifetime there is no window state to follow and the app is never in the background.
             center.IsBackground = false;
             return;
         }

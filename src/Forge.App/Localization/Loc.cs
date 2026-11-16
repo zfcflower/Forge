@@ -16,7 +16,7 @@ namespace Forge.App.Localization;
 /// <see cref="Language"/> raises PropertyChanged for <c>Item[]</c> so every bound text refreshes without a restart;
 /// view models that cache formatted strings listen to <see cref="LanguageChanged"/>.</para>
 /// <para>A missing key returns the key itself wrapped in brackets and is reported once through <c>Trace</c>; a key
-/// registered twice with different texts throws at registration (caught by a test that loads all tables).</para>
+/// registered twice with different texts throws at registration.</para>
 /// </summary>
 internal sealed class Loc : INotifyPropertyChanged
 {
@@ -137,35 +137,14 @@ internal sealed class Loc : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Test seam: when set, <see cref="UiLanguage.System"/> resolves to this language instead of the machine's, so test
-    /// assertions on texts do not depend on the OS display language of the machine they run on. Never set by the product.
-    /// </summary>
-    internal static UiLanguage? SystemLanguageOverride { get; set; }
-
-    /// <summary>All registered keys; for the completeness test.</summary>
-    public static IReadOnlyCollection<string> Keys
-    {
-        get
-        {
-            lock (Gate)
-            {
-                return KeysInOrder.ToArray();
-            }
-        }
-    }
-
-    /// <summary>
     /// The concrete language behind <see cref="UiLanguage.System"/>, never <see cref="UiLanguage.System"/> itself.
     /// <see cref="SystemLanguageDetector"/> owns the decision - culture names, the Windows display language, the POSIX
     /// locale variables - so this build's invariant globalization does not pin the UI to English.
-    /// <see cref="SystemLanguageOverride"/> is the test seam and wins when set.
     /// <para>Also read by the language settings section, which says under "follow the system" which language that choice
     /// currently resolves to; that is why the property is not private.</para>
     /// </summary>
     internal static UiLanguage SystemLanguage =>
-        SystemLanguageOverride is { } forced && forced != UiLanguage.System
-            ? forced
-            : SystemLanguageDetector.Resolve(SystemLanguageDetector.ReadCurrent());
+        SystemLanguageDetector.Resolve(SystemLanguageDetector.ReadCurrent());
 
     private static void ReportMissing(string key)
     {
@@ -197,7 +176,7 @@ internal sealed class Loc : INotifyPropertyChanged
 
     /// <summary>
     /// Invokes every subscriber on its own: one failing subscriber - a control of a closed window whose dispatcher is
-    /// gone, in a test host - must not stop the rest from refreshing or turn a language switch into an error for the
+    /// gone - must not stop the rest from refreshing or turn a language switch into an error for the
     /// caller. The failure is reported, not hidden.
     /// </summary>
     private static void RaiseAll<THandler>(THandler? callbacks, Action<THandler> invoke)

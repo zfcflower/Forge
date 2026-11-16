@@ -85,7 +85,7 @@ internal enum TimelineNodeState
 /// is in. No Avalonia type and no visual tree is touched here, so the whole mapping is unit-testable; the control resolves
 /// the icon key against <c>Resources/Icons.axaml</c> and the name key against <c>Loc</c>.
 /// <para>Keys are constants of <c>TimelineStrings</c> and of the icon dictionary; a key that is missing shows up as an
-/// unregistered key in the localization tests and as an empty icon in the view tests, not as a silent blank node.</para>
+/// unregistered key and as an empty icon, not as a silent blank node.</para>
 /// </summary>
 internal static class TimelineNodeMap
 {

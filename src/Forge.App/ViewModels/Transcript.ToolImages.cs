@@ -7,7 +7,7 @@ namespace Forge.App.ViewModels;
 /// The live preference a tool-row image reads, ambient like <c>EditorSettings.Current</c>: transcript rows are built by
 /// a data template deep inside a session and cannot be handed the composition root, so the composition root replaces
 /// <see cref="ThumbnailEdge"/> with a read of <see cref="AppPreferences.ChatToolImageThumbnailPixels"/> before the first
-/// window opens. Tests and any host without preferences keep the built-in default.
+/// window opens. Any host without preferences keeps the built-in default.
 /// </summary>
 internal static class ToolImageSettings
 {

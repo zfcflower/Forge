@@ -159,7 +159,7 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
     /// <param name="preferences">The live preferences: the line limit is read on every pull, the refresh interval at every reschedule.</param>
     /// <param name="close">Closes the overlay (its close button, Escape or a click on the scrim).</param>
     /// <param name="schedule">
-    /// How the periodic pull is driven. Defaults to a dispatcher timer at the UI's background priority; a test passes its own
+    /// How the periodic pull is driven. Defaults to a dispatcher timer at the UI's background priority; it can be supplied
     /// and calls <see cref="Refresh"/> directly, so the panel is testable without a message loop.
     /// </param>
     /// <param name="post">How a coalesced refresh is queued; defaults to one background-priority dispatcher post.</param>
@@ -223,9 +223,6 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
 
     /// <summary>Open, a session exists and nothing runs anywhere: the one line that says everything is idle.</summary>
     public bool IsEmpty => hasSession && total == 0;
-
-    /// <summary>Sessions the panel currently listens to (one per open session); for tests, which check that none leaks.</summary>
-    internal int ListenedSessions => groups.Count;
 
     /// <summary>Starts the periodic pull and reads the rows once, so the panel is drawn populated on its first frame.</summary>
     public void Start()
@@ -546,7 +543,7 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A notification from another thread belongs to a window that is gone (a test host); re-reading off this one would
+        // A notification from another thread belongs to a window that is gone; re-reading off this one would
         // touch bound controls from the wrong thread.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

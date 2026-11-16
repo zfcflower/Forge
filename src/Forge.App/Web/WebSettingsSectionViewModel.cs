@@ -176,7 +176,7 @@ internal sealed class WebSettingsSectionViewModel : ObservableObject, IDisposabl
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        // A switch raised on another thread belongs to a window that is gone (a test host): the picker's options are bound
+        // A switch raised on another thread belongs to a window that is gone: the picker's options are bound
         // on the thread that built the section.
         if (disposed || Environment.CurrentManagedThreadId != uiThread)
         {

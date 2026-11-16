@@ -47,7 +47,7 @@ internal sealed class ChangedTreeNodeViewModel : ObservableObject, IFlatTreeNode
         });
     }
 
-    /// <summary>The folder chain (<c>tests/Forge.Workspace.Tests/Git</c>) or the file name.</summary>
+    /// <summary>The folder chain (<c>src/Forge.App/Composition</c>) or the file name.</summary>
     public string Name { get; }
 
     /// <summary>The repository-relative path: the file, or the deepest folder of the chain.</summary>
@@ -263,9 +263,9 @@ internal sealed class ChangedFileTree
 
     /// <summary>
     /// Builds the node tree: split every path on <c>/</c>, then fold one-folder chains into one node and sort each level
-    /// folders-first, then by name (ordinal, case-insensitive). Exposed for tests.
+    /// folders-first, then by name (ordinal, case-insensitive).
     /// </summary>
-    internal static List<ChangedTreeNodeViewModel> Build(
+    private static List<ChangedTreeNodeViewModel> Build(
         IReadOnlyList<FileDiffViewModel> changed,
         ISet<string> collapsedFolders,
         Action<ChangedTreeNodeViewModel> expansionChanged,

@@ -56,11 +56,11 @@ public static class ModelCatalogFetcher
     /// <summary>
     /// Fetches <paramref name="sourceUrl"/>. <paramref name="etag"/> is the validator of the snapshot already on disk
     /// (<c>null</c> for a first fetch); <paramref name="now"/> is when the download is deemed to have happened, so a caller
-    /// with a test clock controls the "already updated today" test.
+    /// with its own clock controls the "already updated today" decision.
     /// </summary>
     /// <param name="maxBytes">
-    /// The largest body this call will hold in memory; the default is <see cref="ModelCatalogParser.MaxBytes"/>. A test
-    /// passes a small number to exercise the over-limit path without allocating 32 MB.
+    /// The largest body this call will hold in memory; the default is <see cref="ModelCatalogParser.MaxBytes"/>. A caller
+    /// can pass a small number to exercise the over-limit path without allocating 32 MB.
     /// </param>
     public static async Task<ModelCatalogFetchResult> FetchAsync(
         HttpClient http,

@@ -656,7 +656,7 @@ internal sealed class ProviderRowViewModel : ObservableObject
     private bool deleteArmed;
 
     /// <param name="cacheTtlChanged">
-    /// Saves a new cache lifetime for this provider; null when the row is built without a catalogue behind it (a design-time or test
+    /// Saves a new cache lifetime for this provider; null when the row is built without a catalogue behind it (a design-time
     /// instance), in which case the control still shows the current value but does nothing.
     /// </param>
     public ProviderRowViewModel(ConnectedProvider provider, bool isDefault, Func<string?, Task>? cacheTtlChanged = null)

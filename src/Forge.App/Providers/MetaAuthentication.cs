@@ -142,7 +142,7 @@ internal sealed class MetaAuthentication
         };
 
     /// <param name="http">Must be the same client the API calls use, so its handler pool is shared.</param>
-    /// <param name="time">Clock for the code lifetime and the key expiry; tests inject one instead of sleeping.</param>
+    /// <param name="time">Clock for the code lifetime and the key expiry.</param>
     public MetaAuthentication(HttpClient http, TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(http);
@@ -238,7 +238,7 @@ internal sealed class MetaAuthentication
             status);
     }
 
-    /// <summary>Waits one poll interval on the injected clock, so a test drives the wait instead of sleeping through it.</summary>
+    /// <summary>Waits one poll interval on the injected clock, so the wait can be advanced instead of slept through.</summary>
     internal Task WaitAsync(int intervalSeconds, CancellationToken ct) =>
         Task.Delay(TimeSpan.FromSeconds(Math.Max(0, intervalSeconds)), time, ct);
 

@@ -36,11 +36,6 @@ public sealed class ApprovalStore : IDisposable
     private long dataVersion;
     private bool disposed;
 
-#if DEBUG
-    private readonly Action? afterInitialSnapshotRead;
-    private readonly Action? snapshotRead;
-#endif
-
     public ApprovalStore(string directory)
         : this(directory, null)
     {
@@ -62,11 +57,6 @@ public sealed class ApprovalStore : IDisposable
         legacyPath = Path.Combine(root, LegacyFileName);
         JournalMode = ApprovalDatabase.RollbackJournalMode;
 
-#if DEBUG
-        afterInitialSnapshotRead = options.AfterInitialSnapshotRead;
-        snapshotRead = options.SnapshotRead;
-#endif
-
         SqliteConnection? opened = null;
         try
         {
@@ -75,9 +65,6 @@ public sealed class ApprovalStore : IDisposable
             var imported = ApprovalMigration.EnsureSchema(opened, databasePath, legacyPath, options);
             var version = ApprovalDatabase.DataVersion(opened);
             var loaded = ReadSnapshot(opened, null);
-#if DEBUG
-            afterInitialSnapshotRead?.Invoke();
-#endif
 
             connection = opened;
             records = loaded;
@@ -497,9 +484,6 @@ public sealed class ApprovalStore : IDisposable
         SqliteTransaction? transaction)
     {
         var loaded = ApprovalDatabase.ReadAll(source, transaction, databasePath);
-#if DEBUG
-        snapshotRead?.Invoke();
-#endif
         return loaded;
     }
 
