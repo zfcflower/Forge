@@ -74,6 +74,7 @@ internal sealed class KeymapRowViewModel : ObservableObject
 internal sealed class KeymapSettingsSectionViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
 {
     private readonly AppPreferences preferences;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private readonly List<KeymapRowViewModel> allRows = [];
     private readonly List<KeymapRowViewModel> windowRows = [];
     private readonly List<KeymapRowViewModel> editorRows = [];
@@ -412,6 +413,13 @@ internal sealed class KeymapSettingsSectionViewModel : ObservableObject, IDispos
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A switch raised on another thread belongs to a window that is gone (a test host): every property re-raised
+        // here, and every row it refreshes, is bound on the thread that built the section.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Hint));
         OnPropertyChanged(nameof(SearchPlaceholder));
         OnPropertyChanged(nameof(WindowScopeHeading));

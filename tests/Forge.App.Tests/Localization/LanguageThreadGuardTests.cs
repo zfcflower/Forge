@@ -56,6 +56,7 @@ public sealed class LanguageThreadGuardTests : IDisposable
         "usage-log-row",
         "network-section",
         "new-branch-dialog",
+        "keymap-section",
         "palette",
         "files-panel",
         "changes-document",
@@ -341,6 +342,12 @@ public sealed class LanguageThreadGuardTests : IDisposable
                         services.Dispose();
                         http.Dispose();
                     });
+            }
+
+            case "keymap-section":
+            {
+                var section = new KeymapSettingsSectionViewModel(new AppPreferences());
+                return Subject.Sync(section, section, nameof(KeymapSettingsSectionViewModel.Hint), section.Dispose);
             }
 
             default:
