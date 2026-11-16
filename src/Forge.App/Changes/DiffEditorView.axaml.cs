@@ -632,7 +632,7 @@ internal sealed partial class DiffEditorView : UserControl
             // The preview spans both columns in split mode; an opaque surface keeps the split divider from showing through.
             if (control is Avalonia.Controls.Primitives.TemplatedControl { Background: null } templated)
             {
-                templated.Bind(Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty, this.GetResourceObservable("SurfaceBrush"));
+                templated.Bind(Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty, this.GetResourceObservable("CardBackgroundBrush"));
             }
 
             if (control is ImageDiffView imageDiff)

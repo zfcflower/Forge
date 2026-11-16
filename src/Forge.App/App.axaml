@@ -314,7 +314,7 @@
       <StackPanel Spacing="8">
         <TextBlock Classes="caption" TextWrapping="Wrap"
                    Text="{Binding [network.hint], Source={x:Static loc:Loc.Instance}}" />
-        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"
                    IsVisible="{Binding HasLoadProblem}" Text="{Binding LoadProblemText}" />
         <TextBlock Classes="label" Text="{Binding [network.dns], Source={x:Static loc:Loc.Instance}}" />
         <StackPanel Orientation="Horizontal" Spacing="16">
@@ -334,7 +334,7 @@
           <TextBox Text="{Binding ServersText, Mode=TwoWay}" AcceptsReturn="True" MinHeight="56"
                    PlaceholderText="1.1.1.1"
                    AutomationProperties.AutomationId="network-dns-servers-text" />
-          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"
                      IsVisible="{Binding HasServersError}" Text="{Binding ServersError}" />
         </StackPanel>
         <StackPanel Spacing="4" IsVisible="{Binding IsDnsDoh}">
@@ -343,9 +343,9 @@
                    AutomationProperties.AutomationId="network-doh-url" />
           <TextBlock Classes="caption" TextWrapping="Wrap"
                      Text="{Binding [network.dns.doh.hint], Source={x:Static loc:Loc.Instance}}" />
-          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"
                      IsVisible="{Binding HasDohError}" Text="{Binding DohError}" />
-          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusWarningBrush}"
                      IsVisible="{Binding ShowsDohNameHint}"
                      Text="{Binding [network.dns.doh.nameHint], Source={x:Static loc:Loc.Instance}}"
                      AutomationProperties.AutomationId="network-doh-name-hint" />
@@ -368,9 +368,9 @@
                    AutomationProperties.AutomationId="network-proxy-url" />
           <TextBlock Classes="caption" TextWrapping="Wrap"
                      Text="{Binding [network.proxy.url.hint], Source={x:Static loc:Loc.Instance}}" />
-          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"
                      IsVisible="{Binding HasProxyError}" Text="{Binding ProxyError}" />
-          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusWarningBrush}"
                      IsVisible="{Binding ShowsSocks4Hint}"
                      Text="{Binding [network.proxy.socks4.hint], Source={x:Static loc:Loc.Instance}}"
                      AutomationProperties.AutomationId="network-proxy-socks4-hint" />
@@ -379,7 +379,7 @@
           <TextBox Text="{Binding BypassText, Mode=TwoWay}" AcceptsReturn="True" MinHeight="56"
                    PlaceholderText="*.corp.example"
                    AutomationProperties.AutomationId="network-proxy-bypass" />
-          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"
                      IsVisible="{Binding HasBypassError}" Text="{Binding BypassError}" />
         </StackPanel>
         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
@@ -615,7 +615,7 @@
                       ClipToBounds="True"
                       BorderThickness="1"
                       BorderBrush="{DynamicResource BorderBrush}"
-                      Background="{DynamicResource SurfaceMutedBrush}"
+                      Background="{DynamicResource SurfaceSubtleBrush}"
                       ToolTip.Tip="{Binding Caption}">
                 <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
               </Border>
@@ -638,7 +638,7 @@
                       CornerRadius="6"
                       BorderThickness="1"
                       BorderBrush="{DynamicResource BorderBrush}"
-                      Background="{DynamicResource SurfaceMutedBrush}"
+                      Background="{DynamicResource SurfaceSubtleBrush}"
                       ToolTip.Tip="{Binding Name}">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                   <wc:FluentIcon Data="{StaticResource IconChangesDocument}" Width="14" Height="14" VerticalAlignment="Center" />

@@ -10,16 +10,16 @@
 
   <UserControl.Styles>
     <Style Selector="Border.changes-bar">
-      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="Padding" Value="10,4" />
       <Setter Property="MinHeight" Value="34" />
     </Style>
     <Style Selector="TextBlock.changes-added">
-      <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
     </Style>
     <Style Selector="TextBlock.changes-removed">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Border.key-hint">
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
@@ -37,7 +37,7 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <!-- Top bar: scope · base · files · +/− · viewed | ↑ ↓ | wrap | split|inline | stacked|single -->
     <Border Classes="changes-bar" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="*,Auto">

@@ -26,7 +26,7 @@
       <Setter Property="Padding" Value="11,0,11,10" />
       <!-- Square bottom corners: square is what lets the side borders reach past the seam without curving inwards. -->
       <Setter Property="CornerRadius" Value="10,10,0,0" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <!-- No bottom edge: the grey panel's top edge is the seam, and two 1 px strokes there would read as a thick line. -->
       <Setter Property="BorderThickness" Value="1,1,1,0" />
@@ -39,7 +39,7 @@
          white behind them, while the straight part of its top border is the seam between the zones. Its left, right and
          bottom borders land on the same pixels as the white panel's, so the outline stays one straight line per side. -->
     <Style Selector="Border.composer-body">
-      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceInputBrush}" />
       <Setter Property="CornerRadius" Value="10" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
@@ -48,10 +48,10 @@
 
     <!-- Focus lights up the shared outline: both panels draw part of it, so both take the accent. -->
     <Style Selector="Border.composer-card.focused Border.instrument-strip">
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
     </Style>
     <Style Selector="Border.composer-card.focused Border.composer-body">
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
     </Style>
     <Style Selector="TextBlock.instrument-info">
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
@@ -67,13 +67,13 @@
          allowed_warning is the server's "near the limit", rejected is "the next request would be refused". There is no
          percentage threshold here, because a threshold this app invented would be a guess dressed as a measurement. -->
     <Style Selector="TextBlock.instrument-meta.quota-warning">
-      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
     <Style Selector="TextBlock.instrument-meta.quota-rejected">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Border.instrument-pill">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
       <Setter Property="Padding" Value="6,1" />
       <Setter Property="VerticalAlignment" Value="Center" />
@@ -101,8 +101,8 @@
          specific one, so hovering always wins over the resting state - including the active chip's accent wash, which stays
          the resting reading for "the area is open". -->
     <Style Selector="Button.instrument-chip.active /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
     <Style Selector="Button.instrument-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
@@ -113,28 +113,28 @@
          colour at or past it. The segments and the label take the colour; the brushes live here and not in the template so
          the state classes can replace them. -->
     <Style Selector="Button.context-gauge Polygon.gauge-fill">
-      <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource BrandActionBrush}" />
     </Style>
     <Style Selector="Button.context-gauge Polygon.gauge-outline">
-      <Setter Property="Stroke" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Stroke" Value="{DynamicResource BrandInteractiveBrush}" />
     </Style>
     <Style Selector="Button.context-gauge.warning Polygon.gauge-fill">
-      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
     <Style Selector="Button.context-gauge.warning Polygon.gauge-outline">
-      <Setter Property="Stroke" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Stroke" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
     <Style Selector="Button.context-gauge.warning TextBlock.gauge-label">
-      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
     <Style Selector="Button.context-gauge.over Polygon.gauge-fill">
-      <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Button.context-gauge.over Polygon.gauge-outline">
-      <Setter Property="Stroke" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Stroke" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Button.context-gauge.over TextBlock.gauge-label">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
 
     <Style Selector="Button.instrument-project">
@@ -165,7 +165,7 @@
       <Setter Property="Height" Value="16" />
       <Setter Property="Padding" Value="4,0" />
       <Setter Property="CornerRadius" Value="8" />
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandActionBrush}" />
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="HorizontalAlignment" Value="Center" />
     </Style>
@@ -173,7 +173,7 @@
       <Setter Property="FontSize" Value="10" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="LineHeight" Value="10" />
-      <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextOnBrandBrush}" />
       <Setter Property="HorizontalAlignment" Value="Center" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
@@ -191,13 +191,13 @@
       <Setter Property="Height" Value="4" />
       <Setter Property="CornerRadius" Value="2" />
       <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     </Style>
     <Style Selector="Border.instrument-fill">
       <Setter Property="Height" Value="4" />
       <Setter Property="CornerRadius" Value="2" />
       <Setter Property="HorizontalAlignment" Value="Left" />
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandActionBrush}" />
     </Style>
 
     <!-- the input sits borderless inside the card -->
@@ -226,7 +226,7 @@
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
     <Style Selector="Button.composer-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.composer-chip:disabled /template/ ContentPresenter#PART_ContentPresenter">
@@ -250,21 +250,21 @@
       <Setter Property="Cursor" Value="Hand" />
     </Style>
     <Style Selector="Button.composer-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
     <Style Selector="Button.composer-row.selected /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
     </Style>
     <Style Selector="Border.image-thumb">
       <Setter Property="CornerRadius" Value="6" />
       <Setter Property="ClipToBounds" Value="True" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     </Style>
     <Style Selector="Button.image-remove">
       <Setter Property="Margin" Value="0,2,2,0" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     </Style>
     <Style Selector="Button.composer-mini">
       <Setter Property="MinWidth" Value="20" />
@@ -279,7 +279,7 @@
       <Setter Property="Opacity" Value="0.45" />
     </Style>
     <Style Selector="wc|FluentIcon.star.pinned">
-      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
       <Setter Property="Opacity" Value="1" />
     </Style>
 
@@ -294,27 +294,27 @@
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandActionBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextOnBrandBrush}" />
     </Style>
     <Style Selector="Button.composer-send /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandActionBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextOnBrandBrush}" />
       <Setter Property="CornerRadius" Value="14" />
     </Style>
     <Style Selector="Button.composer-send:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextOnBrandBrush}" />
       <Setter Property="Opacity" Value="0.85" />
     </Style>
     <Style Selector="Button.composer-send:disabled /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandSoftBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource OnBrandSoftBrush}" />
       <Setter Property="Opacity" Value="1" />
     </Style>
 
     <Style Selector="Border.queued-chip">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
@@ -323,7 +323,7 @@
       <Setter Property="MinHeight" Value="24" />
     </Style>
     <Style Selector="Border.queued-chip.interjection">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
       <Setter Property="Padding" Value="7,2" />
     </Style>
     <Style Selector="TextBlock.queued-label">
@@ -356,7 +356,7 @@
     </Style>
 
     <Style Selector="Border.composer-suggestions">
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
@@ -367,7 +367,7 @@
       <Setter Property="BoxShadow" Value="{DynamicResource ShadowMd}" />
     </Style>
     <Style Selector="Border.suggestion-badge">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
       <Setter Property="Padding" Value="5,1" />
       <Setter Property="Margin" Value="8,0,0,0" />
@@ -379,7 +379,7 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="Auto,*,Auto,Auto" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,*,Auto,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <!-- Where this session is: project › workspace (branch) › title. The two left segments select the matching row of the
          project tree; the general workspace has no project segment, so those sessions read workspace › title only. -->
     <Border Grid.Row="0"
@@ -449,7 +449,7 @@
                        Width="14"
                        Height="14"
                        Margin="0,0,8,0"
-                       Foreground="{DynamicResource AccentTextBrush}" />
+                       Foreground="{DynamicResource BrandActionBrush}" />
         <TextBlock Grid.Column="1" Classes="caption" TextWrapping="Wrap" Text="{Binding AutomationBanner}" />
         <Button Grid.Column="2"
                 Classes="ghost"
@@ -658,7 +658,7 @@
                               MaxWidth="320"
                               Padding="12,10"
                               CornerRadius="{StaticResource RadiusMd}"
-                              Background="{DynamicResource SurfaceElevatedBrush}"
+                              Background="{DynamicResource CardBackgroundBrush}"
                               BorderBrush="{DynamicResource BorderStrongBrush}"
                               BorderThickness="1"
                               AutomationProperties.AutomationId="strip-usage-summary-panel">
@@ -851,7 +851,7 @@
                 </ItemsControl>
                 <TextBlock Classes="caption"
                            Margin="10,4,8,0"
-                           Foreground="{DynamicResource WarningBrush}"
+                           Foreground="{DynamicResource StatusWarningBrush}"
                            TextWrapping="Wrap"
                            Text="{Binding Composer.AttachmentsBlockedHint}"
                            IsVisible="{Binding Composer.AttachmentsBlocked}"
@@ -860,7 +860,7 @@
                       Margin="10,4,8,0"
                       IsVisible="{Binding Composer.HasAttachmentError}">
                   <TextBlock Classes="caption"
-                             Foreground="{DynamicResource DangerBrush}"
+                             Foreground="{DynamicResource StatusErrorBrush}"
                              TextWrapping="Wrap"
                              VerticalAlignment="Center"
                              Text="{Binding Composer.AttachmentError}"

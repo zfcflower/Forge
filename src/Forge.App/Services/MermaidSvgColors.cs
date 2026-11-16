@@ -303,6 +303,12 @@ internal static class MermaidSvgColors
         static int Digit(char c) => c is >= '0' and <= '9' ? c - '0' : (c | 0x20) - 'a' + 10;
     }
 
+    /// <summary>
+    /// The CSS colour a fully transparent mix produces. Not a palette entry — it is the absence of colour, and it has to be
+    /// spelled as a value here because Svg.Skia has no notion of <c>none</c> for a fill.
+    /// </summary>
+    private const string TransparentMix = "#00000000";
+
     /// <summary>CSS <c>color-mix</c> in sRGB: premultiplied by alpha, so a translucent input darkens the result, not the weights.</summary>
     private static string Mix(Rgba first, double firstWeight, Rgba second, double secondWeight, double alphaScale)
     {
@@ -315,7 +321,7 @@ internal static class MermaidSvgColors
         var alpha = mixedAlpha * alphaScale;
         if (mixedAlpha <= 0 || alpha <= 0)
         {
-            return "#00000000";
+            return TransparentMix;
         }
 
         var r = (first.R * alpha1 * firstWeight + second.R * alpha2 * secondWeight) / mixedAlpha;

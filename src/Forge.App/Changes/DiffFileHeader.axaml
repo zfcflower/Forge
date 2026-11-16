@@ -15,7 +15,7 @@
       <Setter Property="RenderTransform" Value="rotate(90deg)" />
     </Style>
   </UserControl.Styles>
-  <Border Height="36" Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource BorderBrush}"
+  <Border Height="36" Background="{DynamicResource SurfaceSubtleBrush}" BorderBrush="{DynamicResource BorderBrush}"
           BorderThickness="0,1" Classes.expanded="{Binding !IsCollapsed}">
     <ch:FlexRowPanel Margin="6,0" Spacing="8">
       <Button Classes="ghost icon" Command="{Binding ToggleCollapsedCommand}" VerticalAlignment="Center"
@@ -29,8 +29,8 @@
                              FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeSm}"
                              Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"
                              ToolTip.Tip="{Binding Path}" AutomationProperties.AutomationId="diff-file-path" />
-      <TextBlock x:Name="AddedText" Classes="mono" Foreground="{DynamicResource SuccessBrush}" VerticalAlignment="Center" />
-      <TextBlock x:Name="RemovedText" Classes="mono" Foreground="{DynamicResource DangerBrush}" VerticalAlignment="Center" />
+      <TextBlock x:Name="AddedText" Classes="mono" Foreground="{DynamicResource StatusSuccessBrush}" VerticalAlignment="Center" />
+      <TextBlock x:Name="RemovedText" Classes="mono" Foreground="{DynamicResource StatusErrorBrush}" VerticalAlignment="Center" />
       <TextBlock Text="{Binding KeptSummary}" Classes="caption" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"
                  AutomationProperties.AutomationId="diff-file-kept" />
       <StackPanel ch:FlexRowPanel.IsTrailing="True" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">

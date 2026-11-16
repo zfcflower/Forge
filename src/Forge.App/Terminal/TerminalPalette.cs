@@ -6,7 +6,7 @@ namespace Forge.App.Terminal;
 /// <summary>
 /// The colours a terminal cell can ask for: the 16 ANSI slots, the 6×6×6 colour cube and the 24-step grey ramp, one table
 /// per theme variant. True colour values are passed through untouched. The default foreground and background are not part
-/// of the table: they come from the theme tokens (<c>TextPrimaryBrush</c>, <c>SurfaceBackgroundBrush</c>), and
+/// of the table: they come from the theme tokens (<c>TextPrimaryBrush</c>, <c>WindowBackgroundBrush</c>), and
 /// <see cref="FallbackForeground"/>/<see cref="FallbackBackground"/> only answer OSC 10/11 before a view is attached.
 /// </summary>
 internal sealed class TerminalPalette
@@ -16,25 +16,25 @@ internal sealed class TerminalPalette
 
     private static readonly TerminalPalette Light = new(
         [
-            // The 16 ANSI slots, light variant: readable as text on the #F5F6F5 background.
+            // The 16 ANSI slots, light variant: readable as text on the WindowBackgroundBrush background (#FAFAFA).
             Color.Parse("#2B2F2C"), Color.Parse("#B3261E"), Color.Parse("#2F7449"), Color.Parse("#8A5A00"),
             Color.Parse("#1C5FA8"), Color.Parse("#7B3FA0"), Color.Parse("#146C7E"), Color.Parse("#6E7671"),
             Color.Parse("#5C625E"), Color.Parse("#C7372E"), Color.Parse("#3A8F5C"), Color.Parse("#A06A00"),
             Color.Parse("#2A74C2"), Color.Parse("#9350B8"), Color.Parse("#1B8399"), Color.Parse("#3F4541"),
         ],
-        Color.Parse("#2B2F2C"),
-        Color.Parse("#F5F6F5"));
+        Color.Parse("#1D2129"),
+        Color.Parse("#FAFAFA"));
 
     private static readonly TerminalPalette Dark = new(
         [
-            // The same 16 slots, dark variant: the dim slots stay distinct from the #1E2120 background.
+            // The same 16 slots, dark variant: the dim slots stay distinct from the WindowBackgroundBrush background (#121617).
             Color.Parse("#3F4541"), Color.Parse("#E06C75"), Color.Parse("#98C379"), Color.Parse("#E5C07B"),
             Color.Parse("#61AFEF"), Color.Parse("#C678DD"), Color.Parse("#56B6C2"), Color.Parse("#DDE3DF"),
             Color.Parse("#5C625E"), Color.Parse("#FF7B86"), Color.Parse("#B0D98C"), Color.Parse("#F0D098"),
             Color.Parse("#7CC0FF"), Color.Parse("#D79AE8"), Color.Parse("#7FD4DE"), Color.Parse("#F5F7F5"),
         ],
-        Color.Parse("#DDE3DF"),
-        Color.Parse("#1E2120"));
+        Color.Parse("#F2F4F5"),
+        Color.Parse("#121617"));
 
     private readonly Color[] ansi;
 

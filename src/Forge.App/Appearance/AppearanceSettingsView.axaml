@@ -43,7 +43,7 @@
                 AutomationProperties.AutomationId="appearance-ui-reset" />
       </StackPanel>
 
-      <Border Background="{DynamicResource SurfaceMutedBrush}"
+      <Border Background="{DynamicResource SurfaceSubtleBrush}"
               CornerRadius="{StaticResource RadiusMd}"
               Padding="{StaticResource PaddingCard}">
         <TextBlock Text="{Binding Ui.PreviewText}"
@@ -90,7 +90,7 @@
                 AutomationProperties.AutomationId="appearance-code-reset" />
       </StackPanel>
 
-      <Border Background="{DynamicResource SurfaceMutedBrush}"
+      <Border Background="{DynamicResource SurfaceSubtleBrush}"
               CornerRadius="{StaticResource RadiusMd}"
               Padding="{StaticResource PaddingCard}">
         <TextBlock Text="{Binding Code.PreviewText}"

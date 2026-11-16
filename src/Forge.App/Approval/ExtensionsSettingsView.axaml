@@ -7,7 +7,7 @@
 
   <UserControl.Styles>
     <Style Selector="Border.origin-badge">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="6,1" />
     </Style>
@@ -60,7 +60,7 @@
                 <TextBlock Classes="caption"
                            IsVisible="{Binding HasError}"
                            TextWrapping="Wrap"
-                           Foreground="{DynamicResource DangerBrush}"
+                           Foreground="{DynamicResource StatusErrorBrush}"
                            Text="{Binding ErrorText}" />
                 <WrapPanel Margin="0,4,0,0">
                   <Button Classes="ghost"
@@ -197,7 +197,7 @@
                 <SelectableTextBlock Classes="mono"
                                      IsVisible="{Binding HasDiagnostics}"
                                      TextWrapping="Wrap"
-                                     Foreground="{DynamicResource DangerBrush}"
+                                     Foreground="{DynamicResource StatusErrorBrush}"
                                      Text="{Binding DiagnosticsText}" />
               </StackPanel>
             </Border>

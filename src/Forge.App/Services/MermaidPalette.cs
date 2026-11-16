@@ -19,7 +19,7 @@ internal readonly record struct MermaidPalette(
     string Line)
 {
     /// <summary>Used when a resource is missing or is not a solid colour; matches the light theme tokens.</summary>
-    internal static MermaidPalette Fallback { get; } = new("#FFFFFF", "#1A1A1A", "#2F7449", "#6E6E6E", "#F2F2F2", "#D4D4D8", "#9CA3AF");
+    internal static MermaidPalette Fallback { get; } = new("#FAFAFA", "#1D2129", "#067A76", "#66717D", "#F4F7F8", "#D8DEE1", "#66717D");
 
     /// <summary>
     /// Reads the theme tokens from <paramref name="scope"/> for its current variant. Called when a render starts (and again on
@@ -30,11 +30,11 @@ internal readonly record struct MermaidPalette(
         ArgumentNullException.ThrowIfNull(scope);
         var variant = scope.ActualThemeVariant;
         return new MermaidPalette(
-            Read(scope, variant, "SurfaceBackgroundBrush", Fallback.Background),
+            Read(scope, variant, "WindowBackgroundBrush", Fallback.Background),
             Read(scope, variant, "TextPrimaryBrush", Fallback.Foreground),
-            Read(scope, variant, "AccentTextBrush", Fallback.Accent),
+            Read(scope, variant, "BrandActionBrush", Fallback.Accent),
             Read(scope, variant, "TextMutedBrush", Fallback.Muted),
-            Read(scope, variant, "SurfaceMutedBrush", Fallback.Surface),
+            Read(scope, variant, "SurfaceSubtleBrush", Fallback.Surface),
             Read(scope, variant, "BorderBrush", Fallback.Border),
             Read(scope, variant, "TextMutedBrush", Fallback.Line));
     }

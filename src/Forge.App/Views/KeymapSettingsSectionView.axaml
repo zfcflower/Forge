@@ -63,7 +63,7 @@
     <Border x:Name="CaptureSurface"
             Focusable="True"
             IsVisible="{Binding HasCapture}"
-            Background="{DynamicResource SurfaceElevatedBrush}"
+            Background="{DynamicResource CardBackgroundBrush}"
             BorderBrush="{DynamicResource BorderStrongBrush}"
             BorderThickness="1"
             CornerRadius="6"
@@ -80,7 +80,7 @@
           <TextBlock Classes="caption"
                      Text="{Binding CaptureConflictText}"
                      IsVisible="{Binding HasConflict}"
-                     Foreground="{DynamicResource DangerBrush}"
+                     Foreground="{DynamicResource StatusErrorBrush}"
                      AutomationProperties.AutomationId="keymap-capture-conflict" />
         </StackPanel>
         <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">

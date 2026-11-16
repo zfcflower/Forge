@@ -16,16 +16,16 @@
       <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
     </Style>
     <Style Selector="Ellipse.provider-state.ready">
-      <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusSuccessBrush}" />
     </Style>
     <Style Selector="Ellipse.provider-state.warning">
-      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
     <Style Selector="Ellipse.provider-state.signin">
-      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
     <Style Selector="Ellipse.provider-state.error">
-      <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Button.provider-action">
       <Setter Property="Background" Value="Transparent" />
@@ -46,13 +46,13 @@
   <StackPanel Spacing="14">
     <!-- Top banner: no connected provider means no agent can run. -->
     <Border IsVisible="{Binding ShowsNeedProviderBanner}"
-            Background="{DynamicResource AccentSubtleBrush}"
+            Background="{DynamicResource SurfaceHoverBrush}"
             CornerRadius="6"
             Padding="12,8"
             AutomationProperties.AutomationId="providers-banner">
       <TextBlock Text="{Binding BannerText}"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource WarningBrush}" />
+                 Foreground="{DynamicResource StatusWarningBrush}" />
     </Border>
 
     <!-- Model metadata that is not per provider: the window every model uses unless it has its own. -->
@@ -114,17 +114,17 @@
       </Grid>
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource DangerBrush}"
+                 Foreground="{DynamicResource StatusErrorBrush}"
                  IsVisible="{Binding HasTriggerError}"
                  Text="{Binding TriggerError}" />
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource DangerBrush}"
+                 Foreground="{DynamicResource StatusErrorBrush}"
                  IsVisible="{Binding HasTargetError}"
                  Text="{Binding TargetError}" />
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource DangerBrush}"
+                 Foreground="{DynamicResource StatusErrorBrush}"
                  IsVisible="{Binding HasSaveError}"
                  Text="{Binding SaveError}" />
       <TextBlock Classes="caption"
@@ -144,7 +144,7 @@
                  Text="{Binding Hint}" />
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource DangerBrush}"
+                 Foreground="{DynamicResource StatusErrorBrush}"
                  IsVisible="{Binding HasSaveError}"
                  Text="{Binding SaveError}" />
     </StackPanel>
@@ -183,7 +183,7 @@
       <TextBlock IsVisible="{Binding HasCatalogProblem}"
                  TextWrapping="Wrap"
                  Text="{Binding CatalogProblem}"
-                 Foreground="{DynamicResource DangerBrush}" />
+                 Foreground="{DynamicResource StatusErrorBrush}" />
     </StackPanel>
 
     <!-- 1. Connected: what is already set up. -->
@@ -208,12 +208,12 @@
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBlock Text="{Binding Name}" FontSize="{DynamicResource FontSizeMd}" VerticalAlignment="Center" />
                 <Border IsVisible="{Binding IsDefault}"
-                        Background="{DynamicResource AccentSubtleBrush}"
+                        Background="{DynamicResource SurfaceHoverBrush}"
                         CornerRadius="4"
                         Padding="6,1">
                   <TextBlock Text="{Binding DefaultText}"
                              FontSize="{DynamicResource FontSizeXs}"
-                             Foreground="{DynamicResource AccentTextBrush}" />
+                             Foreground="{DynamicResource BrandActionBrush}" />
                 </Border>
               </StackPanel>
 
@@ -415,7 +415,7 @@
     <TextBlock Classes="caption"
                IsVisible="{Binding HasAgentsProblem}"
                TextWrapping="Wrap"
-               Foreground="{DynamicResource DangerBrush}"
+               Foreground="{DynamicResource StatusErrorBrush}"
                Text="{Binding AgentsProblem}"
                AutomationProperties.AutomationId="providers-agents-problem" />
   </StackPanel>

@@ -53,7 +53,7 @@ internal sealed class WorkbenchHost : Panel
         ClipToBounds = true;
         AutomationProperties.SetAutomationId(this, "workbench-host");
         dropOverlay.IsVisible = false;
-        WorkbenchResources.Link(drawerSurface, Border.BackgroundProperty, "SurfaceBackgroundBrush");
+        WorkbenchResources.Link(drawerSurface, Border.BackgroundProperty, "WindowBackgroundBrush");
         WorkbenchResources.Link(drawerSurface, Border.BorderBrushProperty, "BorderBrush");
         Children.Add(drawerSurface);
         Children.Add(dropOverlay);

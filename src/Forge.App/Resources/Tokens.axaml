@@ -2,16 +2,18 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="using:System">
 
-  <!-- Layer 1: primitives. VS Code-style neutral grey/white body; eye-care green only as accent. -->
-  <Color x:Key="LightBackground">#F8F8F8</Color>
-  <Color x:Key="LightPanel">#FFFFFF</Color>
-  <Color x:Key="LightText">#3B3B3B</Color>
-  <Color x:Key="LightAccent">#3A8F5C</Color>
+  <!-- The app's single colour source. Every key here is defined once per theme variant and consumed only through
+       DynamicResource; the authority for the palette, the usage principles and the extension tokens is the
+       "风格与配色" section of src/Forge.App/SPEC.md — this file is its implementation, so a value changed here without
+       the table changing is a bug, not a tweak.
 
-  <Color x:Key="DarkBackground">#181818</Color>
-  <Color x:Key="DarkPanel">#1F1F1F</Color>
-  <Color x:Key="DarkText">#CCCCCC</Color>
-  <Color x:Key="DarkAccent">#5FBF86</Color>
+       Two groups live below. The first is the specification's own set (brand / surface / typography / status /
+       interaction). The second, marked "Extension", covers what a colour specification cannot know about a specific
+       app — a 1 px divider, one chrome colour, diff tints, the editor's syntax palette — derived from the same neutral
+       ramp so that no two greys on one screen come from different families.
+
+       No Layer-1 primitives any more: every literal used to have a name of its own (`LightBackground` and friends),
+       but each was consumed exactly once, so the indirection only made the file harder to compare with the table. -->
 
   <sys:Double x:Key="FontSizeXs">11</sys:Double>
   <sys:Double x:Key="FontSizeSm">12</sys:Double>
@@ -55,6 +57,11 @@
 
   <BoxShadows x:Key="ShadowSm">0 1 2 0 #20000000</BoxShadows>
   <BoxShadows x:Key="ShadowMd">0 8 24 -8 #33000000</BoxShadows>
+  <!-- Two more steps that used to live inline in four views. They stay separate from ShadowMd because they were tuned
+       against a different background (a card sitting inside a panel body vs a popover floating over a list), and folding
+       them into one would visibly change three of the four surfaces. -->
+  <BoxShadows x:Key="ShadowCard">0 4 16 0 #40000000</BoxShadows>
+  <BoxShadows x:Key="ShadowPopover">0 10 30 0 #3A000000</BoxShadows>
 
   <!-- Built-in form controls: one tier of geometry, expressed in Fluent's own resource keys. Avalonia 12.1.6 drives every one of
        these through DynamicResource (TextBox/NumericUpDown/AutoCompleteBox take the TextControl* heights, ComboBox has its
@@ -89,66 +96,117 @@
   <!-- The default interface size. AppearanceApplier replaces it at runtime with the scaled preference. -->
   <sys:Double x:Key="ControlContentThemeFontSize">13</sys:Double>
 
-  <!-- Layer 2: semantic tokens, one dictionary per theme variant. -->
+  <!-- Semantic tokens, one dictionary per theme variant. The two dictionaries must define exactly the same key set:
+       a key missing from one theme is a rendering bug that only shows up after a theme switch. -->
+
   <ResourceDictionary.ThemeDictionaries>
 
     <ResourceDictionary x:Key="Light">
-      <!-- Fluent system colours, so built-in controls follow the same palette. -->
-      <Color x:Key="SystemAccentColor">#3A8F5C</Color>
-      <Color x:Key="SystemAccentColorLight1">#4A9E6B</Color>
-      <Color x:Key="SystemAccentColorLight2">#63B283</Color>
-      <Color x:Key="SystemAccentColorLight3">#8AC9A3</Color>
-      <Color x:Key="SystemAccentColorDark1">#2F7A4D</Color>
-      <Color x:Key="SystemAccentColorDark2">#25653E</Color>
-      <Color x:Key="SystemAccentColorDark3">#1B4F30</Color>
-      <Color x:Key="SystemBaseHighColor">#3B3B3B</Color>
-      <Color x:Key="SystemBaseMediumHighColor">#4A4A4A</Color>
-      <Color x:Key="SystemBaseMediumColor">#6E6E6E</Color>
-      <Color x:Key="SystemBaseMediumLowColor">#8F8F8F</Color>
-      <Color x:Key="SystemBaseLowColor">#CECECE</Color>
+
+      <!-- Fluent system colours. SystemAccentColor is BrandActionBrush, not BrandPrimaryBrush: Fluent paints white
+           foregrounds on it (check box tick, button text, focus), and #0ABAB5 would put white text at 2.41:1. -->
+      <Color x:Key="SystemAccentColor">#067A76</Color>
+      <Color x:Key="SystemAccentColorLight1">#33928F</Color>
+      <Color x:Key="SystemAccentColorLight2">#51A29F</Color>
+      <Color x:Key="SystemAccentColorLight3">#76B6B4</Color>
+      <Color x:Key="SystemAccentColorDark1">#056461</Color>
+      <Color x:Key="SystemAccentColorDark2">#04524F</Color>
+      <Color x:Key="SystemAccentColorDark3">#033F3D</Color>
+      <Color x:Key="SystemBaseHighColor">#1D2129</Color>
+      <Color x:Key="SystemBaseMediumHighColor">#363D49</Color>
+      <Color x:Key="SystemBaseMediumColor">#66717D</Color>
+      <Color x:Key="SystemBaseMediumLowColor">#8A949E</Color>
+      <Color x:Key="SystemBaseLowColor">#D8DEE1</Color>
       <Color x:Key="SystemChromeMediumColor">#FFFFFF</Color>
-      <Color x:Key="SystemChromeMediumLowColor">#F8F8F8</Color>
-      <Color x:Key="SystemChromeLowColor">#F2F2F2</Color>
-      <Color x:Key="SystemChromeHighColor">#E5E5E5</Color>
+      <Color x:Key="SystemChromeMediumLowColor">#F4F7F8</Color>
+      <Color x:Key="SystemChromeLowColor">#FAFAFA</Color>
+      <Color x:Key="SystemChromeHighColor">#E4EBEC</Color>
       <Color x:Key="SystemAltHighColor">#FFFFFF</Color>
-      <Color x:Key="SystemAltMediumHighColor">#F8F8F8</Color>
-      <Color x:Key="RegionColor">#F8F8F8</Color>
-      <Color x:Key="SystemListLowColor">#F2F2F2</Color>
+      <Color x:Key="SystemAltMediumHighColor">#F2F5F6</Color>
+      <Color x:Key="RegionColor">#FAFAFA</Color>
+      <Color x:Key="SystemListLowColor">#EDF3F4</Color>
 
-      <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource LightBackground}" />
-      <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource LightPanel}" />
-      <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="{StaticResource LightPanel}" />
-      <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#F2F2F2" />
-      <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#F8F8F8" />
-      <SolidColorBrush x:Key="SidebarBrush" Color="#F8F8F8" />
-      <!-- A count badge's fill: one neutral step below the panel body and its sidebar grey, so a number stays legible in a
-           toolbar without becoming a second button. Never the accent — the accent belongs to the selected item. -->
-      <SolidColorBrush x:Key="CountBadgeBrush" Color="#E9E9E9" />
+      <!-- Brand. BrandPrimaryBrush identifies, BrandInteractiveBrush takes non-text interaction (3:1 is enough there),
+           BrandActionBrush carries every readable brand pixel — it is the only tier that clears 4.5:1 in both
+           directions: as a foreground on the card body (#067A76 on #FFFFFF = 5.18:1, 4.97:1 on the #FAFAFA window)
+           and as a fill with white text (the same 5.18:1, contrast is symmetric). -->
+      <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#0ABAB5" />
+      <SolidColorBrush x:Key="BrandInteractiveBrush" Color="#078A86" />
+      <SolidColorBrush x:Key="BrandActionBrush" Color="#067A76" />
+      <SolidColorBrush x:Key="BrandHoverBrush" Color="#066E6A" />
+      <SolidColorBrush x:Key="BrandSoftBrush" Color="#81D8D0" />
+      <!-- BrandSoftBrush is deliberately the same mint in both themes, so its ink cannot be a theme-dependent brand tier:
+           BrandActionBrush on it is 3.13:1 in light and 1.28:1 in dark (where BrandAction is #26C6C1). This is the one
+           foreground that is identical in both variants, and it is 9.65:1 on the soft mint. -->
+      <SolidColorBrush x:Key="OnBrandSoftBrush" Color="#072625" />
+      <SolidColorBrush x:Key="BrandTintBrush" Color="#E8F8F7" />
+
+      <!-- Surfaces. Window is the canvas behind everything, Card is a panel body, Sidebar is the two side panels,
+           Subtle is a static inset (gutter, inline code, code block), Hover and Selected are the two row states,
+           Input is the composer's input band. -->
+      <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#FAFAFA" />
+      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#F2F5F6" />
+      <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#F4F7F8" />
+      <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#EDF3F4" />
+      <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#E8F8F7" />
+      <SolidColorBrush x:Key="SurfaceInputBrush" Color="#FFFFFF" />
+
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1D2129" />
+      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#4E5969" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="#66717D" />
+      <!-- Disabled is not a dimmed Muted: Muted still has to be read (#66717D on white = 4.97:1), Disabled never does,
+           and WCAG exempts it. -->
+      <SolidColorBrush x:Key="TextDisabledBrush" Color="#9AA3AC" />
+      <SolidColorBrush x:Key="TextOnBrandBrush" Color="#FFFFFF" />
+
+      <SolidColorBrush x:Key="StatusSuccessBrush" Color="#16845B" />
+      <SolidColorBrush x:Key="StatusWarningBrush" Color="#A85B00" />
+      <SolidColorBrush x:Key="StatusErrorBrush" Color="#C43D4D" />
+      <SolidColorBrush x:Key="StatusInfoBrush" Color="#2769B0" />
+      <!-- Warm emphasis, kept apart from StatusWarning so "已停止" never reads as "警告". -->
+      <SolidColorBrush x:Key="AccentWarmBrush" Color="#E97818" />
+
+      <SolidColorBrush x:Key="FocusRingBrush" Color="#078A86" />
+      <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#D7F2EF" />
+      <SolidColorBrush x:Key="SelectionForegroundBrush" Color="#075D59" />
+
+      <!-- Extension: dividers and chrome. A colour specification does not model a 1 px line, so the neutral ramp is
+           extended two steps below the darkest surface; the existing rule that an icon button's hover equals the
+           divider and its pressed state equals the stronger outline is preserved by using the two same values. -->
+      <SolidColorBrush x:Key="BorderBrush" Color="#D8DEE1" />
+      <SolidColorBrush x:Key="BorderStrongBrush" Color="#C3CDD0" />
       <!-- One chrome colour: the window header row, every panel title bar (and the tab strip drawn on it), the dock
-           strips and a floated panel's own title bar. One step darker than the window body, so the chrome reads as a
-           separate surface without a second grey appearing on the same row. -->
-      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#EFEFEF" />
+           strips and a floated panel's own title bar. One step below the darkest surface, so chrome never borrows the
+           sidebar's or the card's grey. -->
+      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#E9EFF0" />
+      <!-- A count badge's fill: one neutral step below the card body and its sidebar grey, so a number stays legible in
+           a toolbar without becoming a second button. Never brand — the brand belongs to the selected item. -->
+      <SolidColorBrush x:Key="CountBadgeBrush" Color="#E4EBEC" />
+      <!-- The 3px bar on a dock strip label: idle while the drawer is open (the accent takes over while it is closed, so
+           the closed state is the one that has to be found). One step stronger than a divider, because it is a control's
+           only affordance at 3px wide. -->
+      <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#B7C2C6" />
+      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#D8DEE1" />
+      <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#C3CDD0" />
 
-      <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource LightText}" />
-      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#4A4A4A" />
-      <SolidColorBrush x:Key="TextMutedBrush" Color="#6E6E6E" />
-      <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
+      <!-- Extension: the modal scrim. One token instead of four literals in four views. -->
+      <SolidColorBrush x:Key="BackdropScrimBrush" Color="#5A000000" />
 
-      <SolidColorBrush x:Key="BorderBrush" Color="#D4D4D8" />
-      <SolidColorBrush x:Key="BorderStrongBrush" Color="#CECECE" />
-      <!-- What an icon button shows under the pointer, and while pressed. One step darker than the chrome it sits on,
-           so the hover is unmistakable on a title bar and on a white panel body alike. -->
-      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#D4D4D8" />
-      <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#C4C4C9" />
+      <!-- Extension: the editor's own selection. Brand tint at 24% alpha rather than SelectionBackgroundBrush (#D7F2EF
+           is opaque and would paint over the syntax colours the selection exists to show). -->
+      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#3D0ABAB5" />
+      <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59F5C542" />
 
-      <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource LightAccent}" />
-      <SolidColorBrush x:Key="AccentTextBrush" Color="#2F7449" />
-      <SolidColorBrush x:Key="AccentSubtleBrush" Color="#E4F1E9" />
-      <SolidColorBrush x:Key="PrimaryButtonBackgroundBrush" Color="#2F7449" />
-      <SolidColorBrush x:Key="DangerBrush" Color="#B3261E" />
-      <SolidColorBrush x:Key="SuccessBrush" Color="#2F7449" />
-      <SolidColorBrush x:Key="WarningBrush" Color="#8A5A00" />
-      <SolidColorBrush x:Key="InfoBrush" Color="#1F6FEB" />
+      <!-- Extension: chat and diff surfaces, both tints of a status colour. DiffRemove and ErrorBubble share a value on
+           purpose — a deleted line and an error are the same failure semantics at different scales. -->
+      <SolidColorBrush x:Key="DiffAddBrush" Color="#E7F4EF" />
+      <SolidColorBrush x:Key="DiffRemoveBrush" Color="#FBE9EC" />
+      <SolidColorBrush x:Key="DiffHunkBrush" Color="#F2F6F7" />
+      <SolidColorBrush x:Key="ErrorBubbleBrush" Color="#FBE9EC" />
+
+      <!-- Extension: the editor palette (VS Code Light+). Deliberately not re-derived — a syntax palette is a tuned
+           third-party artifact, and seeding it from the brand ramp would make code less readable, not more. -->
       <SolidColorBrush x:Key="SyntaxKeywordBrush" Color="#0000FF" />
       <SolidColorBrush x:Key="SyntaxStringBrush" Color="#A31515" />
       <SolidColorBrush x:Key="SyntaxCommentBrush" Color="#008000" />
@@ -158,77 +216,87 @@
       <SolidColorBrush x:Key="SyntaxVariableBrush" Color="#001080" />
       <SolidColorBrush x:Key="SyntaxPreprocessorBrush" Color="#AF00DB" />
 
-      <SolidColorBrush x:Key="UserBubbleBrush" Color="#E4F1E9" />
-      <SolidColorBrush x:Key="AssistantBubbleBrush" Color="{StaticResource LightPanel}" />
-      <SolidColorBrush x:Key="ToolBubbleBrush" Color="#F2F2F2" />
-      <SolidColorBrush x:Key="ToolCardBrush" Color="#F8F8F8" />
-      <SolidColorBrush x:Key="ErrorBubbleBrush" Color="#FBEAE9" />
-      <SolidColorBrush x:Key="DiffAddBrush" Color="#E6F4EA" />
-      <SolidColorBrush x:Key="DiffRemoveBrush" Color="#FBEAE9" />
-      <SolidColorBrush x:Key="DiffHunkBrush" Color="#F0F0F0" />
-      <SolidColorBrush x:Key="RunningBrush" Color="#2F7449" />
-
-      <!-- Editor selection: brand blue at ~24% alpha, so the code underneath keeps its own colour. -->
-      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#3D3399FF" />
-      <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59F5C542" />
-
-      <!-- VS Code-style chrome: dock strips, indicator bars and flat tabs. -->
-      <SolidColorBrush x:Key="DockStripBackgroundBrush" Color="#EFEFEF" />
-      <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#C8C8C8" />
-      <SolidColorBrush x:Key="TabActiveBackgroundBrush" Color="#E9E9E9" />
-      <SolidColorBrush x:Key="TabHoverBackgroundBrush" Color="#F0F0F0" />
-
     </ResourceDictionary>
 
     <ResourceDictionary x:Key="Dark">
-      <Color x:Key="SystemAccentColor">#5FBF86</Color>
-      <Color x:Key="SystemAccentColorLight1">#79CC9A</Color>
-      <Color x:Key="SystemAccentColorLight2">#95D9AF</Color>
-      <Color x:Key="SystemAccentColorLight3">#B7E6C8</Color>
-      <Color x:Key="SystemAccentColorDark1">#4CA872</Color>
-      <Color x:Key="SystemAccentColorDark2">#3D8C5E</Color>
-      <Color x:Key="SystemAccentColorDark3">#2E6E49</Color>
-      <Color x:Key="SystemBaseHighColor">#CCCCCC</Color>
-      <Color x:Key="SystemBaseMediumHighColor">#BBBBBB</Color>
-      <Color x:Key="SystemBaseMediumColor">#9D9D9D</Color>
-      <Color x:Key="SystemBaseMediumLowColor">#6E6E6E</Color>
-      <Color x:Key="SystemBaseLowColor">#3C3C3C</Color>
-      <Color x:Key="SystemChromeMediumColor">#1F1F1F</Color>
-      <Color x:Key="SystemChromeMediumLowColor">#1B1B1B</Color>
-      <Color x:Key="SystemChromeLowColor">#181818</Color>
-      <Color x:Key="SystemChromeHighColor">#2B2B2B</Color>
-      <Color x:Key="SystemAltHighColor">#1F1F1F</Color>
-      <Color x:Key="SystemAltMediumHighColor">#252525</Color>
-      <Color x:Key="RegionColor">#181818</Color>
-      <Color x:Key="SystemListLowColor">#2A2A2A</Color>
 
-      <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource DarkBackground}" />
-      <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource DarkPanel}" />
-      <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="{StaticResource DarkPanel}" />
-      <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#2A2A2A" />
-      <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#1A1A1A" />
-      <SolidColorBrush x:Key="SidebarBrush" Color="#181818" />
-      <SolidColorBrush x:Key="CountBadgeBrush" Color="#2E2E2E" />
-      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#101010" />
+      <!-- SystemAccentColor is the brand tier that carries white in this theme, exactly as in light — Fluent fills a
+           checked box with it and paints the tick #FFFFFF, so #26C6C1 (the spec's dark brand, 2.11:1 with white) cannot
+           be the base here; its own Dark1 step can (3.27:1). The rest of the ramp keeps the previous steps around it. -->
+      <Color x:Key="SystemAccentColor">#1E9E9A</Color>
+      <Color x:Key="SystemAccentColorLight1">#4DD0CC</Color>
+      <Color x:Key="SystemAccentColorLight2">#6BD8D5</Color>
+      <Color x:Key="SystemAccentColorLight3">#8AE0DE</Color>
+      <Color x:Key="SystemAccentColorDark1">#19817D</Color>
+      <Color x:Key="SystemAccentColorDark2">#136361</Color>
+      <Color x:Key="SystemAccentColorDark3">#0F4F4E</Color>
+      <Color x:Key="SystemBaseHighColor">#F2F4F5</Color>
+      <Color x:Key="SystemBaseMediumHighColor">#CBD1D6</Color>
+      <Color x:Key="SystemBaseMediumColor">#A9B2B8</Color>
+      <Color x:Key="SystemBaseMediumLowColor">#7B868D</Color>
+      <Color x:Key="SystemBaseLowColor">#313B3E</Color>
+      <Color x:Key="SystemChromeMediumColor">#1C2224</Color>
+      <Color x:Key="SystemChromeMediumLowColor">#161B1D</Color>
+      <Color x:Key="SystemChromeLowColor">#121617</Color>
+      <Color x:Key="SystemChromeHighColor">#242C2E</Color>
+      <Color x:Key="SystemAltHighColor">#1C2224</Color>
+      <Color x:Key="SystemAltMediumHighColor">#242C2E</Color>
+      <Color x:Key="RegionColor">#121617</Color>
+      <Color x:Key="SystemListLowColor">#293235</Color>
 
-      <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource DarkText}" />
-      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#BBBBBB" />
-      <SolidColorBrush x:Key="TextMutedBrush" Color="#9D9D9D" />
-      <SolidColorBrush x:Key="TextOnAccentBrush" Color="#12211A" />
+      <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#26C6C1" />
+      <SolidColorBrush x:Key="BrandInteractiveBrush" Color="#26C6C1" />
+      <SolidColorBrush x:Key="BrandActionBrush" Color="#26C6C1" />
+      <SolidColorBrush x:Key="BrandHoverBrush" Color="#3CD4CF" />
+      <SolidColorBrush x:Key="BrandSoftBrush" Color="#81D8D0" />
+      <SolidColorBrush x:Key="OnBrandSoftBrush" Color="#072625" />
+      <SolidColorBrush x:Key="BrandTintBrush" Color="#0D3F3E" />
 
-      <SolidColorBrush x:Key="BorderBrush" Color="#3F3F46" />
-      <SolidColorBrush x:Key="BorderStrongBrush" Color="#3C3C3C" />
-      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#3F3F46" />
-      <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#4A4A52" />
+      <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#121617" />
+      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#161B1D" />
+      <SolidColorBrush x:Key="CardBackgroundBrush" Color="#1C2224" />
+      <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#242C2E" />
+      <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#293235" />
+      <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#193332" />
+      <!-- The one surface that goes the other way in dark: an input sits below the card it lives on. -->
+      <SolidColorBrush x:Key="SurfaceInputBrush" Color="#161D1F" />
 
-      <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource DarkAccent}" />
-      <SolidColorBrush x:Key="AccentTextBrush" Color="#79CC9A" />
-      <SolidColorBrush x:Key="AccentSubtleBrush" Color="#223A2C" />
-      <SolidColorBrush x:Key="PrimaryButtonBackgroundBrush" Color="#5FBF86" />
-      <SolidColorBrush x:Key="DangerBrush" Color="#F2857C" />
-      <SolidColorBrush x:Key="SuccessBrush" Color="#79CC9A" />
-      <SolidColorBrush x:Key="WarningBrush" Color="#E0B15A" />
-      <SolidColorBrush x:Key="InfoBrush" Color="#6BA7FF" />
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F2F4F5" />
+      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A9B2B8" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="#87939D" />
+      <SolidColorBrush x:Key="TextDisabledBrush" Color="#59656D" />
+      <!-- Dark text on a light brand fill, not white: the brand is light in this theme. -->
+      <SolidColorBrush x:Key="TextOnBrandBrush" Color="#072625" />
+
+      <SolidColorBrush x:Key="StatusSuccessBrush" Color="#43C995" />
+      <SolidColorBrush x:Key="StatusWarningBrush" Color="#FFB454" />
+      <SolidColorBrush x:Key="StatusErrorBrush" Color="#FF6B78" />
+      <SolidColorBrush x:Key="StatusInfoBrush" Color="#69A9F5" />
+      <SolidColorBrush x:Key="AccentWarmBrush" Color="#FF8F33" />
+
+      <SolidColorBrush x:Key="FocusRingBrush" Color="#3CD4CF" />
+      <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#17413F" />
+      <SolidColorBrush x:Key="SelectionForegroundBrush" Color="#B8F0EA" />
+
+      <SolidColorBrush x:Key="BorderBrush" Color="#313B3E" />
+      <SolidColorBrush x:Key="BorderStrongBrush" Color="#3C474A" />
+      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#0D1213" />
+      <SolidColorBrush x:Key="CountBadgeBrush" Color="#2C3538" />
+      <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#556468" />
+      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#313B3E" />
+      <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#3C474A" />
+
+      <SolidColorBrush x:Key="BackdropScrimBrush" Color="#5A000000" />
+
+      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#4D26C6C1" />
+      <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59B58B00" />
+
+      <SolidColorBrush x:Key="DiffAddBrush" Color="#17332C" />
+      <SolidColorBrush x:Key="DiffRemoveBrush" Color="#3A2126" />
+      <SolidColorBrush x:Key="DiffHunkBrush" Color="#232C2E" />
+      <SolidColorBrush x:Key="ErrorBubbleBrush" Color="#3A2126" />
+
+      <!-- The editor palette in dark is VS Code Dark+, unchanged. -->
       <SolidColorBrush x:Key="SyntaxKeywordBrush" Color="#569CD6" />
       <SolidColorBrush x:Key="SyntaxStringBrush" Color="#CE9178" />
       <SolidColorBrush x:Key="SyntaxCommentBrush" Color="#6A9955" />
@@ -237,24 +305,6 @@
       <SolidColorBrush x:Key="SyntaxFunctionBrush" Color="#DCDCAA" />
       <SolidColorBrush x:Key="SyntaxVariableBrush" Color="#9CDCFE" />
       <SolidColorBrush x:Key="SyntaxPreprocessorBrush" Color="#C586C0" />
-
-      <SolidColorBrush x:Key="UserBubbleBrush" Color="#223A2C" />
-      <SolidColorBrush x:Key="AssistantBubbleBrush" Color="{StaticResource DarkPanel}" />
-      <SolidColorBrush x:Key="ToolBubbleBrush" Color="#2A2A2A" />
-      <SolidColorBrush x:Key="ToolCardBrush" Color="#1A1A1A" />
-      <SolidColorBrush x:Key="ErrorBubbleBrush" Color="#3A2323" />
-      <SolidColorBrush x:Key="DiffAddBrush" Color="#1F3128" />
-      <SolidColorBrush x:Key="DiffRemoveBrush" Color="#3A2323" />
-      <SolidColorBrush x:Key="DiffHunkBrush" Color="#262626" />
-      <SolidColorBrush x:Key="RunningBrush" Color="#79CC9A" />
-
-      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#4D3399FF" />
-      <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59B58B00" />
-
-      <SolidColorBrush x:Key="DockStripBackgroundBrush" Color="#101010" />
-      <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#4A4A4A" />
-      <SolidColorBrush x:Key="TabActiveBackgroundBrush" Color="#2E2E2E" />
-      <SolidColorBrush x:Key="TabHoverBackgroundBrush" Color="#262626" />
 
     </ResourceDictionary>
 

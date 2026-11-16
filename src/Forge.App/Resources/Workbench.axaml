@@ -45,16 +45,16 @@
     <!-- The accent tool: green at rest, deeper on hover, so the title bar's one primary action reads as a button and not as an
          outlined icon. Declared after the plain hover rule, which would otherwise win on an equal selector. -->
     <Style Selector="^[IsAccent=True] /template/ controls|FluentIcon">
-      <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
     <Style Selector="^[IsAccent=True]:pointerover /template/ controls|FluentIcon">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandHoverBrush}" />
     </Style>
     <Style Selector="^:pressed /template/ Border#PART_Background">
       <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
     </Style>
     <Style Selector="^:focus-visible /template/ Border#PART_Background">
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
       <Setter Property="BorderThickness" Value="1" />
     </Style>
   </ControlTheme>
@@ -87,7 +87,7 @@
       <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
     </Style>
     <Style Selector="^:focus-visible /template/ Border#PART_Background">
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
       <Setter Property="BorderThickness" Value="1" />
     </Style>
   </ControlTheme>
@@ -176,7 +176,7 @@
     <!-- The frame the render draws follows BorderBrush, so focus only has to recolour it; an inactive tab has no fill but
          still shows the accent frame while it holds the keyboard. -->
     <Style Selector="^:focus-visible">
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
     </Style>
     <Style Selector="^:selected /template/ controls|PanelIconButton#PART_Close, ^:pointerover /template/ controls|PanelIconButton#PART_Close">
       <Setter Property="Opacity" Value="1" />
@@ -237,7 +237,7 @@
        sides); the active tab borrows it so it merges with the body. The title bar's bottom line is drawn under the tab
        strip, so the active tab covers it. Every panel, in every region, wears the same chrome colour. -->
   <ControlTheme x:Key="{x:Type controls:PanelChrome}" TargetType="controls:PanelChrome">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border Name="PART_Body" Background="{TemplateBinding Background}" ClipToBounds="True">
@@ -326,7 +326,7 @@
       </ControlTemplate>
     </Setter>
     <Style Selector="^:sidebar">
-      <Setter Property="Background" Value="{DynamicResource SidebarBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SidebarBackgroundBrush}" />
     </Style>
     <Style Selector="^:minimized /template/ ContentControl#PART_Content">
       <Setter Property="IsVisible" Value="False" />
@@ -346,10 +346,10 @@
       </ControlTemplate>
     </Setter>
     <Style Selector="^:pointerover /template/ Border#PART_Line">
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandInteractiveBrush}" />
     </Style>
     <Style Selector="^:dragging /template/ Border#PART_Line">
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandInteractiveBrush}" />
     </Style>
   </ControlTheme>
 
@@ -373,10 +373,10 @@
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="^:pointerover /template/ Border#PART_Line">
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandInteractiveBrush}" />
     </Style>
     <Style Selector="^:dragging /template/ Border#PART_Line">
-      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandInteractiveBrush}" />
     </Style>
   </ControlTheme>
 

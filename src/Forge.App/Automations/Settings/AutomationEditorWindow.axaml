@@ -10,7 +10,7 @@
         CanResize="True"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{DynamicResource SurfaceBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TextBlock.field-label">
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
@@ -120,7 +120,7 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
           <TextBlock Classes="caption" IsVisible="{Binding HasPreviewError}" TextWrapping="Wrap"
-                     Foreground="{DynamicResource DangerBrush}" Text="{Binding PreviewError}" />
+                     Foreground="{DynamicResource StatusErrorBrush}" Text="{Binding PreviewError}" />
         </StackPanel>
 
         <!-- Placement (prompt runs only). -->
@@ -174,7 +174,7 @@
         <TextBlock Classes="caption"
                    IsVisible="{Binding HasError}"
                    TextWrapping="Wrap"
-                   Foreground="{DynamicResource DangerBrush}"
+                   Foreground="{DynamicResource StatusErrorBrush}"
                    Text="{Binding Error}"
                    AutomationProperties.AutomationId="automation-editor-error" />
       </StackPanel>

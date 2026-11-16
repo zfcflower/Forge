@@ -47,7 +47,7 @@ internal sealed class FloatingPanelWindow : Window
         MinHeight = 160;
         AutomationProperties.SetAutomationId(this, "floating-" + item.Id);
         AutomationProperties.SetName(this, Title);
-        WorkbenchResources.Link(this, BackgroundProperty, "SurfaceBackgroundBrush");
+        WorkbenchResources.Link(this, BackgroundProperty, "WindowBackgroundBrush");
 
         var geometry = item.Geometry;
         Width = geometry.Width > 0 ? geometry.Width : WorkbenchMetrics.FloatingTabWidth;

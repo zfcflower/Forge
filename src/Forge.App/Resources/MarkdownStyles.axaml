@@ -39,7 +39,7 @@
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
   </Style>
   <Style Selector="TextBlock.md-task-done">
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Border.md-quote">
@@ -56,7 +56,7 @@
     <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
   </Style>
   <Style Selector="Border.md-code">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
     <Setter Property="Padding" Value="10,8" />
   </Style>
@@ -76,7 +76,7 @@
     <Setter Property="Padding" Value="8,4" />
   </Style>
   <Style Selector="Border.md-cell-head">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
   </Style>
   <Style Selector="SelectableTextBlock.md-th">
     <Setter Property="FontWeight" Value="SemiBold" />
@@ -96,7 +96,7 @@
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
   <Style Selector="TextBlock.mermaid-status-error">
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
   <Style Selector="SelectableTextBlock.mermaid-detail">
     <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />

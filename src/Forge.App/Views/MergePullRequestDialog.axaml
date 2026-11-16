@@ -10,7 +10,7 @@
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{DynamicResource SurfaceBackgroundBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
         AutomationProperties.AutomationId="merge-pull-request-dialog">
   <StackPanel Margin="18,16" Spacing="10">
     <TextBlock Classes="h2" Text="{Binding Title}" TextWrapping="Wrap" />

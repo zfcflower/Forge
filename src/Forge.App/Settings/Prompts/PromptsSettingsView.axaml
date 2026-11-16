@@ -21,7 +21,7 @@
       <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
     </Style>
     <Style Selector="Button.prompt-row.selected /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
     </Style>
     <Style Selector="Button.prompt-action">
       <Setter Property="Background" Value="Transparent" />
@@ -34,22 +34,22 @@
       <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
     </Style>
     <Style Selector="Border.prompt-badge">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="6,1" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="Border.prompt-badge.global">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     </Style>
     <Style Selector="Border.prompt-badge.project">
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource InfoBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusInfoBrush}" />
       <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="Border.prompt-badge.invalid">
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
       <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="TextBlock.prompt-badge-text">
@@ -57,16 +57,16 @@
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
     <Style Selector="Border.global TextBlock.prompt-badge-text">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
     <Style Selector="Border.project TextBlock.prompt-badge-text">
-      <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusInfoBrush}" />
     </Style>
     <Style Selector="TextBlock.error">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Border.invalid TextBlock.prompt-badge-text">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
   </UserControl.Styles>
 
@@ -76,7 +76,7 @@
     <TextBlock Classes="caption"
                IsVisible="{Binding HasListProblem}"
                TextWrapping="Wrap"
-               Foreground="{DynamicResource DangerBrush}"
+               Foreground="{DynamicResource StatusErrorBrush}"
                Text="{Binding ListProblem}"
                AutomationProperties.AutomationId="prompts-list-problem" />
 
@@ -242,11 +242,11 @@
 
                 <!-- Live validation. -->
                 <StackPanel Spacing="2" IsVisible="{Binding HasProblems}">
-                  <TextBlock Classes="label" Foreground="{DynamicResource DangerBrush}" Text="{Binding ProblemsTitle}" />
+                  <TextBlock Classes="label" Foreground="{DynamicResource StatusErrorBrush}" Text="{Binding ProblemsTitle}" />
                   <ItemsControl ItemsSource="{Binding Problems}" AutomationProperties.AutomationId="prompts-problems">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="x:String">
-                        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}" Text="{Binding}" />
+                        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}" Text="{Binding}" />
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -286,7 +286,7 @@
                           AutomationProperties.AutomationId="prompts-delete" />
                   <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ConfirmingDelete}">
                     <Button Classes="prompt-action"
-                            Foreground="{DynamicResource DangerBrush}"
+                            Foreground="{DynamicResource StatusErrorBrush}"
                             Command="{Binding ConfirmDeleteCommand}"
                             Content="{Binding DeleteConfirmText}"
                             AutomationProperties.AutomationId="prompts-delete-confirm" />

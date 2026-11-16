@@ -5,43 +5,43 @@
              x:Class="Forge.App.Changes.DiffEditorView">
   <UserControl.Styles>
     <Style Selector="Button.reviewIcon, Button.reviewMarker">
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="Button.reviewMarker.lost">
-      <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="wc|FluentIcon.reviewGlyph">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.reviewMarker.lost wc|FluentIcon.reviewGlyph">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Border.reviewComposer">
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="6" />
       <Setter Property="Padding" Value="10" />
-      <Setter Property="BoxShadow" Value="0 4 16 0 #40000000" />
+      <Setter Property="BoxShadow" Value="{StaticResource ShadowCard}" />
     </Style>
   </UserControl.Styles>
   <!-- Two editors side by side (the second only in split mode). Placeholder lines reserve the height of the file header, block
        bar, fold bar and Markdown preview rows; the real controls live in OverlayLayer and are placed over the visible rows. -->
-  <Grid x:Name="Root" Background="{DynamicResource SurfaceBrush}" ClipToBounds="True">
+  <Grid x:Name="Root" Background="{DynamicResource CardBackgroundBrush}" ClipToBounds="True">
     <Grid x:Name="EditorsGrid" ColumnDefinitions="*,Auto,*">
       <ae:TextEditor x:Name="PrimaryEditor" Grid.Column="0" IsReadOnly="True" ShowLineNumbers="False"
                      FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
-                     Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
+                     Background="{DynamicResource CardBackgroundBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                      AutomationProperties.AutomationId="diff-editor" AutomationProperties.Name="diff-editor" />
       <Border x:Name="SplitDivider" Grid.Column="1" Width="1" IsVisible="False" Background="{DynamicResource BorderBrush}" />
       <ae:TextEditor x:Name="SecondaryEditor" Grid.Column="2" IsReadOnly="True" ShowLineNumbers="False" IsVisible="False"
                      FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
-                     Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
+                     Background="{DynamicResource CardBackgroundBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                      AutomationProperties.AutomationId="diff-editor-new" AutomationProperties.Name="diff-editor-new" />
     </Grid>

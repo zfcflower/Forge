@@ -130,7 +130,7 @@
                              AutomationProperties.AutomationId="changed-removed" />
                   <TextBlock Classes="mono"
                              Text="{Binding Badge}"
-                             Foreground="{DynamicResource AccentTextBrush}"
+                             Foreground="{DynamicResource BrandActionBrush}"
                              IsVisible="{Binding ShowBadgeOnly}"
                              AutomationProperties.AutomationId="changed-meta" />
                 </StackPanel>
@@ -494,7 +494,7 @@
                        VerticalAlignment="Center"
                        HorizontalAlignment="Right"
                        Text="{Binding Meta}"
-                       Foreground="{DynamicResource AccentTextBrush}"
+                       Foreground="{DynamicResource BrandActionBrush}"
                        AutomationProperties.AutomationId="changed-meta-fallback"
                        AutomationProperties.Name="{Binding Meta}" />
           </Grid>
@@ -544,7 +544,7 @@
                 AutomationProperties.AutomationId="git-ship-target"
                 AutomationProperties.Name="{Binding Git.PullRequestLabel}">
           <StackPanel Orientation="Horizontal" Spacing="4">
-            <Ellipse Width="6" Height="6" IsVisible="{Binding Git.HasPullRequestState}" Fill="{DynamicResource AccentBrush}" VerticalAlignment="Center" />
+            <Ellipse Width="6" Height="6" IsVisible="{Binding Git.HasPullRequestState}" Fill="{DynamicResource BrandActionBrush}" VerticalAlignment="Center" />
             <TextBlock Text="{Binding Git.PullRequestLabel}" VerticalAlignment="Center" />
             <TextBlock IsVisible="{Binding Git.HasPullRequestState}"
                        Text="{Binding Git.PullRequestNumberText}"
@@ -607,7 +607,7 @@
                              IsVisible="{Binding !Git.IsFetchRunning}" />
               <Ellipse Width="6"
                        Height="6"
-                       Fill="{DynamicResource AccentBrush}"
+                       Fill="{DynamicResource BrandActionBrush}"
                        IsVisible="{Binding Git.IsFetchRunning}"
                        AutomationProperties.AccessibilityView="Raw" />
             </Panel>
@@ -626,7 +626,7 @@
                                IsVisible="{Binding !Git.IsPullRunning}" />
                 <Ellipse Width="6"
                          Height="6"
-                         Fill="{DynamicResource AccentBrush}"
+                         Fill="{DynamicResource BrandActionBrush}"
                          IsVisible="{Binding Git.IsPullRunning}"
                          AutomationProperties.AccessibilityView="Raw" />
               </Panel>
@@ -650,7 +650,7 @@
                                IsVisible="{Binding !Git.IsPushRunning}" />
                 <Ellipse Width="6"
                          Height="6"
-                         Fill="{DynamicResource AccentBrush}"
+                         Fill="{DynamicResource BrandActionBrush}"
                          IsVisible="{Binding Git.IsPushRunning}"
                          AutomationProperties.AccessibilityView="Raw" />
               </Panel>

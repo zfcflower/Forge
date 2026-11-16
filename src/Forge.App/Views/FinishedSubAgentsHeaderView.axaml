@@ -20,7 +20,7 @@
       <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.finished-menu:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
     <Style Selector="Button.finished-menu:pressed /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource BorderBrush}" />

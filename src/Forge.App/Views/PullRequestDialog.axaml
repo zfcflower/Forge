@@ -10,7 +10,7 @@
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{DynamicResource SurfaceBackgroundBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
         AutomationProperties.AutomationId="pull-request-dialog">
   <StackPanel Margin="18,16" Spacing="10">
     <TextBlock Classes="label" Text="{Binding [git.ship.dialog.titleLabel], Source={x:Static loc:Loc.Instance}}" />

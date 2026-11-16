@@ -40,6 +40,14 @@
     <Setter Property="TextWrapping" Value="NoWrap" />
   </Style>
 
+  <!-- Text selection in a selectable transcript block takes the two selection tokens. A TextBox's own selection stays with
+       Fluent, exactly like its TextControl* brushes: there is no theme key to redirect it, and a `TextBox` type selector is
+       the one selector this file does not write (it reaches the inner box of a spinner or a combo box as well). -->
+  <Style Selector="SelectableTextBlock">
+    <Setter Property="SelectionBrush" Value="{DynamicResource SelectionBackgroundBrush}" />
+    <Setter Property="SelectionForegroundBrush" Value="{DynamicResource SelectionForegroundBrush}" />
+  </Style>
+
   <Style Selector="TextBlock.section-title">
     <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
     <!-- Bold, not SemiBold: the CJK fallback faces have no 600 weight, so SemiBold renders as regular here. -->
@@ -120,8 +128,8 @@
   </Style>
 
   <Style Selector="Button.primary /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource PrimaryButtonBackgroundBrush}" />
-    <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+    <Setter Property="Background" Value="{DynamicResource BrandActionBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextOnBrandBrush}" />
   </Style>
 
   <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
@@ -161,7 +169,7 @@
     <Setter Property="Padding" Value="2" />
     <Setter Property="MinHeight" Value="18" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Button.icon">
@@ -180,8 +188,8 @@
   </Style>
 
   <Style Selector="Button.tab.selected">
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
 
   <!-- A count badge: the number a tab (or any chrome row) owns, as a neutral pill so the accent colour stays with the
@@ -209,11 +217,11 @@
   </Style>
 
   <Style Selector="Button.tab.selected Border.count-badge">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
   </Style>
 
   <Style Selector="Button.tab.selected Border.count-badge > TextBlock">
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Button.primary:disabled, Button.ghost:disabled, Button.icon:disabled, Button.tab:disabled, Button.link:disabled">
@@ -224,7 +232,7 @@
 
   <!-- Surfaces. -->
   <Style Selector="Border.card">
-    <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusLg}" />
@@ -237,7 +245,7 @@
   </Style>
 
   <Style Selector="Border.panel">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
   </Style>
 
   <!-- Transparent so a toolbar takes the colour of its region: white in Main, the sidebar grey at the sides. -->
@@ -258,12 +266,12 @@
     <Setter Property="Padding" Value="10,8" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-    <Setter Property="Background" Value="{DynamicResource UserBubbleBrush}" />
+    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     <Setter Property="HorizontalAlignment" Value="Right" />
   </Style>
 
   <Style Selector="Border.turn-card">
-    <Setter Property="Background" Value="{DynamicResource ToolCardBrush}" />
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
@@ -272,25 +280,25 @@
   </Style>
 
   <Style Selector="Border.tool-row">
-    <Setter Property="Background" Value="{DynamicResource ToolBubbleBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
     <Setter Property="Padding" Value="6,3" />
     <Setter Property="Margin" Value="0,2" />
   </Style>
 
   <Style Selector="Border.tool-row.expanded">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
   </Style>
 
   <Style Selector="Border.notice">
-    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
     <Setter Property="Padding" Value="8,3" />
     <Setter Property="Margin" Value="0,3" />
   </Style>
 
   <Style Selector="Border.notice.error">
-    <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <!-- The files panel's git row: a 24 px status line. One place answers "which branch, how far from the remote, and what
@@ -299,7 +307,7 @@
   <Style Selector="Border.git-row">
     <Setter Property="Height" Value="24" />
     <Setter Property="Padding" Value="8,0,4,0" />
-    <Setter Property="Background" Value="{DynamicResource SidebarBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SidebarBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
   </Style>
@@ -309,7 +317,7 @@
   </Style>
 
   <Style Selector="wc|FluentIcon.git-row-branch-icon">
-    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
@@ -332,7 +340,7 @@
   </Style>
 
   <Style Selector="Border.git-row.bad TextBlock.git-row-message">
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <Style Selector="Button.git-row-details">
@@ -342,7 +350,7 @@
     <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />    
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
@@ -382,11 +390,11 @@
   </Style>
 
   <Style Selector="TextBlock.git-row-count.up">
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="TextBlock.git-row-count.down">
-    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
   </Style>
 
   <Style Selector="Button.git-row-action:disabled TextBlock.git-row-count">
@@ -397,7 +405,7 @@
   <Style Selector="Border.git-ship">
     <Setter Property="Height" Value="28" />
     <Setter Property="Padding" Value="8,0" />
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
   </Style>
@@ -415,8 +423,8 @@
     <Setter Property="Padding" Value="8,0" />
     <Setter Property="CornerRadius" Value="11" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -439,23 +447,23 @@
   </Style>
 
   <Style Selector="Button.git-pill.target.open">
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Button.git-pill.target.draft">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
   <Style Selector="Button.git-pill.target.merged">
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Button.git-pill.target.closed">
     <Setter Property="Background" Value="{DynamicResource ErrorBubbleBrush}" />
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <Style Selector="Button.git-ship-item">
@@ -480,7 +488,7 @@
   <!-- A stopped rebase/merge: the only blocking state the panel shows, so it is the only place the danger bar is used. -->
   <Style Selector="Border.git-banner">
     <Setter Property="Background" Value="{DynamicResource ErrorBubbleBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
     <Setter Property="Padding" Value="6,4,6,6" />
   </Style>
@@ -488,7 +496,7 @@
   <Style Selector="TextBlock.git-banner-title">
     <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
@@ -521,16 +529,16 @@
   </Style>
 
   <Style Selector="Border.tree-row-content:pointerover">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
   </Style>
 
   <Style Selector="ListBoxItem:selected Border.tree-row-content">
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
 
   <!-- The row the shell is showing: the active session in the main region, or the sub-agent whose tab the bottom group has. -->
   <Style Selector="Border.tree-row-content.active-row">
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
 
   <!-- 树行箭头:一枚 Fluent chevron_right,展开时整个图标转 90°。 -->
@@ -600,7 +608,7 @@
 
   <!-- Agent kind icons are coloured by run state; ended/unknown falls back to the muted stroke above. -->
   <Style Selector="wc|FluentIcon.tree-icon.agent-running">
-    <Setter Property="Foreground" Value="{DynamicResource RunningBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="wc|FluentIcon.tree-icon.agent-queued">
@@ -608,15 +616,15 @@
   </Style>
 
   <Style Selector="wc|FluentIcon.tree-icon.agent-completed">
-    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
   </Style>
 
   <Style Selector="wc|FluentIcon.tree-icon.agent-failed">
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <Style Selector="wc|FluentIcon.tree-icon.agent-stopped">
-    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
   </Style>
 
   <Style Selector="wc|FluentIcon.tree-icon.agent-running-animated">
@@ -662,7 +670,7 @@
   </Style>
 
   <Style Selector="wc|SyntaxTokenTextBlock.syntax-invalid">
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot">
@@ -673,21 +681,21 @@
   </Style>
 
   <Style Selector="Ellipse.status-dot.running">
-    <Setter Property="Fill" Value="{DynamicResource RunningBrush}" />
+    <Setter Property="Fill" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot.starting">
-    <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+    <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot.failed">
-    <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <!-- The project tree spells a sub-agent's state with a dot or a check instead of a caption; the colours match the icon
        the same row shows, so one glance reads the state twice. -->
   <Style Selector="Ellipse.status-dot.agent-running">
-    <Setter Property="Fill" Value="{DynamicResource RunningBrush}" />
+    <Setter Property="Fill" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot.agent-queued">
@@ -695,11 +703,11 @@
   </Style>
 
   <Style Selector="Ellipse.status-dot.agent-failed">
-    <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot.agent-stopped">
-    <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+    <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot.agent-ended">
@@ -709,7 +717,7 @@
   <Style Selector="wc|FluentIcon.status-check">
     <Setter Property="Width" Value="11" />
     <Setter Property="Height" Value="11" />
-    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
@@ -772,16 +780,16 @@
   </Style>
 
   <Style Selector="ac|CompletionList.completion ListBoxItem:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
   </Style>
 
   <Style Selector="ac|CompletionList.completion ListBoxItem:selected /template/ ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
     <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimaryBrush}" />
   </Style>
 
   <Style Selector="ac|CompletionList.completion ListBoxItem:selected:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
 
   <!-- ============================ 改动范围 / 基准分支选择器 ============================
@@ -817,7 +825,7 @@
     <Setter Property="MinWidth" Value="0" />
   </Style>
   <Style Selector="Border.change-menu">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource OverlayCornerRadius}" />
@@ -838,7 +846,7 @@
   </Style>
   <!-- 选中行只有一层很淡的灰底(勾号才是主提示);悬停盖在它上面。 -->
   <Style Selector="Button.change-menu-row.selected">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
   <Style Selector="Button.change-menu-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
@@ -848,7 +856,7 @@
   </Style>
   <Style Selector="Button.change-menu-row:disabled /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextDisabledBrush}" />
   </Style>
   <Style Selector="Button.change-menu-row:disabled">
     <Setter Property="Cursor" Value="Arrow" />
@@ -866,10 +874,10 @@
     <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
   </Style>
   <Style Selector="TextBlock.change-menu-check">
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
   <Style Selector="wc|FluentIcon.change-menu-check">
-    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     <Setter Property="Width" Value="12" />
     <Setter Property="Height" Value="12" />
     <Setter Property="VerticalAlignment" Value="Center" />
@@ -881,7 +889,7 @@
 
   <!-- 分段开关:Border.segmented 里放 Button.segment,选中的那段是抬起的浅色药丸(拆分|内联、堆叠|单文件、预览|Source)。 -->
   <Style Selector="Border.segmented">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
     <Setter Property="Padding" Value="2" />
     <Setter Property="VerticalAlignment" Value="Center" />
@@ -908,30 +916,30 @@
     <Setter Property="FontWeight" Value="Medium" />
   </Style>
   <Style Selector="Border.segmented Button.segment.selected /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BoxShadow" Value="{StaticResource ShadowSm}" />
   </Style>
   <Style Selector="Border.segmented Button.segment.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
   </Style>
 
   <!-- 改动块上方的操作条:整宽、浅灰圆角;保留之后换成淡绿。 -->
   <Style Selector="Border.diff-block-bar">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
     <Setter Property="Padding" Value="6,2" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
   <Style Selector="Border.diff-block-bar.kept">
-    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
   </Style>
 
   <!-- 已改动树:文件行右侧的 +x −y 计数。 -->
   <Style Selector="TextBlock.change-added">
-    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
   </Style>
   <Style Selector="TextBlock.change-removed">
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <!-- Side panels follow their column: a text keeps to one line and is cut to an ellipsis instead of wrapping, and
@@ -947,7 +955,7 @@
        around. -->
   <Style Selector="Border.toast">
     <Setter Property="Width" Value="380" />
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
@@ -960,40 +968,40 @@
        neutral information blue; the four level classes below are the ones the template actually selects. -->
   <Style Selector="Border.toast-level">
     <Setter Property="Width" Value="3" />
-    <Setter Property="Background" Value="{DynamicResource InfoBrush}" />
+    <Setter Property="Background" Value="{DynamicResource StatusInfoBrush}" />
   </Style>
   <Style Selector="Border.toast.info Border.toast-level">
-    <Setter Property="Background" Value="{DynamicResource InfoBrush}" />
+    <Setter Property="Background" Value="{DynamicResource StatusInfoBrush}" />
   </Style>
   <Style Selector="Border.toast.success Border.toast-level">
-    <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+    <Setter Property="Background" Value="{DynamicResource StatusSuccessBrush}" />
   </Style>
   <Style Selector="Border.toast.warning Border.toast-level">
-    <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+    <Setter Property="Background" Value="{DynamicResource StatusWarningBrush}" />
   </Style>
   <Style Selector="Border.toast.error Border.toast-level">
-    <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Background" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <Style Selector="TextBlock.toast-level-text">
     <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="LetterSpacing" Value="0.4" />
-    <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusInfoBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
   <Style Selector="Border.toast.info TextBlock.toast-level-text">
-    <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusInfoBrush}" />
   </Style>
   <Style Selector="Border.toast.success TextBlock.toast-level-text">
-    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
   </Style>
   <Style Selector="Border.toast.warning TextBlock.toast-level-text">
-    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
   </Style>
   <Style Selector="Border.toast.error TextBlock.toast-level-text">
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <Style Selector="TextBlock.toast-title">

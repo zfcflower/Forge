@@ -4,7 +4,7 @@
              xmlns:vm="using:Forge.App.ViewModels"
              x:Class="Forge.App.Views.SubAgentView"
              x:DataType="vm:SubAgentViewModel">
-  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <!-- Where this tab sits: the parent session's title, then the sub-agent's own name. The parent segment switches the
          shell back to the parent's tab; the sub-agent keeps running and its tab stays in the bottom group. -->
     <Border Grid.Row="0"
@@ -39,7 +39,7 @@
              ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
 
     <Border Grid.Row="2"
-            Background="{DynamicResource SurfaceBrush}"
+            Background="{DynamicResource CardBackgroundBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,1,0,0"
             Padding="10,5">
@@ -49,11 +49,11 @@
           <TextBlock Classes="label" Text="{Binding StatusText}" VerticalAlignment="Center" />
           <TextBlock Classes="caption" Text="{Binding StatusNote}" VerticalAlignment="Center" IsVisible="{Binding HasStatusNote}" />
           <Border IsVisible="{Binding ReadOnlyBadgeVisible}"
-                  Background="{DynamicResource AccentSubtleBrush}"
+                  Background="{DynamicResource BrandTintBrush}"
                   CornerRadius="{StaticResource RadiusSm}"
                   Padding="5,0"
                   VerticalAlignment="Center">
-            <TextBlock Classes="label" Text="{Binding ReadOnlyBadgeText}" Foreground="{DynamicResource AccentTextBrush}" />
+            <TextBlock Classes="label" Text="{Binding ReadOnlyBadgeText}" Foreground="{DynamicResource BrandActionBrush}" />
           </Border>
         </StackPanel>
         <TextBlock Grid.Column="1"

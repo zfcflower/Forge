@@ -13,7 +13,7 @@
     </ItemsControl.ItemsPanel>
     <ItemsControl.ItemTemplate>
       <DataTemplate x:DataType="vm:ToolImageViewModel">
-        <Border Background="{DynamicResource SurfaceElevatedBrush}"
+        <Border Background="{DynamicResource CardBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1"
                 CornerRadius="4"

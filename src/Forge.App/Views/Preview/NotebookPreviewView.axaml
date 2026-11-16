@@ -3,7 +3,7 @@
              xmlns:preview="using:Forge.App.ViewModels.Preview"
              x:Class="Forge.App.Views.Preview.NotebookPreviewView"
              x:DataType="preview:NotebookFilePreviewViewModel">
-  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <TextBlock Classes="caption" Margin="12,6" Text="{Binding Caption}" />
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
       <ItemsControl Margin="12,0" ItemsSource="{Binding Cells}">
@@ -16,7 +16,7 @@
           <DataTemplate x:DataType="preview:NotebookCellViewModel">
             <Border Padding="10,6" Margin="0,4" CornerRadius="6"
                     BorderThickness="1" BorderBrush="{DynamicResource BorderStrongBrush}"
-                    Background="{DynamicResource SurfaceElevatedBrush}">
+                    Background="{DynamicResource CardBackgroundBrush}">
               <StackPanel Spacing="4">
                 <TextBlock Classes="caption" Text="{Binding KindLabel}" />
                 <SelectableTextBlock Text="{Binding Source}" TextWrapping="Wrap"
@@ -42,12 +42,12 @@
                                IsVisible="{Binding HasImage}"
                                AutomationProperties.AutomationId="notebook-output-image" />
                         <StackPanel Spacing="2" IsVisible="{Binding HasError}">
-                          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+                          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"
                                      Text="{Binding ErrorSummary}" />
                           <SelectableTextBlock Text="{Binding Traceback}" TextWrapping="Wrap"
                                                FontFamily="{DynamicResource FontMono}"
                                                FontSize="{DynamicResource FontSizeCode}"
-                                               Foreground="{DynamicResource DangerBrush}" />
+                                               Foreground="{DynamicResource StatusErrorBrush}" />
                         </StackPanel>
                       </StackPanel>
                     </DataTemplate>
@@ -60,7 +60,7 @@
       </ItemsControl>
     </ScrollViewer>
     <TextBlock Grid.Row="2" Classes="caption" Margin="12,6" TextWrapping="Wrap"
-               Foreground="{DynamicResource DangerBrush}"
+               Foreground="{DynamicResource StatusErrorBrush}"
                IsVisible="{Binding HasNotice}" Text="{Binding Notice}"
                AutomationProperties.AutomationId="file-preview-notice" />
   </Grid>

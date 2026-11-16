@@ -37,9 +37,9 @@ internal sealed class DiffPalette
         var variant = scope is Control control ? control.ActualThemeVariant : ThemeVariant.Default;
         Added = Get(scope, variant, "DiffAddBrush", Added);
         Removed = Get(scope, variant, "DiffRemoveBrush", Removed);
-        AddedStripe = Get(scope, variant, "SuccessBrush", AddedStripe);
-        RemovedStripe = Get(scope, variant, "DangerBrush", RemovedStripe);
-        Spacer = Get(scope, variant, "SurfaceMutedBrush", Spacer);
+        AddedStripe = Get(scope, variant, "StatusSuccessBrush", AddedStripe);
+        RemovedStripe = Get(scope, variant, "StatusErrorBrush", RemovedStripe);
+        Spacer = Get(scope, variant, "SurfaceSubtleBrush", Spacer);
         GutterText = Get(scope, variant, "TextMutedBrush", GutterText);
         var line = Get(scope, variant, "BorderStrongBrush", Brushes.Gray);
         SpacerPen = new Pen(line, 1);

@@ -124,9 +124,9 @@ internal sealed class EditorLspDiagnosticRenderer : IBackgroundRenderer, IDispos
 
         var key = severity switch
         {
-            DiagnosticSeverity.Error => "DangerBrush",
-            DiagnosticSeverity.Warning => "WarningBrush",
-            DiagnosticSeverity.Information => "AccentBrush",
+            DiagnosticSeverity.Error => "StatusErrorBrush",
+            DiagnosticSeverity.Warning => "StatusWarningBrush",
+            DiagnosticSeverity.Information => "StatusInfoBrush",
             _ => "TextMutedBrush",
         };
         if (!textView.TryFindResource(key, textView.ActualThemeVariant, out var resource) || resource is not IBrush brush)

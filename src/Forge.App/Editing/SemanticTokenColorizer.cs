@@ -144,7 +144,7 @@ internal sealed class SemanticTokenColorizer : DocumentColorizingTransformer
         keys[(int)TokenCategoryGroup.Function] = "SyntaxFunctionBrush";
         keys[(int)TokenCategoryGroup.Variable] = "SyntaxVariableBrush";
         keys[(int)TokenCategoryGroup.Preprocessor] = "SyntaxPreprocessorBrush";
-        keys[(int)TokenCategoryGroup.Invalid] = "DangerBrush";
+        keys[(int)TokenCategoryGroup.Invalid] = "StatusErrorBrush";
         return keys;
     }
 }

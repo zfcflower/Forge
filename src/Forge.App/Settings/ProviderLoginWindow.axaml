@@ -9,7 +9,7 @@
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{DynamicResource SurfaceBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
   <Grid RowDefinitions="Auto,Auto" Margin="18,16">
     <StackPanel Grid.Row="0" Spacing="12">
 
@@ -138,7 +138,7 @@
       <TextBlock Classes="caption"
                  IsVisible="{Binding HasError}"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource DangerBrush}"
+                 Foreground="{DynamicResource StatusErrorBrush}"
                  Text="{Binding Error}"
                  AutomationProperties.AutomationId="provider-login-error" />
     </StackPanel>

@@ -42,7 +42,7 @@ internal sealed class EditorCodeActionMargin : AbstractMargin
         }
 
         hasActions = value;
-        brush = EditorOptionsApplier.Brush(editor, editor.ActualThemeVariant, "AccentBrush") ?? Brushes.SlateBlue;
+        brush = EditorOptionsApplier.Brush(editor, editor.ActualThemeVariant, "BrandActionBrush") ?? Brushes.SlateBlue;
         InvalidateMeasure();
         InvalidateVisual();
     }

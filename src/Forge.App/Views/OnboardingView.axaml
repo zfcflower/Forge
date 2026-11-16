@@ -9,14 +9,14 @@
        two layers: a dimmed border that swallows every pointer hit (the workbench under it must not be reachable from behind
        the wizard), and the card itself, centred and bounded so it never grows past the window even at the largest texts. -->
   <Grid>
-    <Grid Background="#66000000" />
+    <Grid Background="{DynamicResource BackdropScrimBrush}" />
 
     <Border Width="560"
             MaxHeight="640"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
             Margin="16"
-            Background="{DynamicResource SurfaceElevatedBrush}"
+            Background="{DynamicResource CardBackgroundBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="1"
             CornerRadius="{DynamicResource OverlayCornerRadius}"

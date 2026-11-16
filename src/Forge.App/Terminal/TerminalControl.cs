@@ -44,11 +44,13 @@ internal sealed class TerminalControl : Control
 
     private static readonly bool IsMacOs = OperatingSystem.IsMacOS();
 
-    private static readonly Color LightForeground = Color.Parse("#2B2F2C");
-    private static readonly Color LightBackground = Color.Parse("#F5F6F5");
-    private static readonly Color SelectionTint = Color.Parse("#3A8F5C");
+    // Used only until UpdateTheme reads the real tokens off the tree; the values are the light ones.
+    private static readonly Color LightForeground = Color.Parse("#1D2129");
+    private static readonly Color LightBackground = Color.Parse("#FAFAFA");
+    /// <summary>BrandPrimaryBrush as the light theme defines it: the initial value of <see cref="selectionTint"/>.</summary>
+    private static readonly Color LightSelectionTint = Color.Parse("#0ABAB5");
 
-    /// <summary>The search highlights reuse the selection green: the current match is a solid wash, the others faint.</summary>
+    /// <summary>The search highlights reuse the brand tint — the current match is a solid wash, the others faint.</summary>
     private const byte MatchTintAlpha = 55;
     private const byte CurrentMatchTintAlpha = 135;
 
@@ -64,6 +66,7 @@ internal sealed class TerminalControl : Control
 
     private Color themeForeground = LightForeground;
     private Color themeBackground = LightBackground;
+    private Color selectionTint = LightSelectionTint;
     private TerminalPalette palette = TerminalPalette.For(dark: false);
 
     private double cellWidth = 8;
@@ -383,12 +386,16 @@ internal sealed class TerminalControl : Control
             foreground = foregroundBrush.Color;
         }
 
-        if (this.TryFindResource("SurfaceBackgroundBrush", ActualThemeVariant, out var backgroundValue) &&
+        if (this.TryFindResource("WindowBackgroundBrush", ActualThemeVariant, out var backgroundValue) &&
             backgroundValue is ISolidColorBrush backgroundBrush)
         {
             background = backgroundBrush.Color;
         }
 
+        selectionTint = this.TryFindResource("BrandPrimaryBrush", ActualThemeVariant, out var tintValue) &&
+                         tintValue is ISolidColorBrush tintBrush
+            ? tintBrush.Color
+            : LightSelectionTint;
         themeForeground = foreground;
         themeBackground = background;
         brushes.Clear();
@@ -567,7 +574,7 @@ internal sealed class TerminalControl : Control
         var end = absolute == to.Line ? to.Column : columns - 1;
         start = Math.Clamp(start, 0, Math.Max(0, columns - 1));
         end = Math.Clamp(end, start, Math.Max(0, columns - 1));
-        var brush = BrushFor(Color.FromArgb(90, SelectionTint.R, SelectionTint.G, SelectionTint.B));
+        var brush = BrushFor(Color.FromArgb(90, selectionTint.R, selectionTint.G, selectionTint.B));
         context.FillRectangle(brush, new Rect(start * cellWidth, row * cellHeight, (end - start + 1) * cellWidth, cellHeight));
     }
 
@@ -627,7 +634,7 @@ internal sealed class TerminalControl : Control
             var end = Math.Clamp(match.EndColumn, start, columns - 1);
             var alpha = current is { } active && active.Equals(match) ? CurrentMatchTintAlpha : MatchTintAlpha;
             context.FillRectangle(
-                BrushFor(Color.FromArgb(alpha, SelectionTint.R, SelectionTint.G, SelectionTint.B)),
+                BrushFor(Color.FromArgb(alpha, selectionTint.R, selectionTint.G, selectionTint.B)),
                 new Rect(start * cellWidth, y, (end - start + 1) * cellWidth, cellHeight));
         }
     }

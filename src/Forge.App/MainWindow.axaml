@@ -17,7 +17,7 @@
         WindowDecorations="BorderOnly"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="-1"
-        Background="{DynamicResource SurfaceBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TextBlock">
       <Setter Property="VerticalAlignment" Value="Center"/>
@@ -53,7 +53,7 @@
           <TextBlock x:Name="AppWordmark"
                      FontSize="{DynamicResource FontSizeWordmark}"
                      FontWeight="Medium"
-                     Foreground="{DynamicResource AccentTextBrush}"
+                     Foreground="{DynamicResource BrandActionBrush}"
                      Text="FORGE" />
           <!-- Automations entry: opens Settings > Automations; the badge counts the running and waiting runs only and
           is hidden at zero. -->
@@ -66,7 +66,12 @@
                   AutomationProperties.AutomationId="automations-open"
                   AutomationProperties.Name="{Binding [automations.titleBar.label], Source={x:Static loc:Loc.Instance}}">
             <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-              <wc:FluentIcon Data="{StaticResource IconBolt}" Width="14" Height="14" />
+              <!-- The one warm accent in the chrome: the bolt identifies the automation entry, while the label beside it
+                   carries the meaning — so the icon does not have to meet the 3:1 that a state indicator would. -->
+              <wc:FluentIcon Data="{StaticResource IconBolt}"
+                             Width="14"
+                             Height="14"
+                             Foreground="{DynamicResource AccentWarmBrush}" />
               <TextBlock Classes="caption" Text="{Binding [automations.titleBar.label], Source={x:Static loc:Loc.Instance}}" />
               <Border Classes="count-badge"
                       IsVisible="{Binding HasRunningAutomations}"

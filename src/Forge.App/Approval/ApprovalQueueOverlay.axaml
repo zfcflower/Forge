@@ -317,8 +317,8 @@
                     <TextBlock Classes="caption" Text="{Binding Badge}" Margin="0,0,6,0" />
                     <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasRows}">
-                      <TextBlock Classes="caption" Text="{Binding AddedLines}" Foreground="{DynamicResource SuccessBrush}" />
-                      <TextBlock Classes="caption" Text="{Binding RemovedLines}" Foreground="{DynamicResource DangerBrush}" />
+                      <TextBlock Classes="caption" Text="{Binding AddedLines}" Foreground="{DynamicResource StatusSuccessBrush}" />
+                      <TextBlock Classes="caption" Text="{Binding RemovedLines}" Foreground="{DynamicResource StatusErrorBrush}" />
                     </StackPanel>
                   </Grid>
 
@@ -388,7 +388,7 @@
             <SelectableTextBlock Classes="mono"
                                  Text="{Binding DiagnosticsText}"
                                  TextWrapping="Wrap"
-                                 Foreground="{DynamicResource DangerBrush}" />
+                                 Foreground="{DynamicResource StatusErrorBrush}" />
           </StackPanel>
 
           <TextBlock Classes="caption"
@@ -415,7 +415,7 @@
     </DataTemplate>
   </UserControl.DataTemplates>
 
-  <Border Background="{DynamicResource SurfaceElevatedBrush}"
+  <Border Background="{DynamicResource CardBackgroundBrush}"
           BorderBrush="{DynamicResource BorderBrush}"
           BorderThickness="1"
           CornerRadius="{StaticResource RadiusMd}"
@@ -437,12 +437,12 @@
                   Padding="5,0"
                   MinWidth="18"
                   CornerRadius="{StaticResource RadiusSm}"
-                  Background="{DynamicResource AccentSubtleBrush}"
+                  Background="{DynamicResource BrandTintBrush}"
                   VerticalAlignment="Center">
             <TextBlock Classes="caption"
                        Text="{Binding CountText}"
                        HorizontalAlignment="Center"
-                       Foreground="{DynamicResource AccentTextBrush}" />
+                       Foreground="{DynamicResource BrandActionBrush}" />
           </Border>
           <TextBlock Grid.Column="3"
                      Classes="caption"

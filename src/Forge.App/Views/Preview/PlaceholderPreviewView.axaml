@@ -12,7 +12,7 @@
             CornerRadius="6"
             BorderThickness="1"
             BorderBrush="{DynamicResource BorderStrongBrush}"
-            Background="{DynamicResource SurfaceElevatedBrush}">
+            Background="{DynamicResource CardBackgroundBrush}">
       <StackPanel Spacing="6">
         <TextBlock Classes="mono" FontSize="15" Text="{Binding Name}" TextWrapping="Wrap" />
         <TextBlock Classes="label" Text="{Binding Caption}" />
@@ -36,7 +36,7 @@
           </Grid>
         </StackPanel>
 
-        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"
                    IsVisible="{Binding HasNotice}" Text="{Binding Notice}"
                    AutomationProperties.AutomationId="file-preview-notice" />
 

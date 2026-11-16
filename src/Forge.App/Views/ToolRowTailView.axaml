@@ -7,7 +7,7 @@
   <!-- The live output of a call that is still running: it appears with the first streamed chunk and goes away when the call
        returns (the result then carries the whole output). Bounded so a chatty command cannot push the transcript around. -->
   <Border IsVisible="{Binding HasLiveOutput}"
-          Background="{DynamicResource SurfaceSunkenBrush}"
+          Background="{DynamicResource SurfaceSubtleBrush}"
           CornerRadius="{StaticResource RadiusSm}"
           Padding="8,6">
     <StackPanel Spacing="2">

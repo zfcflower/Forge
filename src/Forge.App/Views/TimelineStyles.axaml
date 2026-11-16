@@ -55,15 +55,15 @@
   </Style>
 
   <Style Selector="wc|FluentIcon.timeline-node.running">
-    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="wc|FluentIcon.timeline-node.failed">
-    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <Style Selector="wc|FluentIcon.timeline-node.warning">
-    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
   </Style>
 
   <!-- The class is only present while motion is allowed (the control drops it when the appearance preference says so), so

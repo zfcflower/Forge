@@ -27,8 +27,8 @@ internal sealed class SwapDropOverlay : Panel
                 CornerRadius = new CornerRadius(2),
                 Opacity = 0.55,
             };
-            WorkbenchResources.Link(box, Border.BackgroundProperty, "AccentSubtleBrush");
-            WorkbenchResources.Link(box, Border.BorderBrushProperty, "AccentBrush");
+            WorkbenchResources.Link(box, Border.BackgroundProperty, "BrandTintBrush");
+            WorkbenchResources.Link(box, Border.BorderBrushProperty, "BrandInteractiveBrush");
             AutomationProperties.SetAutomationId(box, "region-drop-" + (RegionRole)i);
             boxes[i] = box;
         }

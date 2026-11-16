@@ -29,11 +29,11 @@
             <wc:FluentIcon Data="{StaticResource IconTodoPending}" IsVisible="{Binding IsPending}"
                            Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
             <wc:FluentIcon Data="{StaticResource IconTodoInProgress}" IsVisible="{Binding IsInProgress}"
-                           Width="14" Height="14" Foreground="{DynamicResource AccentBrush}" />
+                           Width="14" Height="14" Foreground="{DynamicResource BrandActionBrush}" />
             <wc:FluentIcon Data="{StaticResource IconTodoPaused}" IsVisible="{Binding IsPaused}"
                            Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
             <wc:FluentIcon Data="{StaticResource IconTodoDone}" IsVisible="{Binding IsDone}"
-                           Width="14" Height="14" Foreground="{DynamicResource SuccessBrush}" />
+                           Width="14" Height="14" Foreground="{DynamicResource StatusSuccessBrush}" />
           </Panel>
 
           <TextBlock Grid.Row="0" Grid.Column="1"
@@ -85,7 +85,7 @@
                        Classes="caption"
                        Margin="0,0,4,0"
                        VerticalAlignment="Center"
-                       Foreground="{DynamicResource DangerBrush}"
+                       Foreground="{DynamicResource StatusErrorBrush}"
                        IsVisible="{Binding HasCommitError}"
                        Text="{Binding [git.todo.commitFailed], Source={x:Static loc:Loc.Instance}}" />
             <TextBlock Grid.Column="1"
@@ -93,7 +93,7 @@
                        VerticalAlignment="Center"
                        TextWrapping="NoWrap"
                        TextTrimming="CharacterEllipsis"
-                       Foreground="{DynamicResource DangerBrush}"
+                       Foreground="{DynamicResource StatusErrorBrush}"
                        IsVisible="{Binding HasCommitError}"
                        Text="{Binding CommitError}"
                        ToolTip.Tip="{Binding CommitError}"
@@ -125,11 +125,11 @@
               <wc:FluentIcon Data="{StaticResource IconTodoPending}" IsVisible="{Binding IsPending}"
                              Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
               <wc:FluentIcon Data="{StaticResource IconTodoInProgress}" IsVisible="{Binding IsInProgress}"
-                             Width="14" Height="14" Foreground="{DynamicResource AccentBrush}" />
+                             Width="14" Height="14" Foreground="{DynamicResource BrandActionBrush}" />
               <wc:FluentIcon Data="{StaticResource IconTodoPaused}" IsVisible="{Binding IsPaused}"
                              Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
               <wc:FluentIcon Data="{StaticResource IconTodoDone}" IsVisible="{Binding IsDone}"
-                             Width="14" Height="14" Foreground="{DynamicResource SuccessBrush}" />
+                             Width="14" Height="14" Foreground="{DynamicResource StatusSuccessBrush}" />
             </Panel>
             <TextBlock Grid.Column="1"
                        Margin="0,0,6,0"
@@ -180,7 +180,7 @@
                            Width="14" Height="14"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
-                           Foreground="{DynamicResource SuccessBrush}"
+                           Foreground="{DynamicResource StatusSuccessBrush}"
                            AutomationProperties.Name="{Binding StatusName}" />
             <TextBlock Grid.Column="2"
                        Margin="0,0,6,0"
@@ -234,10 +234,10 @@
       <Setter Property="Focusable" Value="True" />
     </Style>
     <Style Selector="Border.todo-row:pointerover">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
     <Style Selector="Border.todo-row:focus-visible">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
 
     <!-- The row's × appears on hover or on keyboard focus (the row itself is the tab stop, so the button stays reachable
@@ -302,7 +302,7 @@
       <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.todo-done-group:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
 
     <!-- › while folded, pointing down once the group is open. -->
@@ -333,7 +333,7 @@
                AutomationProperties.Name="{Binding [todo.newTask.name], Source={x:Static loc:Loc.Instance}}"
                KeyDown="OnNewTaskKeyDown" />
     </Grid>
-    <Border Grid.Row="1" Height="1" Background="{DynamicResource SurfaceMutedBrush}" />
+    <Border Grid.Row="1" Height="1" Background="{DynamicResource SurfaceSubtleBrush}" />
 
     <!-- One line of small text only when there is nothing to list or the store failed; a panel with rows has no summary. -->
     <TextBlock Grid.Row="2"

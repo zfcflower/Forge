@@ -24,16 +24,16 @@
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
       <Setter Property="Padding" Value="6,1" />
       <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     </Style>
     <Style Selector="Border.chip.resolved">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     </Style>
     <Style Selector="Border.chip.resolved > TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
     <Style Selector="Border.chip.outdated > TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
 
     <!-- The filter row: three segments, the active one carrying the accent — it is the list on screen. -->
@@ -47,9 +47,9 @@
       <Setter Property="FontSize" Value="12" />
     </Style>
     <Style Selector="Button.filter.active">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
 
     <!-- One thread card: no hover fill, because the row holds a text box that must not read as a list item. -->
@@ -58,7 +58,7 @@
       <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="Margin" Value="0,0,0,8" />
     </Style>
     <Style Selector="TextBlock.location">
@@ -77,7 +77,7 @@
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
     <Style Selector="TextBlock.row-status.failed">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="TextBlock.comment-author">
       <Setter Property="FontWeight" Value="SemiBold" />
@@ -88,9 +88,9 @@
   <Border Classes="card"
           MaxHeight="660"
           Padding="0"
-          Background="{DynamicResource SurfaceElevatedBrush}"
+          Background="{DynamicResource CardBackgroundBrush}"
           BorderBrush="{DynamicResource BorderStrongBrush}"
-          BoxShadow="0 10 30 0 #3A000000"
+          BoxShadow="{StaticResource ShadowPopover}"
           ClipToBounds="True">
     <Grid RowDefinitions="Auto,Auto,*,Auto">
 
@@ -149,7 +149,7 @@
         </StackPanel>
         <TextBlock Classes="caption"
                    IsVisible="{Binding HasProblem}"
-                   Foreground="{DynamicResource DangerBrush}"
+                   Foreground="{DynamicResource StatusErrorBrush}"
                    TextWrapping="Wrap"
                    AutomationProperties.AutomationId="pr-comments-problem"
                    Text="{Binding ProblemText}" />
@@ -219,7 +219,7 @@
                       <DataTemplate x:DataType="vm:PrCommentItemViewModel">
                         <Border Padding="8,6"
                                 CornerRadius="{StaticResource RadiusSm}"
-                                Background="{DynamicResource SurfaceElevatedBrush}"
+                                Background="{DynamicResource CardBackgroundBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1">
                           <StackPanel Spacing="3">

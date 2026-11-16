@@ -12,13 +12,13 @@
       <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
     </Style>
     <Style Selector="Ellipse.problem-severity.error">
-      <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Ellipse.problem-severity.warning">
-      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
     <Style Selector="Ellipse.problem-severity.information">
-      <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource StatusInfoBrush}" />
     </Style>
   </UserControl.Styles>
 
@@ -97,7 +97,7 @@
     <TextBlock Grid.Row="2"
                Margin="0,4,0,0"
                Classes="caption"
-               Foreground="{DynamicResource WarningBrush}"
+               Foreground="{DynamicResource StatusWarningBrush}"
                IsVisible="{Binding IsTruncated}"
                Text="{Binding TruncatedNotice}" />
   </Grid>

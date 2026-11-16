@@ -9,7 +9,7 @@
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{DynamicResource SurfaceBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TextBlock.field-label">
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
@@ -66,13 +66,13 @@
       <TextBlock Classes="caption"
                  IsVisible="{Binding HasStatus}"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource SuccessBrush}"
+                 Foreground="{DynamicResource StatusSuccessBrush}"
                  Text="{Binding Status}"
                  AutomationProperties.AutomationId="provider-editor-status" />
       <TextBlock Classes="caption"
                  IsVisible="{Binding HasError}"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource DangerBrush}"
+                 Foreground="{DynamicResource StatusErrorBrush}"
                  Text="{Binding Error}"
                  AutomationProperties.AutomationId="provider-editor-error" />
     </StackPanel>

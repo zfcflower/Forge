@@ -335,7 +335,7 @@ internal sealed class MermaidBlockView : Border, ICopyableText
         if (statusIconFailed != failed)
         {
             statusIconFailed = failed;
-            SetStatusIcon(failed ? "IconClose" : "IconSparkle", failed ? "DangerBrush" : "TextMutedBrush");
+            SetStatusIcon(failed ? "IconClose" : "IconSparkle", failed ? "StatusErrorBrush" : "TextMutedBrush");
         }
 
         statusRow.IsVisible = state is State.Rendering or State.Failed;

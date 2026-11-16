@@ -13,22 +13,22 @@
     </Style>
     <Style Selector="Border.md-block.md-changed">
       <Setter Property="Background" Value="{DynamicResource DiffAddBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusSuccessBrush}" />
     </Style>
     <Style Selector="Border.md-block.md-deleted">
       <Setter Property="Background" Value="{DynamicResource DiffRemoveBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Button.md-fold">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Stretch" />
       <Setter Property="Padding" Value="12,3" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     </Style>
     <Style Selector="Border.md-gap">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="Padding" Value="12,3" />
     </Style>
     <Style Selector="Border.md-gap TextBlock">

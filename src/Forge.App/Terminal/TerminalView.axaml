@@ -3,7 +3,7 @@
              xmlns:term="using:Forge.App.Terminal"
              x:Class="Forge.App.Terminal.TerminalView"
              x:DataType="term:TerminalViewModel">
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource SurfaceBackgroundBrush}">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource WindowBackgroundBrush}">
 
     <!-- Vetoed close: a program is still running, so the tab stays and this banner asks what to do. -->
     <Border Grid.Row="0"
@@ -38,7 +38,7 @@
          navigation buttons. Esc closes it, Enter walks the matches. -->
     <Border Grid.Row="1"
             Padding="8,5"
-            Background="{DynamicResource SurfaceBrush}"
+            Background="{DynamicResource CardBackgroundBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,0,0,1"
             IsVisible="{Binding IsSearchVisible}"
@@ -116,7 +116,7 @@
          offers a restart here, next to the reason it stopped. -->
     <Border Grid.Row="3"
             Padding="10,3"
-            Background="{DynamicResource SurfaceBrush}"
+            Background="{DynamicResource CardBackgroundBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,1,0,0"
             IsVisible="{Binding ShowStatus}">

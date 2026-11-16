@@ -8,17 +8,17 @@
          section gives a template of the same origin — a neutral pill for built-in, the accent for global, an info outline
          for the project's own folder. -->
     <Style Selector="Border.scope-badge">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="6,1" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="Border.scope-badge.global">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     </Style>
     <Style Selector="Border.scope-badge.project">
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource InfoBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusInfoBrush}" />
       <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="TextBlock.scope-badge-text">
@@ -26,10 +26,10 @@
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
     <Style Selector="Border.global TextBlock.scope-badge-text">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
     <Style Selector="Border.project TextBlock.scope-badge-text">
-      <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusInfoBrush}" />
     </Style>
   </UserControl.Styles>
   <!-- The body the four instrument sections share: a hint, a read-only row list and the empty state. It is a view rather

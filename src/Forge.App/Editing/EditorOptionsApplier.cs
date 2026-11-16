@@ -71,13 +71,13 @@ internal static class EditorOptionsApplier
             view.ColumnRulerPen = new Pen(border, 1);
         }
 
-        if (Brush(editor, variant, "AccentBrush") is { } accent)
+        if (Brush(editor, variant, "BrandActionBrush") is { } accent)
         {
             view.LinkTextForegroundBrush = accent;
             view.LinkTextUnderline = true;
         }
 
-        if (Brush(editor, variant, "SurfaceMutedBrush") is { } currentLine)
+        if (Brush(editor, variant, "SurfaceHoverBrush") is { } currentLine)
         {
             view.CurrentLineBackground = currentLine;
         }
@@ -87,7 +87,7 @@ internal static class EditorOptionsApplier
             editor.Foreground = primary;
         }
 
-        if (Brush(editor, variant, "SurfaceBrush") is { } surface)
+        if (Brush(editor, variant, "CardBackgroundBrush") is { } surface)
         {
             editor.Background = surface;
         }
@@ -103,8 +103,8 @@ internal static class EditorOptionsApplier
     {
         var key = severity switch
         {
-            1 => "DangerBrush",
-            2 => "WarningBrush",
+            1 => "StatusErrorBrush",
+            2 => "StatusWarningBrush",
             _ => "TextSecondaryBrush",
         };
 

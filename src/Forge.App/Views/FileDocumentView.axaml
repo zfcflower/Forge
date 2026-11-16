@@ -10,31 +10,31 @@
              x:DataType="vm:FileDocumentViewModel">
   <UserControl.Styles>
     <Style Selector="wc|PanelIconButton.active /template/ Border#PART_Background">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
     <Style Selector="Button.reviewIcon, Button.reviewMarker">
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="Button.reviewMarker.lost">
-      <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="wc|FluentIcon.reviewGlyph">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="Button.reviewMarker.lost wc|FluentIcon.reviewGlyph">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Border.reviewComposer">
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="6" />
       <Setter Property="Padding" Value="10" />
-      <Setter Property="BoxShadow" Value="0 4 16 0 #40000000" />
+      <Setter Property="BoxShadow" Value="{StaticResource ShadowCard}" />
     </Style>
   </UserControl.Styles>
   <UserControl.DataTemplates>
@@ -52,7 +52,7 @@
       <pv:PlaceholderPreviewView />
     </DataTemplate>
   </UserControl.DataTemplates>
-  <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource CardBackgroundBrush}">
     <Border Classes="toolbar">
       <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
         <TextBlock Classes="mono" Text="{Binding PathDisplay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
@@ -85,11 +85,11 @@
     <StackPanel Grid.Row="1">
       <TextBlock Margin="12,6" Classes="caption" IsVisible="{Binding IsLoading}" Text="{Binding [files.loading], Source={x:Static loc:Loc.Instance}}" />
       <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasError}" Text="{Binding Error}"
-                 Foreground="{DynamicResource DangerBrush}" AutomationProperties.AutomationId="file-error" />
+                 Foreground="{DynamicResource StatusErrorBrush}" AutomationProperties.AutomationId="file-error" />
       <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasSaveError}" Text="{Binding SaveError}"
-                 Foreground="{DynamicResource DangerBrush}" AutomationProperties.AutomationId="file-save-error" />
+                 Foreground="{DynamicResource StatusErrorBrush}" AutomationProperties.AutomationId="file-save-error" />
       <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasCopyError}" Text="{Binding CopyError}"
-                 Foreground="{DynamicResource DangerBrush}" AutomationProperties.AutomationId="file-copy-error" />
+                 Foreground="{DynamicResource StatusErrorBrush}" AutomationProperties.AutomationId="file-copy-error" />
       <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasLspStatus}" Text="{Binding LspStatus}"
                  Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-lsp-status" />
       <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasEditorNotice}" Text="{Binding EditorNotice}"
@@ -104,7 +104,7 @@
     <Grid Grid.Row="2">
       <ae:TextEditor x:Name="Editor" ShowLineNumbers="True" WordWrap="{Binding WrapLines}"
                      FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
-                     Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
+                     Background="{DynamicResource CardBackgroundBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
                      LineNumbersForeground="{DynamicResource TextMutedBrush}"
                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                      IsReadOnly="{Binding IsEditorFaulted}"

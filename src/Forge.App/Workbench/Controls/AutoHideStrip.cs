@@ -48,7 +48,7 @@ internal sealed class AutoHideStrip : Panel
         };
         Children.Add(scroller);
         Children.Add(separator);
-        WorkbenchResources.Link(this, BackgroundProperty, "DockStripBackgroundBrush");
+        WorkbenchResources.Link(this, BackgroundProperty, "PanelTitleBarBrush");
         WorkbenchResources.Link(separator, Border.BackgroundProperty, "BorderBrush");
     }
 
@@ -146,7 +146,7 @@ internal sealed class AutoHideStrip : Panel
     {
         for (var i = 0; i < bars.Count; i++)
         {
-            WorkbenchResources.Link(bars[i], Border.BackgroundProperty, isRegionShown ? "DockIndicatorIdleBrush" : "AccentBrush");
+            WorkbenchResources.Link(bars[i], Border.BackgroundProperty, isRegionShown ? "DockIndicatorIdleBrush" : "BrandActionBrush");
         }
     }
 

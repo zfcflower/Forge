@@ -15,7 +15,7 @@
         WindowDecorations="BorderOnly"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="-1"
-        Background="{DynamicResource SurfaceBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
     <!-- The section column: one flat button per section, green-tinted while selected. -->
     <Style Selector="Button.settings-nav">
@@ -40,10 +40,10 @@
       <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
     </Style>
     <Style Selector="Button.settings-nav.selected /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
     </Style>
     <Style Selector="Button.settings-nav.selected TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
   </Window.Styles>
 
@@ -104,7 +104,7 @@
       reachable, which a hidden column would not. -->
       <Border Grid.Column="0"
               Width="{Binding NavWidth}"
-              Background="{DynamicResource SidebarBrush}"
+              Background="{DynamicResource SidebarBackgroundBrush}"
               BorderBrush="{DynamicResource BorderBrush}"
               BorderThickness="0,0,1,0">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">

@@ -46,7 +46,7 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
                 {
                     var run = new Run(inline.Text);
                     run.Bind(TextElement.FontFamilyProperty, this.GetResourceObservable("FontMono"));
-                    run.Bind(TextElement.BackgroundProperty, this.GetResourceObservable("SurfaceMutedBrush"));
+                    run.Bind(TextElement.BackgroundProperty, this.GetResourceObservable("SurfaceSubtleBrush"));
                     target.Add(run);
                     position += inline.Text.Length;
                     break;
@@ -87,7 +87,7 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
                 case MdInlineKind.Link:
                 {
                     var span = new Span { TextDecorations = Decorations(Avalonia.Media.TextDecorationLocation.Underline) };
-                    span.Bind(TextElement.ForegroundProperty, this.GetResourceObservable("AccentTextBrush"));
+                    span.Bind(TextElement.ForegroundProperty, this.GetResourceObservable("BrandActionBrush"));
                     var start = position;
                     AddInlines(span.Inlines, inline.Children ?? [], ref position, bold);
                     if (inline.Url is { Length: > 0 } url)

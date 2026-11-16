@@ -10,7 +10,7 @@
   <UserControl.Styles>
     <!-- The scrim covers the whole workbench row: it dims what is behind the panel and takes the click that closes it. -->
     <Style Selector="Grid.inspector-scrim">
-      <Setter Property="Background" Value="#55000000" />
+      <Setter Property="Background" Value="{DynamicResource BackdropScrimBrush}" />
     </Style>
 
     <!-- One card, centred and capped. Wider than the plan panel: a row carries a command line and its output. -->
@@ -20,7 +20,7 @@
       <Setter Property="Margin" Value="16,0" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusLg}" />
@@ -29,13 +29,13 @@
 
     <!-- The count beside the title: the same chip shape the strip uses for its sub-agent badge. -->
     <Style Selector="Border.inspector-count">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
       <Setter Property="Padding" Value="6,1" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="Border.inspector-count TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     </Style>
 
@@ -63,14 +63,14 @@
     <!-- A session's group header: a tinted band above that session's rows. -->
     <Style Selector="Border.inspector-group">
       <Setter Property="Padding" Value="14,6" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="BorderThickness" Value="0,0,0,1" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     </Style>
 
     <!-- The streamed output: sunken, monospaced, scrollable on its own so a chatty command cannot stretch the panel. -->
     <Style Selector="Border.inspector-tail">
-      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
       <Setter Property="Padding" Value="8,6" />
     </Style>

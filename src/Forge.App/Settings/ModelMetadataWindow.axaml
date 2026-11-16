@@ -10,7 +10,7 @@
         MinHeight="360"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{DynamicResource SurfaceBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TextBlock.meta-header">
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
@@ -85,7 +85,7 @@
       <TextBlock Grid.Column="1"
                  Classes="caption"
                  VerticalAlignment="Center"
-                 Foreground="{DynamicResource SuccessBrush}"
+                 Foreground="{DynamicResource StatusSuccessBrush}"
                  IsVisible="{Binding HasStatus}"
                  Text="{Binding Status}" />
       <Button Grid.Column="3" Classes="ghost" Command="{Binding RefreshCommand}" Content="{Binding RefreshText}" />

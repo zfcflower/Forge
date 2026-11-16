@@ -1147,7 +1147,7 @@ public partial class FileDocumentView
             BorderThickness = new Thickness(1),
             Child = panel,
         };
-        if (EditorOptionsApplier.Brush(Editor, Editor.ActualThemeVariant, "SurfaceElevatedBrush") is { } background)
+        if (EditorOptionsApplier.Brush(Editor, Editor.ActualThemeVariant, "CardBackgroundBrush") is { } background)
         {
             card.Background = background;
         }

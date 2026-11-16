@@ -3,7 +3,7 @@
              xmlns:preview="using:Forge.App.ViewModels.Preview"
              x:Class="Forge.App.Views.Preview.ImagePreviewView"
              x:DataType="preview:ImageFilePreviewViewModel">
-  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <TextBlock Classes="caption" Margin="12,6" Text="{Binding Caption}" />
     <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
       <Border HorizontalAlignment="Center"
@@ -16,7 +16,7 @@
       </Border>
     </ScrollViewer>
     <TextBlock Grid.Row="2" Classes="caption" Margin="12,6" TextWrapping="Wrap"
-               Foreground="{DynamicResource DangerBrush}"
+               Foreground="{DynamicResource StatusErrorBrush}"
                IsVisible="{Binding HasNotice}" Text="{Binding Notice}"
                AutomationProperties.AutomationId="file-preview-notice" />
   </Grid>

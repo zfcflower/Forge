@@ -5,7 +5,7 @@
              x:DataType="auto:AutomationsSettingsViewModel">
   <UserControl.Styles>
     <Style Selector="Border.automation-badge">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="6,1" />
     </Style>
@@ -44,7 +44,7 @@
     <ItemsControl ItemsSource="{Binding ConfigErrors}" IsVisible="{Binding HasConfigErrors}">
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="x:String">
-          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}" Text="{Binding}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusWarningBrush}" Text="{Binding}" />
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>
@@ -52,7 +52,7 @@
     <TextBlock Classes="caption"
                IsVisible="{Binding HasProblem}"
                TextWrapping="Wrap"
-               Foreground="{DynamicResource DangerBrush}"
+               Foreground="{DynamicResource StatusErrorBrush}"
                Text="{Binding Problem}"
                AutomationProperties.AutomationId="automations-problem" />
 
@@ -72,7 +72,7 @@
                     <Border Classes="automation-badge" IsVisible="{Binding IsBuiltIn}">
                       <TextBlock Text="{Binding BadgeText}"
                                  FontSize="{DynamicResource FontSizeXs}"
-                                 Foreground="{DynamicResource AccentTextBrush}" />
+                                 Foreground="{DynamicResource BrandActionBrush}" />
                     </Border>
                   </StackPanel>
                   <TextBlock Classes="caption" Text="{Binding TriggerSummary}" TextTrimming="CharacterEllipsis" />

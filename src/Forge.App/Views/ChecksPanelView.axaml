@@ -22,22 +22,22 @@
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
       <Setter Property="Padding" Value="6,1" />
       <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     </Style>
     <Style Selector="Border.chip.pass">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     </Style>
     <Style Selector="Border.chip.pass > TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
     <Style Selector="Border.chip.fail">
       <Setter Property="Background" Value="{DynamicResource ErrorBubbleBrush}" />
     </Style>
     <Style Selector="Border.chip.fail > TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="Border.chip.warn > TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
     </Style>
 
     <!-- One check row: the rows are bounded by the platform's own check list (tens, not thousands), so the ItemsControl
@@ -48,7 +48,7 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="Border.checks-row:hover">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
     <Style Selector="Button.row-action">
       <Setter Property="Padding" Value="6,2" />
@@ -61,9 +61,9 @@
   <Border Classes="card"
           MaxHeight="620"
           Padding="0"
-          Background="{DynamicResource SurfaceElevatedBrush}"
+          Background="{DynamicResource CardBackgroundBrush}"
           BorderBrush="{DynamicResource BorderStrongBrush}"
-          BoxShadow="0 10 30 0 #3A000000"
+          BoxShadow="{StaticResource ShadowPopover}"
           ClipToBounds="True">
     <Grid RowDefinitions="Auto,Auto,*,Auto">
 
@@ -121,7 +121,7 @@
         </StackPanel>
         <TextBlock Classes="caption"
                    IsVisible="{Binding HasProblem}"
-                   Foreground="{DynamicResource DangerBrush}"
+                   Foreground="{DynamicResource StatusErrorBrush}"
                    TextWrapping="Wrap"
                    AutomationProperties.AutomationId="checks-problem"
                    Text="{Binding ProblemText}" />
@@ -210,7 +210,7 @@
                             Margin="0,4,0,0"
                             Padding="8"
                             CornerRadius="{StaticResource RadiusSm}"
-                            Background="{DynamicResource SurfaceSunkenBrush}"
+                            Background="{DynamicResource SurfaceSubtleBrush}"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="1">
                       <StackPanel Spacing="3">
@@ -220,12 +220,12 @@
                                    Text="{Binding [checks.log.loading], Source={x:Static loc:Loc.Instance}}" />
                         <TextBlock Classes="caption"
                                    IsVisible="{Binding HasLogProblem}"
-                                   Foreground="{DynamicResource DangerBrush}"
+                                   Foreground="{DynamicResource StatusErrorBrush}"
                                    TextWrapping="Wrap"
                                    Text="{Binding LogProblem}" />
                         <TextBlock Classes="caption"
                                    IsVisible="{Binding IsLogCut}"
-                                   Foreground="{DynamicResource WarningBrush}"
+                                   Foreground="{DynamicResource StatusWarningBrush}"
                                    Text="{Binding [checks.log.tailKept], Source={x:Static loc:Loc.Instance}}" />
                         <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
                           <TextBox Classes="mono"

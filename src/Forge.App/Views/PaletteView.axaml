@@ -12,7 +12,7 @@
     <!-- The scrim takes the whole workbench row: a click anywhere outside the card closes the palette, and the dimmed
          workbench behind it makes clear that typing goes to the palette. -->
     <Style Selector="Border.palette-scrim">
-      <Setter Property="Background" Value="#55000000" />
+      <Setter Property="Background" Value="{DynamicResource BackdropScrimBrush}" />
     </Style>
 
     <!-- One elevated card, centred horizontally and pinned near the top, so the list grows downward over the workbench
@@ -24,7 +24,7 @@
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="VerticalAlignment" Value="Top" />
       <Setter Property="Margin" Value="24,56,24,24" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusLg}" />
@@ -44,10 +44,10 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="ListBox.palette-sources ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
     </Style>
     <Style Selector="ListBox.palette-sources ListBoxItem:selected TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
 
     <!-- The query line is the palette's only text input: no border of its own, one rule under it. -->
@@ -73,10 +73,10 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="ListBox.palette-list ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
     <Style Selector="ListBox.palette-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
     </Style>
 
     <!-- A notice row explains an empty list; it reads muted rather than like a result the user can open. -->
@@ -91,14 +91,14 @@
     </Style>
 
     <Style Selector="Border.palette-preview">
-      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="1,0,0,0" />
       <Setter Property="Padding" Value="10,6" />
     </Style>
 
     <Style Selector="Border.palette-badge">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
       <Setter Property="Padding" Value="5,1" />
       <Setter Property="Margin" Value="8,0,0,0" />
