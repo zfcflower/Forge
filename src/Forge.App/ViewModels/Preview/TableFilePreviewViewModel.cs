@@ -42,8 +42,6 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
     /// <summary>The first row when the heuristic found a header; null when the first row is data.</summary>
     public TablePreviewRowViewModel? Header { get; }
 
-    public bool HasHeader => Header is not null;
-
     /// <summary>Data rows only (the header row is excluded from this list).</summary>
     public IReadOnlyList<TablePreviewRowViewModel> Rows { get; }
 
@@ -154,7 +152,7 @@ internal sealed class TablePreviewCellViewModel
     public string Text { get; }
 }
 
-/// <summary>One table column: the content width the view sizes it by (pixel width, or star weight when the table is narrower).</summary>
+/// <summary>One table column: the content width the view starts the column at (a pixel width, scaled up to fill the view until the user drags a separator).</summary>
 internal sealed class TableColumnViewModel
 {
     public TableColumnViewModel(double baseWidth) => BaseWidth = baseWidth;

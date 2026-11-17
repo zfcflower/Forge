@@ -5,9 +5,9 @@
         x:Class="Forge.App.Settings.ModelMetadataWindow"
         x:DataType="settings:ModelMetadataViewModel"
         Title="{Binding Title}"
-        Width="940"
+        Width="1040"
         Height="620"
-        MinWidth="880"
+        MinWidth="920"
         MinHeight="400"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
@@ -40,10 +40,10 @@
     <Style Selector="TextBlock.meta-status.error">
       <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
-    <!-- The table: the control's own chrome is replaced by the window's band, cell grid and row lines. -->
+    <!-- The table: the control's own chrome is replaced by the window's band, cell grid and row lines; its border is the
+         frame itself (BorderBrush/BorderThickness set on the instance, like the table preview's). -->
     <Style Selector="TableView">
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="TableViewCell">
@@ -55,13 +55,11 @@
       <Setter Property="BorderThickness" Value="0,0,1,1" />
       <Setter Property="Padding" Value="8,7" />
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-      <Setter Property="FontWeight" Value="Normal" />
+      <Setter Property="FontWeight" Value="Bold" />
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
-    <!-- Columns are sized to their content, not dragged; the resizer's 1px line only smears over the rows. -->
-    <Style Selector="TableViewColumnHeader /template/ Thumb#PART_Resizer">
-      <Setter Property="IsVisible" Value="False" />
-    </Style>
+    <!-- Columns are sized to their content and stay that way until the user drags a separator; the resizer's 1px line is
+         kept inside the header band by the TableViewColumnResizerMargin override in the resources. -->
     <Style Selector="TableViewRow">
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="0,0,0,1" />
@@ -73,12 +71,16 @@
   </Window.Styles>
   <Window.Resources>
     <Thickness x:Key="TableViewRowPadding">0</Thickness>
+    <!-- The separator the user drags to resize a column. The theme's handle reaches 9 px above and 12 px below the header, so
+         its 1px line is drawn across the first row; keeping only the horizontal overhang leaves a 6 px grab band on each side
+         of the grid line, inside the header band. A style cannot do this: the template's own value outranks a style setter. -->
+    <Thickness x:Key="TableViewColumnResizerMargin">0,0,-6,0</Thickness>
     <!-- One cell template per column: the window builds the columns (their headers are localized and one of them is
          conditional), so each cell's markup lives here and is picked by a resource key. -->
     <DataTemplate x:Key="MetaVisibilityCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line" Padding="8,3">
         <CheckBox IsChecked="{Binding IsShown, Mode=TwoWay}"
-                  HorizontalAlignment="Center"
+                  HorizontalAlignment="Left"
                   VerticalAlignment="Center"
                   ToolTip.Tip="{Binding Model}"
                   AutomationProperties.AutomationId="{Binding Model, StringFormat=model-metadata-shown-{0}}"
@@ -90,7 +92,8 @@
         <TextBlock Text="{Binding Model}"
                    VerticalAlignment="Center"
                    TextTrimming="CharacterEllipsis"
-                   FontSize="{DynamicResource FontSizeSm}" />
+                   FontSize="{DynamicResource FontSizeSm}"
+                   ToolTip.Tip="{Binding Model}" />
       </Border>
     </DataTemplate>
     <DataTemplate x:Key="MetaCapabilitiesCell" x:DataType="settings:ModelMetadataRowViewModel">
@@ -136,22 +139,25 @@
     </DataTemplate>
     <DataTemplate x:Key="MetaReasoningCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line" Padding="8,3" AutomationProperties.Name="{Binding ReasoningLabel}">
-        <StackPanel Orientation="Horizontal"
-                    Spacing="2"
-                    VerticalAlignment="Center"
-                    IsVisible="{Binding HasReasoning}"
-                    ToolTip.Tip="{Binding ReasoningLabel}">
+        <!-- A grid, not a horizontal stack: the tier text has to be measured against the column so it trims there instead of
+             spilling over the next cell. -->
+        <Grid ColumnDefinitions="Auto,*"
+              ColumnSpacing="2"
+              VerticalAlignment="Center"
+              IsVisible="{Binding HasReasoning}"
+              ToolTip.Tip="{Binding ReasoningLabel}">
           <wc:FluentIcon Data="{StaticResource IconReasoning}"
                          Width="14"
                          Height="14"
                          Foreground="{DynamicResource TextSecondaryBrush}" />
-          <TextBlock Text="{Binding ReasoningText}"
+          <TextBlock Grid.Column="1"
+                     Text="{Binding ReasoningText}"
                      IsVisible="{Binding HasReasoningText}"
                      VerticalAlignment="Center"
                      TextTrimming="CharacterEllipsis"
                      FontSize="{DynamicResource FontSizeXs}"
                      Foreground="{DynamicResource TextSecondaryBrush}" />
-        </StackPanel>
+        </Grid>
       </Border>
     </DataTemplate>
     <DataTemplate x:Key="MetaContextCell" x:DataType="settings:ModelMetadataRowViewModel">
@@ -202,18 +208,19 @@
       <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Intro}" />
     </StackPanel>
 
-    <Border Grid.Row="1"
-            Margin="0,14,0,0"
-            BorderBrush="{DynamicResource BorderBrush}"
-            BorderThickness="1"
-            CornerRadius="4"
-            ClipToBounds="True">
-      <TableView x:Name="Table"
-                 ItemsSource="{Binding Rows}"
-                 IsVisible="{Binding HasRows}"
-                 CanUserResizeColumns="False"
-                 AutomationProperties.AutomationId="model-metadata-rows" />
-    </Border>
+    <!-- The frame is the control's own border, so it cannot sit a pixel off the last row or column; VerticalAlignment=Top
+         makes it hug the rows instead of running to the bottom of the window (more rows than fit still fill and scroll). -->
+    <TableView x:Name="Table"
+               Grid.Row="1"
+               Margin="0,14,0,0"
+               VerticalAlignment="Top"
+               ItemsSource="{Binding Rows}"
+               IsVisible="{Binding HasRows}"
+               BorderBrush="{DynamicResource BorderBrush}"
+               BorderThickness="1"
+               CornerRadius="4"
+               ClipToBounds="True"
+               AutomationProperties.AutomationId="model-metadata-rows" />
 
     <TextBlock Grid.Row="2"
                Classes="caption"

@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
+using HAlign = Avalonia.Layout.HorizontalAlignment;
 
 namespace Forge.App.Settings;
 
@@ -19,15 +20,37 @@ internal sealed partial class ModelMetadataWindow : Window
 {
     private const double VisibilityWidth = 84;
     private const double CapabilitiesWidth = 124;
-    private const double ReasoningWidth = 92;
     private const double ContextWidth = 102;
     private const double PriceWidth = 76;
     private const double CacheWidth = 82;
+
+    /// <summary>
+    /// The tier list's column. 158 px is the Chinese list (「极低/低/中/高/超高」 is ~94 px of text) plus the icon, the padding and
+    /// room to breathe; the English labels ("Minimal/Low/Medium/High/Extra high") are longer and get the cell's tooltip instead.
+    /// The model name takes the leftover width.
+    /// </summary>
+    private const double ReasoningWidth = 158;
+
+    // The floor each column keeps when the user drags its separator: its header text plus one icon or one short number. The
+    // reasoning floor is the width the longest tier list (「极低/低/中/高/超高」) needs, measured with the row font.
+    private const double VisibilityMinWidth = 48;
+    private const double ModelMinWidth = 80;
+    private const double CapabilitiesMinWidth = 88;
+    private const double ReasoningMinWidth = 124;
+    private const double ContextMinWidth = 72;
+    private const double PriceMinWidth = 56;
+    private const double CacheMinWidth = 60;
 
     private readonly ModelMetadataViewModel? model;
     private ModelMetadataViewModel? subscribed;
     private TableViewColumn? cacheWriteColumn;
     private CheckBox? allShown;
+
+    /// <summary>
+    /// True while the header switch is being mirrored from the rows. Every row change re-raises <c>AllShown</c>, and writing
+    /// that back into the model looks like a second click: checking one row would clear the rest all over again.
+    /// </summary>
+    private bool syncingAllShown;
 
     /// <summary>Designer/loader constructor.</summary>
     public ModelMetadataWindow()
@@ -88,42 +111,82 @@ internal sealed partial class ModelMetadataWindow : Window
     private void OnRowPrepared(object? sender, ContainerPreparedEventArgs e)
         => e.Container.Classes.Set("alt", e.Index % 2 == 1);
 
-    /// <summary>The column set: the model fits the leftover width, everything else is sized for its content.</summary>
+    /// <summary>
+    /// The column set: the model name takes the leftover width, the tier list is sized for its longest contents, and every
+    /// column keeps a floor the user's drag cannot go below.
+    /// </summary>
     private void BuildColumns(ModelMetadataViewModel viewModel)
     {
         allShown = null;
         cacheWriteColumn = null;
+
+        // The columns are also rebuilt when their headers change language. The widths the user dragged out of the old set are
+        // carried over, so switching the interface language does not undo a resize.
+        var carried = CarriedWidths(viewModel);
+        var next = 0;
         var columns = new AvaloniaList<TableViewColumn>();
+
+        TableViewColumn Add(double minWidth, GridLength width, string cellTemplate, object header)
+        {
+            var column = new TableViewColumn
+            {
+                Width = carried is null ? width : carried[next],
+                MinWidth = minWidth,
+                CellTemplate = this.TryFindResource(cellTemplate, out var resource) ? resource as IDataTemplate : null,
+                Header = header,
+                // Cells draw their own grid line. The cell's default content alignment is Left, which sizes that line to the
+                // text instead of to the column: the header band then shows the real edges and every row shows ragged ones.
+                HorizontalContentAlignment = HAlign.Stretch,
+            };
+            next++;
+            columns.Add(column);
+            return column;
+        }
 
         if (viewModel.HasVisibilityColumn)
         {
-            columns.Add(Column(VisibilityWidth, "MetaVisibilityCell", VisibilityHeader(viewModel)));
+            Add(VisibilityMinWidth, new GridLength(VisibilityWidth), "MetaVisibilityCell", VisibilityHeader(viewModel));
         }
 
-        columns.Add(Column(new GridLength(1, GridUnitType.Star), "MetaModelCell", TextHeader(viewModel.ModelHeader)));
-        columns.Add(Column(CapabilitiesWidth, "MetaCapabilitiesCell", TextHeader(viewModel.CapabilitiesHeader)));
-        columns.Add(Column(ReasoningWidth, "MetaReasoningCell", TextHeader(viewModel.ReasoningHeader)));
-        columns.Add(Column(ContextWidth, "MetaContextCell", TextHeader(viewModel.ContextHeader)));
-        columns.Add(Column(PriceWidth, "MetaInputCell", TextHeader(viewModel.InputHeader)));
-        columns.Add(Column(PriceWidth, "MetaOutputCell", TextHeader(viewModel.OutputHeader)));
-        columns.Add(Column(CacheWidth, "MetaCacheReadCell", TextHeader(viewModel.CacheReadHeader)));
-
-        cacheWriteColumn = Column(CacheWidth, "MetaCacheWriteCell", TextHeader(viewModel.CacheWriteHeader));
+        Add(ModelMinWidth, new GridLength(1, GridUnitType.Star), "MetaModelCell", TextHeader(viewModel.ModelHeader));
+        Add(CapabilitiesMinWidth, new GridLength(CapabilitiesWidth), "MetaCapabilitiesCell", TextHeader(viewModel.CapabilitiesHeader));
+        // The tier list is the longest text in the row and was clipped at 92 px: it gets a fixed width that fits it whole, and the
+        // model name keeps the leftover so widening the window never squeezes the list again.
+        Add(ReasoningMinWidth, new GridLength(ReasoningWidth), "MetaReasoningCell", TextHeader(viewModel.ReasoningHeader));
+        Add(ContextMinWidth, new GridLength(ContextWidth), "MetaContextCell", TextHeader(viewModel.ContextHeader));
+        Add(PriceMinWidth, new GridLength(PriceWidth), "MetaInputCell", TextHeader(viewModel.InputHeader));
+        Add(PriceMinWidth, new GridLength(PriceWidth), "MetaOutputCell", TextHeader(viewModel.OutputHeader));
+        Add(CacheMinWidth, new GridLength(CacheWidth), "MetaCacheReadCell", TextHeader(viewModel.CacheReadHeader));
+        cacheWriteColumn = Add(CacheMinWidth, new GridLength(CacheWidth), "MetaCacheWriteCell", TextHeader(viewModel.CacheWriteHeader));
         cacheWriteColumn.IsVisible = viewModel.ShowsCacheWriteColumn;
-        columns.Add(cacheWriteColumn);
 
         Table.Columns = columns;
     }
 
-    private TableViewColumn Column(GridLength width, string cellTemplate, object header) => new()
+    /// <summary>
+    /// The widths the current columns were dragged to, or null when the set is built for the first time. Keyed by position:
+    /// the columns are always built in the same order, so a carried width only applies to the column it came from.
+    /// </summary>
+    private GridLength[]? CarriedWidths(ModelMetadataViewModel viewModel)
     {
-        Width = width,
-        CellTemplate = this.TryFindResource(cellTemplate, out var resource) ? resource as IDataTemplate : null,
-        Header = header,
-    };
+        var current = Table.Columns;
+        if (current is null || current.Count != ColumnCount(viewModel))
+        {
+            return null;
+        }
 
-    private TableViewColumn Column(double width, string cellTemplate, object header)
-        => Column(new GridLength(width), cellTemplate, header);
+        var widths = new GridLength[current.Count];
+        for (var index = 0; index < widths.Length; index++)
+        {
+            widths[index] = current[index].Width;
+        }
+
+        return widths;
+    }
+
+    /// <summary>The number of columns <see cref="BuildColumns"/> produces, used to recognize the set it is replacing.</summary>
+    private static int ColumnCount(ModelMetadataViewModel viewModel)
+        => (viewModel.HasVisibilityColumn ? 1 : 0) + 8;
 
     private static Control TextHeader(string text) => new TextBlock { Text = text, Classes = { "meta-header" } };
 
@@ -138,7 +201,13 @@ internal sealed partial class ModelMetadataWindow : Window
         ToolTip.SetTip(check, viewModel.VisibilityTooltip);
         AutomationProperties.SetAutomationId(check, "model-metadata-all-shown");
         AutomationProperties.SetName(check, viewModel.VisibilityTooltip);
-        check.IsCheckedChanged += (_, _) => viewModel.AllShown = check.IsChecked == true;
+        check.IsCheckedChanged += (_, _) =>
+        {
+            if (!syncingAllShown)
+            {
+                viewModel.AllShown = check.IsChecked == true;
+            }
+        };
         allShown = check;
 
         var panel = new StackPanel
@@ -164,7 +233,15 @@ internal sealed partial class ModelMetadataWindow : Window
             case nameof(ModelMetadataViewModel.AllShown):
                 if (allShown is not null)
                 {
-                    allShown.IsChecked = viewModel.AllShown;
+                    syncingAllShown = true;
+                    try
+                    {
+                        allShown.IsChecked = viewModel.AllShown;
+                    }
+                    finally
+                    {
+                        syncingAllShown = false;
+                    }
                 }
 
                 break;

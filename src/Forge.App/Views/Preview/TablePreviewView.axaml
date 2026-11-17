@@ -5,10 +5,10 @@
              x:DataType="preview:TableFilePreviewViewModel">
   <UserControl.Styles>
     <!-- The Fluent TableView theme pads the header band and every row with this key; zeroed so the grid lines meet edge to
-         edge and the header band is exactly the height the header cells give it. -->
+         edge and the header band is exactly the height the header cells give it. The frame comes from the control's own
+         BorderBrush/BorderThickness (set on the instance), not from a wrapper. -->
     <Style Selector="TableView">
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Padding" Value="0" />
     </Style>
     <!-- The cells draw their own grid, the header its own band: neither keeps the theme's chrome or its padding. -->
@@ -22,10 +22,6 @@
       <Setter Property="Padding" Value="6,2" />
       <Setter Property="Height" Value="24" />
     </Style>
-    <!-- Column resizing is off, so the theme's resizer (a 1px line drawn with negative margins) only smears over the rows. -->
-    <Style Selector="TableViewColumnHeader /template/ Thumb#PART_Resizer">
-      <Setter Property="IsVisible" Value="False" />
-    </Style>
     <Style Selector="Border.table-cell">
       <Setter Property="BorderThickness" Value="0,0,1,1" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
@@ -37,6 +33,10 @@
   </UserControl.Styles>
   <UserControl.Resources>
     <Thickness x:Key="TableViewRowPadding">0</Thickness>
+    <!-- The separator the user drags to resize a column. The theme's handle reaches 9 px above and 12 px below the header, so
+         its 1 px line is drawn across the first row; keeping only the horizontal overhang leaves a 6 px grab band on each side
+         of the grid line, inside the header band. A style cannot do this: the template's own value outranks a style setter. -->
+    <Thickness x:Key="TableViewColumnResizerMargin">0,0,-6,0</Thickness>
     <!-- One shared cell template: a fixed-height monospace line over the grid line. The view builds one cell per column,
          because a table's column count comes from the file and cannot be written in XAML. -->
     <DataTemplate x:Key="TableCellTemplate" x:DataType="preview:TablePreviewCellViewModel">
@@ -51,15 +51,23 @@
   <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <TextBlock Classes="caption" Margin="12,6,12,2" Text="{Binding Caption}" />
     <TextBlock Grid.Row="1" Classes="caption" Margin="12,0,12,4" Text="{Binding Summary}" />
-    <!-- The TableView owns the header band, both scroll bars, the column layout and the row virtualization. -->
-    <Border Grid.Row="2" Margin="12,0" ClipToBounds="True">
-      <TableView x:Name="Table"
-                 ItemsSource="{Binding Rows}"
-                 CanUserResizeColumns="False"
-                 FontFamily="{DynamicResource FontMono}"
-                 FontSize="{DynamicResource FontSizeCode}"
-                 AutomationProperties.AutomationId="table-preview" />
-    </Border>
+    <!-- The TableView owns the header band, both scroll bars, the column layout and the row virtualization; the separators
+         between its headers are what the user drags to size a column. -->
+    <!-- The table draws its own grid and its own frame: the control's BorderBrush/BorderThickness paint the 1 px rounded
+         outline, so the frame hugs the rows instead of running to the bottom of the pane (VerticalAlignment=Top sizes the
+         control to its content; with more rows than fit, the ScrollViewer inside takes over). -->
+    <TableView x:Name="Table"
+               Grid.Row="2"
+               Margin="12,0"
+               VerticalAlignment="Top"
+               ItemsSource="{Binding Rows}"
+               BorderBrush="{DynamicResource BorderBrush}"
+               BorderThickness="1"
+               CornerRadius="4"
+               ClipToBounds="True"
+               FontFamily="{DynamicResource FontMono}"
+               FontSize="{DynamicResource FontSizeCode}"
+               AutomationProperties.AutomationId="table-preview" />
     <TextBlock Grid.Row="3" Classes="caption" Margin="12,6" TextWrapping="Wrap"
                Foreground="{DynamicResource StatusErrorBrush}"
                IsVisible="{Binding HasNotice}" Text="{Binding Notice}"

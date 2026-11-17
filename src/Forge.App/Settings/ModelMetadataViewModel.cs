@@ -28,6 +28,9 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
     private string? status;
     private bool statusIsError;
     private bool isBusy;
+
+    /// <summary>True while <see cref="AllShown"/> writes every row, so the rows' own notifications stay quiet.</summary>
+    private bool bulkShown;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     public ModelMetadataViewModel(ProviderServices services, ConnectedProvider provider, AppPreferences? preferences = null)
@@ -110,9 +113,17 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
         get => Rows.Count > 0 && Rows.All(static row => row.IsShown);
         set
         {
-            foreach (var row in Rows)
+            bulkShown = true;
+            try
             {
-                row.SetShown(value);
+                foreach (var row in Rows)
+                {
+                    row.SetShown(value);
+                }
+            }
+            finally
+            {
+                bulkShown = false;
             }
 
             OnPropertyChanged();
@@ -339,7 +350,12 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
     {
         if (string.Equals(e.PropertyName, nameof(ModelMetadataRowViewModel.IsShown), StringComparison.Ordinal))
         {
-            OnPropertyChanged(nameof(AllShown));
+            // A select-all runs through every row: reporting the running total would re-read the whole list per row, and the
+            // view would push each intermediate value back into the header switch.
+            if (!bulkShown)
+            {
+                OnPropertyChanged(nameof(AllShown));
+            }
         }
         else if (string.Equals(e.PropertyName, nameof(ModelMetadataRowViewModel.CacheWrite), StringComparison.Ordinal))
         {
