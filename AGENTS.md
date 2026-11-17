@@ -30,6 +30,7 @@
 - 最终构建、测试、改动检查及结果验收。
 
 Worker 规则：
+- 模型：派 Worker 用 `opencode-go/glm-5.3`（高推理），派 reviewer 用 `opencode-go/hy4`（高推理；不是 `hy4-preview`）；主 Agent 自己不改。
 - 每个实现或测试 Worker 必须使用独立仓库副本：`D:/FORGE/workN/<part>`。
 - 创建副本失败必须报告阻塞，禁止退回主仓库修改。
 - 只能修改分配的归属路径，禁止修改其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`。
