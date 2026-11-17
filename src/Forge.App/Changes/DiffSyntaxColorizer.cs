@@ -27,6 +27,7 @@ internal sealed class DiffSyntaxColorizer : DocumentColorizingTransformer
     internal const int MaxCatchUp = 4_000;
 
     private static readonly Dictionary<ThemeName, ThemeContext> Contexts = [];
+    private static readonly object ContextLock = new();
     private readonly Dictionary<(int File, int Hunk, bool Old), Stream> streams = [];
     private readonly Dictionary<int, string?> scopes = [];
     private IReadOnlyList<FileDiff> diffs = [];
@@ -132,6 +133,30 @@ internal sealed class DiffSyntaxColorizer : DocumentColorizingTransformer
         return new Stream(grammar, ctx, diff.Hunks[hunkIndex].Lines, oldSide);
     }
 
+    /// <summary>The shared registry/theme of <paramref name="name"/> (the chat's code blocks use the same one), or null when it cannot load.</summary>
+    internal static ThemeContext? SharedContext(ThemeName name)
+    {
+        try
+        {
+            lock (ContextLock)
+            {
+                if (!Contexts.TryGetValue(name, out var created))
+                {
+                    created = new ThemeContext(name);
+                    Contexts[name] = created;
+                }
+
+                return created;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or KeyNotFoundException
+            or NotSupportedException or FormatException or System.Text.Json.JsonException or UnauthorizedAccessException)
+        {
+            AppLogs.Diff.ZLogWarning($"syntax theme failed: {exception.Message}");
+            return null;
+        }
+    }
+
     private ThemeContext? ContextFor()
     {
         if (context is not null)
@@ -139,29 +164,14 @@ internal sealed class DiffSyntaxColorizer : DocumentColorizingTransformer
             return context;
         }
 
-        try
-        {
-            if (!Contexts.TryGetValue(theme, out var created))
-            {
-                created = new ThemeContext(theme);
-                Contexts[theme] = created;
-            }
-
-            context = created;
-        }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or KeyNotFoundException
-            or NotSupportedException or FormatException or System.Text.Json.JsonException or UnauthorizedAccessException)
-        {
-            AppLogs.Diff.ZLogWarning($"syntax theme failed: {exception.Message}");
-        }
-
+        context = SharedContext(theme);
         return context;
     }
 
-    private readonly record struct Token(int Start, int End, IBrush? Brush, FontStyle Style);
+    internal readonly record struct Token(int Start, int End, IBrush? Brush, FontStyle Style);
 
     /// <summary>Registry, theme and grammars of one TextMate theme; shared by every colorizer.</summary>
-    private sealed class ThemeContext
+    internal sealed class ThemeContext
     {
         private readonly Registry registry;
         private readonly Dictionary<string, IGrammar?> grammars = [];
@@ -198,6 +208,39 @@ internal sealed class DiffSyntaxColorizer : DocumentColorizingTransformer
             }
 
             return grammar;
+        }
+
+        /// <summary>Tokenizes one line and returns the coloured spans plus the state to carry to the next line.</summary>
+        public (Token[] Tokens, IStateStack? State) Tokenize(IGrammar grammar, string text, IStateStack? state)
+        {
+            var clean = text.Replace("\r", string.Empty);
+            var result = grammar.TokenizeLine(clean, state, TimeSpan.FromMilliseconds(20));
+            var list = new List<Token>(result.Tokens.Length);
+            foreach (var token in result.Tokens)
+            {
+                int foreground = -1, style = -1;
+                foreach (var rule in Theme.Match(token.Scopes))
+                {
+                    if (foreground < 0 && rule.foreground > 0)
+                    {
+                        foreground = rule.foreground;
+                    }
+
+                    if (style < 0 && rule.fontStyle > 0)
+                    {
+                        style = (int)rule.fontStyle;
+                    }
+                }
+
+                var fontStyle = style > 0 && (style & (int)TextMateSharp.Themes.FontStyle.Italic) != 0 ? FontStyle.Italic : FontStyle.Normal;
+                var brush = BrushOf(foreground);
+                if (brush is not null || fontStyle != FontStyle.Normal)
+                {
+                    list.Add(new Token(token.StartIndex, token.EndIndex, brush, fontStyle));
+                }
+            }
+
+            return ([.. list], result.RuleStack);
         }
 
         public IBrush? BrushOf(int colorId)
@@ -285,35 +328,9 @@ internal sealed class DiffSyntaxColorizer : DocumentColorizingTransformer
 
         private Token[]? Tokenize(string text)
         {
-            var clean = text.Replace("\r", string.Empty);
-            var result = grammar!.TokenizeLine(clean, state, TimeSpan.FromMilliseconds(20));
-            state = result.RuleStack;
-            var list = new List<Token>(result.Tokens.Length);
-            foreach (var token in result.Tokens)
-            {
-                int foreground = -1, style = -1;
-                foreach (var rule in theme!.Theme.Match(token.Scopes))
-                {
-                    if (foreground < 0 && rule.foreground > 0)
-                    {
-                        foreground = rule.foreground;
-                    }
-
-                    if (style < 0 && rule.fontStyle > 0)
-                    {
-                        style = (int)rule.fontStyle;
-                    }
-                }
-
-                var fontStyle = style > 0 && (style & (int)TextMateSharp.Themes.FontStyle.Italic) != 0 ? FontStyle.Italic : FontStyle.Normal;
-                var brush = theme.BrushOf(foreground);
-                if (brush is not null || fontStyle != FontStyle.Normal)
-                {
-                    list.Add(new Token(token.StartIndex, token.EndIndex, brush, fontStyle));
-                }
-            }
-
-            return [.. list];
+            var result = theme!.Tokenize(grammar!, text, state);
+            state = result.State;
+            return result.Tokens;
         }
     }
 }

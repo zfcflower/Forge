@@ -12,6 +12,48 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
     /// <summary>Column widths are computed over this many rows at most.</summary>
     internal const int WidthSampleRows = 200;
 
+    /// <summary>Horizontal room a cell adds around its text (the cell's own padding plus the grid line).</summary>
+    internal const double CellPadding = 14;
+
+    /// <summary>The narrowest a column can be dragged to.</summary>
+    internal const double MinColumnWidth = 32;
+
+    private bool resizedByUser;
+
+    /// <summary>The shared columns: every cell of a column binds to the same width, so one drag resizes the whole column.</summary>
+    public IReadOnlyList<TableColumnViewModel> Columns { get; private init; } = [];
+
+    /// <summary>
+    /// Spreads the columns over <paramref name="available"/> pixels when the table is narrower than that (proportionally to their
+    /// content widths); a wider table keeps its content widths and scrolls. Once the user dragged a column the widths are theirs.
+    /// </summary>
+    public void FitTo(double available)
+    {
+        if (resizedByUser || Columns.Count == 0 || !(available > 0))
+        {
+            return;
+        }
+
+        var total = 0.0;
+        foreach (var column in Columns)
+        {
+            total += column.BaseWidth;
+        }
+
+        var factor = total > 0 && total < available ? available / total : 1;
+        foreach (var column in Columns)
+        {
+            column.Width = column.BaseWidth * factor;
+        }
+    }
+
+    /// <summary>Resizes one column by a drag, to at least <see cref="MinColumnWidth"/>.</summary>
+    public void Resize(TableColumnViewModel column, double delta)
+    {
+        resizedByUser = true;
+        column.Width = Math.Max(MinColumnWidth, column.Width + delta);
+    }
+
     /// <summary>Longest cell shown before trimming, in monospace columns.</summary>
     internal const int MaxCellChars = 40;
 
@@ -74,16 +116,22 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
             var parsed = TablePreviewReader.Parse(reader, maxRows, separator, ct);
 
             var widths = ColumnWidths(parsed.Rows);
+            var columns = new TableColumnViewModel[widths.Length];
+            for (var column = 0; column < columns.Length; column++)
+            {
+                columns[column] = new TableColumnViewModel(widths[column] * charWidth + CellPadding);
+            }
+
             var hasHeader = TablePreviewReader.HasHeaderRow(parsed.Rows);
-            var header = hasHeader ? new TablePreviewRowViewModel(CellsFor(parsed.Rows[0], widths, charWidth), isHeader: true) : null;
+            var header = hasHeader ? new TablePreviewRowViewModel(CellsFor(parsed.Rows[0], columns), isHeader: true) : null;
 
             var rows = new TablePreviewRowViewModel[parsed.Rows.Count - (hasHeader ? 1 : 0)];
             for (var r = 0; r < rows.Length; r++)
             {
-                rows[r] = new TablePreviewRowViewModel(CellsFor(parsed.Rows[r + (hasHeader ? 1 : 0)], widths, charWidth), isHeader: false);
+                rows[r] = new TablePreviewRowViewModel(CellsFor(parsed.Rows[r + (hasHeader ? 1 : 0)], columns), isHeader: false, isAlternate: r % 2 == 1);
             }
 
-            return new TableFilePreviewViewModel(path, name, byteSize, header, rows, rows.Length, parsed.SkippedRows, format);
+            return new TableFilePreviewViewModel(path, name, byteSize, header, rows, rows.Length, parsed.SkippedRows, format) { Columns = columns };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -114,12 +162,12 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
         return widths;
     }
 
-    private static IReadOnlyList<TablePreviewCellViewModel> CellsFor(IReadOnlyList<string> row, int[] widths, double charWidth)
+    private static IReadOnlyList<TablePreviewCellViewModel> CellsFor(IReadOnlyList<string> row, TableColumnViewModel[] columns)
     {
-        var cells = new TablePreviewCellViewModel[widths.Length];
-        for (var column = 0; column < widths.Length; column++)
+        var cells = new TablePreviewCellViewModel[columns.Length];
+        for (var column = 0; column < columns.Length; column++)
         {
-            cells[column] = new TablePreviewCellViewModel(column < row.Count ? row[column] : string.Empty, widths[column], charWidth);
+            cells[column] = new TablePreviewCellViewModel(column < row.Count ? row[column] : string.Empty, columns[column]);
         }
 
         return cells;
@@ -129,11 +177,16 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
 /// <summary>One table row: the cells with their precomputed widths; the view stacks them horizontally.</summary>
 internal sealed class TablePreviewRowViewModel
 {
-    public TablePreviewRowViewModel(IReadOnlyList<TablePreviewCellViewModel> cells, bool isHeader)
+    public TablePreviewRowViewModel(IReadOnlyList<TablePreviewCellViewModel> cells, bool isHeader, bool isAlternate = false)
     {
         Cells = cells;
         IsHeader = isHeader;
+        IsAlternate = isAlternate;
     }
+
+    /// <summary>Every second data row, drawn on a tinted band.</summary>
+    public bool IsAlternate { get; }
+
 
     public IReadOnlyList<TablePreviewCellViewModel> Cells { get; }
 
@@ -143,13 +196,47 @@ internal sealed class TablePreviewRowViewModel
 /// <summary>One table cell: the text and its column width in monospace characters (times a fixed advance, capped).</summary>
 internal sealed class TablePreviewCellViewModel
 {
-    public TablePreviewCellViewModel(string text, int widthChars, double charWidth)
+    public TablePreviewCellViewModel(string text, TableColumnViewModel column)
     {
         Text = text;
-        Width = widthChars * charWidth;
+        Column = column;
     }
 
     public string Text { get; }
 
-    public double Width { get; }
+    /// <summary>The column this cell belongs to; its width is shared by every cell of the column.</summary>
+    public TableColumnViewModel Column { get; }
+}
+
+/// <summary>One table column: its content width and its current (fitted or dragged) width, which the cells bind to.</summary>
+internal sealed class TableColumnViewModel : System.ComponentModel.INotifyPropertyChanged
+{
+    private static readonly System.ComponentModel.PropertyChangedEventArgs WidthChanged = new(nameof(Width));
+    private double width;
+
+    public TableColumnViewModel(double baseWidth)
+    {
+        BaseWidth = baseWidth;
+        width = baseWidth;
+    }
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>The width the content needs.</summary>
+    public double BaseWidth { get; }
+
+    public double Width
+    {
+        get => width;
+        set
+        {
+            if (width.Equals(value))
+            {
+                return;
+            }
+
+            width = value;
+            PropertyChanged?.Invoke(this, WidthChanged);
+        }
+    }
 }

@@ -152,7 +152,15 @@ internal sealed class TranscriptFollower
 
     private void OnScrollerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.Source is Visual visual && visual.FindAncestorOfType<ScrollBar>(includeSelf: true) is not null)
+        if (e.Source is not Visual visual)
+        {
+            return;
+        }
+
+        // A press on the scroll bar is the user taking the scroll position. So is a press on a link-style button inside the
+        // transcript (a tool row's expander or path): the row grows under the pointer, and following the tail would scroll it away.
+        if (visual.FindAncestorOfType<ScrollBar>(includeSelf: true) is not null ||
+            (e.GetCurrentPoint(null).Properties.IsLeftButtonPressed && visual.FindAncestorOfType<Button>(includeSelf: true) is { } button && button.Classes.Contains("link")))
         {
             StopFollowing();
         }

@@ -103,12 +103,25 @@ internal sealed class MermaidBlockView : Border, ICopyableText
         toggleButton.Click += OnToggleSource;
         AutomationProperties.SetAutomationId(toggleButton, "mermaid-toggle-source");
 
-        header = new MarkdownCodeHeader(this, toggleButton);
+        diagramView = new MermaidDiagramView { IsVisible = false };
+        // The expand button opens the diagram in the viewer (zoom, drag, centre); like a click on the diagram itself.
+        var viewButton = new Button { Content = new TextBlock { Text = "⤢", FontSize = 13 }, Width = 26, Height = 22 };
+        viewButton.Classes.Add("ghost");
+        viewButton.Classes.Add("icon");
+        viewButton.Click += (_, _) => OpenViewer();
+        ToolTip.SetTip(viewButton, Loc.Instance[ViewerStrings.OpenLarge]);
+        AutomationProperties.SetAutomationId(viewButton, "mermaid-open-viewer");
+        viewButton.Bind(IsVisibleProperty, diagramView.GetObservable(IsVisibleProperty));
+        var headerActions = new StackPanel { Orientation = Orientation.Horizontal };
+        headerActions.Children.Add(viewButton);
+        headerActions.Children.Add(toggleButton);
+        header = new MarkdownCodeHeader(this, headerActions);
         header.SetLabel(info);
 
         sourceView = new MarkdownCodeTextView(source);
-        diagramView = new MermaidDiagramView { IsVisible = false };
         AutomationProperties.SetAutomationId(diagramView, "mermaid-diagram");
+        diagramView.Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
+        diagramView.PointerReleased += OnDiagramReleased;
 
         statusIcon = new FluentIcon { Width = 13, Height = 13, VerticalAlignment = VerticalAlignment.Center };
         statusText = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
@@ -435,6 +448,24 @@ internal sealed class MermaidBlockView : Border, ICopyableText
         sourceView.IsVisible = showingSource;
         diagramView.IsVisible = !showingSource;
         UpdateToggle();
+    }
+
+    /// <summary>A click on the diagram opens it large: zoom with the wheel, drag to pan, centred.</summary>
+    private void OnDiagramReleased(object? sender, Avalonia.Input.PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton == Avalonia.Input.MouseButton.Left)
+        {
+            OpenViewer();
+        }
+    }
+
+    private void OpenViewer()
+    {
+        if (diagramView.Picture is { } picture && ChatPicture.ForDiagram(picture, "mermaid") is { } wrapped)
+        {
+            ImageViewerWindow.Open(this, [wrapped], 0);
+            wrapped.Release();
+        }
     }
 
     private void OnRetry(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

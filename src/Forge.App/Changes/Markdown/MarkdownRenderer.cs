@@ -95,6 +95,23 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
                     break;
                 }
 
+                case MdInlineKind.Math:
+                    target.Add(MathView.Inline(inline.Text));
+                    position++;
+                    break;
+                case MdInlineKind.Footnote:
+                {
+                    var mark = new Run(inline.Text)
+                    {
+                        BaselineAlignment = BaselineAlignment.Superscript,
+                        FontSize = Math.Max(8, FontSize * 0.75),
+                    };
+                    mark.Bind(TextElement.ForegroundProperty, this.GetResourceObservable("BrandActionBrush"));
+                    target.Add(mark);
+                    position += inline.Text.Length;
+                    break;
+                }
+
                 case MdInlineKind.Link:
                 case MdInlineKind.Image:
                 {
@@ -191,9 +208,7 @@ internal static class MarkdownRenderer
     public static Control Render(MdBlock block) => block.Kind switch
     {
         MdBlockKind.Heading => Text(block.Inlines, "md-h" + block.Level.ToString(CultureInfo.InvariantCulture)),
-        MdBlockKind.Paragraph => block.Inlines.Exists(static inline => inline.Kind == MdInlineKind.Image)
-            ? RenderWithImages(block.Inlines)
-            : Text(block.Inlines, "md-p"),
+        MdBlockKind.Paragraph => RenderParagraph(block.Inlines),
         MdBlockKind.List => RenderList(block),
         MdBlockKind.Quote => RenderQuote(block),
         MdBlockKind.Code or MdBlockKind.Html => RenderCode(block),
@@ -203,6 +218,36 @@ internal static class MarkdownRenderer
     };
 
     /// <summary>
+    /// A paragraph: a display formula alone in it is drawn as a centred block, footnote definitions (<c>[^1]: text</c>) become small
+    /// numbered lines, a paragraph with pictures splits into text and picture rows, anything else is one text block.
+    /// </summary>
+    private static Control RenderParagraph(List<MdInline> inlines)
+    {
+        if (inlines.Exists(static inline => inline.Kind == MdInlineKind.Image))
+        {
+            return RenderWithImages(inlines);
+        }
+
+        if (inlines.Count == 1 && inlines[0] is { Kind: MdInlineKind.Math, Url: "display" } math)
+        {
+            return new MathView(math.Text, display: true);
+        }
+
+        if (inlines.Count > 1 && inlines[0].Kind == MdInlineKind.Footnote && inlines[1] is { Kind: MdInlineKind.Text } rest &&
+            rest.Text.StartsWith(':'))
+        {
+            var note = new List<MdInline>(inlines.Count) { new(MdInlineKind.Bold, children: [new MdInline(MdInlineKind.Text, inlines[0].Text + ".")]) };
+            note.Add(new MdInline(MdInlineKind.Text, rest.Text[1..]));
+            note.AddRange(inlines.Skip(2));
+            var definition = Text(note, "md-p");
+            definition.Classes.Add("md-footnote");
+            return definition;
+        }
+
+        return Text(inlines, "md-p");
+    }
+
+    /// <summary>
     /// A paragraph that holds pictures: the text around each picture stays text, each picture becomes its own block. (Inside a
     /// heading, list item or table cell a picture is just its alt text, as a link - those rows keep their one text block.)
     /// </summary>
@@ -210,19 +255,43 @@ internal static class MarkdownRenderer
     {
         var stack = new StackPanel { Spacing = 6 };
         var run = new List<MdInline>();
+        WrapPanel? row = null;
+        List<MarkdownImageView>? group = null;
         foreach (var inline in inlines)
         {
             if (inline.Kind != MdInlineKind.Image)
             {
+                // Blanks between two pictures keep them in one row; any real text ends the row.
+                if (inline.Kind is MdInlineKind.SoftBreak or MdInlineKind.LineBreak ||
+                    (inline.Kind == MdInlineKind.Text && string.IsNullOrWhiteSpace(inline.Text)))
+                {
+                    if (row is null)
+                    {
+                        run.Add(inline);
+                    }
+
+                    continue;
+                }
+
+                row = null;
                 run.Add(inline);
                 continue;
             }
 
-            FlushRun(stack, run);
-            if (inline.Url is { Length: > 0 } url)
+            if (inline.Url is not { Length: > 0 } url)
             {
-                stack.Children.Add(new MarkdownImageView(url, PlainText(inline.Children)));
+                continue;
             }
+
+            if (row is null)
+            {
+                FlushRun(stack, run);
+                row = new WrapPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
+                group = [];
+                stack.Children.Add(row);
+            }
+
+            row.Children.Add(new MarkdownImageView(url, PlainText(inline.Children), group!));
         }
 
         FlushRun(stack, run);
@@ -273,10 +342,29 @@ internal static class MarkdownRenderer
     private static Control RenderCode(MdBlock block)
     {
         var info = CodeInfo(block);
-        return block.Kind == MdBlockKind.Code && IsMermaid(info)
-            ? new MermaidBlockView(block.Text, info, block.FenceClosed)
-            : new MarkdownCodeBlock(block.Text, info);
+        if (block.Kind == MdBlockKind.Code && block.FenceClosed && info.AsSpan().Trim().Equals("math", StringComparison.OrdinalIgnoreCase) &&
+            block.Text.Trim().Length > 0)
+        {
+            return new MathView(block.Text, display: true);
+        }
+
+        if (block.Kind == MdBlockKind.Code && IsMermaid(info))
+        {
+            return new MermaidBlockView(block.Text, info, block.FenceClosed);
+        }
+
+        // A closed svg fence is drawn as a picture tile; while it streams (or when it is not a loadable document) it is code.
+        if (block.Kind == MdBlockKind.Code && block.FenceClosed && IsSvg(info) && block.Text.Contains("<svg", StringComparison.OrdinalIgnoreCase))
+        {
+            return new MarkdownImageView("svg", "SVG", [], block.Text);
+        }
+
+        return new MarkdownCodeBlock(block.Text, info);
     }
+
+    /// <summary>Whether a fence's info string declares SVG.</summary>
+    internal static bool IsSvg(string info) =>
+        info.AsSpan().Trim().Equals("svg", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether a fence's info string declares Mermaid - its first word, case-insensitive ("mermaid title=…" too).</summary>
     internal static bool IsMermaid(string info)
@@ -447,6 +535,10 @@ internal static class MarkdownRenderer
         if (header)
         {
             cell.Classes.Add("md-cell-head");
+        }
+        else if (row % 2 == 0)
+        {
+            cell.Classes.Add("md-cell-alt");
         }
 
         Grid.SetRow(cell, row);

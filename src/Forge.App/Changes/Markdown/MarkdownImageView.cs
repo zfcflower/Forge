@@ -3,58 +3,76 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Styling;
 using Avalonia.VisualTree;
 using Forge.App.Services;
-using Forge.App.ViewModels.Preview;
 using Forge.App.Views;
 
 namespace Forge.App.Changes.Markdown;
 
 /// <summary>
-/// A picture in a reply (<c>![alt](path)</c>). Only local files are drawn: a remote address is never fetched on its own
-/// (the reply would phone out just by being shown) and stays a link. The bitmap is read and decoded off the UI thread, bounded
-/// to <see cref="MaxEdge"/>, and cached by path so a streaming paragraph that is re-rendered every flush does not decode the
-/// same file again. A click opens the file in the system's viewer; a file that cannot be read shows its alt text instead.
+/// One picture in a reply (<c>![alt](path or address)</c>, or an inline <c>svg</c> block) as a fixed-size thumbnail tile.
+/// Tiles of one paragraph sit side by side in a wrapping row (see <see cref="MarkdownRenderer"/>); a click opens the viewer
+/// over every picture of that row, so the large view is a carousel. Local files and http(s) addresses are loaded off the UI
+/// thread through <see cref="ChatPictures"/> (bounded, cached); an SVG stays vector. A picture that cannot be loaded shows its
+/// alt text and, on click, opens the link or file with the system as before.
 /// </summary>
 internal sealed class MarkdownImageView : Border
 {
-    private const int MaxEdge = 1280;
-    private const long MaxBytes = 32L * 1024 * 1024;
-    private const int CacheLimit = 24;
+    internal const double TileWidth = 168;
+    internal const double TileHeight = 126;
 
     private static readonly Cursor HandCursor = new(StandardCursorType.Hand);
 
-    /// <summary>Decoded pictures by path, stamped with the file's write time and length so an edited file reloads. UI thread only.</summary>
-    private static readonly Dictionary<string, (long Stamp, Bitmap Bitmap)> Cache = new(StringComparer.OrdinalIgnoreCase);
-
-    private static readonly Queue<string> CacheOrder = new();
-
     private readonly string url;
-    private readonly string alt;
+    private readonly string? inlineSvg;
+    private readonly List<MarkdownImageView> group;
     private readonly Image image;
+    private readonly Viewbox vectorBox;
+    private readonly MermaidDiagramView vectorView;
     private readonly TextBlock fallback;
-    private string? resolved;
     private bool started;
+    private int generation;
 
     protected override Type StyleKeyOverride => typeof(Border);
 
-    internal MarkdownImageView(string url, string alt)
+    /// <summary>The loaded picture, or null while loading or when it failed.</summary>
+    internal ChatPicture? Picture { get; private set; }
+
+    internal MarkdownImageView(string url, string alt, List<MarkdownImageView> group, string? inlineSvg = null)
     {
         this.url = url;
-        this.alt = alt;
+        this.group = group;
+        this.inlineSvg = inlineSvg;
+        group.Add(this);
+        Width = TileWidth;
+        Height = TileHeight;
         HorizontalAlignment = HorizontalAlignment.Left;
         CornerRadius = new CornerRadius(6);
+        BorderThickness = new Thickness(1);
         ClipToBounds = true;
-        image = new Image { Stretch = Stretch.Uniform, MaxHeight = 480, IsVisible = false, StretchDirection = StretchDirection.DownOnly };
-        fallback = new TextBlock { Text = "▣ " + (alt.Length > 0 ? alt : url), TextWrapping = TextWrapping.Wrap };
+        Margin = new Thickness(0, 0, 8, 8);
+        this.Bind(BackgroundProperty, this.GetResourceObservable("SurfaceSubtleBrush"));
+        this.Bind(BorderBrushProperty, this.GetResourceObservable("BorderBrush"));
+
+        image = new Image { Stretch = Stretch.Uniform, IsVisible = false, Margin = new Thickness(2) };
+        vectorView = new MermaidDiagramView();
+        vectorBox = new Viewbox { Stretch = Stretch.Uniform, Child = vectorView, IsVisible = false, Margin = new Thickness(6) };
+        fallback = new TextBlock
+        {
+            Text = "▣ " + (alt.Length > 0 ? alt : url),
+            TextWrapping = TextWrapping.Wrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(8),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
         fallback.Bind(TextBlock.ForegroundProperty, fallback.GetResourceObservable("TextSecondaryBrush"));
-        Child = new Panel { Children = { image, fallback } };
+        Child = new Panel { Children = { image, vectorBox, fallback } };
         Cursor = HandCursor;
-        ToolTip.SetTip(this, alt.Length > 0 ? alt + "\n" + url : url);
+        ToolTip.SetTip(this, alt.Length > 0 ? alt + "\n" + Shorten(url) : Shorten(url));
         PointerReleased += OnReleased;
     }
+
+    private static string Shorten(string value) => value.Length > 200 ? value[..200] + "…" : value;
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -65,16 +83,67 @@ internal sealed class MarkdownImageView : Border
         }
 
         started = true;
-        var target = LinkTarget.Classify(url, LinkLauncher.WorkDirOf(this));
-        if (target.Kind is not (LinkTargetKind.SystemFile or LinkTargetKind.EditorFile))
+        _ = LoadAsync(++generation);
+    }
+
+    /// <summary>
+    /// A tile that leaves the screen (its reply was rebuilt, closed, or scrolled out of a realized list) gives its picture back:
+    /// the bitmap leaves the control and its reference is released, so a picture nobody shows is freed with its last user
+    /// instead of lingering until the garbage collector runs. Attaching again reloads it (from the cache when it is still there).
+    /// </summary>
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        generation++;
+        started = false;
+        var picture = Picture;
+        Picture = null;
+        image.Source = null;
+        image.IsVisible = false;
+        vectorView.SetPicture(null);
+        vectorBox.IsVisible = false;
+        fallback.IsVisible = true;
+        picture?.Release();
+    }
+
+    private async Task LoadAsync(int ticket)
+    {
+        ChatPicture? picture;
+        if (inlineSvg is { } svg)
         {
-            // A remote address (or an unresolvable path) stays text; a web picture is a link, opened on click.
-            Cursor = LinkLauncher.LooksOpenable(url) ? HandCursor : null;
+            // Not cached (the document is the block's own text): this tile holds the only reference.
+            picture = await Task.Run(() => ChatPictures.LoadSvg(svg, url, null)).ConfigureAwait(true);
+        }
+        else
+        {
+            picture = await ChatPictures.AcquireAsync(url, LinkLauncher.WorkDirOf(this)).ConfigureAwait(true);
+        }
+
+        if (picture is null)
+        {
             return;
         }
 
-        resolved = target.Location;
-        _ = LoadAsync(target.Location);
+        if (ticket != generation)
+        {
+            // Detached (or re-attached and restarted) while loading: this load's reference has no one to show it.
+            picture.Release();
+            return;
+        }
+
+        Picture = picture;
+        if (picture.Bitmap is { } bitmap)
+        {
+            image.Source = bitmap;
+            image.IsVisible = true;
+        }
+        else
+        {
+            vectorView.SetPicture(picture.Vector);
+            vectorBox.IsVisible = true;
+        }
+
+        fallback.IsVisible = false;
     }
 
     private void OnReleased(object? sender, PointerReleasedEventArgs e)
@@ -84,74 +153,33 @@ internal sealed class MarkdownImageView : Border
             return;
         }
 
-        if (resolved is { } path)
+        if (Picture is null)
         {
-            _ = LinkLauncher.OpenWithSystemAsync(this, path);
-        }
-        else if (LinkLauncher.LooksOpenable(url))
-        {
-            _ = LinkLauncher.OpenAsync(this, url);
-        }
-    }
-
-    private async Task LoadAsync(string path)
-    {
-        Bitmap? bitmap = null;
-        try
-        {
-            var info = new FileInfo(path);
-            var stamp = info.LastWriteTimeUtc.Ticks ^ info.Length;
-            if (Cache.TryGetValue(path, out var cached) && cached.Stamp == stamp)
+            if (inlineSvg is null && LinkLauncher.LooksOpenable(url))
             {
-                bitmap = cached.Bitmap;
+                _ = LinkLauncher.OpenAsync(this, url);
             }
-            else if (info.Length is > 0 and <= MaxBytes)
-            {
-                bitmap = await Task.Run(() =>
-                {
-                    try
-                    {
-                        return ImageHeader.DecodeBounded(File.ReadAllBytes(path), MaxEdge, BitmapInterpolationMode.MediumQuality);
-                    }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException
-                        or NotSupportedException or InvalidOperationException)
-                    {
-                        return null;
-                    }
-                }).ConfigureAwait(true);
-                if (bitmap is not null)
-                {
-                    Remember(path, stamp, bitmap);
-                }
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            bitmap = null;
-        }
 
-        if (bitmap is null)
-        {
             return;
         }
 
-        image.Source = bitmap;
-        image.IsVisible = true;
-        fallback.IsVisible = false;
-    }
-
-    private static void Remember(string path, long stamp, Bitmap bitmap)
-    {
-        if (!Cache.ContainsKey(path))
+        var pictures = new List<ChatPicture>(group.Count);
+        var at = 0;
+        foreach (var tile in group)
         {
-            CacheOrder.Enqueue(path);
-            while (CacheOrder.Count > CacheLimit)
+            if (tile.Picture is not { } loaded)
             {
-                // The evicted bitmap may still be on screen in another reply, so it is left to the garbage collector.
-                Cache.Remove(CacheOrder.Dequeue());
+                continue;
             }
+
+            if (ReferenceEquals(tile, this))
+            {
+                at = pictures.Count;
+            }
+
+            pictures.Add(loaded);
         }
 
-        Cache[path] = (stamp, bitmap);
+        ImageViewerWindow.Open(this, pictures, at);
     }
 }

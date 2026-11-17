@@ -554,6 +554,8 @@ internal sealed class AppComposition : IAsyncDisposable
 
         // The update checker (wave W10b): its own client through the one network stack, staged under <data>/updates, and
         // the UI-state store for the last-check time the automatic schedule reads. The service owns the client.
+        // Pictures a reply points at by address go through the same stack (proxy, certificates); the loader bounds time and size.
+        Forge.App.Services.ChatPictures.Http = new HttpClient(network.CreateHandler(), disposeHandler: true) { Timeout = TimeSpan.FromSeconds(30) };
         var updateHttp = new HttpClient(network.CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
         var updates = new UpdateService(
             updateHttp,

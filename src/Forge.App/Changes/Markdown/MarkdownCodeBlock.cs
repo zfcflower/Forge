@@ -31,6 +31,7 @@ internal sealed class MarkdownCodeBlock : Border, ICopyableText
         header = new MarkdownCodeHeader(this);
         header.SetLabel(info);
         body = new MarkdownCodeTextView(code);
+        body.SetLanguage(info);
 
         var stack = new StackPanel { Spacing = 4 };
         stack.Children.Add(header);
@@ -48,6 +49,7 @@ internal sealed class MarkdownCodeBlock : Border, ICopyableText
     {
         this.code = code;
         body.Text = code;
+        body.SetLanguage(info);
         header.SetLabel(info);
         ApplyName(info);
     }

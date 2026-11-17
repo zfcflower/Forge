@@ -3,15 +3,48 @@
              xmlns:preview="using:Forge.App.ViewModels.Preview"
              x:Class="Forge.App.Views.Preview.TablePreviewView"
              x:DataType="preview:TableFilePreviewViewModel">
+  <UserControl.Styles>
+    <!-- Grid lines and banded rows: a hairline right and below every cell, the header on a stronger band, every second data
+         row tinted. The row Border spans the cells, so the band is one continuous stripe. -->
+    <Style Selector="Border.table-cell">
+      <Setter Property="BorderThickness" Value="0,0,1,1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    </Style>
+    <Style Selector="Border.table-row.alt">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.table-row">
+      <Setter Property="BorderThickness" Value="1,0,0,0" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    </Style>
+    <Style Selector="Border.table-header">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+      <Setter Property="BorderThickness" Value="1,1,0,1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+    </Style>
+  </UserControl.Styles>
   <UserControl.Resources>
     <!-- One shared cell template: both the header row and the data rows lay cells out at the precomputed column
          widths, so the columns align. Font family and size are inherited from the host ItemsControl. -->
     <DataTemplate x:Key="TableCellTemplate" x:DataType="preview:TablePreviewCellViewModel">
-      <TextBlock Text="{Binding Text}"
-                 Width="{Binding Width}"
-                 Height="24"
-                 Padding="6,2"
-                 TextTrimming="CharacterEllipsis" />
+      <Border Classes="table-cell" Width="{Binding Column.Width}" Height="24">
+        <TextBlock Text="{Binding Text}"
+                   Padding="6,2"
+                   VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </Border>
+    </DataTemplate>
+    <!-- The header cell adds a grip on its right edge: dragging it resizes the whole column. -->
+    <DataTemplate x:Key="TableHeaderCellTemplate" x:DataType="preview:TablePreviewCellViewModel">
+      <Border Classes="table-cell" Width="{Binding Column.Width}" Height="24">
+        <Panel>
+          <TextBlock Text="{Binding Text}"
+                     Padding="6,2"
+                     VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" />
+          <Thumb Classes="column-grip" Width="7" HorizontalAlignment="Right" Cursor="SizeWestEast" Background="Transparent" />
+        </Panel>
+      </Border>
     </DataTemplate>
   </UserControl.Resources>
   <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
@@ -23,10 +56,11 @@
                   HorizontalScrollBarVisibility="Auto"
                   VerticalScrollBarVisibility="Disabled">
       <Grid RowDefinitions="Auto,*">
-        <ItemsControl Margin="12,0" IsVisible="{Binding HasHeader}"
+        <Border Classes="table-header" Margin="12,0" IsVisible="{Binding HasHeader}">
+        <ItemsControl
                       FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
                       FontWeight="SemiBold"
-                      ItemsSource="{Binding Header.Cells}" ItemTemplate="{StaticResource TableCellTemplate}"
+                      ItemsSource="{Binding Header.Cells}" ItemTemplate="{StaticResource TableHeaderCellTemplate}"
                       AutomationProperties.AutomationId="table-preview-header">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -34,6 +68,7 @@
             </ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
         </ItemsControl>
+        </Border>
         <ScrollViewer Grid.Row="1"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled"
@@ -47,13 +82,15 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="preview:TablePreviewRowViewModel">
-                <ItemsControl Margin="12,0" ItemsSource="{Binding Cells}" ItemTemplate="{StaticResource TableCellTemplate}">
-                  <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                      <StackPanel Orientation="Horizontal" />
-                    </ItemsPanelTemplate>
-                  </ItemsControl.ItemsPanel>
-                </ItemsControl>
+                <Border Classes="table-row" Classes.alt="{Binding IsAlternate}" Margin="12,0">
+                  <ItemsControl ItemsSource="{Binding Cells}" ItemTemplate="{StaticResource TableCellTemplate}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                  </ItemsControl>
+                </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>

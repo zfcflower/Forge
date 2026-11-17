@@ -15,6 +15,10 @@
     <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
   </Style>
+  <Style Selector="SelectableTextBlock.md-footnote">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+  </Style>
   <Style Selector="SelectableTextBlock.md-h1">
     <Setter Property="FontSize" Value="{DynamicResource FontSizeXl}" />
     <Setter Property="FontWeight" Value="Bold" />
@@ -76,6 +80,11 @@
     <Setter Property="Padding" Value="8,4" />
   </Style>
   <Style Selector="Border.md-cell-head">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+  </Style>
+  <!-- Banded rows: every second body row is tinted so a wide table can be followed across. -->
+  <Style Selector="Border.md-cell-alt">
     <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
   </Style>
   <Style Selector="SelectableTextBlock.md-th">

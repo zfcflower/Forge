@@ -73,7 +73,13 @@ internal sealed class MermaidDiagramView : Control
             return;
         }
 
-        context.Custom(new DiagramOperation(new Rect(Bounds.Size), picture, Bounds.Width / natural.Width));
+        // A transparent fill makes the whole diagram a pointer target (the custom operation itself is not hit-testable).
+        context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
+        // The operation owns a reference for as long as the renderer keeps it, so the picture cannot be disposed under a replay.
+        if (picture.TryRetain())
+        {
+            context.Custom(new DiagramOperation(new Rect(Bounds.Size), picture, Bounds.Width / natural.Width));
+        }
     }
 
     /// <summary>One frame of the picture: a scale-to-fit transform and the Skia replay, nothing allocated besides the operation.</summary>
@@ -100,9 +106,7 @@ internal sealed class MermaidDiagramView : Control
             ReferenceEquals(operation.picture, picture) &&
             operation.scale.Equals(scale);
 
-        public void Dispose()
-        {
-        }
+        public void Dispose() => picture.Release();
 
         public void Render(ImmediateDrawingContext context)
         {
