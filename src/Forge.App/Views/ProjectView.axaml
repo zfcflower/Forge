@@ -6,6 +6,7 @@
              x:Class="Forge.App.Views.ProjectView"
              x:DataType="vm:ProjectTreeViewModel">
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/TreeStyles.axaml" />
     <!-- A project's own name heads its subtree, so it reads one step larger and one weight heavier than the rows under it;
          a workspace row names its branch, so it takes the weight without the size. Declared here rather than in the shared
          dictionary: the tree's own view is the only place that spells this. -->
@@ -19,6 +20,12 @@
     <!-- A recycled workspace row (lifecycle 5.1) stays in the tree only to be restored or purged, so it reads greyed. -->
     <Style Selector="Border.tree-row-content.recycled">
       <Setter Property="Opacity" Value="0.55" />
+    </Style>
+    <!-- The row's own tool button is 22 px, so it fits the 24 px name surface instead of pushing the surface (and with it the
+         row) back to Button.icon's 26 px minimum. -->
+    <Style Selector="Button.tree-plus">
+      <Setter Property="MinWidth" Value="22" />
+      <Setter Property="MinHeight" Value="22" />
     </Style>
   </UserControl.Styles>
 

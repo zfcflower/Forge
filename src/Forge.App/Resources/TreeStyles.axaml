@@ -1,0 +1,173 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
+        xmlns:ac="using:AvaloniaEdit.CodeCompletion">
+
+  <!-- Tree rows, tree icons, agent state icons and dots (project tree, file tree, spec tree, branch picker). Included by the views that draw them; the chevron (tree-chevron) stays in Controls.axaml because tool and turn rows use it. -->
+
+  <!-- Tree rows (project tree, file tree, spec tree). The row box is 26 px and rows touch vertically, so a tree's 1 px
+       indent guides run on across row boundaries: the guides stretch with this box, never with the name surface. -->
+  <Style Selector="Border.tree-row">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- The hover/selection surface starts after the indent guides: rounded, muted, stretched to the right edge, and 24 px tall
+       with a 1 px gap above and below, so two adjacent rows' surfaces never meet. 24 + 1 + 1 is the row's own 26 px, which is
+       why the pitch is the row box and not the surface. Anything inside a row that carries a fixed height has to fit 24, or it
+       pushes the surface back to 26 and the pitch grows with it. -->
+  <Style Selector="Border.tree-row-content">
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="MinHeight" Value="24" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+  </Style>
+
+  <Style Selector="Border.tree-row-content:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="ListBoxItem:selected Border.tree-row-content">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+  </Style>
+
+  <!-- A project or workspace row heads a subtree, it is not something you are "on": clicking it expands, and the row you
+       are on is the session below it, so the selection colour would lie about which row is current. The selection itself
+       stays — the tree's keyboard navigation and its refresh restore both read it — only the background is withheld. -->
+  <Style Selector="ListBoxItem:selected Border.tree-row-content.heading-row">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- The row the shell is showing: the active session in the main region, or the sub-agent whose tab the bottom group has. -->
+  <Style Selector="Border.tree-row-content.active-row">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+  </Style>
+
+  <!-- A tree row's icon is the same size as the text beside it: rows set no font size of their own, so the icon follows the
+       13px row text, and the one heavier row (a project's own name, 14px) says so with the project-icon class. -->
+  <Style Selector="wc|FluentIcon.tree-icon">
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Height" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tree-icon.project-icon">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="14" />
+    <!-- The one coloured icon in the tree: a project row heads a subtree rather than naming a session, and the brand tier
+         that carries readable pixels keeps it distinguishable from the muted rows underneath. -->
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
+  </Style>
+
+  <!-- The active session's row takes the primary colour: the tree's own "this is the conversation you are in" mark. Every
+       other conversation row stays muted. -->
+  <Style Selector="wc|FluentIcon.tree-icon.active-session">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
+  <Style Selector="Button.tree-chevron-button">
+    <Setter Property="Width" Value="8" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="MinWidth" Value="8" />
+    <Setter Property="MinHeight" Value="24" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.tree-chevron-button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Button.tree-chevron-button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- A transparent whole-row hit target for the file tree: the name is plain body text, not a link button. Its height
+       follows the 24 px name surface so the row keeps its 26 px pitch. -->
+  <Style Selector="Button.tree-row-hit">
+    <Setter Property="MinHeight" Value="24" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.tree-row-hit:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Button.tree-row-hit:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- Agent kind icons are coloured by run state; ended/unknown falls back to the muted stroke above. -->
+  <Style Selector="wc|FluentIcon.tree-icon.agent-running">
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tree-icon.agent-queued">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tree-icon.agent-completed">
+    <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tree-icon.agent-failed">
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tree-icon.agent-stopped">
+    <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tree-icon.agent-running-animated">
+    <Style.Animations>
+      <Animation Duration="0:0:1.2" IterationCount="INFINITE" Easing="SineEaseInOut">
+        <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
+        <KeyFrame Cue="50%"><Setter Property="Opacity" Value="0.3" /></KeyFrame>
+        <KeyFrame Cue="100%"><Setter Property="Opacity" Value="1" /></KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <!-- The project tree spells a sub-agent's state with a dot or a check instead of a caption; the colours match the icon
+       the same row shows, so one glance reads the state twice. -->
+  <Style Selector="Ellipse.status-dot.agent-running">
+    <Setter Property="Fill" Value="{DynamicResource BrandActionBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-queued">
+    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-failed">
+    <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-stopped">
+    <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-ended">
+    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.status-check">
+    <Setter Property="Width" Value="11" />
+    <Setter Property="Height" Value="11" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+</Styles>
