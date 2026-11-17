@@ -1,20 +1,38 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:preview="using:Forge.App.ViewModels.Preview"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.Preview.ImagePreviewView"
              x:DataType="preview:ImageFilePreviewViewModel">
   <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
-    <TextBlock Classes="caption" Margin="12,6" Text="{Binding Caption}" />
-    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-      <Border HorizontalAlignment="Center"
-              VerticalAlignment="Center"
-              Padding="12"
-              CornerRadius="6"
-              BorderThickness="1"
-              BorderBrush="{DynamicResource BorderStrongBrush}">
-        <Image Source="{Binding Image}" Stretch="None" />
-      </Border>
-    </ScrollViewer>
+    <Border Classes="toolbar">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+        <TextBlock Classes="caption" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="{Binding Caption}" />
+        <wc:PanelIconButton x:Name="PreviousButton" Grid.Column="1" Icon="{DynamicResource IconChevronLeft}" Click="OnPrevious" IsVisible="False"
+                            ToolTip.Tip="{Binding [viewer.previous], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="image-previous" AutomationProperties.Name="{Binding [viewer.previous], Source={x:Static loc:Loc.Instance}}" />
+        <wc:PanelIconButton x:Name="NextButton" Grid.Column="2" Icon="{DynamicResource IconChevronRight}" Click="OnNext" IsVisible="False"
+                            ToolTip.Tip="{Binding [viewer.next], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="image-next" AutomationProperties.Name="{Binding [viewer.next], Source={x:Static loc:Loc.Instance}}" />
+        <wc:PanelIconButton Grid.Column="3" Icon="{DynamicResource IconZoomOut}" Click="OnZoomOut"
+                            ToolTip.Tip="{Binding [viewer.zoomOut], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="image-zoom-out" AutomationProperties.Name="{Binding [viewer.zoomOut], Source={x:Static loc:Loc.Instance}}" />
+        <Button Grid.Column="4" Classes="ghost" MinWidth="52" Padding="6,0" Click="OnActual"
+                ToolTip.Tip="{Binding [viewer.actual], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="image-zoom-actual">
+          <TextBlock x:Name="ZoomText" Classes="caption" TextAlignment="Center" />
+        </Button>
+        <wc:PanelIconButton Grid.Column="5" Icon="{DynamicResource IconZoomIn}" Click="OnZoomIn"
+                            ToolTip.Tip="{Binding [viewer.zoomIn], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="image-zoom-in" AutomationProperties.Name="{Binding [viewer.zoomIn], Source={x:Static loc:Loc.Instance}}" />
+        <wc:PanelIconButton Grid.Column="6" Icon="{DynamicResource IconScaleFit}" Click="OnFit"
+                            ToolTip.Tip="{Binding [viewer.fit], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="image-zoom-fit" AutomationProperties.Name="{Binding [viewer.fit], Source={x:Static loc:Loc.Instance}}" />
+      </Grid>
+    </Border>
+    <views:ZoomPanView x:Name="Zoom" Grid.Row="1" />
     <TextBlock Grid.Row="2" Classes="caption" Margin="12,6" TextWrapping="Wrap"
                Foreground="{DynamicResource StatusErrorBrush}"
                IsVisible="{Binding HasNotice}" Text="{Binding Notice}"

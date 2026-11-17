@@ -63,6 +63,9 @@ internal static class FilePreviewClassifier
     public static bool IsImageExtension(string path) =>
         ExtensionOf(path) is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp";
 
+    /// <summary>An <c>.svg</c> file: shown as a vector picture in the preview, not as text.</summary>
+    public static bool IsSvgExtension(string path) => ExtensionOf(path) == ".svg";
+
     /// <summary>The field separator a table preview parses: tab for TSV (no quoting), comma otherwise.</summary>
     public static char TableSeparator(string path) =>
         string.Equals(ExtensionOf(path), ".tsv", StringComparison.OrdinalIgnoreCase) ? '\t' : ',';

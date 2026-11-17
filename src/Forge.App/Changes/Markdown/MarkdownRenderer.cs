@@ -256,7 +256,6 @@ internal static class MarkdownRenderer
         var stack = new StackPanel { Spacing = 6 };
         var run = new List<MdInline>();
         WrapPanel? row = null;
-        List<MarkdownImageView>? group = null;
         foreach (var inline in inlines)
         {
             if (inline.Kind != MdInlineKind.Image)
@@ -287,11 +286,10 @@ internal static class MarkdownRenderer
             {
                 FlushRun(stack, run);
                 row = new WrapPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
-                group = [];
                 stack.Children.Add(row);
             }
 
-            row.Children.Add(new MarkdownImageView(url, PlainText(inline.Children), group!));
+            row.Children.Add(new MarkdownImageView(url, PlainText(inline.Children)));
         }
 
         FlushRun(stack, run);
@@ -356,7 +354,7 @@ internal static class MarkdownRenderer
         // A closed svg fence is drawn as a picture tile; while it streams (or when it is not a loadable document) it is code.
         if (block.Kind == MdBlockKind.Code && block.FenceClosed && IsSvg(info) && block.Text.Contains("<svg", StringComparison.OrdinalIgnoreCase))
         {
-            return new MarkdownImageView("svg", "SVG", [], block.Text);
+            return new MarkdownImageView("svg", "SVG", block.Text);
         }
 
         return new MarkdownCodeBlock(block.Text, info);

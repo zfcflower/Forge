@@ -34,6 +34,8 @@ internal static partial class TranscriptScenarios
         "rapid",
         "follow-expand",
         "subagent-new-turn",
+        "click-inside",
+        "click-inside-autoscroll",
     ];
 
 
@@ -171,6 +173,20 @@ internal static partial class TranscriptScenarios
                 probe.Scroller.Offset = new Vector(0, probe.Scroller.Offset.Y + (now - y));
                 await FramesAsync(2).ConfigureAwait(true);
             }
+        }
+
+        /// <summary>A left press and release at the middle of the visible part of <paramref name="target"/>, as the mouse would send them.</summary>
+        private void PointerClick(Control target)
+        {
+            var size = target.Bounds.Size;
+            var local = new Point(Math.Min(20, size.Width / 2), Math.Min(8, size.Height / 2));
+            var position = target.TranslatePoint(local, window) ?? throw new InvalidOperationException("target is not attached");
+            var pointer = new Avalonia.Input.Pointer(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Mouse, true);
+            target.Focus(Avalonia.Input.NavigationMethod.Pointer);
+            var pressed = new Avalonia.Input.PointerPoint(pointer, position, new Avalonia.Input.PointerPointProperties(Avalonia.Input.RawInputModifiers.LeftMouseButton, Avalonia.Input.PointerUpdateKind.LeftButtonPressed));
+            target.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(target, pointer, window, position, 0, pressed.Properties, Avalonia.Input.KeyModifiers.None));
+            var released = new Avalonia.Input.PointerPointProperties(Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PointerUpdateKind.LeftButtonReleased);
+            target.RaiseEvent(new Avalonia.Input.PointerReleasedEventArgs(target, pointer, window, position, 0, released, Avalonia.Input.KeyModifiers.None, Avalonia.Input.MouseButton.Left));
         }
 
         private static void Click(Button button)
@@ -414,6 +430,27 @@ internal static partial class TranscriptScenarios
                     await FramesAsync(4).ConfigureAwait(true);
                     var sv = probe.Scroller;
                     results.Add($"following {probe.Follower.IsFollowing}, distance from bottom {F(sv.Extent.Height - sv.Viewport.Height - sv.Offset.Y)}");
+                    break;
+                }
+
+                case "click-inside":
+                case "click-inside-autoscroll":
+                {
+                    // A press and release (a real pointer press, not a command) inside the text of an open tool row. The list
+                    // must not move: no jump to the row or to the text. "-autoscroll" is a list that still has the framework
+                    // default of scrolling a newly selected row into view.
+                    if (name == "click-inside-autoscroll")
+                    {
+                        probe.List.AutoScrollToSelectedItem = true;
+                    }
+
+                    var tool = Tool(transcript, 20, 2);
+                    tool.IsExpanded = true;
+                    await FramesAsync(2).ConfigureAwait(true);
+                    await PlaceAsync(probe, tool, -120).ConfigureAwait(true);
+                    var container = probe.List.ContainerFromItem(tool)!;
+                    var text = container.GetVisualDescendants().OfType<SelectableTextBlock>().Last(t => t.IsEffectivelyVisible);
+                    results.Add(await MeasureAsync(probe, "press inside result", () => ElementY(probe, text), () => PointerClick(text)).ConfigureAwait(true));
                     break;
                 }
 

@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using Forge.App.Localization;
 using Forge.App.Logging;
+using Forge.App.Services;
 using ZLogger;
 
 namespace Forge.App.ViewModels.Preview;
@@ -18,6 +19,7 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
     internal const int MaxLongEdge = 4096;
 
     private Bitmap? image;
+    private ChatPicture? picture;
 
     private ImageFilePreviewViewModel(string path, string name, long byteSize, Bitmap? image, int pixelWidth, int pixelHeight)
         : base(path, name, byteSize)
@@ -34,7 +36,10 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
 
     public int PixelHeight { get; }
 
-    public bool HasImage => image is not null;
+    /// <summary>The vector picture of an <c>.svg</c> file; null for a bitmap. Replayed at the zoomed scale, never rasterized.</summary>
+    public MermaidPicture? Vector => picture?.Vector;
+
+    public bool HasImage => image is not null || picture is not null;
 
     public override string Caption =>
         PreviewStrings.ImageCaptionText(Name, PixelWidth, PixelHeight, SizeText(ByteSize)).Resolve();
@@ -43,6 +48,8 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
     {
         image?.Dispose();
         image = null;
+        picture?.Release();
+        picture = null;
     }
 
     public static ImageFilePreviewViewModel Build(string path, long byteSize, Func<byte[], Bitmap?>? decoder, CancellationToken ct = default)
@@ -51,9 +58,14 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
         try
         {
             ct.ThrowIfCancellationRequested();
+            if (FilePreviewClassifier.IsSvgExtension(path))
+            {
+                return BuildSvg(path, name, byteSize);
+            }
+
             var data = File.ReadAllBytes(path);
             ct.ThrowIfCancellationRequested();
-            return Build(data, name, byteSize, decoder);
+            return Build(data, name, byteSize, decoder, path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -66,7 +78,7 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
     /// version of a file exists nowhere on disk. The caller decides the name (and whether the bytes are within the preview
     /// limit) and gets the same bounded decode, scaling and failure notice as the file overload.
     /// </summary>
-    public static ImageFilePreviewViewModel Build(byte[] data, string name, long byteSize, Func<byte[], Bitmap?>? decoder)
+    public static ImageFilePreviewViewModel Build(byte[] data, string name, long byteSize, Func<byte[], Bitmap?>? decoder, string? path = null)
     {
         ArgumentNullException.ThrowIfNull(data);
         Bitmap? decoded;
@@ -77,12 +89,12 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             AppLogs.File.ZLogWarning($"image decode failed: {name}: {exception.Message}");
-            return Failed(name, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
+            return Failed(path ?? name, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
         }
 
         if (decoded is null)
         {
-            return Failed(name, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
+            return Failed(path ?? name, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
         }
 
         var pixelSize = decoded.PixelSize;
@@ -98,7 +110,20 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
             decoded = scaled;
         }
 
-        return new ImageFilePreviewViewModel(name, name, byteSize, decoded, decoded.PixelSize.Width, decoded.PixelSize.Height);
+        return new ImageFilePreviewViewModel(path ?? name, name, byteSize, decoded, decoded.PixelSize.Width, decoded.PixelSize.Height);
+    }
+
+    /// <summary>An SVG file as a vector picture, through the same self-contained check the transcript's SVGs get.</summary>
+    private static ImageFilePreviewViewModel BuildSvg(string path, string name, long byteSize)
+    {
+        var loaded = ChatPictures.LoadSvg(File.ReadAllText(path), name, path);
+        if (loaded is null)
+        {
+            return Failed(path, name, byteSize, PreviewStrings.ImageDecodeFailed(name));
+        }
+
+        var size = loaded.Size;
+        return new ImageFilePreviewViewModel(path, name, byteSize, null, (int)size.Width, (int)size.Height) { picture = loaded };
     }
 
     private static ImageFilePreviewViewModel Failed(string path, string name, long byteSize, LocText notice)

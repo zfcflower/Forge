@@ -301,6 +301,8 @@ internal sealed partial class FileDocumentViewModel
                 return new FileRead(null, PlaceholderFilePreviewViewModel.ForLfs(full, info.Length, firstBytes), false, 0);
             case FilePreviewKind.Image:
                 return ReadImagePreview(full, info);
+            case FilePreviewKind.Text when FilePreviewClassifier.IsSvgExtension(full):
+                return ReadImagePreview(full, info);
             case FilePreviewKind.Table:
                 return new FileRead(
                     null,

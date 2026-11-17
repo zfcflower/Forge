@@ -43,7 +43,7 @@ internal static class Program
             .UsePlatformDetect()
             // Popups, flyouts and tooltips are drawn in the window's own overlay layer instead of each opening a native
             // window of its own (an HWND plus a render target per popup is what made the model picker slow to appear).
-            .With(new Win32PlatformOptions { OverlayPopups = true })
+            .With(new Win32PlatformOptions { OverlayPopups = true, RenderingMode = Environment.GetEnvironmentVariable("FORGE_RENDER") == "soft" ? [Win32RenderingMode.Software] : [Win32RenderingMode.AngleEgl, Win32RenderingMode.Software] })
             .With(new X11PlatformOptions { OverlayPopups = true })
             .With(new AvaloniaNativePlatformOptions { OverlayPopups = true })
             .WithInterFont()

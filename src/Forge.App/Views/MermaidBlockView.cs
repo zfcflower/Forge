@@ -105,7 +105,8 @@ internal sealed class MermaidBlockView : Border, ICopyableText
 
         diagramView = new MermaidDiagramView { IsVisible = false };
         // The expand button opens the diagram in the viewer (zoom, drag, centre); like a click on the diagram itself.
-        var viewButton = new Button { Content = new TextBlock { Text = "⤢", FontSize = 13 }, Width = 26, Height = 22 };
+        var viewButton = new Button { Content = new FluentIcon { Width = 12, Height = 12 }, Width = 26, Height = 22 };
+        ((FluentIcon)viewButton.Content!).Bind(Avalonia.Controls.PathIcon.DataProperty, viewButton.GetResourceObservable("IconFullScreen"));
         viewButton.Classes.Add("ghost");
         viewButton.Classes.Add("icon");
         viewButton.Click += (_, _) => OpenViewer();
@@ -459,12 +460,14 @@ internal sealed class MermaidBlockView : Border, ICopyableText
         }
     }
 
+    /// <summary>The drawn diagram; null until it has rendered.</summary>
+    internal MermaidPicture? Diagram => diagramView.Picture;
+
     private void OpenViewer()
     {
-        if (diagramView.Picture is { } picture && ChatPicture.ForDiagram(picture, "mermaid") is { } wrapped)
+        if (diagramView.Picture is not null)
         {
-            ImageViewerWindow.Open(this, [wrapped], 0);
-            wrapped.Release();
+            _ = PicturePreview.OpenAsync(this);
         }
     }
 

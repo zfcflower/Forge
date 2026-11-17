@@ -11,10 +11,9 @@ using SkiaSharp;
 namespace Forge.App.Views;
 
 /// <summary>
-/// Shows one picture (bitmap or vector) that can be zoomed with the wheel or the buttons and dragged with the pointer. A new
-/// picture starts "fit": as large as the view allows without upscaling past 4x, centred. Once zoomed the picture is kept inside
-/// the view (it can be dragged only while it is larger than the view; a smaller one stays centred). Vector pictures are replayed
-/// at the zoomed scale, so a zoomed diagram stays crisp.
+/// Shows one picture (bitmap or vector) that can be zoomed with the wheel or the buttons and dragged with the pointer. A new picture starts "fit":
+/// as large as the view allows without upscaling past 4x, centred. Once zoomed the picture is kept inside the view (it can be
+/// dragged only while it is larger than the view; a smaller one stays centred). The file preview's image view hosts it.
 /// </summary>
 internal sealed class ZoomPanView : Control
 {
@@ -31,7 +30,13 @@ internal sealed class ZoomPanView : Control
     private Point dragStart;
     private Point dragOrigin;
 
-    internal ZoomPanView()
+    /// <summary>
+    /// The size the view was last arranged at. <see cref="Visual.Bounds"/> is only updated after the arrange pass returns, so
+    /// fitting from inside it (or right after a picture is set) with Bounds would centre against a stale (often empty) size.
+    /// </summary>
+    private Size viewSize;
+
+    public ZoomPanView()
     {
         ClipToBounds = true;
         Focusable = true;
@@ -43,11 +48,15 @@ internal sealed class ZoomPanView : Control
 
     internal event Action? ZoomChanged;
 
-    internal void SetPicture(ChatPicture? picture)
+    /// <summary>
+    /// Shows a bitmap or a vector picture (the owner keeps either alive while it is shown) fitted and centred. A vector picture
+    /// is replayed at the zoomed scale, so a zoomed diagram or SVG stays crisp.
+    /// </summary>
+    internal void Show(Bitmap? image, MermaidPicture? diagram = null)
     {
-        bitmap = picture?.Bitmap;
-        vector = picture?.Vector;
-        natural = picture?.Size ?? default;
+        bitmap = image;
+        vector = diagram;
+        natural = image?.Size ?? (diagram is null ? default : new Size(diagram.Size.Width, diagram.Size.Height));
         Fit();
     }
 
@@ -59,9 +68,9 @@ internal sealed class ZoomPanView : Control
         ZoomChanged?.Invoke();
     }
 
-    internal void Actual() => ZoomTo(1, new Point(Bounds.Width / 2, Bounds.Height / 2));
+    internal void Actual() => ZoomTo(1, new Point(viewSize.Width / 2, viewSize.Height / 2));
 
-    internal void ZoomBy(double factor) => ZoomTo(scale * factor, new Point(Bounds.Width / 2, Bounds.Height / 2));
+    internal void ZoomBy(double factor) => ZoomTo(scale * factor, new Point(viewSize.Width / 2, viewSize.Height / 2));
 
     private void ZoomTo(double next, Point anchor)
     {
@@ -83,13 +92,13 @@ internal sealed class ZoomPanView : Control
 
     private void Layout()
     {
-        if (!(natural.Width > 0) || !(Bounds.Width > 0) || !(Bounds.Height > 0))
+        if (!(natural.Width > 0) || !(viewSize.Width > 0) || !(viewSize.Height > 0))
         {
             return;
         }
 
-        scale = Math.Min(4, Math.Min(Bounds.Width / natural.Width, Bounds.Height / natural.Height));
-        offset = new Point((Bounds.Width - natural.Width * scale) / 2, (Bounds.Height - natural.Height * scale) / 2);
+        scale = Math.Min(4, Math.Min(viewSize.Width / natural.Width, viewSize.Height / natural.Height));
+        offset = new Point((viewSize.Width - natural.Width * scale) / 2, (viewSize.Height - natural.Height * scale) / 2);
     }
 
     private void Clamp()
@@ -97,13 +106,14 @@ internal sealed class ZoomPanView : Control
         var width = natural.Width * scale;
         var height = natural.Height * scale;
         offset = new Point(
-            width <= Bounds.Width ? (Bounds.Width - width) / 2 : Math.Clamp(offset.X, Bounds.Width - width, 0),
-            height <= Bounds.Height ? (Bounds.Height - height) / 2 : Math.Clamp(offset.Y, Bounds.Height - height, 0));
+            width <= viewSize.Width ? (viewSize.Width - width) / 2 : Math.Clamp(offset.X, viewSize.Width - width, 0),
+            height <= viewSize.Height ? (viewSize.Height - height) / 2 : Math.Clamp(offset.Y, viewSize.Height - height, 0));
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
         var size = base.ArrangeOverride(finalSize);
+        viewSize = finalSize;
         if (fitted)
         {
             Layout();
@@ -197,12 +207,9 @@ internal sealed class ZoomPanView : Control
                 context.DrawImage(bitmap, new Rect(bitmap.Size), target);
             }
         }
-        else if (vector is not null)
+        else if (vector is not null && vector.TryRetain())
         {
-            if (vector.TryRetain())
-            {
-                context.Custom(new VectorOperation(new Rect(Bounds.Size), vector, scale, offset));
-            }
+            context.Custom(new VectorOperation(new Rect(Bounds.Size), vector, scale, offset));
         }
     }
 

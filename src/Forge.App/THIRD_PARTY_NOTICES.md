@@ -25,6 +25,7 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`,
   `code`, `document_text`, `globe`, `info`, `lightbulb`, `task_list_ltr`, `warning`;
   the model-capability icons (2026-11) add `brain_sparkle`, `document_pdf`, `image`, `speaker_2`, `text_description` and `video`.
+  The picture viewer (2026-11) adds `zoom_in`, `zoom_out`, `scale_fit` and `full_screen_maximize`.
   The chat timeline (wave W13) added a second, exact regular variant of `search`, `edit`, `globe`, `plug_connected`,
   `shield_checkmark` and `wrench` (`*Regular` + `*Filled` in `Icons.axaml`) because the older outline keys were
   coordinate-rounded replays of the same FIS path; the two variants of one node type must be the same glyph at two weights.

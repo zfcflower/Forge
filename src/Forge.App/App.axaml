@@ -686,9 +686,57 @@
       </Grid>
     </DataTemplate>
 
-    <!-- One agent turn: its metadata row, the blocks of the reply, and the closing footnote, all on the same axis. -->
+    <!-- One agent turn is several rows of the flat transcript list, all on the same axis: its metadata row (the card itself),
+         one row per block of the reply, and the closing footnote row. -->
     <DataTemplate DataType="vm:TurnCardViewModel" x:DataType="vm:TurnCardViewModel">
       <views:TimelineTurnView />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:TurnFootnoteViewModel" x:DataType="vm:TurnFootnoteViewModel">
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Role="Footnote" Kind="Error" IsFailing="True" />
+        <TextBlock Grid.Column="1"
+                   Classes="caption"
+                   Margin="0,4,8,6"
+                   TextWrapping="Wrap"
+                   Text="{Binding Text}" />
+      </Grid>
+    </DataTemplate>
+
+    <!-- The reasoning row carries no business data beyond its text. A collapsed row shows the first line only. -->
+    <DataTemplate DataType="vm:TurnThinkingViewModel" x:DataType="vm:TurnThinkingViewModel">
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Role="Block" Kind="Thinking" IsRunning="{Binding IsStreaming}" />
+        <StackPanel Grid.Column="1" Margin="0,2,0,4" Spacing="2">
+          <Button Classes="link"
+                  HorizontalAlignment="Left"
+                  HorizontalContentAlignment="Left"
+                  Command="{Binding ToggleCommand}"
+                  AutomationProperties.AutomationId="thinking-toggle"
+                  AutomationProperties.Name="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}" Classes="tree-chevron" Classes.expanded="{Binding IsExpanded}" Width="12" Height="12" />
+              <TextBlock Classes="caption" Text="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Classes="caption"
+                         MaxWidth="560"
+                         Text="{Binding Preview}"
+                         TextTrimming="CharacterEllipsis"
+                         IsVisible="{Binding !IsExpanded}" />
+            </StackPanel>
+          </Button>
+          <ScrollViewer MaxHeight="240"
+                        IsVisible="{Binding IsExpanded}"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+            <TextBlock Classes="caption"
+                       Margin="0,0,8,0"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       Text="{Binding Text}"
+                       AutomationProperties.AutomationId="thinking-text" />
+          </ScrollViewer>
+        </StackPanel>
+      </Grid>
     </DataTemplate>
 
     <DataTemplate DataType="vm:TurnTextViewModel" x:DataType="vm:TurnTextViewModel">

@@ -37,6 +37,8 @@ internal static class ProviderStrings
 
     public const string MetadataCapabilitiesKey = "providers.metadata.capabilities";
 
+    public const string MetadataReasoningKey = "providers.metadata.reasoning";
+
     public const string CapabilityTextKey = "providers.metadata.capability.text";
 
     public const string CapabilityImageKey = "providers.metadata.capability.image";
@@ -336,6 +338,7 @@ internal static class ProviderStrings
         Loc.Register(RowDeleteArmedKey, "再次点击删除", "Click again to delete");
         Loc.Register(SectionRefreshKey, "刷新", "Refresh");
         Loc.Register(MetadataCapabilitiesKey, "能力", "Capabilities");
+        Loc.Register(MetadataReasoningKey, "推理档位", "Reasoning tiers");
         Loc.Register(CapabilityTextKey, "文本", "text");
         Loc.Register(CapabilityImageKey, "图像", "image");
         Loc.Register(CapabilityPdfKey, "PDF", "PDF");
@@ -616,6 +619,8 @@ internal static class ProviderStrings
     public static string ManagedText => Localization.Loc.Instance[ManagedKey];
 
     public static string MetadataCapabilities => Localization.Loc.Instance[MetadataCapabilitiesKey];
+
+    public static string MetadataReasoning => Localization.Loc.Instance[MetadataReasoningKey];
 
     public static string CapabilityTextLabel => Localization.Loc.Instance[CapabilityTextKey];
 

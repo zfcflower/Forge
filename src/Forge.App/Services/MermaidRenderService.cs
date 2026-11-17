@@ -99,10 +99,14 @@ internal sealed class MermaidPicture
         }
     }
 
-    internal MermaidPicture(SKSvg owner)
+    /// <summary>The SVG text the picture was parsed from; the preview opens a copy of it as a file, so it stays vector.</summary>
+    internal string? Svg { get; }
+
+    internal MermaidPicture(SKSvg owner, string? svg = null)
     {
         ArgumentNullException.ThrowIfNull(owner);
         this.owner = owner;
+        Svg = svg;
         if (owner.Picture is null)
         {
             throw new InvalidOperationException(Loc.Instance[MermaidStrings.EmptyPicture]);
@@ -272,7 +276,7 @@ internal sealed partial class MermaidRenderService
             return MermaidRenderResult.Failed(MermaidRenderFailure.Internal, Loc.Instance[MermaidStrings.EmptyPicture]);
         }
 
-        return MermaidRenderResult.Rendered(new MermaidPicture(skSvg));
+        return MermaidRenderResult.Rendered(new MermaidPicture(skSvg, concrete));
     }
 
     internal static MermaidRenderResult RenderCore(MermaidRenderRequest request)

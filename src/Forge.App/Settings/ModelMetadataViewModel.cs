@@ -62,8 +62,11 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
 
     public string ModelHeader => Loc.Instance[ProviderStrings.MetadataModelKey];
 
-    /// <summary>The column of what the model accepts (input kinds and reasoning), which is read-only.</summary>
+    /// <summary>The column of what the model accepts (input kinds), which is read-only.</summary>
     public string CapabilitiesHeader => ProviderStrings.MetadataCapabilities;
+
+    /// <summary>The column of the reasoning tiers the model offers, which is read-only.</summary>
+    public string ReasoningHeader => ProviderStrings.MetadataReasoning;
 
     public string ContextHeader => Loc.Instance[ProviderStrings.MetadataContextKey];
 
@@ -188,7 +191,6 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
         Rows.Clear();
         var list = seeds as IList<RowSeed> ?? seeds.ToList();
         var showCacheWrite = billsCacheWrite || list.Any(static seed => seed.Metadata.Pricing?.CacheWrite is not null);
-        var index = 0;
         foreach (var seed in list)
         {
             var row = new ModelMetadataRowViewModel(
@@ -196,12 +198,9 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
                 seed.Metadata,
                 showCacheWrite: showCacheWrite,
                 capabilities: seed.Capabilities,
-                isShown: preferences is null || !preferences.IsModelHidden(seed.Model),
-                isAlternate: (index & 1) == 1,
-                showsVisibility: preferences is not null);
+                isShown: preferences is null || !preferences.IsModelHidden(seed.Model));
             row.PropertyChanged += OnRowPropertyChanged;
             Rows.Add(row);
-            index++;
         }
 
         OnPropertyChanged(nameof(HasRows));
@@ -374,7 +373,7 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
 
         foreach (var name in new[]
                  {
-                     nameof(Title), nameof(Intro), nameof(ModelHeader), nameof(CapabilitiesHeader), nameof(ContextHeader), nameof(InputHeader),
+                     nameof(Title), nameof(Intro), nameof(ModelHeader), nameof(CapabilitiesHeader), nameof(ReasoningHeader), nameof(ContextHeader), nameof(InputHeader),
                      nameof(OutputHeader), nameof(CacheReadHeader), nameof(CacheWriteHeader), nameof(VisibilityHeader),
                      nameof(VisibilityTooltip), nameof(PerMillion), nameof(SaveText), nameof(RefreshText), nameof(ResetText),
                      nameof(CloseText), nameof(EmptyText),
@@ -415,14 +414,10 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
         ModelMetadata metadata,
         bool showCacheWrite = true,
         ModelCapabilities? capabilities = null,
-        bool isShown = true,
-        bool isAlternate = false,
-        bool showsVisibility = true)
+        bool isShown = true)
     {
         Model = model;
         ShowCacheWrite = showCacheWrite;
-        IsAlternate = isAlternate;
-        ShowsVisibility = showsVisibility;
         this.isShown = isShown;
         capabilityValue = capabilities ?? metadata.Capabilities ?? ModelCapabilities.Unknown;
         var inputs = capabilityValue.Inputs ?? ModelInputs.None;
@@ -435,12 +430,13 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
         {
             HasReasoning = true;
             reasoningSteps = steps.Count;
-            ReasoningLevel = (steps.Count - 1).ToString(CultureInfo.InvariantCulture);
+            ReasoningText = string.Join(
+                "/",
+                steps.Where(static effort => effort != ThinkingEffort.Off).Select(SessionStrings.ComposerEffortName));
         }
         else if (capabilityValue.Reasoning == true)
         {
             HasReasoning = true;
-            ReasoningLevel = string.Empty;
         }
         contextWindow = Format(metadata.ContextWindow);
         input = Format(metadata.Pricing?.Input);
@@ -467,10 +463,10 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
 
     public bool HasReasoning { get; }
 
-    /// <summary>The number after the reasoning icon ("3"), or empty when only "reasons" is known.</summary>
-    public string ReasoningLevel { get; } = string.Empty;
+    /// <summary>The tiers this model offers ("低/中/高"), empty when only "it reasons" is known.</summary>
+    public string ReasoningText { get; } = string.Empty;
 
-    public bool HasReasoningLevel => ReasoningLevel.Length > 0;
+    public bool HasReasoningText => ReasoningText.Length > 0;
 
     public string ReasoningLabel => HasReasoning ? ProviderStrings.CapabilityReasoningLabel(reasoningSteps) : string.Empty;
 
@@ -486,12 +482,6 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
 
     /// <summary>Whether this row shows the cache-write price; hidden for providers that never bill it.</summary>
     public bool ShowCacheWrite { get; }
-
-    /// <summary>Whether the first visibility column exists (the window has live preferences).</summary>
-    public bool ShowsVisibility { get; }
-
-    /// <summary>Alternate rows get the muted background so a wide table stays readable.</summary>
-    public bool IsAlternate { get; }
 
     /// <summary>Staged visibility; written to <c>preferences.modelsHidden</c> only when the window saves.</summary>
     public bool IsShown

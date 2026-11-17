@@ -44,6 +44,63 @@ internal sealed class ChatPicture
     internal static ChatPicture? ForDiagram(MermaidPicture diagram, string url) =>
         diagram.TryRetain() ? new ChatPicture(null, diagram, url, null) : null;
 
+    /// <summary>
+    /// The picture as a file the preview tab can open: a local file is itself; anything else (remote, a diagram, an inline SVG)
+    /// is written under the temp folder - vector stays vector (an <c>.svg</c> copy of its text), a bitmap becomes a PNG - and
+    /// that file is returned. Null when there is nothing to write or the write failed. Runs on a pool thread.
+    /// </summary>
+    internal string? Materialize()
+    {
+        if (LocalPath is { } local && File.Exists(local))
+        {
+            return local;
+        }
+
+        if (!TryRetain())
+        {
+            return null;
+        }
+
+        try
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "forge-pictures");
+            Directory.CreateDirectory(folder);
+            PictureSet.Sweep(folder);
+            if (Vector is { Svg: { } svg })
+            {
+                return Store(folder, "diagram-", ".svg", svg, path => File.WriteAllText(path, svg));
+            }
+
+            if (Bitmap is { } bitmap)
+            {
+                return Store(folder, "picture-", ".png", Url + "|" + bitmap.PixelSize, path => bitmap.Save(path, new PngBitmapEncoderOptions()));
+            }
+
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+        finally
+        {
+            Release();
+        }
+    }
+
+    /// <summary>The file for <paramref name="key"/> under <paramref name="folder"/>, written once: the name is the key's hash.</summary>
+    private static string Store(string folder, string prefix, string extension, string key, Action<string> write)
+    {
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..16];
+        var path = Path.Combine(folder, prefix + hash.ToLowerInvariant() + extension);
+        if (!File.Exists(path))
+        {
+            write(path);
+        }
+
+        return path;
+    }
+
     /// <summary>Takes one more reference; false when the last one was already released (the picture is gone).</summary>
     internal bool TryRetain()
     {
@@ -429,6 +486,54 @@ internal static class ChatPictures
             return null;
         }
 
-        return new ChatPicture(null, new MermaidPicture(parsed), url, localPath);
+        return new ChatPicture(null, new MermaidPicture(parsed, svg), url, localPath);
+    }
+}
+
+/// <summary>
+/// The pictures of the reply that was last opened large, in order, as files. The preview's previous/next buttons step through
+/// it: an image whose file is in the set shows them, any other image (a file from the tree) does not.
+/// </summary>
+internal static class PictureSet
+{
+    private static string[] paths = [];
+    private static bool swept;
+
+    internal static void Set(IEnumerable<string> files) => paths = [.. files];
+
+    internal static bool Contains(string path) => paths.Length > 1 && IndexOf(path) >= 0;
+
+    /// <summary>The file <paramref name="step"/> places from <paramref name="path"/>, wrapping around; null when it is not in the set.</summary>
+    internal static string? Step(string path, int step)
+    {
+        var at = IndexOf(path);
+        return at < 0 ? null : paths[(at + step % paths.Length + paths.Length) % paths.Length];
+    }
+
+    private static int IndexOf(string path) =>
+        Array.FindIndex(paths, candidate => string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Once per run, removes the files of earlier runs that are over a week old from the temp picture folder.</summary>
+    internal static void Sweep(string folder)
+    {
+        if (swept)
+        {
+            return;
+        }
+
+        swept = true;
+        foreach (var file in Directory.EnumerateFiles(folder))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(file) < DateTime.UtcNow.AddDays(-7))
+                {
+                    File.Delete(file);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
     }
 }

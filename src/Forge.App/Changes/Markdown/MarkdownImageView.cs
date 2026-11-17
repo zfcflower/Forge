@@ -11,8 +11,8 @@ namespace Forge.App.Changes.Markdown;
 
 /// <summary>
 /// One picture in a reply (<c>![alt](path or address)</c>, or an inline <c>svg</c> block) as a fixed-size thumbnail tile.
-/// Tiles of one paragraph sit side by side in a wrapping row (see <see cref="MarkdownRenderer"/>); a click opens the viewer
-/// over every picture of that row, so the large view is a carousel. Local files and http(s) addresses are loaded off the UI
+/// Tiles of one paragraph sit side by side in a wrapping row (see <see cref="MarkdownRenderer"/>); a click opens the picture
+/// in the file preview tab (see <see cref="ChatPicture.OpenInPreviewAsync"/>). Local files and http(s) addresses are loaded off the UI
 /// thread through <see cref="ChatPictures"/> (bounded, cached); an SVG stays vector. A picture that cannot be loaded shows its
 /// alt text and, on click, opens the link or file with the system as before.
 /// </summary>
@@ -25,7 +25,6 @@ internal sealed class MarkdownImageView : Border
 
     private readonly string url;
     private readonly string? inlineSvg;
-    private readonly List<MarkdownImageView> group;
     private readonly Image image;
     private readonly Viewbox vectorBox;
     private readonly MermaidDiagramView vectorView;
@@ -38,12 +37,10 @@ internal sealed class MarkdownImageView : Border
     /// <summary>The loaded picture, or null while loading or when it failed.</summary>
     internal ChatPicture? Picture { get; private set; }
 
-    internal MarkdownImageView(string url, string alt, List<MarkdownImageView> group, string? inlineSvg = null)
+    internal MarkdownImageView(string url, string alt, string? inlineSvg = null)
     {
         this.url = url;
-        this.group = group;
         this.inlineSvg = inlineSvg;
-        group.Add(this);
         Width = TileWidth;
         Height = TileHeight;
         HorizontalAlignment = HorizontalAlignment.Left;
@@ -163,23 +160,6 @@ internal sealed class MarkdownImageView : Border
             return;
         }
 
-        var pictures = new List<ChatPicture>(group.Count);
-        var at = 0;
-        foreach (var tile in group)
-        {
-            if (tile.Picture is not { } loaded)
-            {
-                continue;
-            }
-
-            if (ReferenceEquals(tile, this))
-            {
-                at = pictures.Count;
-            }
-
-            pictures.Add(loaded);
-        }
-
-        ImageViewerWindow.Open(this, pictures, at);
+        _ = PicturePreview.OpenAsync(this);
     }
 }
