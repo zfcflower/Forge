@@ -46,6 +46,8 @@ FORGE 的扩展执行全部在进程外：主程序保持 Native AOT、不可变
 
 - 常驻 JIT 进程，主程序是它唯一的 IPC 客户端。命令行：`--pipe`（必需）、`--plugins`、`--data`、`--bundled`、`--builtin`、`--dotnet`、`--worker`、`--executor`、`--tool-timeout`、`--concurrency`、`--script-workers`。
 - 职责：发现与注册、生命周期、审批把关、编译服务（经 `Forge.Scripting`）、声明式工作流执行、Worker 与执行器管理、进程归属、交互终端 PTY。**不加载插件代码、不运行脚本**。
+- **三个 JIT 进程与生命周期**：Host 常驻，每应用实例 1 个；`PluginWorker` 每插件 1 个（镜像字节一变就杀进程树重启，见 11.6）；`ScriptExecutor` 每次 `code.execute` 1 个，跑完（成功/失败/取消/超时）杀整棵进程树、绝不复用（见 11.7）。三者都跑在 **.NET 11 / `net11.0`** 上，AOT 主程序不加载那份运行时。
+- **为什么必须进程外**：把 CoreCLR 托管进 Native AOT 进程不被支持——`nethost`/`hostfxr` 的托管 API 只支持 framework-dependent 部署，且 CLR 不能与 NativeAOT 运行时同进程共存；进程外 JIT 同时是“主程序不可变、插件代码进不来”这条边界的实现方式，不是权宜之计。
 - 审批以磁盘字节为准：`plugin.execute` 每次从磁盘重读并重算哈希；批准在落盘前就在闸门内按磁盘当前字节重算并比对，不符即 `approval_mismatch` 且不写记录；记录自身已 `Approved` 却不再覆盖磁盘内容时退回 `Draft`。
 - 每插件一把异步闸门：批准/撤销/刷新与一次执行的“重算哈希 → 审批校验 → 确保 Worker 已装载 → 再校验 → 派发”互斥；`plugin.revoke` 在闸门内注销工具、杀 Worker 进程树并等待在途计数归零（`RevokeDrainWindow` 默认 10 s）。
 - 闸门按**根调用令牌**归属：顶层执行与审批/撤销/刷新独占排队；嵌套调用只在闸门空闲或正被同一个根持有时进入（同根兄弟并行做哈希/装载/发布），否则立即 `plugin_busy`；一旦有独占调用排队，新的同根嵌套调用也改为 `plugin_busy`，避免饿死审批。

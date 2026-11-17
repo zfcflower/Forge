@@ -43,6 +43,8 @@ Forge.App（Native AOT，Avalonia UI，唯一知道全部主程序项目）
      └─ Forge.ScriptExecutor × 1/次调用（一次性执行器，跑完杀整棵进程树）
 ```
 
+这三个 JIT 进程都需要用户已安装 .NET 11 运行时；AOT 主程序不需要（见 13.7）。
+
 主程序与 Host、Host 与 Worker/执行器之间是命名管道（Linux/macOS 为 Unix 域套接字）+ 4 字节长度前缀 + MessagePack 帧（协议版本 2，单帧上限 16 MiB）。
 
 ## 模块地图

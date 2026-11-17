@@ -61,6 +61,9 @@
   - **2026-11-16 同机同配置重测**：`Forge.App.exe` **72.92 MiB**；`OptimizationPreference=Size` 62.27 MiB；`StackTraceSupport=false` 69.83 MiB；发布目录去掉 `.pdb` 后 93.31 MiB（含原生库 libSkiaSharp 11.09、av_libglesv2 5.14、e_sqlite3 1.88、libHarfBuzzSharp 1.73、libonigwrap 0.52 MiB），`.pdb` 另占 350.31 MiB、不随产品分发。
   - 早先同机记录：最小 Avalonia 窗口 16.5 MiB、加 AvaloniaEdit+TextMate 28.7 MiB、完整 App 49.7 MiB（约 +12 MiB 编辑器栈、+21 MiB 产品代码与其余模块，嵌入资源 8.6 MiB）；`Size` 42.8 MiB、关托管堆栈追踪 40.8 MiB。两次记录之间的差值未逐项定位，不得据此宣称体积回归或优化。
   - 两者都不建议默认开 `Size` 或关闭堆栈追踪（前者牺牲速度，后者丢掉插件与 Agent 链路最需要的托管堆栈）。
-- 扩展侧要求用户已安装对应 .NET 运行时；启动时检测并给出明确错误。原生库不能静态链接，“单文件”不成立。
+- **扩展侧要求用户已安装 .NET 11 运行时**（`net11.0`；`global.json` 固定 SDK `11.0.100`）：在 JIT 侧跑的是三个进程——常驻的 `Forge.ExtensionHost`（每应用 1 个）、`Forge.PluginWorker`（每插件 1 个）、`Forge.ScriptExecutor`（每次 `code.execute` 1 个，一次性）；主程序不需要运行时。Host 的 `--dotnet` 指定拉起 `.dll` 形态 Worker/执行器的运行时（默认是跑 Host 的那个），`Forge.HostClient` 的 `RuntimePath` 置空时直接执行 apphost 可执行文件——所以“随包私有运行时”（`<install>/runtime/dotnet.exe`）不需要改代码，只需把这两处指过去。
+- **AOT 发布产物不含这三个 JIT 组件**（实测 `dotnet publish src/Forge.App -c Release` 的输出只有 `Forge.App.exe`、原生库、`.pdb` 与 `Assets/`；`Forge.App.csproj` 不引用它们的项目）。`JitHostLayout` 只按 `FORGE_JIT_DIR` 与仓内构建布局（`src/<asm>/bin/<cfg>/net11.0`、`artifacts/publish/<asm>/<cfg>`、`publish/<asm>/<cfg>`）定位它们，仓库里也没有发布它们的脚本或 CI 步骤——把 publish 目录原样发给用户时宿主起不来（`diag.jitHostMissing`），终端、插件、`run_code` 全部不可用。
+- 实测对照（本机 win-x64、同一提交、剔除 `.pdb`）：Native AOT 主程序目录 **94 MiB**、启动到窗口 **171 ms**；同一提交 `-p:PublishAot=false --self-contained` 的 JIT 版 **141 MiB**、**874 ms**（3 次中位）；框架依赖 JIT **58 MiB**。私有运行时单份（`Microsoft.NETCore.App` 共享框架）约 **75 MiB**，上面 105 MiB 的 JIT 目录 gzip 后 **44 MiB**。因此“反正要带运行时”时 AOT 不再省体积（94 + 75 > 141，本体反而大 ~28 MiB），它的收益是启动、内存、不可变边界与主程序不随用户机器 .NET 版本漂移。
+- 原生库不能静态链接，“单文件”不成立。
 
 相关文档：[03-providers-and-network.md](03-providers-and-network.md)（网络与用量日志）、[12-storage-and-data.md](12-storage-and-data.md)（数据目录）、[14-limitations.md](14-limitations.md)（未接线项）。

@@ -57,7 +57,7 @@ depends-on: [forge-goal]
 
 **三种扩展形态,不混为一套。** Markdown 技能描述 Agent 行为与知识;声明式 Workflow(JSON,第一阶段只含顺序、并行、JSON 路径映射,优先复用 `run_code`)组合已有工具;C# 插件实现新逻辑。保存下来的 run_code 脚本也可作为持久化扩展。
 
-**Extension Host 与 Worker。** `ExtensionHost` 是常驻的普通 .NET JIT 进程,要求用户已安装对应 .NET 运行时(已确认;启动时检测并给出明确错误)。新创建和已批准的 C# 插件默认都在独立 `PluginWorker` 进程执行;共享 Host 仅为高信任低风险插件的可选性能优化。批准只代表允许执行,不代表可进入共享进程。`AssemblyLoadContext` 只负责加载卸载,不提供隔离。取消令牌无法停止不合作的代码,必要时终止整个 Worker(含进程树)。
+**Extension Host 与 Worker。** `ExtensionHost` 是常驻的普通 .NET JIT 进程,要求用户已安装 **.NET 11** 运行时(`net11.0`;`PluginWorker` 每插件一个、`ScriptExecutor` 每次调用一个,都由 Host 用同一运行时拉起,主程序本身不需要运行时)。把 CoreCLR 托管进 AOT 进程这条路不成立:`nethost`/`hostfxr` 的托管 API 只支持 framework-dependent 部署,CLR 也不能与 NativeAOT 运行时同进程共存——进程外 JIT 是 AOT 不可变边界的前提。(现状偏差:没有运行时探测与版本检查,缺 `dotnet` 只落在 `diag.hostStartFailed` 的启动失败文本里;AOT 发布产物也还没带这三个 JIT 组件,见 `Docs/13` §13.7 与 `Docs/14`。)新创建和已批准的 C# 插件默认都在独立 `PluginWorker` 进程执行;共享 Host 仅为高信任低风险插件的可选性能优化。批准只代表允许执行,不代表可进入共享进程。`AssemblyLoadContext` 只负责加载卸载,不提供隔离。取消令牌无法停止不合作的代码,必要时终止整个 Worker(含进程树)。
 
 **审批与哈希。** 新插件默认未批准,展示源码差异与权限需求,用户批准后才可启用。每个插件记录 SourceHash、ApprovedHash、DependencyHash、SDKVersion 等;重启只恢复哈希匹配的已批准版本;源码或依赖变化使批准失效;不能通过改 manifest 或缓存状态绕过。插件调用主程序能力一律经 IPC,由主程序的权限引擎判断、审批与审计。
 
