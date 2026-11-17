@@ -236,6 +236,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// <summary>The orchestration block of the host being built; empty when the default orchestration is off or has no router.</summary>
     private string orchestration = string.Empty;
 
+    /// <summary>What the chat can draw (diagrams, images, file links), told to the root; a snapshot per host like <see cref="orchestration"/>.</summary>
+    private string chatRendering = string.Empty;
+
     /// <summary>The model a default root runs on, kept so the decorated root definition is the same agent as the undecorated one.</summary>
     private ModelSettings rootModel;
 
@@ -466,17 +469,21 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// </summary>
     private AgentDefinition? WithOrchestration(AgentDefinition? definition)
     {
-        if (orchestration.Length == 0 || !OrchestrationPrompt.CanLoadSkills(definition))
+        // The orchestration block points at the skill tool, so it needs an agent that can call it; the rendering block does not.
+        var extra = orchestration.Length > 0 && OrchestrationPrompt.CanLoadSkills(definition)
+            ? chatRendering.Length > 0 ? orchestration + "\n\n" + chatRendering : orchestration
+            : chatRendering;
+        if (extra.Length == 0)
         {
             return definition;
         }
 
-        // The same agent AgentHost.CreateRoot would build by default, with the block as its role text.
+        // The same agent AgentHost.CreateRoot would build by default, with the blocks as its role text.
         return definition is null
-            ? new AgentDefinition("Root", "Main coding agent.", orchestration, rootModel)
+            ? new AgentDefinition("Root", "Main coding agent.", extra, rootModel)
             : definition with
             {
-                Prompt = definition.Prompt.Length == 0 ? orchestration : definition.Prompt + "\n\n" + orchestration,
+                Prompt = definition.Prompt.Length == 0 ? extra : definition.Prompt + "\n\n" + extra,
             };
     }
 
@@ -1043,6 +1050,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         orchestration = services.OrchestrationEnabled is { } orchestrationEnabled && !orchestrationEnabled()
             ? string.Empty
             : OrchestrationPrompt.Build(DiscoverSkills());
+        chatRendering = ChatRenderingPrompt.Build();
         var compaction = services.CurrentCompaction();
         var built = new AgentHost(
             new AgentHostOptions

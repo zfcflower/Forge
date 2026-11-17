@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:loc="using:Forge.App.Localization"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.SessionView"
              x:DataType="vm:SessionWorkspaceViewModel">
   <UserControl.Styles>
@@ -216,46 +217,7 @@
       <Setter Property="BorderThickness" Value="0" />
     </Style>
 
-    <Style Selector="Button.composer-chip">
-      <Setter Property="MinHeight" Value="24" />
-      <Setter Property="Padding" Value="7,2" />
-      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Cursor" Value="Hand" />
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-    </Style>
-    <Style Selector="Button.composer-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="Button.composer-chip:disabled /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Opacity" Value="0.5" />
-    </Style>
-    <Style Selector="Rectangle.effort-bar">
-      <Setter Property="Width" Value="2.5" />
-      <Setter Property="VerticalAlignment" Value="Bottom" />
-      <Setter Property="Fill" Value="{DynamicResource TextSecondaryBrush}" />
-    </Style>
 
-    <!-- full-width rows inside the flyouts and the suggestion list -->
-    <Style Selector="Button.composer-row">
-      <Setter Property="HorizontalAlignment" Value="Stretch" />
-      <Setter Property="HorizontalContentAlignment" Value="Left" />
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="8,5" />
-      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
-      <Setter Property="Cursor" Value="Hand" />
-    </Style>
-    <Style Selector="Button.composer-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
-    </Style>
-    <Style Selector="Button.composer-row.selected /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
-    </Style>
     <Style Selector="Border.image-thumb">
       <Setter Property="CornerRadius" Value="6" />
       <Setter Property="ClipToBounds" Value="True" />
@@ -266,22 +228,6 @@
     <Style Selector="Button.image-remove">
       <Setter Property="Margin" Value="0,2,2,0" />
       <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
-    </Style>
-    <Style Selector="Button.composer-mini">
-      <Setter Property="MinWidth" Value="20" />
-      <Setter Property="MinHeight" Value="20" />
-      <Setter Property="Padding" Value="4" />
-      <Setter Property="VerticalAlignment" Value="Center" />
-    </Style>
-    <!-- The pin lives in the composer's model list: a hollow star while the model is not pinned, the filled one while it is.
-         Colour alone (muted vs warning) tells the two apart besides the shape. -->
-    <Style Selector="wc|FluentIcon.star">
-      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-      <Setter Property="Opacity" Value="0.45" />
-    </Style>
-    <Style Selector="wc|FluentIcon.star.pinned">
-      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
-      <Setter Property="Opacity" Value="1" />
     </Style>
 
     <!-- round send button: accent circle with an up arrow; "…" while a turn runs -->
@@ -332,29 +278,6 @@
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     </Style>
 
-    <!-- effort slider over a gradient track -->
-    <Style Selector="Border.effort-track">
-      <Setter Property="Height" Value="4" />
-      <Setter Property="CornerRadius" Value="2" />
-      <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Margin" Value="6,0" />
-      <Setter Property="Background">
-        <LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
-          <GradientStop Offset="0" Color="{DynamicResource SystemAccentColorLight3}" />
-          <GradientStop Offset="1" Color="{DynamicResource SystemAccentColorDark1}" />
-        </LinearGradientBrush>
-      </Setter>
-    </Style>
-    <Style Selector="Slider.effort">
-      <Style.Resources>
-        <SolidColorBrush x:Key="SliderTrackFill" Color="Transparent" />
-        <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="Transparent" />
-        <SolidColorBrush x:Key="SliderTrackFillPressed" Color="Transparent" />
-        <SolidColorBrush x:Key="SliderTrackValueFill" Color="Transparent" />
-        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="Transparent" />
-        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="Transparent" />
-      </Style.Resources>
-    </Style>
 
     <Style Selector="Border.composer-suggestions">
       <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
@@ -856,170 +779,11 @@
                        AutomationProperties.AutomationId="session-input"
                        AutomationProperties.Name="{Binding [session.messageName], Source={x:Static loc:Loc.Instance}}" />
 
-              <!-- toolbar: agent and model chips on the left, send / running menu on the right -->
-              <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*,Auto" Margin="6,0,6,6">
-                <Button x:Name="AgentChip"
-                        Classes="composer-chip"
-                        AutomationProperties.AutomationId="composer-agent"
-                        AutomationProperties.Name="{Binding [session.composer.agent], Source={x:Static loc:Loc.Instance}}"
-                        ToolTip.Tip="{Binding [session.composer.agentTooltip], Source={x:Static loc:Loc.Instance}}">
-                  <StackPanel Orientation="Horizontal" Spacing="5">
-                    <wc:FluentIcon Data="{StaticResource IconSparkle}" Width="14" Height="14" />
-                    <TextBlock Text="{Binding Composer.AgentLabel}" VerticalAlignment="Center" />
-                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
-                  </StackPanel>
-                  <Button.Flyout>
-                    <Flyout Placement="TopEdgeAlignedLeft">
-                      <ItemsControl ItemsSource="{Binding Composer.Agents}"
-                                    MinWidth="260"
-                                    AutomationProperties.AutomationId="composer-agent-list">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="vm:ComposerAgentOption">
-                            <Button Classes="composer-row"
-                                    Command="{Binding SelectCommand}"
-                                    Click="OnAgentPicked"
-                                    AutomationProperties.Name="{Binding Name}">
-                              <Grid ColumnDefinitions="18,*">
-                                <TextBlock Text="✓" IsVisible="{Binding IsSelected}" VerticalAlignment="Top" />
-                                <StackPanel Grid.Column="1" Spacing="1">
-                                  <TextBlock Text="{Binding Name}" FontWeight="Medium" />
-                                  <TextBlock Classes="caption"
-                                             Text="{Binding Description}"
-                                             MaxWidth="300"
-                                             TextWrapping="Wrap" />
-                                </StackPanel>
-                              </Grid>
-                            </Button>
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-                    </Flyout>
-                  </Button.Flyout>
-                </Button>
+              <!-- toolbar: the agent, model and orchestration pickers on the left, send / running menu on the right -->
+              <Grid Grid.Row="3" ColumnDefinitions="*,Auto" Margin="6,0,6,6">
+                <views:ComposerToolbar HorizontalAlignment="Left" DataContext="{Binding Composer}" />
 
-                <Button x:Name="ModelChip"
-                        Grid.Column="1"
-                        Margin="4,0,0,0"
-                        Classes="composer-chip"
-                        IsEnabled="{Binding Composer.HasModel}"
-                        AutomationProperties.AutomationId="composer-model"
-                        AutomationProperties.Name="{Binding Composer.ModelLabel}"
-                        ToolTip.Tip="{Binding [session.composer.modelTooltip], Source={x:Static loc:Loc.Instance}}">
-                  <StackPanel Orientation="Horizontal" Spacing="6">
-                    <TextBlock Text="{Binding Composer.ModelLabel}"
-                               MaxWidth="220"
-                               TextTrimming="CharacterEllipsis"
-                               VerticalAlignment="Center" />
-                    <ItemsControl ItemsSource="{Binding Composer.EffortBars}"
-                                  VerticalAlignment="Center"
-                                  Height="10">
-                      <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                          <StackPanel Orientation="Horizontal" Spacing="1.5" VerticalAlignment="Bottom" />
-                        </ItemsPanelTemplate>
-                      </ItemsControl.ItemsPanel>
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ComposerEffortBarViewModel">
-                          <Rectangle Classes="effort-bar" Height="{Binding Height}" Opacity="{Binding Opacity}" />
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
-                  </StackPanel>
-                  <Button.Flyout>
-                    <Flyout Placement="TopEdgeAlignedLeft">
-                      <StackPanel Width="300" Spacing="6" AutomationProperties.AutomationId="composer-model-panel">
-                        <TextBox x:Name="ModelSearch"
-                                 Text="{Binding Composer.ModelSearch, Mode=TwoWay}"
-                                 PlaceholderText="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}"
-                                 AutomationProperties.AutomationId="composer-model-search"
-                                 AutomationProperties.Name="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}" />
-                        <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled">
-                          <ItemsControl ItemsSource="{Binding Composer.Models}"
-                                        AutomationProperties.AutomationId="composer-model-list">
-                            <ItemsControl.ItemTemplate>
-                              <DataTemplate x:DataType="vm:ComposerModelOption">
-                                <Grid ColumnDefinitions="*,Auto">
-                                  <Button Classes="composer-row"
-                                          Command="{Binding SelectCommand}"
-                                          Click="OnModelPicked"
-                                          AutomationProperties.Name="{Binding Name}">
-                                    <Grid ColumnDefinitions="18,*,Auto">
-                                      <TextBlock Text="✓" IsVisible="{Binding IsSelected}" />
-                                      <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                      <TextBlock Grid.Column="2"
-                                                 Margin="8,0,0,0"
-                                                 Classes="caption"
-                                                 IsVisible="{Binding ShowProviderCaption}"
-                                                 Text="{Binding Caption}"
-                                                 VerticalAlignment="Center" />
-                                    </Grid>
-                                  </Button>
-                                  <Button Grid.Column="1"
-                                          Classes="icon composer-mini"
-                                          Command="{Binding TogglePinCommand}"
-                                          AutomationProperties.Name="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}"
-                                          ToolTip.Tip="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}">
-                                    <Panel Width="12" Height="12">
-                                      <wc:FluentIcon Classes="star"
-                                                     Data="{StaticResource IconStar}"
-                                                     Width="12"
-                                                     Height="12"
-                                                     IsVisible="{Binding !IsPinned}" />
-                                      <wc:FluentIcon Classes="star pinned"
-                                                     Data="{StaticResource IconStarFilled}"
-                                                     Width="12"
-                                                     Height="12"
-                                                     IsVisible="{Binding IsPinned}" />
-                                    </Panel>
-                                  </Button>
-                                </Grid>
-                              </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                          </ItemsControl>
-                        </ScrollViewer>
-                        <TextBlock Classes="caption"
-                                   IsVisible="{Binding Composer.HasNoModels}"
-                                   Text="{Binding [session.composer.noModels], Source={x:Static loc:Loc.Instance}}" />
-                        <Separator />
-                        <Grid ColumnDefinitions="*,Auto" Margin="2,0">
-                          <TextBlock Classes="label" Text="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
-                          <TextBlock Grid.Column="1" Classes="caption" Text="{Binding Composer.EffortName}" />
-                        </Grid>
-                        <Panel Margin="2,0">
-                          <Border Classes="effort-track" />
-                          <Slider Classes="effort"
-                                  Minimum="0"
-                                  Maximum="{Binding Composer.EffortMaximum, Mode=OneWay}"
-                                  TickFrequency="1"
-                                  IsSnapToTickEnabled="True"
-                                  Value="{Binding Composer.EffortValue, Mode=TwoWay}"
-                                  AutomationProperties.AutomationId="composer-effort"
-                                  AutomationProperties.Name="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
-                        </Panel>
-                        <Separator />
-                        <Button Classes="composer-row"
-                                Command="{Binding Composer.SaveDefaultsCommand}"
-                                AutomationProperties.AutomationId="composer-save-defaults"
-                                Content="{Binding [session.composer.saveDefaults], Source={x:Static loc:Loc.Instance}}" />
-                        <Button Classes="composer-row"
-                                Command="{Binding Composer.RefreshCommand}"
-                                AutomationProperties.AutomationId="composer-refresh">
-                          <StackPanel Orientation="Horizontal" Spacing="6">
-                            <wc:FluentIcon Data="{DynamicResource IconRefresh}" Width="14" Height="14" />
-                            <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
-                          </StackPanel>
-                        </Button>
-                        <TextBlock Classes="caption"
-                                   Margin="8,0"
-                                   IsVisible="{Binding Composer.HasStatus}"
-                                   Text="{Binding Composer.Status}" />
-                      </StackPanel>
-                    </Flyout>
-                  </Button.Flyout>
-                </Button>
-
-                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom">
                   <!-- Always enabled: each picked file is gated by kind; the tooltip says when images are refused. -->
                   <Button Classes="icon"
                           Click="OnAttachImagesClick"

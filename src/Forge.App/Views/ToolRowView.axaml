@@ -3,6 +3,7 @@
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:views="using:Forge.App.Views"
              xmlns:loc="using:Forge.App.Localization"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
              x:Class="Forge.App.Views.ToolRowView"
              x:DataType="vm:ToolRowViewModel">
   <Panel>
@@ -43,7 +44,9 @@
           <TextBlock Grid.Column="2"
                      Classes="caption"
                      Margin="8,0"
-                     Text="{Binding ArgumentSummary}" />
+                     TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding Headline}"
+                     Text="{Binding Headline}" />
           <TextBlock Grid.Column="3" Classes="caption" Text="{Binding Status}" />
         </Grid>
       </Button>
@@ -56,12 +59,40 @@
         <TextBlock Classes="label"
                    Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
                    IsVisible="{Binding HasResult}" />
-        <SelectableTextBlock Classes="mono"
-                             Text="{Binding Result}"
-                             TextWrapping="Wrap"
-                             MaxHeight="240"
-                             Foreground="{DynamicResource TextSecondaryBrush}"
-                             IsVisible="{Binding HasResult}" />
+        <ScrollViewer MaxHeight="{Binding ResultMaxHeight}"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto"
+                      IsVisible="{Binding HasResult}">
+          <SelectableTextBlock Classes="mono"
+                               Text="{Binding ResultDisplay}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,8,0"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+        </ScrollViewer>
+        <TextBlock Classes="caption" Text="{Binding ResultNote}" IsVisible="{Binding HasResultNote}" />
+        <!-- Result actions: the whole output to the clipboard, a taller view for a long one, and the file the call worked on. -->
+        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasResult}">
+          <views:CopyTextButton Classes="ghost icon"
+                                Width="26"
+                                Height="22"
+                                ToolTip.Tip="{Binding [turn.toolCopyResult], Source={x:Static loc:Loc.Instance}}"
+                                AutomationProperties.AutomationId="tool-copy-result"
+                                AutomationProperties.Name="{Binding [turn.toolCopyResult], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconCopy}" Width="12" Height="12" />
+          </views:CopyTextButton>
+          <Button Classes="link"
+                  Command="{Binding ToggleResultCommand}"
+                  IsVisible="{Binding CanExpandResult}"
+                  AutomationProperties.AutomationId="tool-result-toggle">
+            <TextBlock Classes="caption" Text="{Binding ResultToggleText}" />
+          </Button>
+          <Button Classes="link"
+                  Click="OnOpenTarget"
+                  IsVisible="{Binding HasTarget}"
+                  AutomationProperties.AutomationId="tool-open-file">
+            <TextBlock Classes="caption" Text="{Binding [turn.toolOpenFile], Source={x:Static loc:Loc.Instance}}" />
+          </Button>
+        </StackPanel>
         <!-- Result images (wave W4 owns ToolRowImagesView) and the live output tail (wave W8 owns ToolRowTailView). -->
         <views:ToolRowImagesView />
         <views:ToolRowTailView />

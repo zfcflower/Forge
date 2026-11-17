@@ -220,8 +220,4 @@ public partial class SessionView : UserControl
             container.BringIntoView();
         }
     }
-
-    private void OnAgentPicked(object? sender, RoutedEventArgs e) => this.FindControl<Button>("AgentChip")?.Flyout?.Hide();
-
-    private void OnModelPicked(object? sender, RoutedEventArgs e) => this.FindControl<Button>("ModelChip")?.Flyout?.Hide();
 }

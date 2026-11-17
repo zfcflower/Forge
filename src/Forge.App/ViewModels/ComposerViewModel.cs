@@ -56,6 +56,52 @@ internal sealed class ComposerAgentOption : ObservableObject
     }
 }
 
+/// <summary>One row of the model popup's orchestration list: Auto, Direct, or one workflow skill.</summary>
+internal sealed class ComposerOrchestrationOption : ObservableObject
+{
+    private readonly string skillDescription;
+    private bool isSelected;
+
+    public ComposerOrchestrationOption(OrchestrationChoice choice, string skillDescription = "")
+    {
+        Choice = choice;
+        this.skillDescription = skillDescription;
+        SelectCommand = new RelayCommand(() => Selected?.Invoke(this));
+    }
+
+    public OrchestrationChoice Choice { get; }
+
+    public string Name => Choice.Mode switch
+    {
+        OrchestrationMode.Direct => SessionStrings.ComposerOrchestrationDirect,
+        OrchestrationMode.Workflow => Choice.Skill,
+        _ => SessionStrings.ComposerOrchestrationAuto,
+    };
+
+    public string Description => Choice.Mode switch
+    {
+        OrchestrationMode.Direct => SessionStrings.ComposerOrchestrationDirectDescription,
+        OrchestrationMode.Workflow => skillDescription,
+        _ => SessionStrings.ComposerOrchestrationAutoDescription,
+    };
+
+    public bool IsSelected
+    {
+        get => isSelected;
+        set => Set(ref isSelected, value);
+    }
+
+    public RelayCommand SelectCommand { get; }
+
+    internal event Action<ComposerOrchestrationOption>? Selected;
+
+    public void RefreshText()
+    {
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(Description));
+    }
+}
+
 /// <summary>One row of the model picker.</summary>
 internal sealed class ComposerModelOption : ObservableObject
 {
@@ -148,6 +194,7 @@ internal sealed class QueuedMessageViewModel : ObservableObject
     public QueuedMessageViewModel(ComposerPrompt prompt, bool isInterjection, Action<QueuedMessageViewModel> remove)
         : this(prompt.Text, isInterjection, remove, prompt.Attachments)
     {
+        Orchestration = prompt.Orchestration;
     }
 
     public string Text { get; }
@@ -164,7 +211,10 @@ internal sealed class QueuedMessageViewModel : ObservableObject
         : AttachmentStrings.Count(Attachments.Count);
 
     /// <summary>The message as it will be sent.</summary>
-    public ComposerPrompt Prompt => new(Text, Attachments);
+    public ComposerPrompt Prompt => new(Text, Attachments, Orchestration);
+
+    /// <summary>The orchestration the message was composed with; it is applied when the message is finally sent.</summary>
+    public OrchestrationChoice Orchestration { get; }
 
     /// <summary>Single-line preview for the chip.</summary>
     public string Preview => Text.ReplaceLineEndings(" ");
@@ -190,7 +240,7 @@ internal sealed class QueuedMessageViewModel : ObservableObject
 /// <see cref="FileBlock"/>s and text files inlined as <see cref="TextBlock"/>s, in sending order. It is what the queue, an
 /// interjection, a redirect and a refused turn carry, so attachments are never dropped on the way.
 /// </summary>
-internal sealed record ComposerPrompt(string Text, IReadOnlyList<ContentBlock> Attachments)
+internal sealed record ComposerPrompt(string Text, IReadOnlyList<ContentBlock> Attachments, OrchestrationChoice Orchestration = default)
 {
     public static ComposerPrompt FromText(string text) => new(text, []);
 
@@ -266,6 +316,8 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     private IReadOnlyList<ThinkingEffort> effortSteps = [ThinkingEffort.Off];
     private string providerId = string.Empty;
     private ComposerAgentOption selectedAgent;
+    private List<ComposerOrchestrationOption>? orchestrations;
+    private ComposerOrchestrationOption? selectedOrchestration;
     private string model = string.Empty;
     private ThinkingEffort effort;
     private string modelSearch = string.Empty;
@@ -379,6 +431,128 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 
     public IReadOnlyList<ComposerAgentOption> Agents { get; }
 
+    /// <summary>Auto, Direct and the built-in workflow skills: how the next message is orchestrated.</summary>
+    public IReadOnlyList<ComposerOrchestrationOption> Orchestrations
+    {
+        get
+        {
+            EnsureOrchestrations();
+            return orchestrations!;
+        }
+    }
+
+    /// <summary>The choice for the next message; it returns to Auto once a message has been sent (<see cref="TakeOrchestration"/>).</summary>
+    public ComposerOrchestrationOption SelectedOrchestration
+    {
+        get
+        {
+            EnsureOrchestrations();
+            return selectedOrchestration!;
+        }
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            EnsureOrchestrations();
+            if (ReferenceEquals(selectedOrchestration, value))
+            {
+                return;
+            }
+
+            selectedOrchestration!.IsSelected = false;
+            selectedOrchestration = value;
+            value.IsSelected = true;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(OrchestrationLabel));
+            OnPropertyChanged(nameof(HasOrchestrationOverride));
+        }
+    }
+
+    /// <summary>The chip text for a non-Auto choice.</summary>
+    public string OrchestrationLabel => SelectedOrchestration.Name;
+
+    public bool HasOrchestrationOverride => SelectedOrchestration.Choice.Mode != OrchestrationMode.Auto;
+
+    /// <summary>The choice for the message being sent now; the selection goes back to Auto.</summary>
+    public OrchestrationChoice TakeOrchestration()
+    {
+        if (selectedOrchestration is not { } current)
+        {
+            return OrchestrationChoice.Auto;
+        }
+
+        var choice = current.Choice;
+        if (choice.Mode != OrchestrationMode.Auto)
+        {
+            SelectedOrchestration = orchestrations![0];
+        }
+
+        return choice;
+    }
+
+    private void EnsureOrchestrations()
+    {
+        if (orchestrations is not null)
+        {
+            return;
+        }
+
+        // Auto and Direct need nothing from disk, so the popup opens at once; the skills folder scan (disk) follows off the
+        // UI thread and adds the workflow rows when it is done.
+        InstallOrchestrations([]);
+        _ = LoadWorkflowsAsync();
+    }
+
+    private async Task LoadWorkflowsAsync()
+    {
+        var found = await Task.Run(LoadSkills).ConfigureAwait(true);
+        var workflows = new List<ComposerOrchestrationOption>();
+        // Only the workflows FORGE ships: the router decides among them, and todos is the plan panel's rule, not a workflow.
+        foreach (var skill in found)
+        {
+            if (skill.IsSkill && skill.Scope == SkillScope.Product &&
+                !string.Equals(skill.Name, OrchestrationPrompt.RouterSkillName, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(skill.Name, "todos", StringComparison.OrdinalIgnoreCase))
+            {
+                workflows.Add(new ComposerOrchestrationOption(OrchestrationChoice.ForWorkflow(skill.Name), skill.Description));
+            }
+        }
+
+        if (workflows.Count > 0)
+        {
+            InstallOrchestrations(workflows);
+        }
+    }
+
+    /// <summary>Replaces the list with Auto, Direct and <paramref name="workflows"/>, keeping the current pick where it still exists.</summary>
+    private void InstallOrchestrations(List<ComposerOrchestrationOption> workflows)
+    {
+        var list = new List<ComposerOrchestrationOption>(2 + workflows.Count)
+        {
+            new(OrchestrationChoice.Auto),
+            new(OrchestrationChoice.Direct),
+        };
+        list.AddRange(workflows);
+        var keep = selectedOrchestration?.Choice ?? OrchestrationChoice.Auto;
+        foreach (var option in list)
+        {
+            option.Selected += OnOrchestrationSelected;
+        }
+
+        var first = orchestrations is null;
+        orchestrations = list;
+        selectedOrchestration = list.FirstOrDefault(option => option.Choice == keep) ?? list[0];
+        selectedOrchestration.IsSelected = true;
+        if (!first)
+        {
+            OnPropertyChanged(nameof(Orchestrations));
+            OnPropertyChanged(nameof(SelectedOrchestration));
+            OnPropertyChanged(nameof(OrchestrationLabel));
+            OnPropertyChanged(nameof(HasOrchestrationOverride));
+        }
+    }
+
+    private void OnOrchestrationSelected(ComposerOrchestrationOption option) => SelectedOrchestration = option;
+
     public ComposerAgentOption SelectedAgent
     {
         get => selectedAgent;
@@ -404,7 +578,7 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     public bool HasModel => catalog.IsConfigured;
 
     /// <summary>The visible model rows: the search filter applied, pinned ones first.</summary>
-    public ObservableCollection<ComposerModelOption> Models { get; }
+    public RangeObservableCollection<ComposerModelOption> Models { get; }
 
     public bool HasNoModels => Models.Count == 0;
 
@@ -508,6 +682,12 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         Status = null;
         skills = null;
         files = null;
+        if (orchestrations is not null)
+        {
+            // The skills may have changed on disk: rescan (off the UI thread) and keep the current pick where it still exists.
+            _ = LoadWorkflowsAsync();
+        }
+
         await modelRefresh(cancellationToken).ConfigureAwait(true);
         catalog = services.Catalog;
         RebuildModels();
@@ -675,6 +855,16 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         foreach (var agent in Agents)
         {
             agent.RefreshText();
+        }
+
+        if (orchestrations is not null)
+        {
+            foreach (var option in orchestrations)
+            {
+                option.RefreshText();
+            }
+
+            OnPropertyChanged(nameof(OrchestrationLabel));
         }
 
         OnPropertyChanged(nameof(AgentLabel));
@@ -961,11 +1151,8 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         }
 
         var hadModels = Models.Count > 0;
-        Models.Clear();
-        foreach (var option in visibleModels)
-        {
-            Models.Add(option);
-        }
+        // One Reset instead of ~180 Add notifications: the picker rebuilds its rows once.
+        Models.ReplaceAll(visibleModels);
 
         if (hadModels != (Models.Count > 0))
         {

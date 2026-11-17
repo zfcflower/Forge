@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Services;
@@ -12,9 +13,25 @@ namespace Forge.App.ViewModels;
 /// <summary>
 /// One tool call: "▸ name · argument summary · ✓" collapsed, full arguments and result when expanded.
 /// </summary>
-internal sealed partial class ToolRowViewModel(string name, string argumentsJson) : TurnBlockViewModel
+internal sealed partial class ToolRowViewModel(string name, string argumentsJson) : TurnBlockViewModel, ICopyableText
 {
     private const int SummaryLimit = 160;
+
+    /// <summary>The most result text a row lays out; a build log of megabytes would stall layout. Copy still gives all of it.</summary>
+    private const int ResultDisplayLimit = 24_000;
+
+    /// <summary>A result past this many lines (or characters) gets the "show more" toggle; a short one never needs it.</summary>
+    private const int ExpandableLines = 10;
+
+    private static readonly string[] HeadlineKeys = ["command", "cmd", "file_path", "filePath", "path", "pattern", "query", "url", "description", "name"];
+    private static readonly string[] PathKeys = ["file_path", "filePath", "path"];
+
+    private string? headline;
+    private string? targetPath;
+    private bool argumentsRead;
+    private bool isResultExpanded;
+    private RelayCommand? toggleCommand;
+    private RelayCommand? toggleResultCommand;
 
     private string status = "…";
     private LocText result;
@@ -56,7 +73,140 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         set => Set(ref isExpanded, value);
     }
 
-    public RelayCommand ToggleCommand => new(() => IsExpanded = !IsExpanded);
+    public RelayCommand ToggleCommand => toggleCommand ??= new RelayCommand(() => IsExpanded = !IsExpanded);
+
+    // ---------------------------------------------------------------- readable header and result
+
+    /// <summary>
+    /// What the call is about, in one line: the command, file, pattern or address out of the arguments when they are JSON with
+    /// a well-known key, otherwise the compacted arguments. Read once, when the header is first drawn.
+    /// </summary>
+    public string Headline
+    {
+        get
+        {
+            ReadArguments();
+            return headline ?? ArgumentSummary;
+        }
+    }
+
+    /// <summary>The file the call works on (a path argument), or null; the row offers to open it.</summary>
+    public string? TargetPath
+    {
+        get
+        {
+            ReadArguments();
+            return targetPath;
+        }
+    }
+
+    public bool HasTarget => TargetPath is not null;
+
+    private void ReadArguments()
+    {
+        if (argumentsRead)
+        {
+            return;
+        }
+
+        argumentsRead = true;
+        try
+        {
+            using var document = JsonDocument.Parse(Arguments);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            foreach (var key in HeadlineKeys)
+            {
+                if (document.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String &&
+                    value.GetString() is { Length: > 0 } text)
+                {
+                    headline = Compact(text, SummaryLimit);
+                    break;
+                }
+            }
+
+            foreach (var key in PathKeys)
+            {
+                if (document.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String &&
+                    value.GetString() is { Length: > 0 } path)
+                {
+                    targetPath = path;
+                    break;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON (a provider that streams something else): the compacted text is the headline.
+        }
+    }
+
+    /// <summary>The result as shown: cut at <see cref="ResultDisplayLimit"/> characters so a huge output cannot stall layout.</summary>
+    public string? ResultDisplay =>
+        hasResult && result.Resolve() is { } full ? (full.Length > ResultDisplayLimit ? full[..ResultDisplayLimit] : full) : null;
+
+    /// <summary>The note under a cut result ("first 24000 of 90000 characters"); empty when nothing was cut.</summary>
+    public string ResultNote =>
+        hasResult && result.Resolve() is { Length: > ResultDisplayLimit } full
+            ? SessionStrings.ToolResultCut(ResultDisplayLimit, full.Length)
+            : string.Empty;
+
+    public bool HasResultNote => ResultNote.Length > 0;
+
+    /// <summary>The copy button's text: the whole result, not the cut one.</summary>
+    public string CopyText => Result ?? string.Empty;
+
+    /// <summary>A result long enough to be worth a taller view.</summary>
+    public bool CanExpandResult
+    {
+        get
+        {
+            var text = Result;
+            if (text is null)
+            {
+                return false;
+            }
+
+            if (text.Length > 1500)
+            {
+                return true;
+            }
+
+            var lines = 0;
+            foreach (var character in text)
+            {
+                if (character == (char)10 && ++lines >= ExpandableLines)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    public bool IsResultExpanded
+    {
+        get => isResultExpanded;
+        set
+        {
+            if (Set(ref isResultExpanded, value))
+            {
+                OnPropertyChanged(nameof(ResultMaxHeight));
+                OnPropertyChanged(nameof(ResultToggleText));
+            }
+        }
+    }
+
+    /// <summary>240 while folded; the expanded view is taller but still bounded, with its own scroll bar.</summary>
+    public double ResultMaxHeight => isResultExpanded ? 720 : 240;
+
+    public string ResultToggleText => isResultExpanded ? SessionStrings.ToolShowLess : SessionStrings.ToolShowMore;
+
+    public RelayCommand ToggleResultCommand => toggleResultCommand ??= new RelayCommand(() => IsResultExpanded = !IsResultExpanded);
 
     // ---------------------------------------------------------------- live state of a running call
 
@@ -148,6 +298,10 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         isRunning = false;
         OnPropertyChanged(nameof(IsRunning));
         OnPropertyChanged(nameof(Result));
+        OnPropertyChanged(nameof(ResultDisplay));
+        OnPropertyChanged(nameof(ResultNote));
+        OnPropertyChanged(nameof(HasResultNote));
+        OnPropertyChanged(nameof(CanExpandResult));
         OnPropertyChanged(nameof(HasResult));
         RaiseQuestionCard();
     }
@@ -155,6 +309,9 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     public override void RefreshText()
     {
         OnPropertyChanged(nameof(Result));
+        OnPropertyChanged(nameof(ResultDisplay));
+        OnPropertyChanged(nameof(ResultNote));
+        OnPropertyChanged(nameof(ResultToggleText));
         OnPropertyChanged(nameof(HasResult));
         RaiseQuestionCard();
         OnPropertyChanged(nameof(LiveElapsedText));

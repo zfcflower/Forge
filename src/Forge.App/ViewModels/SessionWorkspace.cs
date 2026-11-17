@@ -839,7 +839,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         var text = draft.Trim();
         Draft = string.Empty;
-        return new ComposerPrompt(Composer.ExpandCommand(text), Composer.TakeAttachments());
+        return new ComposerPrompt(Composer.ExpandCommand(text), Composer.TakeAttachments(), Composer.TakeOrchestration());
     }
 
     private bool HasSendableQueue() => queued.Any(message => !message.IsInterjection);
@@ -1457,7 +1457,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 }
             }
 
-            await live.RunTurnAsync(text, prompt.Attachments, OnAgentEvent, token).ConfigureAwait(true);
+            await live.RunTurnAsync(OrchestrationDirective.Apply(prompt.Orchestration, text), prompt.Attachments, OnAgentEvent, token).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {

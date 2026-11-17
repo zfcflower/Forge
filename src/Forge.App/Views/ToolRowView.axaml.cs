@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using Avalonia.Interactivity;
+using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
 
@@ -6,4 +8,13 @@ namespace Forge.App.Views;
 public partial class ToolRowView : UserControl
 {
     public ToolRowView() => InitializeComponent();
+
+    /// <summary>Opens the file the call worked on: source in the editor, PDF/HTML/pictures in the system's application.</summary>
+    private void OnOpenTarget(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ToolRowViewModel { TargetPath: { } path })
+        {
+            _ = LinkLauncher.OpenAsync(this, path);
+        }
+    }
 }

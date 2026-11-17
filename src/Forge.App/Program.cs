@@ -1,4 +1,6 @@
 using Avalonia;
+using Avalonia.Native;
+using Avalonia.X11;
 using Avalonia.Logging;
 using Forge.App.Composition;
 using Forge.App.Logging;
@@ -39,6 +41,11 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            // Popups, flyouts and tooltips are drawn in the window's own overlay layer instead of each opening a native
+            // window of its own (an HWND plus a render target per popup is what made the model picker slow to appear).
+            .With(new Win32PlatformOptions { OverlayPopups = true })
+            .With(new X11PlatformOptions { OverlayPopups = true })
+            .With(new AvaloniaNativePlatformOptions { OverlayPopups = true })
             .WithInterFont()
             .LogToForge();
 

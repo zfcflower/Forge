@@ -1,5 +1,6 @@
 using System.Text;
 using Forge.Abstractions;
+using Forge.App.Agents;
 using Forge.Core.Storage;
 
 namespace Forge.App.ViewModels;
@@ -53,7 +54,7 @@ internal static class TranscriptReplay
         switch (message.Role)
         {
             case MessageRole.User:
-                var text = TextOf(message, skipAttachments: true);
+                var text = OrchestrationDirective.Strip(TextOf(message, skipAttachments: true));
                 var attachments = AttachmentsOf(message);
                 if (text.Length > 0 || attachments.Count > 0)
                 {

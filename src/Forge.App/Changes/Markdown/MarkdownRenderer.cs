@@ -7,17 +7,21 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Forge.App.Logging;
+using Forge.App.Services;
 using Forge.App.Views;
 using ZLogger;
 
 namespace Forge.App.Changes.Markdown;
 
-/// <summary>A selectable text block whose links open through the launcher (http/https only) on a plain click.</summary>
+/// <summary>A selectable text block whose links (web addresses and local files) open on a plain click.</summary>
 internal sealed class MarkdownTextBlock : SelectableTextBlock
 {
     private static readonly Cursor HandCursor = new(StandardCursorType.Hand);
 
     private readonly List<(int Start, int End, string Url)> links = [];
+
+    /// <summary>Links that come from inline code that merely looks like a path: they only count once the file exists.</summary>
+    private readonly HashSet<string> probed = [];
 
     protected override Type StyleKeyOverride => typeof(SelectableTextBlock);
 
@@ -26,6 +30,7 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
     internal void SetInlines(IReadOnlyList<MdInline> source)
     {
         links.Clear();
+        probed.Clear();
         var collection = new InlineCollection();
         var position = 0;
         AddInlines(collection, source, ref position, bold: false);
@@ -48,6 +53,12 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
                     run.Bind(TextElement.FontFamilyProperty, this.GetResourceObservable("FontMono"));
                     run.Bind(TextElement.BackgroundProperty, this.GetResourceObservable("SurfaceSubtleBrush"));
                     target.Add(run);
+                    if (LinkTarget.LooksLikeFilePath(inline.Text))
+                    {
+                        links.Add((position, position + inline.Text.Length, inline.Text));
+                        probed.Add(inline.Text);
+                    }
+
                     position += inline.Text.Length;
                     break;
                 }
@@ -85,6 +96,7 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
                 }
 
                 case MdInlineKind.Link:
+                case MdInlineKind.Image:
                 {
                     var span = new Span { TextDecorations = Decorations(Avalonia.Media.TextDecorationLocation.Underline) };
                     span.Bind(TextElement.ForegroundProperty, this.GetResourceObservable("BrandActionBrush"));
@@ -131,7 +143,7 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        Cursor = LinkAt(e.GetPosition(this)) is { } url && MarkdownRenderer.IsOpenable(url) ? HandCursor : null;
+        Cursor = LinkAt(e.GetPosition(this)) is { } url && IsLive(url) ? HandCursor : null;
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -142,27 +154,16 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
             return;
         }
 
-        if (LinkAt(e.GetPosition(this)) is { } url && MarkdownRenderer.IsOpenable(url))
+        if (LinkAt(e.GetPosition(this)) is { } url && IsLive(url))
         {
             _ = LaunchAsync(url);
         }
     }
 
-    private async Task LaunchAsync(string url)
-    {
-        try
-        {
-            if (TopLevel.GetTopLevel(this) is { } top && Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            {
-                await top.Launcher.LaunchUriAsync(uri).ConfigureAwait(true);
-            }
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or NotSupportedException
-            or System.Runtime.InteropServices.ExternalException or UriFormatException)
-        {
-            AppLogs.Markdown.ZLogWarning($"link launch failed: {exception.Message}");
-        }
-    }
+    private bool IsLive(string url) =>
+        probed.Contains(url) ? LinkLauncher.ExistsCached(this, url) : MarkdownRenderer.IsOpenable(url);
+
+    private Task LaunchAsync(string url) => LinkLauncher.OpenAsync(this, url);
 
     // Avalonia's TextDecorations.Underline/Strikethrough are cached AvaloniaObjects bound to the first thread that read them;
     // a fresh collection per span keeps the preview safe on any UI thread.
@@ -173,9 +174,8 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
 /// <summary>Builds Avalonia controls from parsed Markdown blocks. Colors and sizes come from the md-* styles of the hosting view.</summary>
 internal static class MarkdownRenderer
 {
-    /// <summary>Only web links are opened; everything else is shown but inert.</summary>
-    internal static bool IsOpenable(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+    /// <summary>Web links and local file paths are opened (see <see cref="LinkLauncher"/>); everything else is shown but inert.</summary>
+    internal static bool IsOpenable(string url) => LinkLauncher.LooksOpenable(url);
 
     public static Control RenderBlocks(IReadOnlyList<MdBlock> blocks, double spacing = 8)
     {
@@ -191,7 +191,9 @@ internal static class MarkdownRenderer
     public static Control Render(MdBlock block) => block.Kind switch
     {
         MdBlockKind.Heading => Text(block.Inlines, "md-h" + block.Level.ToString(CultureInfo.InvariantCulture)),
-        MdBlockKind.Paragraph => Text(block.Inlines, "md-p"),
+        MdBlockKind.Paragraph => block.Inlines.Exists(static inline => inline.Kind == MdInlineKind.Image)
+            ? RenderWithImages(block.Inlines)
+            : Text(block.Inlines, "md-p"),
         MdBlockKind.List => RenderList(block),
         MdBlockKind.Quote => RenderQuote(block),
         MdBlockKind.Code or MdBlockKind.Html => RenderCode(block),
@@ -199,6 +201,60 @@ internal static class MarkdownRenderer
         MdBlockKind.Rule => new Border { Classes = { "md-rule" } },
         _ => new Control(),
     };
+
+    /// <summary>
+    /// A paragraph that holds pictures: the text around each picture stays text, each picture becomes its own block. (Inside a
+    /// heading, list item or table cell a picture is just its alt text, as a link - those rows keep their one text block.)
+    /// </summary>
+    private static Control RenderWithImages(List<MdInline> inlines)
+    {
+        var stack = new StackPanel { Spacing = 6 };
+        var run = new List<MdInline>();
+        foreach (var inline in inlines)
+        {
+            if (inline.Kind != MdInlineKind.Image)
+            {
+                run.Add(inline);
+                continue;
+            }
+
+            FlushRun(stack, run);
+            if (inline.Url is { Length: > 0 } url)
+            {
+                stack.Children.Add(new MarkdownImageView(url, PlainText(inline.Children)));
+            }
+        }
+
+        FlushRun(stack, run);
+        return stack;
+    }
+
+    private static void FlushRun(StackPanel stack, List<MdInline> run)
+    {
+        if (run.Exists(static inline => inline.Kind is not (MdInlineKind.SoftBreak or MdInlineKind.LineBreak) &&
+                                        !(inline.Kind == MdInlineKind.Text && string.IsNullOrWhiteSpace(inline.Text))))
+        {
+            stack.Children.Add(Text([.. run], "md-p"));
+        }
+
+        run.Clear();
+    }
+
+    private static string PlainText(List<MdInline>? inlines)
+    {
+        if (inlines is null)
+        {
+            return string.Empty;
+        }
+
+        var builder = new System.Text.StringBuilder();
+        foreach (var inline in inlines)
+        {
+            builder.Append(inline.Text).Append(PlainText(inline.Children));
+        }
+
+        return builder.ToString();
+    }
 
     private static MarkdownTextBlock Text(IReadOnlyList<MdInline> inlines, string cls)
     {
