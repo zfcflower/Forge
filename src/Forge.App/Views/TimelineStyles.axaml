@@ -82,20 +82,16 @@
   <!-- The class is only present while motion is allowed (the control drops it when the appearance preference says so), so
        "reduce motion" needs no second selector and stops the pulse the moment the preference changes. -->
   <Style Selector="wc|FluentIcon.timeline-node.pulsing">
-    <Setter Property="RenderTransformOrigin" Value="50%,50%" />
     <Style.Animations>
       <Animation Duration="0:0:1.2" IterationCount="INFINITE" Easing="SineEaseInOut">
         <KeyFrame Cue="0%">
           <Setter Property="Opacity" Value="1" />
-          <Setter Property="RenderTransform" Value="scale(1)" />
         </KeyFrame>
         <KeyFrame Cue="50%">
           <Setter Property="Opacity" Value="0.3" />
-          <Setter Property="RenderTransform" Value="scale(1.15)" />
         </KeyFrame>
         <KeyFrame Cue="100%">
           <Setter Property="Opacity" Value="1" />
-          <Setter Property="RenderTransform" Value="scale(1)" />
         </KeyFrame>
       </Animation>
     </Style.Animations>
@@ -108,12 +104,12 @@
     <Setter Property="Height" Value="{DynamicResource TimelineNodeSize}" />
     <Setter Property="Stroke" Value="{DynamicResource BrandInteractiveBrush}" />
     <Setter Property="StrokeThickness" Value="1.5" />
-    <Setter Property="RenderTransformOrigin" Value="50%,50%" />
   </Style>
 
   <Style Selector="Ellipse.timeline-ring.still">
     <Setter Property="Opacity" Value="0.8" />
-    <Setter Property="RenderTransform" Value="scale(1.35)" />
+    <Setter Property="Width" Value="18.9" />
+    <Setter Property="Height" Value="18.9" />
   </Style>
 
   <Style Selector="Ellipse.timeline-ring.waiting">
@@ -121,11 +117,13 @@
       <Animation Duration="0:0:1.4" IterationCount="INFINITE" Easing="CubicEaseOut">
         <KeyFrame Cue="0%">
           <Setter Property="Opacity" Value="0.9" />
-          <Setter Property="RenderTransform" Value="scale(0.8)" />
+          <Setter Property="Width" Value="11.2" />
+          <Setter Property="Height" Value="11.2" />
         </KeyFrame>
         <KeyFrame Cue="100%">
           <Setter Property="Opacity" Value="0" />
-          <Setter Property="RenderTransform" Value="scale(1.9)" />
+          <Setter Property="Width" Value="26.6" />
+          <Setter Property="Height" Value="26.6" />
         </KeyFrame>
       </Animation>
     </Style.Animations>
@@ -136,15 +134,18 @@
       <Animation Duration="0:0:1.8" IterationCount="INFINITE" Easing="SineEaseInOut">
         <KeyFrame Cue="0%">
           <Setter Property="Opacity" Value="0.15" />
-          <Setter Property="RenderTransform" Value="scale(1)" />
+          <Setter Property="Width" Value="14" />
+          <Setter Property="Height" Value="14" />
         </KeyFrame>
         <KeyFrame Cue="50%">
           <Setter Property="Opacity" Value="0.85" />
-          <Setter Property="RenderTransform" Value="scale(1.5)" />
+          <Setter Property="Width" Value="21" />
+          <Setter Property="Height" Value="21" />
         </KeyFrame>
         <KeyFrame Cue="100%">
           <Setter Property="Opacity" Value="0.15" />
-          <Setter Property="RenderTransform" Value="scale(1)" />
+          <Setter Property="Width" Value="14" />
+          <Setter Property="Height" Value="14" />
         </KeyFrame>
       </Animation>
     </Style.Animations>

@@ -279,6 +279,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             lineCountsFactory: null,
             changeReview: Changes,
             gitSync: GitSync);
+        Services.EditorFileOpener.Handler = path => OpenFile(path, newTab: false);
         Todos = new TodoListViewModel(composition.Todos, composition.TodoStepCommitter);
         Reviews = new ReviewPanelViewModel(reviews, path => ShowChangesAsync(path));
         Specs = new SpecTreeViewModel(root => new SpecGraph(root), path => OpenFile(path, newTab: false));

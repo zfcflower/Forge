@@ -1,0 +1,222 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
+             x:Class="Forge.App.Views.ComposerToolbar"
+             x:DataType="vm:ComposerViewModel">
+  <!-- The composer's three pickers, side by side: agent, model (with effort) and the per-message orchestration. Each is a chip that
+       opens a picker; DataContext is the session's ComposerViewModel. The Flyout elements only hold the picker content: the code-behind
+       moves it into a PickerPopup that stays in the overlay layer (a real flyout re-attaches its content on every open, which was the lag). -->
+  <StackPanel Orientation="Horizontal">
+    <Button x:Name="AgentChip"
+            Classes="composer-chip"
+            AutomationProperties.AutomationId="composer-agent"
+            AutomationProperties.Name="{Binding [session.composer.agent], Source={x:Static loc:Loc.Instance}}"
+            ToolTip.Tip="{Binding [session.composer.agentTooltip], Source={x:Static loc:Loc.Instance}}">
+      <StackPanel Orientation="Horizontal" Spacing="5">
+        <wc:FluentIcon Data="{StaticResource IconSparkle}" Width="14" Height="14" />
+        <TextBlock Text="{Binding AgentLabel}" VerticalAlignment="Center" />
+        <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+      </StackPanel>
+      <Button.Flyout>
+        <Flyout Placement="TopEdgeAlignedLeft">
+          <ItemsControl ItemsSource="{Binding Agents}"
+                        MinWidth="260"
+                        AutomationProperties.AutomationId="composer-agent-list">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ComposerAgentOption">
+                <views:PickerRow Command="{Binding SelectCommand}"
+                        Click="OnAgentPicked"
+                        AutomationProperties.Name="{Binding Name}">
+                  <Grid ColumnDefinitions="18,*">
+                    <TextBlock Text="✓" IsVisible="{Binding IsSelected}" VerticalAlignment="Top" />
+                    <StackPanel Grid.Column="1" Spacing="1">
+                      <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                      <TextBlock Classes="caption"
+                                 Text="{Binding Description}"
+                                 MaxWidth="300"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Grid>
+                </views:PickerRow>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Flyout>
+      </Button.Flyout>
+    </Button>
+
+    <Button x:Name="ModelChip"
+            Margin="4,0,0,0"
+            Classes="composer-chip"
+            IsEnabled="{Binding HasModel}"
+            AutomationProperties.AutomationId="composer-model"
+            AutomationProperties.Name="{Binding ModelLabel}"
+            ToolTip.Tip="{Binding [session.composer.modelTooltip], Source={x:Static loc:Loc.Instance}}">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="{Binding ModelLabel}"
+                   MaxWidth="220"
+                   TextTrimming="CharacterEllipsis"
+                   VerticalAlignment="Center" />
+        <ItemsControl ItemsSource="{Binding EffortBars}"
+                      VerticalAlignment="Center"
+                      Height="10">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="1.5" VerticalAlignment="Bottom" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:ComposerEffortBarViewModel">
+              <Rectangle Classes="effort-bar" Height="{Binding Height}" Opacity="{Binding Opacity}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+      </StackPanel>
+      <Button.Flyout>
+        <Flyout Placement="TopEdgeAlignedLeft">
+          <StackPanel Width="300" Spacing="6" AutomationProperties.AutomationId="composer-model-panel">
+            <TextBox x:Name="ModelSearch"
+                     Text="{Binding ModelSearch, Mode=TwoWay}"
+                     PlaceholderText="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}"
+                     AutomationProperties.AutomationId="composer-model-search"
+                     AutomationProperties.Name="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}" />
+            <!-- Virtualized: the catalogue is ~180 rows, and only the ~8 that fit are ever built. -->
+            <ItemsControl ItemsSource="{Binding Models}"
+                            MaxHeight="220"
+                            AutomationProperties.AutomationId="composer-model-list">
+                <ItemsControl.Template>
+                  <ControlTemplate>
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                      <ItemsPresenter x:Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                    </ScrollViewer>
+                  </ControlTemplate>
+                </ItemsControl.Template>
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <VirtualizingStackPanel />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ComposerModelOption">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <views:PickerRow Command="{Binding SelectCommand}"
+                              Click="OnModelPicked"
+                              AutomationProperties.Name="{Binding Name}">
+                        <Grid ColumnDefinitions="18,*,Auto">
+                          <TextBlock Text="✓" IsVisible="{Binding IsSelected}" />
+                          <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Grid.Column="2"
+                                     Margin="8,0,0,0"
+                                     Classes="caption"
+                                     IsVisible="{Binding ShowProviderCaption}"
+                                     Text="{Binding Caption}"
+                                     VerticalAlignment="Center" />
+                        </Grid>
+                      </views:PickerRow>
+                      <views:PickerRow Grid.Column="1"
+                                       Classes="pin"
+                                       Command="{Binding TogglePinCommand}"
+                                       AutomationProperties.Name="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}"
+                                       ToolTip.Tip="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}">
+                        <TextBlock Classes="star" Classes.pinned="{Binding IsPinned}" />
+                      </views:PickerRow>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Classes="caption"
+                       IsVisible="{Binding HasNoModels}"
+                       Text="{Binding [session.composer.noModels], Source={x:Static loc:Loc.Instance}}" />
+            <Separator />
+            <Grid ColumnDefinitions="*,Auto" Margin="2,0">
+              <TextBlock Classes="label" Text="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Grid.Column="1" Classes="caption" Text="{Binding EffortName}" />
+            </Grid>
+            <Panel Margin="2,0">
+              <Border Classes="effort-track" />
+              <Slider Classes="effort"
+                      Minimum="0"
+                      Maximum="{Binding EffortMaximum, Mode=OneWay}"
+                      TickFrequency="1"
+                      IsSnapToTickEnabled="True"
+                      Value="{Binding EffortValue, Mode=TwoWay}"
+                      AutomationProperties.AutomationId="composer-effort"
+                      AutomationProperties.Name="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
+            </Panel>
+            <Separator />
+            <Button Classes="composer-row"
+                    Command="{Binding SaveDefaultsCommand}"
+                    AutomationProperties.AutomationId="composer-save-defaults"
+                    Content="{Binding [session.composer.saveDefaults], Source={x:Static loc:Loc.Instance}}" />
+            <Button Classes="composer-row"
+                    Command="{Binding RefreshCommand}"
+                    AutomationProperties.AutomationId="composer-refresh">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <wc:FluentIcon Data="{DynamicResource IconRefresh}" Width="14" Height="14" />
+                <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
+              </StackPanel>
+            </Button>
+            <TextBlock Classes="caption"
+                       Margin="8,0"
+                       IsVisible="{Binding HasStatus}"
+                       Text="{Binding Status}" />
+          </StackPanel>
+        </Flyout>
+      </Button.Flyout>
+    </Button>
+
+  <Button x:Name="OrchestrationChip"
+          Margin="4,0,0,0"
+          Classes="composer-chip"
+          AutomationProperties.AutomationId="composer-orchestration"
+          AutomationProperties.Name="{Binding [session.composer.orchestration], Source={x:Static loc:Loc.Instance}}"
+          ToolTip.Tip="{Binding [session.composer.orchestrationHint], Source={x:Static loc:Loc.Instance}}">
+    <StackPanel Orientation="Horizontal" Spacing="5">
+      <wc:FluentIcon Data="{DynamicResource IconBranchCompare}" Width="14" Height="14" />
+      <TextBlock Text="{Binding OrchestrationLabel}"
+                 MaxWidth="140"
+                 TextTrimming="CharacterEllipsis"
+                 VerticalAlignment="Center" />
+      <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+    </StackPanel>
+    <Button.Flyout>
+      <Flyout Placement="TopEdgeAlignedLeft">
+        <StackPanel Width="300" Spacing="4" AutomationProperties.AutomationId="composer-orchestration-panel">
+          <StackPanel Margin="2,0,2,2" Spacing="1">
+            <TextBlock Classes="label" Text="{Binding [session.composer.orchestration], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="{Binding [session.composer.orchestrationHint], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+          <ItemsControl ItemsSource="{Binding Orchestrations}"
+                        AutomationProperties.AutomationId="composer-orchestration-list">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ComposerOrchestrationOption">
+                <views:PickerRow Command="{Binding SelectCommand}"
+                        Click="OnOrchestrationPicked"
+                        AutomationProperties.Name="{Binding Name}">
+                  <Grid ColumnDefinitions="18,*">
+                    <TextBlock Text="✓" IsVisible="{Binding IsSelected}" VerticalAlignment="Top" />
+                    <StackPanel Grid.Column="1" Spacing="1">
+                      <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                      <TextBlock Classes="caption"
+                                 Text="{Binding Description}"
+                                 MaxLines="2"
+                                 TextTrimming="CharacterEllipsis"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Grid>
+                </views:PickerRow>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+  </StackPanel>
+</UserControl>

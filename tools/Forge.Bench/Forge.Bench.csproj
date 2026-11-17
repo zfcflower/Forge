@@ -7,5 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Forge.IO/Forge.IO.csproj" />
     <ProjectReference Include="../../src/Forge.Core/Forge.Core.csproj" />
+    <!-- The composer popup scenarios drive the real views and view models, on a real Avalonia window. -->
+    <ProjectReference Include="../../src/Forge.App/Forge.App.csproj" />
   </ItemGroup>
 </Project>

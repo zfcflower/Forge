@@ -38,6 +38,12 @@ internal static class SessionStrings
     public const string ComposerAgentDefaultKey = "session.composer.agentDefault";
     public const string ComposerAgentDefaultDescriptionKey = "session.composer.agentDefaultDescription";
     public const string ComposerAgentTooltipKey = "session.composer.agentTooltip";
+    public const string ComposerOrchestrationKey = "session.composer.orchestration";
+    public const string ComposerOrchestrationHintKey = "session.composer.orchestrationHint";
+    public const string ComposerOrchestrationAutoKey = "session.composer.orchestrationAuto";
+    public const string ComposerOrchestrationAutoDescriptionKey = "session.composer.orchestrationAutoDescription";
+    public const string ComposerOrchestrationDirectKey = "session.composer.orchestrationDirect";
+    public const string ComposerOrchestrationDirectDescriptionKey = "session.composer.orchestrationDirectDescription";
     public const string ComposerModelTooltipKey = "session.composer.modelTooltip";
     public const string ComposerSearchModelsKey = "session.composer.searchModels";
     public const string ComposerNoModelsKey = "session.composer.noModels";
@@ -82,6 +88,11 @@ internal static class SessionStrings
     public const string TurnCollapseKey = "turn.collapse";
     public const string ToolArgumentsKey = "turn.toolArguments";
     public const string ToolResultKey = "turn.toolResult";
+    public const string ToolOpenFileKey = "turn.toolOpenFile";
+    public const string ToolCopyResultKey = "turn.toolCopyResult";
+    public const string ToolShowMoreKey = "turn.toolShowMore";
+    public const string ToolShowLessKey = "turn.toolShowLess";
+    public const string ToolResultCutKey = "turn.toolResultCut";
     public const string NoTextKey = "turn.noText";
     public const string CopyMessageKey = "turn.copyMessage";
     public const string NoToolResultKey = "turn.noToolResult";
@@ -171,6 +182,14 @@ internal static class SessionStrings
     public static string ComposerAgentDefault => Loc.Instance[ComposerAgentDefaultKey];
 
     public static string ComposerAgentDefaultDescription => Loc.Instance[ComposerAgentDefaultDescriptionKey];
+
+    public static string ComposerOrchestrationAuto => Loc.Instance[ComposerOrchestrationAutoKey];
+
+    public static string ComposerOrchestrationAutoDescription => Loc.Instance[ComposerOrchestrationAutoDescriptionKey];
+
+    public static string ComposerOrchestrationDirect => Loc.Instance[ComposerOrchestrationDirectKey];
+
+    public static string ComposerOrchestrationDirectDescription => Loc.Instance[ComposerOrchestrationDirectDescriptionKey];
 
     public static string ComposerSkill => Loc.Instance[ComposerSkillKey];
 
@@ -276,6 +295,13 @@ internal static class SessionStrings
     public static string ToolArguments => Loc.Instance[ToolArgumentsKey];
 
     public static string ToolResult => Loc.Instance[ToolResultKey];
+
+    public static string ToolShowMore => Loc.Instance[ToolShowMoreKey];
+
+    public static string ToolShowLess => Loc.Instance[ToolShowLessKey];
+
+    /// <summary>The note under a result that was cut for display; copying still gives the whole output.</summary>
+    public static string ToolResultCut(int shown, int total) => Loc.Instance.Format(ToolResultCutKey, shown, total);
 
     /// <summary>The placeholder of a reply that never arrived; stored in the closed text block.</summary>
     public static LocText NoText => new(NoTextKey);
@@ -417,6 +443,12 @@ internal static class SessionStrings
         Loc.Register(ComposerAgentKey, "代理", "Agent");
         Loc.Register(ComposerAgentDefaultKey, "Agent", "Agent");
         Loc.Register(ComposerAgentDefaultDescriptionKey, "主编码代理（默认）", "Main coding agent (default)");
+        Loc.Register(ComposerOrchestrationKey, "编排", "Orchestration");
+        Loc.Register(ComposerOrchestrationHintKey, "仅对下一条消息生效，发送后恢复为自动", "Applies to the next message only, then returns to Auto");
+        Loc.Register(ComposerOrchestrationAutoKey, "自动", "Auto");
+        Loc.Register(ComposerOrchestrationAutoDescriptionKey, "由代理按默认路由决定是否走工作流", "The agent routes the work as usual");
+        Loc.Register(ComposerOrchestrationDirectKey, "直接执行", "Direct");
+        Loc.Register(ComposerOrchestrationDirectDescriptionKey, "跳过工作流，直接处理这条消息", "Skip workflows and handle this message directly");
         Loc.Register(ComposerAgentTooltipKey, "选择本会话后续轮次使用的代理", "Choose the agent for the next turns of this session");
         Loc.Register(ComposerModelTooltipKey, "选择模型与思考力度", "Choose the model and thinking effort");
         Loc.Register(ComposerSearchModelsKey, "搜索模型", "Search models");
@@ -469,6 +501,11 @@ internal static class SessionStrings
         Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");
         Loc.Register(ToolArgumentsKey, "参数", "Arguments");
         Loc.Register(ToolResultKey, "结果", "Result");
+        Loc.Register(ToolOpenFileKey, "打开文件", "Open file");
+        Loc.Register(ToolCopyResultKey, "复制结果", "Copy result");
+        Loc.Register(ToolShowMoreKey, "展开全部", "Show more");
+        Loc.Register(ToolShowLessKey, "收起", "Show less");
+        Loc.Register(ToolResultCutKey, "仅显示前 {0} 个字符（共 {1} 个），复制可得完整输出", "Showing the first {0} of {1} characters; copy gives the whole output");
         Loc.Register(NoTextKey, "（模型没有返回文本）", "(the model returned no text)");
         Loc.Register(CopyMessageKey, "复制消息", "Copy message");
         Loc.Register(NoToolResultKey, "没有结果：本轮已结束", "No result: the turn ended");

@@ -6,9 +6,9 @@ internal enum MdBlockKind { Paragraph, Heading, List, Quote, Code, Table, Rule, 
 
 internal enum MdAlign { None, Left, Center, Right }
 
-internal enum MdInlineKind { Text, Code, Bold, Italic, Strike, Link, SoftBreak, LineBreak }
+internal enum MdInlineKind { Text, Code, Bold, Italic, Strike, Link, SoftBreak, LineBreak, Image }
 
-/// <summary>Small inline AST node. <see cref="Text"/> is set for Text/Code, <see cref="Url"/> for Link, <see cref="Children"/> for the wrappers.</summary>
+/// <summary>Small inline AST node. <see cref="Text"/> is set for Text/Code, <see cref="Url"/> for Link and Image (the children are the alt text), <see cref="Children"/> for the wrappers.</summary>
 internal sealed class MdInline
 {
     public MdInline(MdInlineKind kind, string text = "", string? url = null, List<MdInline>? children = null)
@@ -1064,7 +1064,7 @@ internal static class MarkdownBlockParser
                     i = Emphasis(s, start, i, end, c, sb, o);
                     break;
                 case '!':
-                    if (i + 1 < end && s[i + 1] == '[' && TryLink(s, i + 1, end, o, sb, out var imageEnd))
+                    if (i + 1 < end && s[i + 1] == '[' && TryLink(s, i + 1, end, o, sb, out var imageEnd, image: true))
                     {
                         i = imageEnd;
                     }
@@ -1329,7 +1329,7 @@ internal static class MarkdownBlockParser
         return -1;
     }
 
-    private static bool TryLink(string s, int open, int end, List<MdInline> o, StringBuilder sb, out int next)
+    private static bool TryLink(string s, int open, int end, List<MdInline> o, StringBuilder sb, out int next, bool image = false)
     {
         next = open;
         var depth = 0;
@@ -1448,7 +1448,7 @@ internal static class MarkdownBlockParser
         Flush(sb, o);
         var label = new List<MdInline>();
         ParseInlineRange(s.Substring(open + 1, close - open - 1), 0, close - open - 1, label);
-        o.Add(new MdInline(MdInlineKind.Link, url: Unescape(url), children: label));
+        o.Add(new MdInline(image ? MdInlineKind.Image : MdInlineKind.Link, url: Unescape(url), children: label));
         next = p + 1;
         return true;
     }

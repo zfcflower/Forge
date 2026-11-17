@@ -1,0 +1,102 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wc="using:Forge.App.Workbench.Controls">
+
+  <!-- The composer's chips and the rows of the pickers that open from them (agent, model, orchestration). Shared by the toolbar
+       and the suggestion list, so they live here instead of in either view. -->
+    <Style Selector="Button.composer-chip">
+      <Setter Property="MinHeight" Value="24" />
+      <Setter Property="Padding" Value="7,2" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="Button.composer-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.composer-chip:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
+    <Style Selector="Rectangle.effort-bar">
+      <Setter Property="Width" Value="2.5" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+      <Setter Property="Fill" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="Button.composer-row">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.composer-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
+    <Style Selector="Button.composer-row.selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+    </Style>
+    <Style Selector="Button.composer-mini">
+      <Setter Property="MinWidth" Value="20" />
+      <Setter Property="MinHeight" Value="20" />
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- The picker rows (PickerRow): a plain decorator, so a popup that attaches dozens of them stays cheap. -->
+    <Style Selector="Border.picker-row">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+    </Style>
+    <Style Selector="Border.picker-row:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
+    <Style Selector="Border.picker-row:focus-visible">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
+    <Style Selector="Border.picker-row.pin">
+      <Setter Property="Padding" Value="6,5" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- The pin lives in the model list: a hollow star while the model is not pinned, the filled one while it is. Glyphs, not
+         icons: a row is built many times per open and an icon is a templated control. Colour tells the two apart besides the shape. -->
+    <Style Selector="TextBlock.star">
+      <Setter Property="Text" Value="☆" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="Opacity" Value="0.6" />
+    </Style>
+    <Style Selector="TextBlock.star.pinned">
+      <Setter Property="Text" Value="★" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="Border.effort-track">
+      <Setter Property="Height" Value="4" />
+      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="6,0" />
+      <Setter Property="Background">
+        <LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
+          <GradientStop Offset="0" Color="{DynamicResource SystemAccentColorLight3}" />
+          <GradientStop Offset="1" Color="{DynamicResource SystemAccentColorDark1}" />
+        </LinearGradientBrush>
+      </Setter>
+    </Style>
+    <Style Selector="Slider.effort">
+      <Style.Resources>
+        <SolidColorBrush x:Key="SliderTrackFill" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderTrackFillPressed" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderTrackValueFill" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="Transparent" />
+      </Style.Resources>
+    </Style>
+</Styles>
