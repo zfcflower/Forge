@@ -3,6 +3,7 @@ using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Templates;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.ViewModels.Preview;
 
@@ -20,21 +21,43 @@ public partial class TablePreviewView : UserControl
 
     private readonly IDataTemplate? cellTemplate;
     private TableViewColumnHeadersPresenter? headers;
+    private bool widthsPending;
 
     public TablePreviewView()
     {
         InitializeComponent();
         cellTemplate = ResolveCellTemplate();
-        Table.TemplateApplied += (_, _) => EnsureHeaders();
-        Table.ContainerPrepared += OnContainerPrepared;
-        // The header band lives inside the control's ScrollViewer template, which is applied during the first layout pass,
-        // so the first size change is the earliest point the presenter is reliably there to be collapsed.
-        SizeChanged += (_, _) =>
+        Table.TemplateApplied += (_, _) =>
         {
+            // The presenter belongs to the control's template: a re-applied template replaces it.
+            headers = null;
             EnsureHeaders();
-            ApplyWidths();
+            RequestWidths();
         };
+        Table.ContainerPrepared += OnContainerPrepared;
+        // The widths are applied from the table's own size, on the dispatcher: writing a column width from inside a layout
+        // pass leaves the header arranged with the previous widths while the rows already have the new ones.
+        Table.SizeChanged += (_, _) => RequestWidths();
         DataContextChanged += (_, _) => BuildColumns();
+    }
+
+    /// <summary>One pending width pass at a time; it runs after the current layout pass, not during it.</summary>
+    private void RequestWidths()
+    {
+        if (widthsPending)
+        {
+            return;
+        }
+
+        widthsPending = true;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                widthsPending = false;
+                EnsureHeaders();
+                ApplyWidths();
+            },
+            DispatcherPriority.Loaded);
     }
 
     /// <summary>Band the rows: the container is re-prepared for every item, so a recycled row never keeps a stale class.</summary>
@@ -70,7 +93,7 @@ public partial class TablePreviewView : UserControl
 
         Table.Columns = columns;
         EnsureHeaders();
-        ApplyWidths();
+        RequestWidths();
     }
 
     /// <summary>
