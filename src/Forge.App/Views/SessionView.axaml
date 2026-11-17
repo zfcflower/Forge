@@ -306,10 +306,17 @@
   <Grid RowDefinitions="*,Auto,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <Panel Grid.Row="0">
       <ListBox x:Name="Transcript"
-               ItemsSource="{Binding Transcript.Items}"
+               ItemsSource="{Binding Transcript.Rows}"
                Padding="{DynamicResource ChatTranscriptPadding}"
                SelectionMode="Single"
-               ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+               AutoScrollToSelectedItem="False"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+        <ListBox.ItemsPanel>
+          <ItemsPanelTemplate>
+            <views:TranscriptStackPanel />
+          </ItemsPanelTemplate>
+        </ListBox.ItemsPanel>
+      </ListBox>
       <StackPanel IsVisible="{Binding Transcript.IsEmpty}"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"

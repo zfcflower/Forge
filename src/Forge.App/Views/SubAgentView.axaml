@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:loc="using:Forge.App.Localization"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.SubAgentView"
              x:DataType="vm:SubAgentViewModel">
   <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
@@ -33,10 +34,16 @@
 
     <ListBox x:Name="Transcript"
              Grid.Row="1"
-             ItemsSource="{Binding Transcript.Items}"
+             ItemsSource="{Binding Transcript.Rows}"
              Padding="{DynamicResource ChatTranscriptPadding}"
              SelectionMode="Single"
-             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <views:TranscriptStackPanel />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
+    </ListBox>
 
     <Border Grid.Row="2"
             Background="{DynamicResource CardBackgroundBrush}"

@@ -26,7 +26,7 @@ internal enum TimelineRowRole
     /// <summary>The turn's metadata row: no node, the axis only passes through it.</summary>
     TurnHeader,
 
-    /// <summary>One block inside an expanded turn, an item of the turn's block list.</summary>
+    /// <summary>One block of an expanded turn, a row of the flat transcript list.</summary>
     Block,
 
     /// <summary>The turn's footnote, rendered next to the turn's blocks but not one of them.</summary>
@@ -80,10 +80,7 @@ internal sealed class TimelineGutter : TemplatedControl
     private Ellipse? ring;
     private ItemsControl? owner;
     private Control? container;
-    private ItemsControl? outer;
-    private Control? outerContainer;
     private INotifyCollectionChanged? ownerItems;
-    private INotifyCollectionChanged? outerItems;
     private TurnCardViewModel? turn;
     private bool attached;
     private bool hooked;
@@ -234,11 +231,6 @@ internal sealed class TimelineGutter : TemplatedControl
             ownerItems.CollectionChanged += OnCollectionChanged;
         }
 
-        if (outer is not null && (outerItems = Observable(outer)) is not null)
-        {
-            outerItems.CollectionChanged += OnCollectionChanged;
-        }
-
         if (turn is not null)
         {
             turn.PropertyChanged += OnTurnChanged;
@@ -255,12 +247,6 @@ internal sealed class TimelineGutter : TemplatedControl
         {
             ownerItems.CollectionChanged -= OnCollectionChanged;
             ownerItems = null;
-        }
-
-        if (outerItems is not null)
-        {
-            outerItems.CollectionChanged -= OnCollectionChanged;
-            outerItems = null;
         }
 
         if (turn is not null)
@@ -287,8 +273,6 @@ internal sealed class TimelineGutter : TemplatedControl
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         owner = null;
         container = null;
-        outer = null;
-        outerContainer = null;
     }
 
     private static INotifyCollectionChanged? Observable(ItemsControl? control) =>
@@ -300,16 +284,11 @@ internal sealed class TimelineGutter : TemplatedControl
         container = owner is null || DataContext is null ? null : owner.ContainerFromItem(DataContext);
         turn = Role switch
         {
-            TimelineRowRole.TurnHeader or TimelineRowRole.Footnote => DataContext as TurnCardViewModel,
-            TimelineRowRole.Block => owner?.DataContext as TurnCardViewModel,
+            TimelineRowRole.TurnHeader => DataContext as TurnCardViewModel,
+            TimelineRowRole.Footnote => (DataContext as TurnFootnoteViewModel)?.Card,
+            TimelineRowRole.Block => (DataContext as TurnBlockViewModel)?.Turn,
             _ => null,
         };
-
-        if (Role == TimelineRowRole.Block && owner is not null && owner.DataContext is not null)
-        {
-            outer = owner.GetVisualAncestors().OfType<ItemsControl>().FirstOrDefault();
-            outerContainer = outer?.ContainerFromItem(owner.DataContext);
-        }
     }
 
     /// <summary>
@@ -339,10 +318,6 @@ internal sealed class TimelineGutter : TemplatedControl
         if (ReferenceEquals(sender, ownerItems) && owner is not null && container is not null)
         {
             position = owner.IndexFromContainer(container);
-        }
-        else if (ReferenceEquals(sender, outerItems) && outer is not null && outerContainer is not null)
-        {
-            position = outer.IndexFromContainer(outerContainer);
         }
         else if (turn is not null && ReferenceEquals(sender, turn.Blocks))
         {
@@ -449,20 +424,8 @@ internal sealed class TimelineGutter : TemplatedControl
         ApplyName(force: false);
     }
 
-    /// <summary>
-    /// Whether every container this row's position depends on is realized and mapped: its own, and for a block row also its
-    /// turn's container in the transcript (a block's first/last-in-transcript flags come from there, not from its own list).
-    /// </summary>
-    private bool PlacementResolved()
-    {
-        if (owner is null || container is null || owner.IndexFromContainer(container) < 0)
-        {
-            return false;
-        }
-
-        return Role != TimelineRowRole.Block
-            || (outer is not null && outerContainer is not null && outer.IndexFromContainer(outerContainer) >= 0);
-    }
+    /// <summary>Whether this row's container is realized and mapped in the list, so its position is known.</summary>
+    private bool PlacementResolved() => owner is not null && container is not null && owner.IndexFromContainer(container) >= 0;
 
     private TimelineRowLayout ComputeLayout()
     {
@@ -482,23 +445,14 @@ internal sealed class TimelineGutter : TemplatedControl
             case TimelineRowRole.TurnHeader:
                 return TimelineLayout.TurnHeader(isFirst, isLast, VisibleBlocks, turn?.HasFootnote == true);
             case TimelineRowRole.Footnote:
-                return TimelineLayout.TurnFootnote(VisibleBlocks, isFirst, isLast);
             case TimelineRowRole.Block:
-                var (turnFirst, turnLast) = TurnPosition();
-                return TimelineLayout.TurnBlock(index, count, turnFirst, turnLast, turn?.HasFootnote == true);
+                return TimelineLayout.TurnRow(index, count);
             default:
                 return TimelineLayout.Item(isFirst, isLast);
         }
     }
 
     private int VisibleBlocks => turn is { IsExpanded: true } expanded ? expanded.Blocks.Count : 0;
-
-    private (bool First, bool Last) TurnPosition()
-    {
-        // PlacementResolved has already vouched for both containers: a block row never gets here with an unmapped turn.
-        var index = outer!.IndexFromContainer(outerContainer!);
-        return (index == 0, index == outer.ItemCount - 1);
-    }
 
     private (TimelineNodeKind Kind, TimelineNodeState State) Effective()
     {

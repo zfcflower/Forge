@@ -28,6 +28,7 @@ internal sealed class TranscriptFollower
     private readonly Border sticky;
     private readonly TextBlock stickyText;
     private readonly Button follow;
+    private readonly TranscriptScrollAnchor anchor;
     private INotifyCollectionChanged? items;
     private ScrollViewer? scroller;
     private bool following = true;
@@ -84,6 +85,7 @@ internal sealed class TranscriptFollower
             host.Children.Add(overlay);
         }
 
+        anchor = new TranscriptScrollAnchor(list, () => following);
         list.TemplateApplied += OnTemplateApplied;
         list.AddHandler(InputElement.PointerWheelChangedEvent, OnWheel, RoutingStrategies.Tunnel);
         list.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
@@ -99,13 +101,14 @@ internal sealed class TranscriptFollower
     }
 
     /// <summary>Installs the behaviour on <paramref name="list"/>, whose parent must be a panel (the overlays join it).</summary>
-    public static void Attach(ListBox list)
-    {
-        if (list.Parent is Panel host)
-        {
-            _ = new TranscriptFollower(list, host);
-        }
-    }
+    public static TranscriptFollower? Attach(ListBox list) =>
+        list.Parent is Panel host ? new TranscriptFollower(list, host) : null;
+
+    /// <summary>Whether the list is following the reply (kept at the bottom as it grows).</summary>
+    internal bool IsFollowing => following;
+
+    /// <summary>What keeps the paused transcript's content in place while rows change.</summary>
+    internal TranscriptScrollAnchor Anchor => anchor;
 
     private void Hook(INotifyCollectionChanged? source)
     {
@@ -136,10 +139,13 @@ internal sealed class TranscriptFollower
         {
             scroller.ScrollChanged -= OnScrollChanged;
             scroller.RemoveHandler(InputElement.PointerPressedEvent, OnScrollerPressed);
+            scroller.RemoveHandler(InputElement.PointerReleasedEvent, OnScrollerReleased);
+            scroller.RemoveHandler(InputElement.PointerCaptureLostEvent, OnScrollerCaptureLost);
         }
 
         scroller = e.NameScope.Find<ScrollViewer>("PART_ScrollViewer")
             ?? list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        anchor.SetScroller(scroller);
         if (scroller is null)
         {
             return;
@@ -148,6 +154,9 @@ internal sealed class TranscriptFollower
         scroller.ScrollChanged += OnScrollChanged;
         // A press on the scroll bar is the user taking the scroll position: stop following until they reach the bottom again.
         scroller.AddHandler(InputElement.PointerPressedEvent, OnScrollerPressed, RoutingStrategies.Tunnel);
+        // The thumb captures the pointer while dragged; its release (or a lost capture) ends the user's scroll.
+        scroller.AddHandler(InputElement.PointerReleasedEvent, OnScrollerReleased, RoutingStrategies.Bubble, handledEventsToo: true);
+        scroller.AddHandler(InputElement.PointerCaptureLostEvent, OnScrollerCaptureLost, RoutingStrategies.Bubble, handledEventsToo: true);
     }
 
     private void OnScrollerPressed(object? sender, PointerPressedEventArgs e)
@@ -159,15 +168,24 @@ internal sealed class TranscriptFollower
 
         // A press on the scroll bar is the user taking the scroll position. So is a press on a link-style button inside the
         // transcript (a tool row's expander or path): the row grows under the pointer, and following the tail would scroll it away.
-        if (visual.FindAncestorOfType<ScrollBar>(includeSelf: true) is not null ||
-            (e.GetCurrentPoint(null).Properties.IsLeftButtonPressed && visual.FindAncestorOfType<Button>(includeSelf: true) is { } button && button.Classes.Contains("link")))
+        if (visual.FindAncestorOfType<ScrollBar>(includeSelf: true) is not null)
+        {
+            anchor.BeginUserScroll();
+            StopFollowing();
+        }
+        else if (e.GetCurrentPoint(null).Properties.IsLeftButtonPressed && visual.FindAncestorOfType<Button>(includeSelf: true) is { } button && button.Classes.Contains("link"))
         {
             StopFollowing();
         }
     }
 
+    private void OnScrollerReleased(object? sender, PointerReleasedEventArgs e) => anchor.EndUserScroll();
+
+    private void OnScrollerCaptureLost(object? sender, PointerCaptureLostEventArgs e) => anchor.EndUserScroll();
+
     private void OnWheel(object? sender, PointerWheelEventArgs e)
     {
+        anchor.UserScrolled();
         if (e.Delta.Y > 0 && CanScrollUp)
         {
             StopFollowing();
@@ -176,13 +194,18 @@ internal sealed class TranscriptFollower
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Source is not TextBox && e.Key is Key.PageUp or Key.PageDown or Key.Home or Key.End or Key.Up or Key.Down or Key.Space)
+        {
+            anchor.UserScrolled();
+        }
+
         if (e.Key is Key.PageUp or Key.Home or Key.Up && e.Source is not TextBox && CanScrollUp)
         {
             StopFollowing();
         }
     }
 
-    private void StopFollowing()
+    internal void StopFollowing()
     {
         following = false;
         UpdateOverlays();
@@ -207,6 +230,10 @@ internal sealed class TranscriptFollower
         {
             PostScrollToEnd();
         }
+        else
+        {
+            anchor.ItemsChanged(e);
+        }
     }
 
     /// <summary>Whether an upward scroll would move anything; a wheel turned over a transcript that fits is not "the user left".</summary>
@@ -217,6 +244,8 @@ internal sealed class TranscriptFollower
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         var contentChanged = Math.Abs(e.ExtentDelta.Y) > 0.5 || Math.Abs(e.ViewportDelta.Y) > 0.5;
+        // The anchor holding the content in place is not the user returning to the bottom.
+        var anchored = anchor.TakeOwnWrite();
         if (following)
         {
             if (contentChanged && !AtBottom)
@@ -224,7 +253,7 @@ internal sealed class TranscriptFollower
                 PostScrollToEnd();
             }
         }
-        else if (!contentChanged && AtBottom)
+        else if (!contentChanged && !anchored && AtBottom)
         {
             following = true;
         }
@@ -309,6 +338,7 @@ internal sealed class TranscriptFollower
         if (stickyIndex >= 0)
         {
             StopFollowing();
+            anchor.UserScrolled();
             list.ScrollIntoView(stickyIndex);
             e.Handled = true;
         }

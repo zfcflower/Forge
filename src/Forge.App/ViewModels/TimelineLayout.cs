@@ -37,11 +37,11 @@ internal static class TimelineLayout
         return new(false, line, line);
     }
 
-    /// <summary>One block of an expanded turn, at <paramref name="index"/> of <paramref name="visibleBlocks"/>.</summary>
-    public static TimelineRowLayout TurnBlock(int index, int visibleBlocks, bool isFirst, bool isLast, bool hasFootnote) =>
-        new(true, index > 0 || !isFirst, index < visibleBlocks - 1 || hasFootnote || !isLast);
-
-    /// <summary>The turn's footnote, when it has one: it is the turn's closing error node.</summary>
-    public static TimelineRowLayout TurnFootnote(int visibleBlocks, bool isFirst, bool isLast) =>
-        new(true, visibleBlocks > 0 || !isFirst, !isLast);
+    /// <summary>
+    /// A block or the footnote of a turn, at <paramref name="index"/> of <paramref name="count"/> rows of the flat transcript
+    /// list. The row above the first block (or the footnote of a turn with no block) is the turn's header; when that header
+    /// is the very first row it draws no line, so the axis starts at the first node, not at the header. Every other row has
+    /// a node above it, and a node below it unless it is the last row.
+    /// </summary>
+    public static TimelineRowLayout TurnRow(int index, int count) => new(true, index > 1, index < count - 1);
 }

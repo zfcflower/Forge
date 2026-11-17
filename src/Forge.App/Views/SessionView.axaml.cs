@@ -44,7 +44,7 @@ public partial class SessionView : UserControl
         viewModel = DataContext as SessionWorkspaceViewModel;
         if (viewModel is not null)
         {
-            items = viewModel.Transcript.Items;
+            items = viewModel.Transcript.Rows;
             items.CollectionChanged += OnItemsChanged;
         }
     }

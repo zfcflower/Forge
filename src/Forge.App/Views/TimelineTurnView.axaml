@@ -3,13 +3,12 @@
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:views="using:Forge.App.Views"
              xmlns:loc="using:Forge.App.Localization"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
              x:Class="Forge.App.Views.TimelineTurnView"
              x:DataType="vm:TurnCardViewModel">
-  <!-- One agent turn on the timeline (wave W13): its metadata is a node-less row the axis passes through, each block of the
-       reply is its own node, and the turn's footnote closes with an error node. The rows share one full-width stack with no
-       card around it, so every gutter lands on the same x as the rows of every other transcript item. -->
-  <StackPanel>
-    <Grid ColumnDefinitions="Auto,*">
+  <!-- The turn's metadata row on the timeline: a node-less row the axis passes through. The turn's blocks and its footnote are
+       rows of their own in the flat transcript list, so every gutter lands on the same x as the rows of every other item. -->
+  <Grid ColumnDefinitions="Auto,*">
       <views:TimelineGutter Role="TurnHeader" Kind="Turn" IsRunning="{Binding IsRunning}" />
       <Button Grid.Column="1"
               Classes="link"
@@ -20,58 +19,9 @@
               AutomationProperties.AutomationId="turn-toggle"
               AutomationProperties.Name="{Binding [turn.collapse], Source={x:Static loc:Loc.Instance}}">
         <StackPanel Orientation="Horizontal" Spacing="6">
-          <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
+          <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}" Classes="tree-chevron" Classes.expanded="{Binding IsExpanded}" Width="12" Height="12" />
           <TextBlock Classes="caption" Text="{Binding Header}" />
         </StackPanel>
       </Button>
     </Grid>
-    <ItemsControl ItemsSource="{Binding Blocks}" IsVisible="{Binding IsExpanded}">
-      <!-- The reasoning row (wave W17a) is the one block type without an app-wide template: it carries no business data
-           beyond its text, so its row lives next to the block list that holds it. A collapsed row shows the first line only. -->
-      <ItemsControl.DataTemplates>
-        <DataTemplate DataType="vm:TurnThinkingViewModel" x:DataType="vm:TurnThinkingViewModel">
-          <Grid ColumnDefinitions="Auto,*">
-            <views:TimelineGutter Role="Block" Kind="Thinking" IsRunning="{Binding IsStreaming}" />
-            <StackPanel Grid.Column="1" Margin="0,2,0,4" Spacing="2">
-              <Button Classes="link"
-                      HorizontalAlignment="Left"
-                      HorizontalContentAlignment="Left"
-                      Command="{Binding ToggleCommand}"
-                      AutomationProperties.AutomationId="thinking-toggle"
-                      AutomationProperties.Name="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                  <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
-                  <TextBlock Classes="caption" Text="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}" />
-                  <TextBlock Classes="caption"
-                             MaxWidth="560"
-                             Text="{Binding Preview}"
-                             TextTrimming="CharacterEllipsis"
-                             IsVisible="{Binding !IsExpanded}" />
-                </StackPanel>
-              </Button>
-              <ScrollViewer MaxHeight="240"
-                            IsVisible="{Binding IsExpanded}"
-                            HorizontalScrollBarVisibility="Disabled"
-                            VerticalScrollBarVisibility="Auto">
-                <TextBlock Classes="caption"
-                           Margin="0,0,8,0"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextMutedBrush}"
-                           Text="{Binding Text}"
-                           AutomationProperties.AutomationId="thinking-text" />
-              </ScrollViewer>
-            </StackPanel>
-          </Grid>
-        </DataTemplate>
-      </ItemsControl.DataTemplates>
-    </ItemsControl>
-    <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFootnote}">
-      <views:TimelineGutter Role="Footnote" Kind="Error" IsFailing="True" />
-      <TextBlock Grid.Column="1"
-                 Classes="caption"
-                 Margin="0,4,8,6"
-                 TextWrapping="Wrap"
-                 Text="{Binding Footnote}" />
-    </Grid>
-  </StackPanel>
 </UserControl>
