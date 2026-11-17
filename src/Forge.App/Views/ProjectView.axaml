@@ -6,6 +6,7 @@
              x:Class="Forge.App.Views.ProjectView"
              x:DataType="vm:ProjectTreeViewModel">
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <StyleInclude Source="avares://Forge.App/Resources/TreeStyles.axaml" />
     <!-- A project's own name heads its subtree, so it reads one step larger and one weight heavier than the rows under it;
          a workspace row names its branch, so it takes the weight without the size. Declared here rather than in the shared

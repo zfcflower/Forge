@@ -5,6 +5,9 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Changes.DiffBlockBar"
              x:DataType="ch:IDiffBlockItem">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/DiffStyles.axaml" />
+  </UserControl.Styles>
   <!-- The bar above one change block: "✓ 保留  ↶". Shared by the diff editor overlay and the Markdown preview. -->
   <Border Classes="diff-block-bar" Classes.kept="{Binding IsKept}">
     <StackPanel Orientation="Horizontal" Spacing="4">

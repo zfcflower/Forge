@@ -14,6 +14,10 @@
         ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}"
         AutomationProperties.AutomationId="new-branch-dialog">
+  <Window.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+    <StyleInclude Source="avares://Forge.App/Resources/ChangeMenuStyles.axaml" />
+  </Window.Styles>
   <StackPanel Margin="18,16" Spacing="12">
     <!-- Start point: the branch the new one begins at, opened in the same searchable picker the changes panel uses. -->
     <Grid ColumnDefinitions="Auto,*">

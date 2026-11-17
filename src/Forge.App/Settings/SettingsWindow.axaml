@@ -17,6 +17,7 @@
         ExtendClientAreaTitleBarHeightHint="-1"
         Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <!-- The section column: one flat button per section, green-tinted while selected. -->
     <Style Selector="Button.settings-nav">
       <Setter Property="Background" Value="Transparent" />

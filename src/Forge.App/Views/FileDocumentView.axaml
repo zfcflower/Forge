@@ -9,6 +9,7 @@
              x:Class="Forge.App.Views.FileDocumentView"
              x:DataType="vm:FileDocumentViewModel">
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="wc|PanelIconButton.active /template/ Border#PART_Background">
       <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>

@@ -13,6 +13,9 @@
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,0,0,1"
             AutomationProperties.AutomationId="subagent-breadcrumb">
+      <Border.Styles>
+        <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+      </Border.Styles>
       <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
         <Button Classes="breadcrumb"
                 IsVisible="{Binding HasBackToParent}"
@@ -32,24 +35,28 @@
       </StackPanel>
     </Border>
 
-    <ListBox x:Name="Transcript"
+    <views:TranscriptListBox x:Name="Transcript"
              Grid.Row="1"
              ItemsSource="{Binding Transcript.Rows}"
              Padding="{DynamicResource ChatTranscriptPadding}"
              SelectionMode="Single"
+             AutoScrollToSelectedItem="False"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
       <ListBox.ItemsPanel>
         <ItemsPanelTemplate>
           <views:TranscriptStackPanel />
         </ItemsPanelTemplate>
       </ListBox.ItemsPanel>
-    </ListBox>
+    </views:TranscriptListBox>
 
     <Border Grid.Row="2"
             Background="{DynamicResource CardBackgroundBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,1,0,0"
             Padding="12,6">
+      <Border.Styles>
+        <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+      </Border.Styles>
       <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
           <Ellipse Classes="status-dot" Classes.running="{Binding IsLive}" />

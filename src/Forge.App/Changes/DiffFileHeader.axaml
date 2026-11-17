@@ -8,6 +8,7 @@
   <!-- The bar above one file of the diff editor. Its pieces left to right: collapse chevron, badge, path (middle-ellipsised),
        +N / -N, kept summary, then the right cluster. FlexRowPanel gives the path whatever the others leave. -->
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/DiffStyles.axaml" />
     <Style Selector="wc|FluentIcon.chevron">
       <Setter Property="RenderTransform" Value="rotate(0deg)" />
     </Style>

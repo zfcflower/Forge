@@ -4,6 +4,9 @@
              xmlns:preview="using:Forge.App.ViewModels.Preview"
              x:Class="Forge.App.Views.Preview.PlaceholderPreviewView"
              x:DataType="preview:PlaceholderFilePreviewViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
     <Border MaxWidth="560"
             HorizontalAlignment="Left"

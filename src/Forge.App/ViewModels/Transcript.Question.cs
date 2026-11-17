@@ -24,6 +24,9 @@ internal sealed partial class ToolRowViewModel
     /// <summary>A failed call (invalid arguments, handler error) keeps the plain tool row so its error text stays visible.</summary>
     public bool IsQuestionCard => IsAskUser && !IsError;
 
+    /// <summary>The row itself for an <c>ask_user</c> card, null for every other row: the slot the card's controls are built in, so a tool row does not build them hidden.</summary>
+    public object? QuestionBody => IsQuestionCard ? this : null;
+
     private bool IsAskUser => string.Equals(Name, Forge.Core.Agents.AskUserTool.Name, StringComparison.Ordinal);
 
     public IReadOnlyList<QuestionCardItem> QuestionItems => questionItems ??= BuildQuestionItems();
@@ -64,6 +67,7 @@ internal sealed partial class ToolRowViewModel
 
         questionItems = null;
         OnPropertyChanged(nameof(IsQuestionCard));
+        OnPropertyChanged(nameof(QuestionBody));
         OnPropertyChanged(nameof(QuestionItems));
         OnPropertyChanged(nameof(QuestionStatusText));
     }

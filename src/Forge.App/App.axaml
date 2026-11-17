@@ -769,7 +769,6 @@
 
   <Application.Styles>
     <FluentTheme />
-    <StyleInclude Source="avares://Forge.App/Views/TimelineStyles.axaml" />
     <StyleInclude Source="avares://Forge.App/Views/ComposerStyles.axaml" />
     <Style Selector=":is(Window)">
       <Setter Property="Icon" Value="avares://Forge.App/Assets/forge.ico" />

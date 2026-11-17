@@ -8,30 +8,36 @@
              x:DataType="vm:ToolRowViewModel">
   <Panel>
   <!-- ask_user: the question-and-answer card. -->
-  <Border Classes="turn-card" Padding="10" Margin="0,2" IsVisible="{Binding IsQuestionCard}">
-    <StackPanel Spacing="6">
-      <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Classes="label" Text="{Binding [questions.card.title], Source={x:Static loc:Loc.Instance}}" />
-        <TextBlock Grid.Column="1" Classes="caption" Text="{Binding QuestionStatusText}" />
-      </Grid>
-      <ItemsControl ItemsSource="{Binding QuestionItems}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="vm:QuestionCardItem">
-            <StackPanel Spacing="2" Margin="0,4,0,0">
-              <Border Classes="notice" HorizontalAlignment="Left" Padding="6,1">
-                <TextBlock Classes="caption" Text="{Binding Header}" />
-              </Border>
-              <TextBlock Text="{Binding Prompt}" TextWrapping="Wrap" />
-              <SelectableTextBlock Text="{Binding Answer}"
-                                   TextWrapping="Wrap"
-                                   FontWeight="SemiBold"
-                                   IsVisible="{Binding HasAnswer}" />
-            </StackPanel>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
-    </StackPanel>
-  </Border>
+  <ContentControl Content="{Binding QuestionBody}" IsVisible="{Binding IsQuestionCard}">
+    <ContentControl.ContentTemplate>
+      <DataTemplate x:DataType="vm:ToolRowViewModel">
+      <Border Classes="turn-card" Padding="10" Margin="0,2">
+        <StackPanel Spacing="6">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="label" Text="{Binding [questions.card.title], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1" Classes="caption" Text="{Binding QuestionStatusText}" />
+          </Grid>
+          <ItemsControl ItemsSource="{Binding QuestionItems}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:QuestionCardItem">
+                <StackPanel Spacing="2" Margin="0,4,0,0">
+                  <Border Classes="notice" HorizontalAlignment="Left" Padding="6,1">
+                    <TextBlock Classes="caption" Text="{Binding Header}" />
+                  </Border>
+                  <TextBlock Text="{Binding Prompt}" TextWrapping="Wrap" />
+                  <SelectableTextBlock Text="{Binding Answer}"
+                                       TextWrapping="Wrap"
+                                       FontWeight="SemiBold"
+                                       IsVisible="{Binding HasAnswer}" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+      </DataTemplate>
+    </ContentControl.ContentTemplate>
+  </ContentControl>
   <Border Classes="tool-row" Classes.expanded="{Binding IsExpanded}" IsVisible="{Binding !IsQuestionCard}">
     <StackPanel Spacing="2">
       <!-- The header is one toggle button over the whole row; a tool that works on a file (read, write, edit...) shows that path as
@@ -63,53 +69,58 @@
           <TextBlock Grid.Column="3" Classes="caption" Text="{Binding Status}" />
         </Grid>
       </Button>
-      <StackPanel IsVisible="{Binding IsExpanded}" Spacing="4" Margin="14,2,0,2">
-        <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
-        <SelectableTextBlock Classes="mono"
-                             Text="{Binding Arguments}"
-                             TextWrapping="Wrap"
-                             Foreground="{DynamicResource TextSecondaryBrush}" />
-        <TextBlock Classes="label"
-                   Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
-                   IsVisible="{Binding HasResult}" />
-        <ScrollViewer MaxHeight="{Binding ResultMaxHeight}"
-                      HorizontalScrollBarVisibility="Disabled"
-                      VerticalScrollBarVisibility="Auto"
-                      IsVisible="{Binding HasResult}">
-          <SelectableTextBlock Classes="mono"
-                               Text="{Binding ResultDisplay}"
-                               TextWrapping="Wrap"
-                               Margin="0,0,8,0"
-                               Foreground="{DynamicResource TextSecondaryBrush}" />
-        </ScrollViewer>
-        <TextBlock Classes="caption" Text="{Binding ResultNote}" IsVisible="{Binding HasResultNote}" />
-        <!-- Result actions: the whole output to the clipboard, a taller view for a long one, and the file the call worked on. -->
-        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasResult}">
-          <views:CopyTextButton Classes="ghost icon"
-                                Width="26"
-                                Height="22"
-                                ToolTip.Tip="{Binding [turn.toolCopyResult], Source={x:Static loc:Loc.Instance}}"
-                                AutomationProperties.AutomationId="tool-copy-result"
-                                AutomationProperties.Name="{Binding [turn.toolCopyResult], Source={x:Static loc:Loc.Instance}}">
-            <wc:FluentIcon Data="{StaticResource IconCopy}" Width="12" Height="12" />
-          </views:CopyTextButton>
-          <Button Classes="link"
-                  Command="{Binding ToggleResultCommand}"
-                  IsVisible="{Binding CanExpandResult}"
-                  AutomationProperties.AutomationId="tool-result-toggle">
-            <TextBlock Classes="caption" Text="{Binding ResultToggleText}" />
-          </Button>
-          <Button Classes="link"
-                  Click="OnOpenTarget"
-                  IsVisible="{Binding HasTarget}"
-                  AutomationProperties.AutomationId="tool-open-file">
-            <TextBlock Classes="caption" Text="{Binding [turn.toolOpenFile], Source={x:Static loc:Loc.Instance}}" />
-          </Button>
-        </StackPanel>
-        <!-- Result images (wave W4 owns ToolRowImagesView) and the live output tail (wave W8 owns ToolRowTailView). -->
-        <views:ToolRowImagesView />
-        <views:ToolRowTailView />
-      </StackPanel>
+      <ContentControl Content="{Binding ExpandedBody}" IsVisible="{Binding IsExpanded}">
+        <ContentControl.ContentTemplate>
+          <DataTemplate x:DataType="vm:ToolRowViewModel">
+            <StackPanel Spacing="4" Margin="14,2,0,2">
+              <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
+              <SelectableTextBlock Classes="mono"
+                                   Text="{Binding Arguments}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+              <TextBlock Classes="label"
+                         Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
+                         IsVisible="{Binding HasResult}" />
+              <ScrollViewer MaxHeight="{Binding ResultMaxHeight}"
+                            HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto"
+                            IsVisible="{Binding HasResult}">
+                <SelectableTextBlock Classes="mono"
+                                     Text="{Binding ResultDisplay}"
+                                     TextWrapping="Wrap"
+                                     Margin="0,0,8,0"
+                                     Foreground="{DynamicResource TextSecondaryBrush}" />
+              </ScrollViewer>
+              <TextBlock Classes="caption" Text="{Binding ResultNote}" IsVisible="{Binding HasResultNote}" />
+              <!-- Result actions: the whole output to the clipboard, a taller view for a long one, and the file the call worked on. -->
+              <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasResult}">
+                <views:CopyTextButton Classes="ghost icon"
+                                      Width="26"
+                                      Height="22"
+                                      ToolTip.Tip="{Binding [turn.toolCopyResult], Source={x:Static loc:Loc.Instance}}"
+                                      AutomationProperties.AutomationId="tool-copy-result"
+                                      AutomationProperties.Name="{Binding [turn.toolCopyResult], Source={x:Static loc:Loc.Instance}}">
+                  <wc:FluentIcon Data="{StaticResource IconCopy}" Width="12" Height="12" />
+                </views:CopyTextButton>
+                <Button Classes="link"
+                        Command="{Binding ToggleResultCommand}"
+                        IsVisible="{Binding CanExpandResult}"
+                        AutomationProperties.AutomationId="tool-result-toggle">
+                  <TextBlock Classes="caption" Text="{Binding ResultToggleText}" />
+                </Button>
+                <Button Classes="link"
+                        IsVisible="{Binding HasTarget}"
+                        AutomationProperties.AutomationId="tool-open-file">
+                  <TextBlock Classes="caption" Text="{Binding [turn.toolOpenFile], Source={x:Static loc:Loc.Instance}}" />
+                </Button>
+              </StackPanel>
+              <!-- Result images (wave W4 owns ToolRowImagesView) and the live output tail (wave W8 owns ToolRowTailView). -->
+              <views:ToolRowImagesView />
+              <views:ToolRowTailView />
+            </StackPanel>
+          </DataTemplate>
+        </ContentControl.ContentTemplate>
+      </ContentControl>
     </StackPanel>
   </Border>
   </Panel>

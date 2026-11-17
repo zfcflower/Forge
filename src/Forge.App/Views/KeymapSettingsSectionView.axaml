@@ -4,6 +4,9 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.KeymapSettingsSectionView"
              x:DataType="settings:KeymapSettingsSectionViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <UserControl.Resources>
     <!-- One row template for all three scope groups: the action name, its current gesture as the rebind target, the default
          (only while overridden) and the reset button (also only while overridden). -->

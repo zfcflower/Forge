@@ -12,6 +12,9 @@
         ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}"
         AutomationProperties.AutomationId="project-creation-dialog">
+  <Window.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </Window.Styles>
   <StackPanel Margin="18,16" Spacing="12">
     <!-- What this dialog is for: one sentence, mode-dependent. -->
     <TextBlock Classes="caption"

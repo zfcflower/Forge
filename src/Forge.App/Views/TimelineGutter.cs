@@ -3,14 +3,12 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Shapes;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
-using Forge.App.Workbench.Controls;
 
 namespace Forge.App.Views;
 
@@ -34,15 +32,26 @@ internal enum TimelineRowRole
 }
 
 /// <summary>
-/// The left column of one transcript row: the vertical axis with this row's node on it. The control owns only the geometry
-/// decision (it asks <see cref="TimelineLayout"/> and supplies the row's position from the visual tree it is already in);
-/// the axis line, the icon size, the colours and the running pulse all live in <c>Views/TimelineStyles.axaml</c>.
-/// <para>Nothing here allocates per message: the gutter is part of the row template the list already realizes, the geometry
-/// is read from the icon dictionary when the state changes, and the subscriptions are limited to the realized rows (the
-/// two collections that can move a node, the turn view model while a turn's expansion changes, the language and the motion
-/// gate). The row keeps its position current across append, expand and collapse without rebuilding anything.</para>
+/// The left column of one transcript row: the vertical axis with this row's node on it. The control owns the geometry
+/// decision (it asks <see cref="TimelineLayout"/> and supplies the row's position from the visual tree it is already in) and
+/// draws the result itself: the axis segments, the node's icon, and the ring behind a thinking or waiting node are one
+/// <see cref="Render"/>, not a template of a dozen visuals.
+/// <para>
+/// Why it draws itself: the gutter is on every row of the transcript, and a row is built again each time the scroll bar
+/// jumps. A templated gutter (a grid, panels, three borders, an ellipse, an icon with its own viewbox and canvas) was about
+/// 14 of the ~37 visuals of a collapsed tool row, and a visual costs ~12-35 KB and tens of microseconds to attach (style
+/// matching, bindings, resource lookups) whatever it shows; this control is one visual with no template, no binding and no
+/// style. The sizes still come from <c>Tokens.axaml</c> (read once), the colours are the theme's brushes (resolved when
+/// drawn and again after a theme or resource change), the icons are the dictionary's geometries on their 24×24 grid scaled
+/// into the node box exactly as <c>FluentIcon</c> does. The running pulse and the two rings are computed from one process
+/// clock and ask for a frame only while one is on screen and motion is allowed.
+/// </para>
+/// <para>Nothing here allocates per message: the geometry is read from the icon dictionary when first drawn, and the
+/// subscriptions are limited to the realized rows (the two collections that can move a node, the turn view model while a
+/// turn's expansion changes, the language and the motion gate). The row keeps its position current across append, expand and
+/// collapse without rebuilding anything.</para>
 /// </summary>
-internal sealed class TimelineGutter : TemplatedControl
+internal sealed class TimelineGutter : Control
 {
     public static readonly StyledProperty<TimelineNodeKind> KindProperty =
         AvaloniaProperty.Register<TimelineGutter, TimelineNodeKind>(nameof(Kind));
@@ -75,9 +84,6 @@ internal sealed class TimelineGutter : TemplatedControl
     public static readonly StyledProperty<bool> ShowBottomLineProperty =
         AvaloniaProperty.Register<TimelineGutter, bool>(nameof(ShowBottomLine));
 
-    private FluentIcon? icon;
-    private Border? middleLine;
-    private Ellipse? ring;
     private ItemsControl? owner;
     private Control? container;
     private INotifyCollectionChanged? ownerItems;
@@ -147,15 +153,22 @@ internal sealed class TimelineGutter : TemplatedControl
     /// <summary>The node's readable name for the current language; empty while the row draws no node.</summary>
     internal string NodeName => AutomationProperties.GetName(this) ?? string.Empty;
 
-    protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
+    static TimelineGutter()
     {
-        base.OnApplyTemplate(e);
-        icon = e.NameScope.Find<FluentIcon>("PART_Icon");
-        middleLine = e.NameScope.Find<Border>("PART_MidLine");
-        ring = e.NameScope.Find<Ellipse>("PART_Ring");
-        appliedNode = null;
-        appliedName = null;
-        Recompute();
+        AffectsRender<TimelineGutter>(ShowNodeProperty, ShowTopLineProperty, ShowBottomLineProperty);
+    }
+
+    public TimelineGutter()
+    {
+        Width = Metrics.GutterWidth;
+        Focusable = false;
+        IsTabStop = false;
+        IsHitTestVisible = false;
+
+        // The brushes and the icon are looked up when drawn; a new theme variant or a replaced resource (the accent colour)
+        // makes them stale.
+        ActualThemeVariantChanged += (_, _) => ResourcesStale();
+        ResourcesChanged += (_, _) => ResourcesStale();
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -464,58 +477,276 @@ internal sealed class TimelineGutter : TemplatedControl
     }
 
     /// <summary>
-    /// Repaints the icon. Skipped when neither the effective kind, the state nor the node's visibility changed since the last
-    /// paint: a collection change or a turn property that left the node alone costs no resource lookup and no class churn.
-    /// Only the motion gate (which is not part of that key) forces a repaint.
+    /// Repaints the node. Skipped when neither the effective kind, the state nor the node's visibility changed since the last
+    /// paint: a collection change or a turn property that left the node alone costs no redraw. Only the motion gate (which is
+    /// not part of that key) forces a repaint.
     /// </summary>
     private void ApplyNode(bool force)
     {
-        if (icon is null)
-        {
-            return;
-        }
-
         var (kind, state) = Effective();
-
-        // The header's connector segment follows the line flags, which can change without the node changing.
-        // The header has no node: its icon slot becomes one more segment, so the axis never opens a gap there.
-        middleLine?.SetCurrentValue(IsVisibleProperty, !ShowNode && ShowTopLine && ShowBottomLine);
         if (!force && appliedNode == (kind, state, ShowNode))
         {
             return;
         }
 
         appliedNode = (kind, state, ShowNode);
-        var key = TimelineNodeMap.IconKey(kind, state is TimelineNodeState.Running or TimelineNodeState.Failed or TimelineNodeState.Warning);
-        icon.Data = this.TryFindResource(key, out var value) && value is Geometry geometry ? geometry : null;
-        icon.IsVisible = ShowNode;
-        icon.Classes.Set("running", state == TimelineNodeState.Running);
-        icon.Classes.Set("failed", state == TimelineNodeState.Failed);
-        icon.Classes.Set("warning", state == TimelineNodeState.Warning);
-        icon.Classes.Set("pulsing", state == TimelineNodeState.Running && !TreeMotion.ReducedMotion);
-        ApplyRing(kind, state);
+        InvalidateVisual();
+        UpdateClock(kind, state);
+    }
+
+    private void ResourcesStale()
+    {
+        iconKey = null;
+        icon = null;
+        lineBrush = null;
+        InvalidateVisual();
+    }
+
+    private enum Motion
+    {
+        None,
+
+        /// <summary>A running node's icon breathes (opacity 1 → 0.3 → 1 over 1.2 s).</summary>
+        Pulse,
+
+        /// <summary>The slow halo of a running reasoning stretch.</summary>
+        Thinking,
+
+        /// <summary>Ripples outward from a node that waits for the user (a pending question or approval).</summary>
+        Waiting,
+
+        /// <summary>The waiting ring with motion reduced: it does not move but stays as a still outline.</summary>
+        Still,
     }
 
     /// <summary>
-    /// The ring behind the node, the second signal besides the pulse: a running reasoning stretch breathes a slow halo, and a
-    /// node that waits for the user (a pending question or approval) sends ripples outward. With motion reduced the ring does
-    /// not move but stays as a still outline for the waiting node, so the state reads without animation.
+    /// What moves on this node. The ring is the second signal besides the pulse: a running reasoning stretch breathes a slow
+    /// halo, and a node that waits for the user sends ripples outward. With motion reduced the waiting ring stays as a still
+    /// outline, so the state reads without animation.
     /// </summary>
-    private void ApplyRing(TimelineNodeKind kind, TimelineNodeState state)
+    private Motion MotionOf(TimelineNodeKind kind, TimelineNodeState state)
     {
-        if (ring is null)
+        if (!ShowNode || state != TimelineNodeState.Running)
+        {
+            return Motion.None;
+        }
+
+        var animated = !TreeMotion.ReducedMotion;
+        if (kind is TimelineNodeKind.Approval or TimelineNodeKind.Notice)
+        {
+            return animated ? Motion.Waiting : Motion.Still;
+        }
+
+        if (kind == TimelineNodeKind.Thinking)
+        {
+            return animated ? Motion.Thinking : Motion.None;
+        }
+
+        return animated ? Motion.Pulse : Motion.None;
+    }
+
+    private static bool Moves(Motion motion) => motion is not (Motion.None or Motion.Still);
+
+    /// <summary>Asks for frames while something on this node moves and the control is on screen; stops by itself otherwise.</summary>
+    private void UpdateClock(TimelineNodeKind kind, TimelineNodeState state)
+    {
+        if (ticking || !attached || !Moves(MotionOf(kind, state)))
         {
             return;
         }
 
-        var running = state == TimelineNodeState.Running && ShowNode;
-        var waiting = running && kind is TimelineNodeKind.Approval or TimelineNodeKind.Notice;
-        var thinking = running && kind == TimelineNodeKind.Thinking;
-        var animated = !TreeMotion.ReducedMotion;
-        ring.Classes.Set("waiting", waiting && animated);
-        ring.Classes.Set("thinking", thinking && animated);
-        ring.Classes.Set("still", waiting && !animated);
-        ring.IsVisible = waiting || thinking;
+        RequestFrame();
+    }
+
+    private void RequestFrame()
+    {
+        if (TopLevel.GetTopLevel(this) is not { } top)
+        {
+            ticking = false;
+            return;
+        }
+
+        ticking = true;
+        top.RequestAnimationFrame(frame ??= OnFrame);
+    }
+
+    private void OnFrame(TimeSpan time)
+    {
+        var (kind, state) = Effective();
+        if (!attached || !Moves(MotionOf(kind, state)))
+        {
+            ticking = false;
+            return;
+        }
+
+        InvalidateVisual();
+        RequestFrame();
+    }
+
+    protected override Size MeasureOverride(Size availableSize) => new(Metrics.GutterWidth, Metrics.NodeTopGap + Metrics.NodeSize);
+
+    /// <summary>The sizes of the axis, from <c>Tokens.axaml</c> (the one place that states them), read once.</summary>
+    private static class Metrics
+    {
+        public static readonly double GutterWidth = Read("TimelineGutterWidth", 26);
+        public static readonly double NodeSize = Read("TimelineNodeSize", 14);
+        public static readonly double NodeTopGap = Read("TimelineNodeTopGap", 6);
+        public static readonly double AxisWidth = Read("TimelineAxisWidth", 1);
+
+        /// <summary>The axis' left edge inside the gutter: half a node minus half the axis, the node's own centre.</summary>
+        public static readonly double AxisLeft = (NodeSize - AxisWidth) / 2;
+
+        private static double Read(string key, double fallback) =>
+            Application.Current is { } app && app.TryGetResource(key, null, out var value) && value is double number ? number : fallback;
+    }
+
+    private const double IconGrid = 24;
+    private static readonly long Origin = System.Diagnostics.Stopwatch.GetTimestamp();
+
+    private static double Phase(double seconds) =>
+        System.Diagnostics.Stopwatch.GetElapsedTime(Origin).TotalSeconds / seconds % 1;
+
+    private static double SineInOut(double t) => -(Math.Cos(Math.PI * t) - 1) / 2;
+
+    /// <summary>0 → 1 → 0 across one cycle (the keyframes at 0%, 50% and 100% after the easing has moved the time).</summary>
+    private static double Triangle(double f) => f < 0.5 ? f * 2 : (1 - f) * 2;
+
+    private IBrush? lineBrush;
+    private Geometry? icon;
+    private string? iconKey;
+    private Action<TimeSpan>? frame;
+    private bool ticking;
+
+    private IBrush? Brush(string key) => this.TryFindResource(key, ActualThemeVariant, out var value) ? value as IBrush : null;
+
+    public override void Render(DrawingContext context)
+    {
+        var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        // Layout rounding puts the half pixel of the axis on the column to its right (6.5 -> 7), as the border it replaces was.
+        double Snap(double value) => Math.Round(value * scale, MidpointRounding.AwayFromZero) / scale;
+
+        var node = Metrics.NodeSize;
+        var nodeTop = Snap(Metrics.NodeTopGap);
+        var nodeBottom = Snap(Metrics.NodeTopGap + node);
+        var left = Snap(Metrics.AxisLeft);
+        var width = Math.Max(Snap(Metrics.AxisWidth), 1 / scale);
+        var height = Bounds.Height;
+
+        if (ShowTopLine || ShowBottomLine)
+        {
+            if ((lineBrush ??= Brush("BorderBrush")) is { } brush)
+            {
+                if (!ShowNode && ShowTopLine && ShowBottomLine)
+                {
+                    // The header has no node: its icon slot becomes one more segment, so the axis never opens a gap there.
+                    context.DrawRectangle(brush, null, new Rect(left, 0, width, height));
+                }
+                else
+                {
+                    if (ShowTopLine)
+                    {
+                        context.DrawRectangle(brush, null, new Rect(left, 0, width, nodeTop));
+                    }
+
+                    if (ShowBottomLine && height > nodeBottom)
+                    {
+                        context.DrawRectangle(brush, null, new Rect(left, nodeBottom, width, height - nodeBottom));
+                    }
+                }
+            }
+        }
+
+        if (!ShowNode)
+        {
+            return;
+        }
+
+        var (kind, state) = Effective();
+        var motion = MotionOf(kind, state);
+        if (motion is Motion.Thinking or Motion.Waiting or Motion.Still)
+        {
+            DrawRing(context, motion, new Point(node / 2, Metrics.NodeTopGap + node / 2));
+        }
+
+        var filled = state is TimelineNodeState.Running or TimelineNodeState.Failed or TimelineNodeState.Warning;
+        var key = TimelineNodeMap.IconKey(kind, filled);
+        if (iconKey != key)
+        {
+            iconKey = key;
+            icon = this.TryFindResource(key, out var value) && value is Geometry geometry ? geometry : null;
+        }
+
+        var foreground = Brush(state switch
+        {
+            TimelineNodeState.Running => "BrandActionBrush",
+            TimelineNodeState.Failed => "StatusErrorBrush",
+            TimelineNodeState.Warning => "StatusWarningBrush",
+            _ => "TextMutedBrush",
+        });
+        if (icon is null || foreground is null)
+        {
+            return;
+        }
+
+        // The icon's 24x24 grid scaled into the node box, as FluentIcon's viewbox does.
+        var place = Matrix.CreateScale(node / IconGrid, node / IconGrid) * Matrix.CreateTranslation(0, Metrics.NodeTopGap);
+        if (motion == Motion.Pulse)
+        {
+            using (context.PushOpacity(1 - 0.7 * Triangle(SineInOut(Phase(1.2)))))
+            using (context.PushTransform(place))
+            {
+                context.DrawGeometry(foreground, null, icon);
+            }
+        }
+        else
+        {
+            using (context.PushTransform(place))
+            {
+                context.DrawGeometry(foreground, null, icon);
+            }
+        }
+    }
+
+    private void DrawRing(DrawingContext context, Motion motion, Point centre)
+    {
+        double size;
+        double opacity;
+        switch (motion)
+        {
+            case Motion.Thinking:
+            {
+                var t = Triangle(SineInOut(Phase(1.8)));
+                size = 14 + 7 * t;
+                opacity = 0.15 + 0.7 * t;
+                break;
+            }
+
+            case Motion.Waiting:
+            {
+                var f = 1 - Math.Pow(1 - Phase(1.4), 3);
+                size = 11.2 + (26.6 - 11.2) * f;
+                opacity = 0.9 * (1 - f);
+                break;
+            }
+
+            default:
+                size = 18.9;
+                opacity = 0.8;
+                break;
+        }
+
+        if (Brush("BrandInteractiveBrush") is not { } brush)
+        {
+            return;
+        }
+
+        // A stroke is drawn inside the ellipse's box, like the Ellipse shape this replaces.
+        const double Stroke = 1.5;
+        var radius = (size - Stroke) / 2;
+        using (context.PushOpacity(opacity))
+        {
+            context.DrawEllipse(null, new Pen(brush, Stroke), centre, radius, radius);
+        }
     }
 
     /// <summary>Renames the node; skipped while the name's inputs are unchanged, forced by a language switch.</summary>

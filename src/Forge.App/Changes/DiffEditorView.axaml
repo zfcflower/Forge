@@ -4,6 +4,7 @@
              xmlns:ae="using:AvaloniaEdit"
              x:Class="Forge.App.Changes.DiffEditorView">
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="Button.reviewIcon, Button.reviewMarker">
       <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />

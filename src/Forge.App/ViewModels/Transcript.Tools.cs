@@ -70,8 +70,21 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     public bool IsExpanded
     {
         get => isExpanded;
-        set => Set(ref isExpanded, value);
+        set
+        {
+            if (Set(ref isExpanded, value))
+            {
+                OnPropertyChanged(nameof(ExpandedBody));
+            }
+        }
     }
+
+    /// <summary>
+    /// The row itself while it is open, null while it is closed: the content of the slot the open part of the row is built in.
+    /// A closed row, which is nearly every row of a long transcript, builds none of the arguments, result, actions, images and
+    /// live tail controls (building them hidden cost several times a whole text row at realization).
+    /// </summary>
+    public object? ExpandedBody => isExpanded ? this : null;
 
     public RelayCommand ToggleCommand => toggleCommand ??= new RelayCommand(() => IsExpanded = !IsExpanded);
 

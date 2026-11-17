@@ -10,6 +10,9 @@
              IsVisible="False"
              IsHitTestVisible="False"
              AutomationProperties.AutomationId="notification-overlay">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ToastStyles.axaml" />
+  </UserControl.Styles>
 
   <!-- The toasts of the shell: a fixed-width card per notification, stacked by ToastStackPanel (which animates a toast to
        its new place when the ones above it come and go). The cards are pure display: the overlay does not take a pointer,

@@ -5,6 +5,7 @@
              x:Class="Forge.App.Settings.Prompts.PromptsSettingsView"
              x:DataType="ps:PromptsSettingsViewModel">
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="Button.prompt-row">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />

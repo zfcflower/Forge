@@ -7,6 +7,12 @@
              xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.FilesToolView"
              x:DataType="vm:FilesPanelViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+    <StyleInclude Source="avares://Forge.App/Resources/GitStyles.axaml" />
+    <StyleInclude Source="avares://Forge.App/Resources/TreeStyles.axaml" />
+    <StyleInclude Source="avares://Forge.App/Resources/ChangeMenuStyles.axaml" />
+  </UserControl.Styles>
   <UserControl.Resources>
     <!-- One indent step, sized by the mark; the guide line is centred in the chevron slot so it lines up under
          the ancestor's chevron. -->

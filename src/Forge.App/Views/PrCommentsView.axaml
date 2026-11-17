@@ -17,6 +17,7 @@
        files panel's pull-request area. It draws itself only while the window's Comments slot is set. Nothing here reads on
        its own: RefreshCommand is the one way to read the threads again, and every write is a row command the user pressed. -->
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <StyleInclude Source="avares://Forge.App/Resources/MarkdownStyles.axaml" />
 
     <!-- The state chip: green when the thread is resolved, warning colour once the diff moved past it. -->

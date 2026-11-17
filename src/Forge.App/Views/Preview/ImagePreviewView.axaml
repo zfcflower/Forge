@@ -6,6 +6,9 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.Preview.ImagePreviewView"
              x:DataType="preview:ImageFilePreviewViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <Border Classes="toolbar">
       <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">

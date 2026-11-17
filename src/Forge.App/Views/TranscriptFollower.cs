@@ -31,6 +31,7 @@ internal sealed class TranscriptFollower
     private readonly TranscriptScrollAnchor anchor;
     private INotifyCollectionChanged? items;
     private ScrollViewer? scroller;
+    private ScrollThumbDrag? thumbDrag;
     private bool following = true;
     private bool scrollPending;
     private int stickyIndex = -1;
@@ -135,6 +136,8 @@ internal sealed class TranscriptFollower
 
     private void OnTemplateApplied(object? sender, TemplateAppliedEventArgs e)
     {
+        thumbDrag?.Detach();
+        thumbDrag = null;
         if (scroller is not null)
         {
             scroller.ScrollChanged -= OnScrollChanged;
@@ -152,6 +155,8 @@ internal sealed class TranscriptFollower
         }
 
         scroller.ScrollChanged += OnScrollChanged;
+        // The thumb follows the mouse although the extent behind it is an estimate that changes while it is dragged.
+        thumbDrag = ScrollThumbDrag.Attach(scroller);
         // A press on the scroll bar is the user taking the scroll position: stop following until they reach the bottom again.
         scroller.AddHandler(InputElement.PointerPressedEvent, OnScrollerPressed, RoutingStrategies.Tunnel);
         // The thumb captures the pointer while dragged; its release (or a lost capture) ends the user's scroll.
@@ -197,6 +202,13 @@ internal sealed class TranscriptFollower
         if (e.Source is not TextBox && e.Key is Key.PageUp or Key.PageDown or Key.Home or Key.End or Key.Up or Key.Down or Key.Space)
         {
             anchor.UserScrolled();
+        }
+
+        // Enter or Space on a row's expander is the keyboard's press on it (see OnScrollerPressed): the row grows under the
+        // focus, and following the tail would run to the end of what opened.
+        if (e.Key is Key.Enter or Key.Space && e.Source is Button { } pressed && pressed.Classes.Contains("link"))
+        {
+            StopFollowing();
         }
 
         if (e.Key is Key.PageUp or Key.Home or Key.Up && e.Source is not TextBox && CanScrollUp)

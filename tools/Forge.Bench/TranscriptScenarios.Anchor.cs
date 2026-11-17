@@ -36,6 +36,9 @@ internal static partial class TranscriptScenarios
         "subagent-new-turn",
         "click-inside",
         "click-inside-autoscroll",
+        "follow-click-expand",
+        "click-below",
+        "click-label",
     ];
 
 
@@ -73,10 +76,38 @@ internal static partial class TranscriptScenarios
                         }
 
                         Console.Error.WriteLine($"{mode} {name}: {report}");
+                        if (mode == "anchor")
+                        {
+                            AssertStable(name, report);
+                        }
+
                         return new OpResult(Items: 1, Observation: report);
                     },
                 };
             });
+
+    /// <summary>Cases where the watched content leaves the list (its row collapses away or is replaced), so there is nothing left to hold still.</summary>
+    private static readonly string[] ContentLeaves = ["turn-covering", "subagent-new-turn"];
+
+    /// <summary>
+    /// The acceptance for the app as shipped: in every case where the content stays in the list, it must not move more than
+    /// one DIP on screen (the first frame included), or the case fails and the run with it.
+    /// </summary>
+    private static void AssertStable(string name, string report)
+    {
+        if (ContentLeaves.Contains(name))
+        {
+            return;
+        }
+
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(report, @"(?:drift|first frame|worst between frames) (-?\d+(?:\.\d+)?|lost|NaN)"))
+        {
+            if (!double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var drift) || Math.Abs(drift) > 1d)
+            {
+                throw new InvalidOperationException($"transcript.anchor.{name}: the content moved ({match.Value}); the limit is 1 DIP. {report}");
+            }
+        }
+    }
 
     private sealed partial class Rig
     {
@@ -176,15 +207,22 @@ internal static partial class TranscriptScenarios
         }
 
         /// <summary>A left press and release at the middle of the visible part of <paramref name="target"/>, as the mouse would send them.</summary>
-        private void PointerClick(Control target)
+        private void PointerClick(Control target, bool release = true)
         {
             var size = target.Bounds.Size;
             var local = new Point(Math.Min(20, size.Width / 2), Math.Min(8, size.Height / 2));
             var position = target.TranslatePoint(local, window) ?? throw new InvalidOperationException("target is not attached");
             var pointer = new Avalonia.Input.Pointer(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Mouse, true);
-            target.Focus(Avalonia.Input.NavigationMethod.Pointer);
+            // A press focuses the nearest focusable element: the text itself, or (on a label, a gap, a caption) the row.
+            var focus = target.GetSelfAndVisualAncestors().OfType<Avalonia.Input.InputElement>().FirstOrDefault(e => e.Focusable && e.IsEffectivelyEnabled && e.IsEffectivelyVisible) ?? target;
+            focus.Focus(Avalonia.Input.NavigationMethod.Pointer);
             var pressed = new Avalonia.Input.PointerPoint(pointer, position, new Avalonia.Input.PointerPointProperties(Avalonia.Input.RawInputModifiers.LeftMouseButton, Avalonia.Input.PointerUpdateKind.LeftButtonPressed));
             target.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(target, pointer, window, position, 0, pressed.Properties, Avalonia.Input.KeyModifiers.None));
+            if (!release)
+            {
+                return;
+            }
+
             var released = new Avalonia.Input.PointerPointProperties(Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PointerUpdateKind.LeftButtonReleased);
             target.RaiseEvent(new Avalonia.Input.PointerReleasedEventArgs(target, pointer, window, position, 0, released, Avalonia.Input.KeyModifiers.None, Avalonia.Input.MouseButton.Left));
         }
@@ -273,7 +311,7 @@ internal static partial class TranscriptScenarios
                 var probe = await MountAsync(BuildRich(name == "subagent-new-turn" ? 8 : 40, name == "subagent-new-turn"), pinned).ConfigureAwait(true);
                 try
                 {
-                    if (name != "follow-expand")
+                    if (name is not ("follow-expand" or "follow-click-expand"))
                     {
                         probe.Follower.StopFollowing();
                     }
@@ -451,6 +489,60 @@ internal static partial class TranscriptScenarios
                     var container = probe.List.ContainerFromItem(tool)!;
                     var text = container.GetVisualDescendants().OfType<SelectableTextBlock>().Last(t => t.IsEffectivelyVisible);
                     results.Add(await MeasureAsync(probe, "press inside result", () => ElementY(probe, text), () => PointerClick(text)).ConfigureAwait(true));
+                    break;
+                }
+
+                case "click-below":
+                {
+                    // An open tool row whose text runs past the bottom of the window; the user clicks the part that is showing.
+                    // The list must not scroll to bring the rest of the text (or its bottom) into view.
+                    var tool = Tool(transcript, 20, 2);
+                    tool.IsExpanded = true;
+                    await FramesAsync(2).ConfigureAwait(true);
+                    await PlaceAsync(probe, tool, 700).ConfigureAwait(true);
+                    var container = probe.List.ContainerFromItem(tool)!;
+                    var viewport = probe.Scroller.Viewport.Height;
+                    var text = container.GetVisualDescendants().OfType<SelectableTextBlock>()
+                        .Where(t => t.IsEffectivelyVisible && ElementY(probe, t) is { } y && y < viewport - 30)
+                        .OrderBy(t => ElementY(probe, t)).Last();
+                    results.Add($"text at y {F(ElementY(probe, text) ?? double.NaN)}, {F(text.Bounds.Height)} tall, viewport {F(viewport)}");
+                    results.Add(await MeasureAsync(probe, "press text running past the bottom", () => ElementY(probe, text), () => PointerClick(text)).ConfigureAwait(true));
+                    break;
+                }
+
+                case "click-label":
+                {
+                    // The same open row, the user presses something that is not text and not a button (the "result" label): the
+                    // press focuses the row itself, and the scroll viewer asks to bring the focused element (the whole row) into
+                    // view, which aligns the bottom of a row that is taller than what shows. The list must not move.
+                    var tool = Tool(transcript, 20, 2);
+                    tool.IsExpanded = true;
+                    await FramesAsync(2).ConfigureAwait(true);
+                    await PlaceAsync(probe, tool, 700).ConfigureAwait(true);
+                    var container = probe.List.ContainerFromItem(tool)!;
+                    var viewport = probe.Scroller.Viewport.Height;
+                    var label = container.GetVisualDescendants().OfType<Avalonia.Controls.TextBlock>().Where(t => t is not SelectableTextBlock && t.Classes.Contains("label") && t.IsEffectivelyVisible && ElementY(probe, t) is { } ly && ly > 0 && ly < viewport - 30)
+                        .OrderBy(t => ElementY(probe, t)).Last();
+                    results.Add($"row {F(container.Bounds.Height)} tall, label at y {F(ElementY(probe, label) ?? double.NaN)}, viewport {F(viewport)}");
+                    results.Add(await MeasureAsync(probe, "press a label of the open row", () => ElementY(probe, label), () => PointerClick(label)).ConfigureAwait(true));
+                    break;
+                }
+
+                case "follow-click-expand":
+                {
+                    // Following the reply at the bottom, the user presses the header of the last tool row (the press, then the
+                    // click's command): the row opens below the pointer; the list must stay where the header is, not run to
+                    // the bottom of what opened.
+                    await FramesAsync(3).ConfigureAwait(true);
+                    var last = transcript.Rows.OfType<ToolRowViewModel>().Last();
+                    Func<Button, bool> match = b => ReferenceEquals(b.Command, last.ToggleCommand);
+                    results.Add(await MeasureAsync(probe, "press header of the last row", () => ButtonY(probe, last, match), () =>
+                    {
+                        PointerClick(ButtonIn(probe, last, match), release: false);
+                        Click(ButtonIn(probe, last, match));
+                    }).ConfigureAwait(true));
+                    var sv = probe.Scroller;
+                    results.Add($"following {probe.Follower.IsFollowing}, distance from bottom {F(sv.Extent.Height - sv.Viewport.Height - sv.Offset.Y)}");
                     break;
                 }
 

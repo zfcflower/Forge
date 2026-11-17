@@ -5,6 +5,7 @@
              x:Class="Forge.App.Settings.ProvidersSettingsView"
              x:DataType="settings:ProvidersSettingsViewModel">
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="Border.provider-row">
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="0,0,0,1" />

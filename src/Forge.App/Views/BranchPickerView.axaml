@@ -5,6 +5,11 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.BranchPickerView"
              x:DataType="vm:BranchPickerViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+    <StyleInclude Source="avares://Forge.App/Resources/TreeStyles.axaml" />
+    <StyleInclude Source="avares://Forge.App/Resources/ChangeMenuStyles.axaml" />
+  </UserControl.Styles>
   <UserControl.Resources>
     <!-- One branch of the picker: check, branch icon, name, and the default tag at the right. The row only selects; the
          owner of the flyout decides what a pick means and closes the menu (the click reaches the command first). -->

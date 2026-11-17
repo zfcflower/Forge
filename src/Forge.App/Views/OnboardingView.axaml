@@ -4,6 +4,9 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.OnboardingView"
              x:DataType="vm:OnboardingViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
 
   <!-- The first-run wizard. The shell mounts it as a plain ContentControl over the workbench, so the view supplies its own
        two layers: a dimmed border that swallows every pointer hit (the workbench under it must not be reachable from behind

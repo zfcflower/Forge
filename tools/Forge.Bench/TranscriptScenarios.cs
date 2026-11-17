@@ -44,11 +44,39 @@ internal static partial class TranscriptScenarios
             yield return Scroll(turns, "pinned");
         }
 
-        foreach (var scenario in AnchorScenarios())
+        yield return PanelFields();
+
+        foreach (var scenario in AnchorScenarios().Concat(FrameScenarios()))
         {
             yield return scenario;
         }
     }
+
+    /// <summary>Fails when an Avalonia upgrade has taken away the private fields <see cref="TranscriptStackPanel"/> steers by.</summary>
+    private static BenchScenario PanelFields() =>
+        new(
+            "transcript.guard.panel-fields",
+            "transcript",
+            Heavy: false,
+            PrepareAsync: async cancellationToken =>
+            {
+                var rig = await Rig.GetAsync(cancellationToken).ConfigureAwait(false);
+                return new BenchCase
+                {
+                    Warmup = 0,
+                    Iterations = 1,
+                    Note = "TranscriptStackPanel can steer: _scrollToIndex and _scrollToElement exist in the pinned Avalonia",
+                    Run = async _ =>
+                    {
+                        if (!await rig.CanSteerAsync().ConfigureAwait(false))
+                        {
+                            throw new InvalidOperationException("VirtualizingStackPanel has no _scrollToIndex/_scrollToElement field any more: TranscriptStackPanel has fallen back to the stock panel; re-derive it for this Avalonia.");
+                        }
+
+                        return new OpResult(Items: 1, Observation: "fields present");
+                    },
+                };
+            });
 
     private static string Name(string what, int turns, string stack) => $"transcript.{stack}.{turns}.{what}";
 
@@ -140,6 +168,8 @@ internal static partial class TranscriptScenarios
             return await ready.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
         }
 
+        public Task<bool> CanSteerAsync() => Dispatcher.UIThread.InvokeAsync(TranscriptStackPanel.CanSteer).GetTask();
+
         private Task NextFrameAsync()
         {
             var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -178,15 +208,16 @@ internal static partial class TranscriptScenarios
             return transcript;
         }
 
+        /// <summary>Bench switch: the stock ListBox, whose rows build their template every time (the cases ending in "-unpooled").</summary>
+        private static bool Unpooled;
+
         private ListBox NewList(TranscriptViewModel transcript, string stack)
         {
-            var box = new ListBox
-            {
-                Padding = new Thickness(8),
-                SelectionMode = SelectionMode.Single,
-                AutoScrollToSelectedItem = false,
-                ItemsSource = transcript.Rows,
-            };
+            ListBox box = Unpooled ? new ListBox() : new Forge.App.Views.TranscriptListBox();
+            box.Padding = new Thickness(8);
+            box.SelectionMode = SelectionMode.Single;
+            box.AutoScrollToSelectedItem = false;
+            box.ItemsSource = transcript.Rows;
             ScrollViewer.SetHorizontalScrollBarVisibility(box, Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled);
             if (stack == "stack")
             {

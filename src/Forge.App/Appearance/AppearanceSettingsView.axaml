@@ -4,6 +4,9 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Appearance.AppearanceSettingsView"
              x:DataType="appearance:AppearanceSettingsViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <StackPanel Spacing="{StaticResource Space4}">
 
     <!-- Interface font: the tree, tabs, chat and buttons. -->

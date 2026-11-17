@@ -5,6 +5,7 @@
              x:Class="Forge.App.Approval.QuestionPanelView"
              x:DataType="ap:UserQuestionCardViewModel">
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="Border.chip">
       <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
       <Setter Property="BorderThickness" Value="1" />

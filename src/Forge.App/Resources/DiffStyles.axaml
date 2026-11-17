@@ -1,0 +1,71 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
+        xmlns:ac="using:AvaloniaEdit.CodeCompletion">
+
+  <!-- Diff lines of the approval overlay, the segmented switch and the action bar over a diff block. Included by the views that draw them. -->
+
+  <!-- Diff. -->
+  <Style Selector="Border.diff-line">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Height" Value="17" />
+  </Style>
+
+  <Style Selector="Border.diff-line.add">
+    <Setter Property="Background" Value="{DynamicResource DiffAddBrush}" />
+  </Style>
+
+  <Style Selector="Border.diff-line.del">
+    <Setter Property="Background" Value="{DynamicResource DiffRemoveBrush}" />
+  </Style>
+
+  <Style Selector="Border.diff-line.hunk">
+    <Setter Property="Background" Value="{DynamicResource DiffHunkBrush}" />
+  </Style>
+  <!-- 分段开关:Border.segmented 里放 Button.segment,选中的那段是抬起的浅色药丸(拆分|内联、堆叠|单文件、预览|Source)。 -->
+  <Style Selector="Border.segmented">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+    <Setter Property="Padding" Value="2" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment">
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="Padding" Value="10,2" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment.selected">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment.selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="BoxShadow" Value="{StaticResource ShadowSm}" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+  </Style>
+  <!-- 改动块上方的操作条:整宽、浅灰圆角;保留之后换成淡绿。 -->
+  <Style Selector="Border.diff-block-bar">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+  </Style>
+  <Style Selector="Border.diff-block-bar.kept">
+    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+  </Style>
+
+</Styles>

@@ -5,6 +5,9 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.SpecTreeToolView"
              x:DataType="vm:SpecTreeViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/TreeStyles.axaml" />
+  </UserControl.Styles>
   <UserControl.Resources>
     <!-- One indent step, sized by the mark; the guide line is centred in the chevron slot so it lines up under
          the ancestor's chevron. -->

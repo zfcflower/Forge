@@ -7,6 +7,7 @@
              x:DataType="set:McpSettingsSectionViewModel">
 
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="Border.mcp-badge">
       <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="CornerRadius" Value="4" />

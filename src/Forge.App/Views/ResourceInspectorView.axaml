@@ -8,6 +8,7 @@
              AutomationProperties.AutomationId="resource-inspector">
 
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <!-- The scrim covers the whole workbench row: it dims what is behind the panel and takes the click that closes it. -->
     <Style Selector="Grid.inspector-scrim">
       <Setter Property="Background" Value="{DynamicResource BackdropScrimBrush}" />

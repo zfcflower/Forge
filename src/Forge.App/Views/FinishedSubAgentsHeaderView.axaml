@@ -5,6 +5,7 @@
              x:Class="Forge.App.Views.FinishedSubAgentsHeaderView"
              x:DataType="vm:FinishedSubAgentsViewModel">
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <!-- A flat title-bar button: 20 px tall so it fits the 28 px bar beside the 20x20 icon buttons. -->
     <Style Selector="Button.finished-menu">
       <Setter Property="Height" Value="20" />

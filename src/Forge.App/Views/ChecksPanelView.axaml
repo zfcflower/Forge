@@ -17,6 +17,7 @@
        list instead of pushing the verdict line off screen. Nothing here writes anything: every action is a command on the
        view model, which owns the poll, its cancellation and the error reporting. -->
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <!-- The bucket chip: green when the check passed, red when it failed, neutral while it runs or was skipped. -->
     <Style Selector="Border.chip">
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />

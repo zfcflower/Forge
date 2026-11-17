@@ -6,6 +6,7 @@
              x:DataType="ap:ExtensionsSettingsSectionViewModel">
 
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="Border.origin-badge">
       <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
       <Setter Property="CornerRadius" Value="4" />

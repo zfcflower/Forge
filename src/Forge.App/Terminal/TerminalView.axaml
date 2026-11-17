@@ -3,6 +3,9 @@
              xmlns:term="using:Forge.App.Terminal"
              x:Class="Forge.App.Terminal.TerminalView"
              x:DataType="term:TerminalViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource WindowBackgroundBrush}">
 
     <!-- Vetoed close: a program is still running, so the tab stays and this banner asks what to do. -->

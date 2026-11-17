@@ -9,6 +9,7 @@
              Focusable="True">
 
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/DiffStyles.axaml" />
     <Style Selector="Border.changes-bar">
       <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />

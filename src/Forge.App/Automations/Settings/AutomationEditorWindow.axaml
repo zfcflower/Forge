@@ -12,6 +12,7 @@
         ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="TextBlock.field-label">
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />

@@ -66,6 +66,9 @@
                   AutomationProperties.AutomationId="automations-open"
                   AutomationProperties.Name="{Binding [automations.titleBar.label], Source={x:Static loc:Loc.Instance}}">
             <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+              <StackPanel.Styles>
+                <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+              </StackPanel.Styles>
               <!-- The one warm accent in the chrome: the bolt identifies the automation entry, while the label beside it
                    carries the meaning — so the icon does not have to meet the 3:1 that a state indicator would. -->
               <wc:FluentIcon Data="{StaticResource IconBolt}"
@@ -122,6 +125,9 @@
                       VerticalAlignment="Center"
                       ToolTip.Tip="{Binding Status.HostTooltip}"
                       AutomationProperties.AutomationId="host-state">
+            <StackPanel.Styles>
+              <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+            </StackPanel.Styles>
             <Ellipse Classes="status-dot"
                      Classes.running="{Binding Status.IsHostRunning}"
                      Classes.starting="{Binding Status.IsHostStarting}"
