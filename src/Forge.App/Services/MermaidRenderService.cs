@@ -60,14 +60,44 @@ internal readonly record struct MermaidRenderRequest(
 /// <summary>
 /// A parsed, drawable diagram. Holds the <see cref="SKSvg"/> that owns the <see cref="SKPicture"/> - taking the picture and
 /// disposing the SKSvg leaves a dangling handle (a native access violation on the next draw), so both stay together.
-/// <para>Nothing disposes this explicitly: an <see cref="SKPicture"/> is ~2 KB, the cache bounds how many exist, and disposal
-/// would race the render thread, which may still be replaying the picture of a frame that was queued before the UI replaced
-/// it. SkiaSharp's finalizer releases the native picture once no control, drawing operation or cache entry references this.</para>
+/// <para>Reference counted, because disposal must not race the render thread, which may still be replaying the picture of a
+/// frame queued before the UI replaced it: the creator holds the first reference, every drawing operation takes one for as
+/// long as it lives (<see cref="TryRetain"/> / <see cref="Release"/>), and the native picture is disposed when the last is
+/// released. Mermaid pictures are held by the render cache for the process lifetime (the cache never releases), so they are
+/// never disposed; SVG pictures of the chat are released by <see cref="ChatPicture"/>.</para>
 /// </summary>
 internal sealed class MermaidPicture
 {
     /// <summary>The object that owns the picture's native handle; kept alive so the handle outlives every replay of it.</summary>
     private readonly SKSvg owner;
+    private int references = 1;
+
+    /// <summary>Takes one more reference; false when the picture was already disposed.</summary>
+    internal bool TryRetain()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref references);
+            if (current <= 0)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref references, current + 1, current) == current)
+            {
+                return true;
+            }
+        }
+    }
+
+    /// <summary>Gives one reference back; the last one disposes the native picture.</summary>
+    internal void Release()
+    {
+        if (Interlocked.Decrement(ref references) == 0)
+        {
+            owner.Dispose();
+        }
+    }
 
     internal MermaidPicture(SKSvg owner)
     {

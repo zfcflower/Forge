@@ -34,6 +34,8 @@
   </Border>
   <Border Classes="tool-row" Classes.expanded="{Binding IsExpanded}" IsVisible="{Binding !IsQuestionCard}">
     <StackPanel Spacing="2">
+      <!-- The header is one toggle button over the whole row; a tool that works on a file (read, write, edit...) shows that path as
+           its own link inside it, so a click on the path opens the file in the preview tab and a click anywhere else expands. -->
       <Button Classes="link"
               Command="{Binding ToggleCommand}"
               HorizontalAlignment="Stretch"
@@ -45,8 +47,19 @@
                      Classes="caption"
                      Margin="8,0"
                      TextTrimming="CharacterEllipsis"
+                     IsVisible="{Binding !HasTarget}"
                      ToolTip.Tip="{Binding Headline}"
                      Text="{Binding Headline}" />
+          <Button Grid.Column="2"
+                  Classes="link"
+                  Click="OnOpenTarget"
+                  IsVisible="{Binding HasTarget}"
+                  HorizontalAlignment="Left"
+                  Margin="8,0"
+                  AutomationProperties.AutomationId="tool-open-path"
+                  ToolTip.Tip="{Binding Headline}">
+            <TextBlock Classes="caption" Text="{Binding Headline}" TextDecorations="Underline" TextTrimming="CharacterEllipsis" />
+          </Button>
           <TextBlock Grid.Column="3" Classes="caption" Text="{Binding Status}" />
         </Grid>
       </Button>

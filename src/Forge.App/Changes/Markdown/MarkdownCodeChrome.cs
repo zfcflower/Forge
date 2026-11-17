@@ -3,6 +3,11 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Styling;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
+using Avalonia.Controls.Documents;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.App.Views;
@@ -108,22 +113,165 @@ internal sealed class MarkdownCodeHeader : Grid
 internal sealed class MarkdownCodeTextView : ScrollViewer
 {
     private readonly SelectableTextBlock text;
+    private string value;
+    private string language = string.Empty;
+    private int version;
+    private bool pending;
+    private DispatcherTimer? settle;
+
+    /// <summary>How long a streaming block's text must stay unchanged before it is tokenized again.</summary>
+    private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(150);
 
     protected override Type StyleKeyOverride => typeof(ScrollViewer);
 
     internal MarkdownCodeTextView(string value = "")
     {
+        this.value = value;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
         VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
         text = new SelectableTextBlock { Text = value };
         text.Classes.Add("md-code-text");
+        // The code font is the user's preference (Appearance > code font, resource FontMono); bind it on the control itself so
+        // no style-selector detail can leave the block on the inherited UI font.
+        text.Bind(TextBlock.FontFamilyProperty, text.GetResourceObservable("FontMono"));
+        text.Bind(TextBlock.FontSizeProperty, text.GetResourceObservable("FontSizeCode"));
         Content = text;
     }
 
     /// <summary>The current text; replacing it does not rebuild the view, which is what a streaming block relies on.</summary>
     internal string Text
     {
-        get => text.Text ?? string.Empty;
-        set => text.Text = value;
+        get => value;
+        set
+        {
+            if (this.value == value)
+            {
+                return;
+            }
+
+            this.value = value;
+            text.Text = value;
+            // A streaming block changes on every flush; tokenizing each time would re-colour the whole block ten times a
+            // second. The plain text shows immediately and the colours follow once the text has been still for a moment.
+            ScheduleHighlight(settled: false);
+        }
+    }
+
+    /// <summary>The fence's info string; its first word picks the grammar. An unknown or empty one keeps the text plain.</summary>
+    internal void SetLanguage(string info)
+    {
+        var word = CodeHighlighter.FirstWord(info);
+        if (word == language)
+        {
+            return;
+        }
+
+        language = word;
+        ScheduleHighlight();
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        ActualThemeVariantChanged += OnThemeChanged;
+        ScheduleHighlight();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        ActualThemeVariantChanged -= OnThemeChanged;
+        settle?.Stop();
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnThemeChanged(object? sender, EventArgs e) => ScheduleHighlight();
+
+    /// <summary>Coalesces bursts (a streaming block changes every flush) into one tokenization after the layout has settled.</summary>
+    private void ScheduleHighlight(bool settled = true)
+    {
+        version++;
+        if (!settled)
+        {
+            if (language.Length == 0 || TopLevel.GetTopLevel(this) is null)
+            {
+                return;
+            }
+
+            if (settle is null)
+            {
+                settle = new DispatcherTimer { Interval = SettleDelay };
+                settle.Tick += (_, _) =>
+                {
+                    settle.Stop();
+                    ScheduleHighlight();
+                };
+            }
+
+            settle.Stop();
+            settle.Start();
+            return;
+        }
+
+        settle?.Stop();
+        if (pending || language.Length == 0 || TopLevel.GetTopLevel(this) is null)
+        {
+            return;
+        }
+
+        pending = true;
+        Dispatcher.UIThread.Post(Highlight, DispatcherPriority.Background);
+    }
+
+    private void Highlight()
+    {
+        pending = false;
+        if (language.Length == 0 || TopLevel.GetTopLevel(this) is null)
+        {
+            return;
+        }
+
+        var seen = version;
+        var dark = Forge.App.Editing.EditorSettings.Current.IsDarkTheme(ActualThemeVariant == ThemeVariant.Dark);
+        var lines = CodeHighlighter.Tokenize(value, language, dark);
+        if (lines is null || seen != version)
+        {
+            return;
+        }
+
+        var runs = new InlineCollection();
+        var rows = value.Split('\n');
+        for (var index = 0; index < rows.Length && index < lines.Length; index++)
+        {
+            if (index > 0)
+            {
+                runs.Add(new LineBreak());
+            }
+
+            var row = rows[index].TrimEnd('\r');
+            var at = 0;
+            foreach (var token in lines[index])
+            {
+                var start = Math.Min(token.Start, row.Length);
+                var end = Math.Min(token.End, row.Length);
+                if (start > at)
+                {
+                    runs.Add(new Run(row[at..start]));
+                }
+
+                if (end > start)
+                {
+                    runs.Add(new Run(row[start..end]) { Foreground = token.Brush, FontStyle = token.Style });
+                }
+
+                at = Math.Max(at, end);
+            }
+
+            if (at < row.Length)
+            {
+                runs.Add(new Run(row[at..]));
+            }
+        }
+
+        text.Inlines = runs;
     }
 }

@@ -6,9 +6,9 @@ internal enum MdBlockKind { Paragraph, Heading, List, Quote, Code, Table, Rule, 
 
 internal enum MdAlign { None, Left, Center, Right }
 
-internal enum MdInlineKind { Text, Code, Bold, Italic, Strike, Link, SoftBreak, LineBreak, Image }
+internal enum MdInlineKind { Text, Code, Bold, Italic, Strike, Link, SoftBreak, LineBreak, Image, Math, Footnote }
 
-/// <summary>Small inline AST node. <see cref="Text"/> is set for Text/Code, <see cref="Url"/> for Link and Image (the children are the alt text), <see cref="Children"/> for the wrappers.</summary>
+/// <summary>Small inline AST node. <see cref="Text"/> is set for Text/Code (and holds the TeX of a Math node, whose <see cref="Url"/> is "display" for a <c>$$</c> formula, and the label of a Footnote reference), <see cref="Url"/> for Link and Image (the children are the alt text), <see cref="Children"/> for the wrappers.</summary>
 internal sealed class MdInline
 {
     public MdInline(MdInlineKind kind, string text = "", string? url = null, List<MdInline>? children = null)
@@ -580,9 +580,64 @@ internal static class MarkdownBlockParser
         }
 
         var block = new MdBlock(MdBlockKind.Quote, s[i], s[j - 1]);
-        ParseCore([.. lines], [.. srcs], 0, lines.Count, block.Children, top: false);
+        ParseNested(lines, srcs, block.Children);
         output.Add(block);
         return j;
+    }
+
+    /// <summary>
+    /// How deep quotes, list items and inline emphasis / link labels may nest before the rest is kept as plain text. The parser,
+    /// and the renderer that walks its tree, recurse once per level, so an unbounded input (<c>&gt; &gt; &gt; ...</c> or a
+    /// thousand nested <c>*</c> pairs, which a model can emit and a user can paste) would overflow the stack - which cannot be
+    /// caught and ends the process. Real replies nest a handful of levels.
+    /// </summary>
+    private const int MaxNesting = 32;
+
+    [ThreadStatic]
+    private static int nesting;
+
+    private static void ParseNested(List<string> lines, List<int> srcs, List<MdBlock> into)
+    {
+        if (nesting >= MaxNesting)
+        {
+            into.Add(new MdBlock(MdBlockKind.Paragraph, srcs[0], srcs[^1])
+            {
+                Inlines = [new MdInline(MdInlineKind.Text, string.Join('\n', lines))],
+            });
+            return;
+        }
+
+        nesting++;
+        try
+        {
+            ParseCore([.. lines], [.. srcs], 0, lines.Count, into, top: false);
+        }
+        finally
+        {
+            nesting--;
+        }
+    }
+
+    private static List<MdInline> ParseInner(string text)
+    {
+        var inner = new List<MdInline>();
+        if (nesting >= MaxNesting)
+        {
+            inner.Add(new MdInline(MdInlineKind.Text, text));
+            return inner;
+        }
+
+        nesting++;
+        try
+        {
+            ParseInlineRange(text, 0, text.Length, inner);
+        }
+        finally
+        {
+            nesting--;
+        }
+
+        return inner;
     }
 
     private static bool StartsBlock(string line)
@@ -775,7 +830,7 @@ internal static class MarkdownBlockParser
         }
 
         var item = new MdListItem { Number = list.Ordered ? marker.Number : null, Checked = isChecked, StartLine = s[i] };
-        ParseCore([.. lines], [.. srcs], 0, lines.Count, item.Blocks, top: false);
+        ParseNested(lines, srcs, item.Blocks);
         item.EndLine = s[lastNonBlank];
         list.Items.Add(item);
         return j;
@@ -1075,8 +1130,24 @@ internal static class MarkdownBlockParser
                     }
 
                     break;
+                case '$':
+                    if (TryMath(s, i, end, o, sb, out var mathEnd))
+                    {
+                        i = mathEnd;
+                    }
+                    else
+                    {
+                        sb.Append(c);
+                        i++;
+                    }
+
+                    break;
                 case '[':
-                    if (TryLink(s, i, end, o, sb, out var linkEnd))
+                    if (TryFootnote(s, i, end, o, sb, out var noteEnd))
+                    {
+                        i = noteEnd;
+                    }
+                    else if (TryLink(s, i, end, o, sb, out var linkEnd))
                     {
                         i = linkEnd;
                     }
@@ -1139,6 +1210,95 @@ internal static class MarkdownBlockParser
         }
 
         Flush(sb, o);
+    }
+
+    /// <summary>
+    /// <c>$…$</c> (inline) or <c>$$…$$</c> (display, may span lines). An inline formula needs a non-blank character right after the
+    /// opening and before the closing dollar, and no digit right after the closing one, so prices ("$5 and $10") stay text.
+    /// </summary>
+    private static bool TryMath(string s, int open, int end, List<MdInline> o, StringBuilder sb, out int next)
+    {
+        next = open;
+        var display = open + 1 < end && s[open + 1] == '$';
+        var start = open + (display ? 2 : 1);
+        if (start >= end)
+        {
+            return false;
+        }
+
+        int close;
+        if (display)
+        {
+            close = s.IndexOf("$$", start, end - start, StringComparison.Ordinal);
+            if (close <= start)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if (char.IsWhiteSpace(s[start]))
+            {
+                return false;
+            }
+
+            close = -1;
+            for (var i = start; i < end; i++)
+            {
+                if (s[i] == '\\')
+                {
+                    i++;
+                    continue;
+                }
+
+                if (s[i] == '\n')
+                {
+                    return false;
+                }
+
+                if (s[i] == '$')
+                {
+                    close = i;
+                    break;
+                }
+            }
+
+            if (close <= start || char.IsWhiteSpace(s[close - 1]) || (close + 1 < end && char.IsLetterOrDigit(s[close + 1])))
+            {
+                return false;
+            }
+        }
+
+        Flush(sb, o);
+        o.Add(new MdInline(MdInlineKind.Math, s.Substring(start, close - start).Replace('\n', ' '), display ? "display" : null));
+        next = close + (display ? 2 : 1);
+        return true;
+    }
+
+    /// <summary>A footnote reference <c>[^label]</c>; the definition (<c>[^label]: text</c>) is recognized by the renderer.</summary>
+    private static bool TryFootnote(string s, int open, int end, List<MdInline> o, StringBuilder sb, out int next)
+    {
+        next = open;
+        if (open + 3 >= end || s[open + 1] != '^')
+        {
+            return false;
+        }
+
+        var close = open + 2;
+        while (close < end && s[close] != ']' && s[close] != '[' && !char.IsWhiteSpace(s[close]) && close - open < 40)
+        {
+            close++;
+        }
+
+        if (close >= end || s[close] != ']' || close == open + 2)
+        {
+            return false;
+        }
+
+        Flush(sb, o);
+        o.Add(new MdInline(MdInlineKind.Footnote, s.Substring(open + 2, close - open - 2)));
+        next = close + 1;
+        return true;
     }
 
     private static int CodeSpan(string s, int i, int end, StringBuilder sb, List<MdInline> o)
@@ -1222,8 +1382,7 @@ internal static class MarkdownBlockParser
 
             sb.Append(c, run - n);
             Flush(sb, o);
-            var inner = new List<MdInline>();
-            ParseInlineRange(s.Substring(afterRun, close - afterRun), 0, close - afterRun, inner);
+            List<MdInline> inner = ParseInner(s.Substring(afterRun, close - afterRun));
             MdInline node;
             if (c == '~')
             {
@@ -1446,8 +1605,7 @@ internal static class MarkdownBlockParser
         }
 
         Flush(sb, o);
-        var label = new List<MdInline>();
-        ParseInlineRange(s.Substring(open + 1, close - open - 1), 0, close - open - 1, label);
+        var label = ParseInner(s.Substring(open + 1, close - open - 1));
         o.Add(new MdInline(image ? MdInlineKind.Image : MdInlineKind.Link, url: Unescape(url), children: label));
         next = p + 1;
         return true;
