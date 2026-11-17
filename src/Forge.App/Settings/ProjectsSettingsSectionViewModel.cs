@@ -1,3 +1,4 @@
+using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.ViewModels;
 
@@ -8,10 +9,14 @@ namespace Forge.App.Settings;
 /// the live preferences, so the next add-project dialog uses them without a restart; the folder picker itself belongs to the
 /// view (it needs a window), which answers by setting <see cref="CloneDirectory"/>.
 /// </summary>
-internal sealed class ProjectsSettingsSectionViewModel : NotifyingObject
+internal sealed class ProjectsSettingsSectionViewModel : NotifyingObject, IDisposable
 {
     private readonly AppPreferences preferences;
     private readonly string fallbackParentDirectory;
+    private string cloneDirectory = string.Empty;
+    private InputError? cloneDirectoryError;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+    private bool disposed;
 
     /// <param name="preferences">The live preferences the section edits.</param>
     /// <param name="fallbackParentDirectory">
@@ -24,6 +29,9 @@ internal sealed class ProjectsSettingsSectionViewModel : NotifyingObject
         ArgumentException.ThrowIfNullOrWhiteSpace(fallbackParentDirectory);
         this.preferences = preferences;
         this.fallbackParentDirectory = fallbackParentDirectory;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
+        cloneDirectory = preferences.ProjectsCloneDirectory;
+        SetCloneDirectoryError(InputRules.ValidateAbsolutePath(cloneDirectory, allowEmpty: true));
         BrowseCommand = new RelayCommand(() => BrowseRequested?.Invoke(this, EventArgs.Empty));
         ClearCommand = new RelayCommand(() => CloneDirectory = string.Empty, () => CloneDirectory.Length > 0);
     }
@@ -54,22 +62,32 @@ internal sealed class ProjectsSettingsSectionViewModel : NotifyingObject
     /// <summary>Where new project folders are created; empty means <see cref="EffectiveDirectoryText"/>.</summary>
     public string CloneDirectory
     {
-        get => preferences.ProjectsCloneDirectory;
+        get => cloneDirectory;
         set
         {
-            var text = (value ?? string.Empty).Trim();
-            if (string.Equals(preferences.ProjectsCloneDirectory, text, StringComparison.Ordinal))
+            var text = value ?? string.Empty;
+            if (!Set(ref cloneDirectory, text))
             {
                 return;
             }
 
-            preferences.ProjectsCloneDirectory = text;
-            OnPropertyChanged();
+            var trimmed = text.Trim();
+            SetCloneDirectoryError(InputRules.ValidateAbsolutePath(trimmed, allowEmpty: true));
+            if (cloneDirectoryError is null)
+            {
+                preferences.ProjectsCloneDirectory = trimmed;
+            }
+
             OnPropertyChanged(nameof(EffectiveDirectoryText));
             OnPropertyChanged(nameof(UsesDefaultDirectory));
             ClearCommand.NotifyCanExecuteChanged();
         }
     }
+
+    /// <summary>The inline reason a non-empty directory is not an absolute path; null means acceptable.</summary>
+    public string? CloneDirectoryError => cloneDirectoryError is null ? null : InputValidationStrings.Describe(cloneDirectoryError);
+
+    public bool HasCloneDirectoryError => cloneDirectoryError is not null;
 
     public bool UsesDefaultDirectory => CloneDirectory.Length == 0;
 
@@ -81,4 +99,38 @@ internal sealed class ProjectsSettingsSectionViewModel : NotifyingObject
 
     /// <summary>Empties the field, so clones follow the fallback directory again.</summary>
     public RelayCommand ClearCommand { get; }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(CloneDirectoryError));
+        OnPropertyChanged(nameof(HasCloneDirectoryError));
+    }
+
+    private void SetCloneDirectoryError(InputError? value)
+    {
+        if (Nullable.Equals(cloneDirectoryError, value))
+        {
+            return;
+        }
+
+        cloneDirectoryError = value;
+        OnPropertyChanged(nameof(CloneDirectoryError));
+        OnPropertyChanged(nameof(HasCloneDirectoryError));
+    }
 }

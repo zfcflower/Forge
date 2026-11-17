@@ -120,7 +120,7 @@ internal sealed partial class ProvidersSettingsView : UserControl
             return;
         }
 
-        var model = new ModelMetadataViewModel(page.Services, row.Provider);
+        var model = new ModelMetadataViewModel(page.Services, row.Provider, page.Preferences);
         var window = new ModelMetadataWindow(model);
         metadataWindows[row.Id] = window;
         window.Closed += (_, _) => metadataWindows.Remove(row.Id);

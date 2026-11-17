@@ -43,6 +43,8 @@ internal sealed class UpdatesSettingsSectionViewModel : ObservableObject, IReloa
     private bool isChecking;
     private bool isInstalling;
     private LocText result;
+    private string manifestUrl = string.Empty;
+    private InputError? manifestUrlError;
     private LocText progress;
     private LocText installResult;
     private string notes = string.Empty;
@@ -55,6 +57,8 @@ internal sealed class UpdatesSettingsSectionViewModel : ObservableObject, IReloa
         ArgumentNullException.ThrowIfNull(service);
         this.preferences = preferences;
         this.service = service;
+        manifestUrl = preferences.UpdatesManifestUrl;
+        SetManifestUrlError(InputRules.ValidateAbsoluteHttpUrl(manifestUrl, allowEmpty: true));
 
         CheckNowCommand = new AsyncRelayCommand(_ => CheckNowAsync(), () => !isChecking);
         CancelCommand = new RelayCommand(Cancel, () => isChecking);
@@ -66,13 +70,26 @@ internal sealed class UpdatesSettingsSectionViewModel : ObservableObject, IReloa
 
     public string ManifestUrl
     {
-        get => preferences.UpdatesManifestUrl;
+        get => manifestUrl;
         set
         {
-            preferences.UpdatesManifestUrl = value;
-            OnPropertyChanged();
+            var text = value ?? string.Empty;
+            if (Set(ref manifestUrl, text))
+            {
+                var trimmed = text.Trim();
+                SetManifestUrlError(InputRules.ValidateAbsoluteHttpUrl(trimmed, allowEmpty: true));
+                if (manifestUrlError is null)
+                {
+                    preferences.UpdatesManifestUrl = trimmed;
+                }
+            }
         }
     }
+
+    /// <summary>The inline reason the address is not a usable manifest URL; null means acceptable (or empty = off).</summary>
+    public string? ManifestUrlError => manifestUrlError is null ? null : InputValidationStrings.Describe(manifestUrlError);
+
+    public bool HasManifestUrlError => manifestUrlError is not null;
 
     /// <summary>The three frequencies in display order, with localized labels.</summary>
     public IReadOnlyList<UpdatesChoiceOption> Frequencies => frequencyOptions;
@@ -172,6 +189,14 @@ internal sealed class UpdatesSettingsSectionViewModel : ObservableObject, IReloa
     /// <summary>Reads the persisted last-check time on the thread pool and updates the section on the UI thread.</summary>
     public async Task ReloadAsync()
     {
+        var stored = preferences.UpdatesManifestUrl;
+        if (!string.Equals(stored, manifestUrl, StringComparison.Ordinal))
+        {
+            manifestUrl = stored;
+            OnPropertyChanged(nameof(ManifestUrl));
+        }
+
+        SetManifestUrlError(InputRules.ValidateAbsoluteHttpUrl(manifestUrl, allowEmpty: true));
         lastCheckAt = await service.GetLastCheckAsync(CancellationToken.None).ConfigureAwait(true);
         OnPropertyChanged(nameof(LastCheckText));
     }
@@ -391,5 +416,18 @@ internal sealed class UpdatesSettingsSectionViewModel : ObservableObject, IReloa
         OnPropertyChanged(nameof(ProgressText));
         OnPropertyChanged(nameof(LastCheckText));
         OnPropertyChanged(nameof(InstallText));
+        OnPropertyChanged(nameof(ManifestUrlError));
+    }
+
+    private void SetManifestUrlError(InputError? value)
+    {
+        if (Nullable.Equals(manifestUrlError, value))
+        {
+            return;
+        }
+
+        manifestUrlError = value;
+        OnPropertyChanged(nameof(ManifestUrlError));
+        OnPropertyChanged(nameof(HasManifestUrlError));
     }
 }

@@ -7,6 +7,14 @@
   <!-- The `updates` section: where the manifest lives, how often and from which channel to check, the running version,
        and the check-now action with progress and a readable result. Release notes are rendered from Markdown in
        code-behind, reusing the app's renderer. -->
+  <UserControl.Styles>
+      <Style Selector="TextBox.invalid">
+        <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
+      </Style>
+      <Style Selector="TextBox.invalid /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
+      </Style>
+    </UserControl.Styles>
   <StackPanel Spacing="6">
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
@@ -20,10 +28,17 @@
                MinWidth="320"
                HorizontalAlignment="Left"
                PlaceholderText="https://…/updates.json"
+               Classes.invalid="{Binding HasManifestUrlError}"
+               ToolTip.Tip="{Binding ManifestUrlError}"
                Text="{Binding ManifestUrl, Mode=TwoWay}"
                AutomationProperties.AutomationId="updates-manifest-url"
                AutomationProperties.Name="{Binding [updates.settings.manifestUrl], Source={x:Static loc:Loc.Instance}}" />
     </Grid>
+    <TextBlock Classes="caption"
+               IsVisible="{Binding HasManifestUrlError}"
+               Foreground="{DynamicResource StatusErrorBrush}"
+               TextWrapping="Wrap"
+               Text="{Binding ManifestUrlError}" />
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
                Text="{Binding [updates.settings.manifestUrlHint], Source={x:Static loc:Loc.Instance}}" />

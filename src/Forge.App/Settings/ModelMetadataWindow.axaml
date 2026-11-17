@@ -1,13 +1,14 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:settings="using:Forge.App.Settings"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
         x:Class="Forge.App.Settings.ModelMetadataWindow"
         x:DataType="settings:ModelMetadataViewModel"
         Title="{Binding Title}"
-        Width="820"
-        Height="560"
-        MinWidth="640"
-        MinHeight="360"
+        Width="940"
+        Height="620"
+        MinWidth="780"
+        MinHeight="400"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}">
@@ -21,61 +22,226 @@
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
       <Setter Property="Padding" Value="6,3" />
       <Setter Property="MinHeight" Value="26" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="TextBox.meta-cell.invalid">
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
+    </Style>
+    <Style Selector="TextBox.meta-cell.invalid /template/ Border#PART_BorderElement">
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
+    </Style>
+    <Style Selector="Border.meta-row">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.meta-row.alt">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.meta-line">
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,1,0" />
+    </Style>
+    <Style Selector="TextBlock.meta-status">
+      <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
+    </Style>
+    <Style Selector="TextBlock.meta-status.error">
+      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
+    </Style>
+    <Style Selector="ListBoxItem">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
   </Window.Styles>
 
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="18,16">
+  <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="18,16">
     <StackPanel Grid.Row="0" Spacing="4">
       <TextBlock Classes="h2" Text="{Binding Title}" />
       <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Intro}" />
     </StackPanel>
 
-    <!-- Column headers; the same column widths the rows use, so the table reads as a table. -->
-    <Grid Grid.Row="1" ColumnDefinitions="*,150,100,90,90,90,Auto" ColumnSpacing="6" Margin="0,14,0,6">
-      <TextBlock Grid.Column="0" Classes="meta-header" Text="{Binding ModelHeader}" />
-      <TextBlock Grid.Column="1" Classes="meta-header" Text="{Binding CapabilitiesHeader}" />
-      <TextBlock Grid.Column="2" Classes="meta-header" Text="{Binding ContextHeader}" />
-      <TextBlock Grid.Column="3" Classes="meta-header" Text="{Binding InputHeader}" />
-      <TextBlock Grid.Column="4" Classes="meta-header" Text="{Binding OutputHeader}" />
-      <TextBlock Grid.Column="5" Classes="meta-header" Text="{Binding CacheReadHeader}" />
-      <TextBlock Grid.Column="6"
-                 Classes="meta-header"
-                 IsVisible="{Binding ShowsCacheWriteColumn}"
-                 Text="{Binding CacheWriteHeader}" />
-    </Grid>
+    <!-- Header and rows share this column set: shown | model | capabilities | context | input | output | cache read | cache write. -->
+    <Border Grid.Row="1"
+            Margin="0,14,0,0"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="4"
+            ClipToBounds="True">
+      <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0"
+                Background="{DynamicResource SurfaceSubtleBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+          <Grid ColumnDefinitions="78,*,142,110,84,84,84,Auto">
+            <Border Grid.Column="0"
+                    Classes="meta-line"
+                    MinWidth="74"
+                    Padding="8,7"
+                    IsVisible="{Binding HasVisibilityColumn}">
+              <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                <CheckBox IsChecked="{Binding AllShown, Mode=TwoWay}"
+                          VerticalAlignment="Center"
+                          ToolTip.Tip="{Binding VisibilityTooltip}"
+                          AutomationProperties.AutomationId="model-metadata-all-shown"
+                          AutomationProperties.Name="{Binding VisibilityTooltip}" />
+                <TextBlock Classes="meta-header" Text="{Binding VisibilityHeader}" />
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Classes="meta-line" Padding="8,7">
+              <TextBlock Classes="meta-header" Text="{Binding ModelHeader}" />
+            </Border>
+            <Border Grid.Column="2" Classes="meta-line" Padding="8,7">
+              <TextBlock Classes="meta-header" Text="{Binding CapabilitiesHeader}" TextTrimming="CharacterEllipsis" />
+            </Border>
+            <Border Grid.Column="3" Classes="meta-line" Padding="8,7">
+              <TextBlock Classes="meta-header" Text="{Binding ContextHeader}" TextTrimming="CharacterEllipsis" />
+            </Border>
+            <Border Grid.Column="4" Classes="meta-line" Padding="8,7">
+              <TextBlock Classes="meta-header" Text="{Binding InputHeader}" />
+            </Border>
+            <Border Grid.Column="5" Classes="meta-line" Padding="8,7">
+              <TextBlock Classes="meta-header" Text="{Binding OutputHeader}" />
+            </Border>
+            <Border Grid.Column="6" Classes="meta-line" Padding="8,7">
+              <TextBlock Classes="meta-header" Text="{Binding CacheReadHeader}" TextTrimming="CharacterEllipsis" />
+            </Border>
+            <Border Grid.Column="7"
+                    MinWidth="84"
+                    Padding="8,7"
+                    IsVisible="{Binding ShowsCacheWriteColumn}">
+              <TextBlock Classes="meta-header" Text="{Binding CacheWriteHeader}" TextTrimming="CharacterEllipsis" />
+            </Border>
+          </Grid>
+        </Border>
 
-    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-      <StackPanel Spacing="4">
-        <ItemsControl ItemsSource="{Binding Rows}" AutomationProperties.AutomationId="model-metadata-rows">
-          <ItemsControl.ItemTemplate>
+        <ListBox Grid.Row="1"
+                 ItemsSource="{Binding Rows}"
+                 IsVisible="{Binding HasRows}"
+                 SelectionMode="Single"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 AutomationProperties.AutomationId="model-metadata-rows">
+          <ListBox.ItemTemplate>
             <DataTemplate x:DataType="settings:ModelMetadataRowViewModel">
-              <Grid ColumnDefinitions="*,150,100,90,90,90,Auto" ColumnSpacing="6">
-                <TextBlock Grid.Column="0"
-                           Text="{Binding Model}"
-                           VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis"
-                           FontSize="{DynamicResource FontSizeSm}" />
-                <TextBlock Grid.Column="1"
-                           Text="{Binding Capabilities}"
-                           VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis"
-                           Foreground="{DynamicResource TextSecondaryBrush}"
-                           FontSize="{DynamicResource FontSizeSm}" />
-                <TextBox Grid.Column="2" Classes="meta-cell" Text="{Binding ContextWindow, Mode=TwoWay}" />
-                <TextBox Grid.Column="3" Classes="meta-cell" Text="{Binding Input, Mode=TwoWay}" />
-                <TextBox Grid.Column="4" Classes="meta-cell" Text="{Binding Output, Mode=TwoWay}" />
-                <TextBox Grid.Column="5" Classes="meta-cell" Text="{Binding CacheRead, Mode=TwoWay}" />
-                <TextBox Grid.Column="6" Classes="meta-cell" Width="90" IsVisible="{Binding ShowCacheWrite}" Text="{Binding CacheWrite, Mode=TwoWay}" />
-              </Grid>
+              <Border Classes="meta-row"
+                      Classes.alt="{Binding IsAlternate}"
+                      BorderBrush="{DynamicResource BorderBrush}"
+                      BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="78,*,142,110,84,84,84,Auto">
+                  <Border Grid.Column="0"
+                          Classes="meta-line"
+                          Padding="8,3"
+                          IsVisible="{Binding ShowsVisibility}">
+                    <CheckBox IsChecked="{Binding IsShown, Mode=TwoWay}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              ToolTip.Tip="{Binding Model}"
+                              AutomationProperties.AutomationId="{Binding Model, StringFormat=model-metadata-shown-{0}}"
+                              AutomationProperties.Name="{Binding Model}" />
+                  </Border>
+                  <Border Grid.Column="1" Classes="meta-line" Padding="8,3">
+                    <TextBlock Text="{Binding Model}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               FontSize="{DynamicResource FontSizeSm}" />
+                  </Border>
+                  <Border Grid.Column="2"
+                          Classes="meta-line"
+                          Padding="8,3"
+                          AutomationProperties.Name="{Binding CapabilitiesText}">
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="4"
+                                VerticalAlignment="Center"
+                                ToolTip.Tip="{Binding CapabilitiesText}">
+                      <wc:FluentIcon Data="{StaticResource IconText}"
+                                     Width="14"
+                                     Height="14"
+                                     IsVisible="{Binding HasTextInput}"
+                                     Foreground="{DynamicResource TextSecondaryBrush}"
+                                     ToolTip.Tip="{Binding TextCapabilityLabel}" />
+                      <wc:FluentIcon Data="{StaticResource IconImage}"
+                                     Width="14"
+                                     Height="14"
+                                     IsVisible="{Binding HasImageInput}"
+                                     Foreground="{DynamicResource TextSecondaryBrush}"
+                                     ToolTip.Tip="{Binding ImageCapabilityLabel}" />
+                      <wc:FluentIcon Data="{StaticResource IconPdf}"
+                                     Width="14"
+                                     Height="14"
+                                     IsVisible="{Binding HasPdfInput}"
+                                     Foreground="{DynamicResource TextSecondaryBrush}"
+                                     ToolTip.Tip="{Binding PdfCapabilityLabel}" />
+                      <wc:FluentIcon Data="{StaticResource IconAudio}"
+                                     Width="14"
+                                     Height="14"
+                                     IsVisible="{Binding HasAudioInput}"
+                                     Foreground="{DynamicResource TextSecondaryBrush}"
+                                     ToolTip.Tip="{Binding AudioCapabilityLabel}" />
+                      <wc:FluentIcon Data="{StaticResource IconVideo}"
+                                     Width="14"
+                                     Height="14"
+                                     IsVisible="{Binding HasVideoInput}"
+                                     Foreground="{DynamicResource TextSecondaryBrush}"
+                                     ToolTip.Tip="{Binding VideoCapabilityLabel}" />
+                      <StackPanel Orientation="Horizontal"
+                                  Spacing="1"
+                                  IsVisible="{Binding HasReasoning}"
+                                  ToolTip.Tip="{Binding ReasoningLabel}">
+                        <wc:FluentIcon Data="{StaticResource IconReasoning}"
+                                       Width="14"
+                                       Height="14"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <TextBlock Text="{Binding ReasoningLevel}"
+                                   IsVisible="{Binding HasReasoningLevel}"
+                                   VerticalAlignment="Center"
+                                   FontSize="{DynamicResource FontSizeXs}"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+                  <Border Grid.Column="3" Classes="meta-line" Padding="6,3">
+                    <TextBox Classes="meta-cell"
+                             Classes.invalid="{Binding HasContextWindowError}"
+                             ToolTip.Tip="{Binding ContextWindowError}"
+                             Text="{Binding ContextWindow, Mode=TwoWay}" />
+                  </Border>
+                  <Border Grid.Column="4" Classes="meta-line" Padding="6,3">
+                    <TextBox Classes="meta-cell"
+                             Classes.invalid="{Binding InputPriceInvalid}"
+                             ToolTip.Tip="{Binding InputPriceTooltip}"
+                             Text="{Binding Input, Mode=TwoWay}" />
+                  </Border>
+                  <Border Grid.Column="5" Classes="meta-line" Padding="6,3">
+                    <TextBox Classes="meta-cell"
+                             Classes.invalid="{Binding OutputPriceInvalid}"
+                             ToolTip.Tip="{Binding OutputPriceTooltip}"
+                             Text="{Binding Output, Mode=TwoWay}" />
+                  </Border>
+                  <Border Grid.Column="6" Classes="meta-line" Padding="6,3">
+                    <TextBox Classes="meta-cell"
+                             Classes.invalid="{Binding CacheReadPriceInvalid}"
+                             ToolTip.Tip="{Binding CacheReadPriceTooltip}"
+                             Text="{Binding CacheRead, Mode=TwoWay}" />
+                  </Border>
+                  <Border Grid.Column="7"
+                          MinWidth="84"
+                          Padding="6,3"
+                          IsVisible="{Binding ShowCacheWrite}">
+                    <TextBox Classes="meta-cell"
+                             Classes.invalid="{Binding CacheWritePriceInvalid}"
+                             ToolTip.Tip="{Binding CacheWritePriceTooltip}"
+                             Text="{Binding CacheWrite, Mode=TwoWay}" />
+                  </Border>
+                </Grid>
+              </Border>
             </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-        <TextBlock Classes="caption"
-                   IsVisible="{Binding !HasRows}"
-                   TextWrapping="Wrap"
-                   Text="{Binding EmptyText}" />
-      </StackPanel>
-    </ScrollViewer>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Grid>
+    </Border>
+
+    <TextBlock Grid.Row="2"
+               Classes="caption"
+               Margin="0,8,0,0"
+               IsVisible="{Binding !HasRows}"
+               TextWrapping="Wrap"
+               Text="{Binding EmptyText}" />
 
     <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,14,0,0">
       <TextBlock Grid.Column="0"
@@ -83,9 +249,9 @@
                  VerticalAlignment="Center"
                  Text="{Binding PerMillion}" />
       <TextBlock Grid.Column="1"
-                 Classes="caption"
+                 Classes="caption meta-status"
+                 Classes.error="{Binding StatusIsError}"
                  VerticalAlignment="Center"
-                 Foreground="{DynamicResource StatusSuccessBrush}"
                  IsVisible="{Binding HasStatus}"
                  Text="{Binding Status}" />
       <Button Grid.Column="3" Classes="ghost" Command="{Binding RefreshCommand}" Content="{Binding RefreshText}" />

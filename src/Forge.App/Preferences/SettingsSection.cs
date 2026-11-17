@@ -127,9 +127,6 @@ internal static class SettingsSectionIds
     // The sections of the thinkrail-gap waves. The ids and orders are allocated here once so no wave edits this file; the
     // wave that owns a section registers it (its Composition module) and picks the group.
 
-    /// <summary>Which models the picker lists (wave W1).</summary>
-    public const string ModelsVisibility = "models-visibility";
-
     /// <summary>The per-provider request/token budget and the automation gap (wave W15).</summary>
     public const string RateLimit = "rate-limit";
 
@@ -193,8 +190,6 @@ internal static class SettingsSectionIds
 
     /// <summary>After the providers (100), before the automations (150).</summary>
     public const int PromptsOrder = 130;
-
-    public const int ModelsVisibilityOrder = 110;
 
     /// <summary>
     /// Right after the model list and before the sub-agent caps: the budget is a property of the provider connection, so it

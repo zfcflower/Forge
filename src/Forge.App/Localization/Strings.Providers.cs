@@ -302,13 +302,22 @@ internal static class ProviderStrings
 
     public const string MetadataEmptyKey = "providers.meta.empty";
 
+    /// <summary>Heading of the first column: whether the model is offered by the pickers.</summary>
+    public const string MetadataVisibilityKey = "providers.meta.visibility";
+
+    /// <summary>Tooltip of the header checkbox that selects or clears every row.</summary>
+    public const string MetadataVisibilityTooltipKey = "providers.meta.visibilityTooltip";
+
+    /// <summary>"All models (23 shown / 100 total)" next to the connected heading.</summary>
+    public const string ModelStatsKey = "providers.section.modelStats";
+
     /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
     [ModuleInitializer]
     internal static void Initialize() => Register();
 
     internal static void Register()
     {
-        Loc.Register(SectionTitleKey, "提供商", "Providers");
+        Loc.Register(SectionTitleKey, "提供商/模型设置", "Providers & models");
         Loc.Register(BannerNeedProviderKey, "至少连接一个提供商才能运行 agent", "Connect at least one provider to run an agent");
         Loc.Register(SectionConnectedKey, "已连接", "Connected");
         Loc.Register(SectionAddServerKey, "添加提供商", "Add provider");
@@ -530,6 +539,15 @@ internal static class ProviderStrings
         Loc.Register(MetadataCloseKey, "关闭", "Close");
         Loc.Register(MetadataEmptyKey, "这个提供商还没有模型；先在编辑界面刷新一次。",
             "This provider has no models yet; refresh once in the editor.");
+        Loc.Register(MetadataVisibilityKey, "显示", "Shown");
+        Loc.Register(
+            MetadataVisibilityTooltipKey,
+            "全选 / 取消全选当前提供商的模型；改动随「保存」生效",
+            "Show or hide every model of this provider; changes apply when you save");
+        Loc.Register(
+            ModelStatsKey,
+            "全部模型（可见 {0} 个/共 {1} 个）",
+            "All models ({0} shown / {1} total)");
     }
 
     // ---------------------------------------------------------------- accessors used outside this file
@@ -599,6 +617,29 @@ internal static class ProviderStrings
 
     public static string MetadataCapabilities => Localization.Loc.Instance[MetadataCapabilitiesKey];
 
+    public static string CapabilityTextLabel => Localization.Loc.Instance[CapabilityTextKey];
+
+    public static string CapabilityImageLabel => Localization.Loc.Instance[CapabilityImageKey];
+
+    public static string CapabilityPdfLabel => Localization.Loc.Instance[CapabilityPdfKey];
+
+    public static string CapabilityAudioLabel => Localization.Loc.Instance[CapabilityAudioKey];
+
+    public static string CapabilityVideoLabel => Localization.Loc.Instance[CapabilityVideoKey];
+
+    /// <summary>The reasoning tooltip: "reasoning × 3" when the step count is known, otherwise just "reasoning".</summary>
+    public static string CapabilityReasoningLabel(int? steps) => steps is { } count
+        ? Localization.Loc.Instance.Format(CapabilityReasoningKey, (count - 1).ToString(System.Globalization.CultureInfo.InvariantCulture))
+        : Localization.Loc.Instance[CapabilityReasoningUnknownStepsKey];
+
+    public static string MetadataVisibilityHeader => Localization.Loc.Instance[MetadataVisibilityKey];
+
+    public static string MetadataVisibilityTooltip => Localization.Loc.Instance[MetadataVisibilityTooltipKey];
+
+    /// <summary>The "all models" count next to the connected heading; distinct model names, like the hidden set.</summary>
+    public static string ModelStats(int visible, int total) =>
+        Localization.Loc.Instance.Format(ModelStatsKey, TextFormat.Number(visible), TextFormat.Number(total));
+
     /// <summary>
     /// The read-only capability summary of one model ("文本·图像 · 推理 4 档"). Empty when no source described the model,
     /// which is the normal state for a model nobody has priced yet; the dialog then shows nothing instead of "unknown".
@@ -635,7 +676,7 @@ internal static class ProviderStrings
             }
         }
 
-        if (capabilities.ReasoningSteps is { Count: > 0 } steps)
+        if (capabilities.ReasoningSteps is { Count: > 1 } steps)
         {
             parts.Add(Localization.Loc.Instance.Format(
                 CapabilityReasoningKey,

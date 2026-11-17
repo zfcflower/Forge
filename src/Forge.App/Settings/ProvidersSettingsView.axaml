@@ -187,9 +187,14 @@
     </StackPanel>
 
     <!-- 1. Connected: what is already set up. -->
-    <Grid ColumnDefinitions="*,Auto">
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
       <TextBlock Classes="section-title" Text="{Binding ConnectedTitle}" VerticalAlignment="Center" />
-      <Button Grid.Column="1"
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 VerticalAlignment="Center"
+                 Text="{Binding ModelStatsText}"
+                 AutomationProperties.AutomationId="providers-model-stats" />
+      <Button Grid.Column="2"
               Classes="provider-action"
               Command="{Binding RefreshCommand}"
               AutomationProperties.AutomationId="providers-refresh">

@@ -39,6 +39,8 @@ internal sealed partial class ProviderEditorWindow : Window
                 // Cancel, Esc and the close button all end here: stop a running test and drop its draft key.
                 _ = model.AbandonAsync();
             }
+
+            model.Dispose();
         }
 
         base.OnClosed(e);

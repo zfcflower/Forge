@@ -52,6 +52,11 @@
               AutomationProperties.Name="{Binding [settings.projects.clear], Source={x:Static loc:Loc.Instance}}" />
     </Grid>
     <TextBlock Classes="caption"
+               IsVisible="{Binding HasCloneDirectoryError}"
+               Foreground="{DynamicResource StatusErrorBrush}"
+               TextWrapping="Wrap"
+               Text="{Binding CloneDirectoryError}" />
+    <TextBlock Classes="caption"
                TextWrapping="Wrap"
                Text="{Binding [settings.projects.directoryHint], Source={x:Static loc:Loc.Instance}}" />
   </StackPanel>

@@ -143,12 +143,11 @@
 ## 7.12 设置窗口
 
 - 独立窗口，1040×760，最小 720×480，`BorderOnly` + 自绘标题行；左侧分区导航按 `AGENT` / `界面` / `系统` 三组排（每行图标来自 `Resources/Icons.axaml`），右侧 `ScrollViewer` 里一个按选中分区的 `ContentControl`；默认选中 `provider`。窗口宽度小于 880 DIP 时左栏收成 48 DIP 图标条（每行只剩图标 + tooltip），标题行另有手动收起，手动状态优先；两种状态都保留全部分区入口。
-- 28 个分区（按 order）：
+- 27 个分区（按 order）：
 
 | 分区 id | 分组 | 内容 |
 |---|---|---|
-| `provider` 100 | AGENT | 提供商、密钥、模型目录、默认上下文窗口、缓存寿命、内置 Agent 默认、压缩设置 |
-| `models-visibility` 110 | AGENT | 逐模型“在选型器中显示” |
+| `provider` 100 | AGENT | 提供商、密钥、模型目录、默认上下文窗口、缓存寿命、模型可见性（模型窗口首列）、内置 Agent 默认、压缩设置 |
 | `rate-limit` 115 | AGENT | 本地限速开关、请求/令牌预算、自动化间隔、每提供商覆盖 |
 | `agents` 120 | AGENT | 子 Agent 并发上限（1–16）、允许派生 Agent |
 | `prompts` 130 | AGENT | 命令/Agent/内置提示词的编辑、复制、追加、还原 |

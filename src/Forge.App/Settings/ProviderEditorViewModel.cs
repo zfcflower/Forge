@@ -30,7 +30,7 @@ internal enum ProviderTestState
 /// Models, default model, thinking effort and output limit are not edited here: a provider's models come from its
 /// <c>/models</c> answer, and the default model and effort belong to the agents, not to the provider.
 /// </remarks>
-internal sealed class ProviderEditorViewModel : NotifyingObject
+internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
 {
     /// <summary>The thinking effort a provider's definition carries when the dialog creates it; the agents override it.</summary>
     private const ThinkingEffort DefaultThinking = ThinkingEffort.Medium;
@@ -43,6 +43,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
     private readonly IReadOnlyCollection<string> existingIds;
     private readonly ProviderPreset preset;
     private readonly Func<ProviderDefinition, Task<string?>>? persist;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private string name = string.Empty;
     private string baseUrl = string.Empty;
     private bool keyIsSecret = true;
@@ -58,6 +59,10 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
     private string? error;
     private string? status;
     private bool isBusy;
+    private InputError? nameError;
+    private InputError? baseUrlError;
+    private InputError? keyError;
+    private string? headersError;
 
     /// <summary>
     /// Opens the dialog for a new provider (<paramref name="startPreset"/> is the built-in vendor, or the custom entry) or for an
@@ -75,6 +80,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
         original = definition;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
         existingIds = existingProviderIds ?? [];
         this.persist = persist;
 
@@ -165,7 +171,13 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
     public string Name
     {
         get => name;
-        set => Set(ref name, value ?? string.Empty);
+        set
+        {
+            if (Set(ref name, value ?? string.Empty))
+            {
+                RevalidateName();
+            }
+        }
     }
 
     /// <summary>Changing the address invalidates a passing test: the answer was for the old endpoint.</summary>
@@ -176,6 +188,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
         {
             if (Set(ref baseUrl, value ?? string.Empty))
             {
+                RevalidateBaseUrl();
                 MarkUntested();
             }
         }
@@ -199,6 +212,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
             OnPropertyChanged(nameof(KeyText));
             OnPropertyChanged(nameof(KeyHint));
             OnPropertyChanged(nameof(KeyPlaceholder));
+            RevalidateKey();
             MarkUntested();
         }
     }
@@ -211,6 +225,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
         {
             if (Set(ref keyText, value ?? string.Empty))
             {
+                RevalidateKey();
                 MarkUntested();
             }
         }
@@ -227,6 +242,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
         {
             if (Set(ref headersText, value ?? string.Empty))
             {
+                RevalidateHeaders();
                 MarkUntested();
             }
         }
@@ -257,6 +273,85 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
 
     public bool HasError => Error is { Length: > 0 };
 
+    /// <summary>Inline messages for the fields that have a rule; a null message means the field is acceptable.</summary>
+    public string? NameError => nameError is null ? null : InputValidationStrings.Describe(nameError);
+
+    public bool HasNameError => nameError is not null;
+
+    public string? BaseUrlError => baseUrlError is null ? null : InputValidationStrings.Describe(baseUrlError);
+
+    public bool HasBaseUrlError => baseUrlError is not null;
+
+    public string? KeyError => keyError is null ? null : InputValidationStrings.Describe(keyError);
+
+    public bool HasKeyError => keyError is not null;
+
+    public string? HeadersError => headersError;
+
+    public bool HasHeadersError => headersError is { Length: > 0 };
+
+    private void RevalidateName()
+    {
+        if (nameError is not null)
+        {
+            SetError(ref nameError, InputRules.ValidateRequired(Name), nameof(NameError), nameof(HasNameError));
+        }
+    }
+
+    private void RevalidateBaseUrl()
+    {
+        if (baseUrlError is not null)
+        {
+            SetError(ref baseUrlError, InputRules.ValidateAbsoluteHttpUrl(BaseUrl), nameof(BaseUrlError), nameof(HasBaseUrlError));
+        }
+    }
+
+    private void RevalidateKey()
+    {
+        if (keyError is not null)
+        {
+            SetError(
+                ref keyError,
+                ShowsKey && !KeyIsSecret ? InputRules.ValidateEnvironmentVariable(KeyText) : null,
+                nameof(KeyError),
+                nameof(HasKeyError));
+        }
+    }
+
+    private void RevalidateHeaders()
+    {
+        if (headersError is not null)
+        {
+            SetHeadersError(TryParseHeaders(HeadersText, out _, out var badLine)
+                ? null
+                : Loc.Instance.Format(ProviderStrings.EditorHeadersInvalidKey, badLine));
+        }
+    }
+
+    private void SetError(ref InputError? field, InputError? value, string errorName, string hasErrorName)
+    {
+        if (Nullable.Equals(field, value))
+        {
+            return;
+        }
+
+        field = value;
+        OnPropertyChanged(errorName);
+        OnPropertyChanged(hasErrorName);
+    }
+
+    private void SetHeadersError(string? value)
+    {
+        if (string.Equals(headersError, value, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        headersError = value;
+        OnPropertyChanged(nameof(HeadersError));
+        OnPropertyChanged(nameof(HasHeadersError));
+    }
+
     /// <summary>
     /// Validates the form and builds the definition; <c>null</c> when something is wrong (<see cref="Error"/> says what).
     /// The key itself is never part of the definition — only the reference it is stored under.
@@ -264,29 +359,21 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
     public ProviderDefinition? TryBuild()
     {
         var trimmedName = Name.Trim();
-        if (trimmedName.Length == 0)
-        {
-            Error = Loc.Instance[ProviderStrings.EditorNeedsNameKey];
-            return null;
-        }
-
         var url = BaseUrl.Trim();
-        if (url.Length == 0 || !Uri.TryCreate(url, UriKind.Absolute, out _))
-        {
-            Error = Loc.Instance[ProviderStrings.EditorNeedsBaseUrlKey];
-            return null;
-        }
-
         var variable = KeyText.Trim();
-        if (ShowsKey && !KeyIsSecret && variable.Length == 0)
-        {
-            Error = Loc.Instance[ProviderStrings.EditorNeedsVariableKey];
-            return null;
-        }
+        SetError(ref nameError, InputRules.ValidateRequired(trimmedName), nameof(NameError), nameof(HasNameError));
+        SetError(ref baseUrlError, InputRules.ValidateAbsoluteHttpUrl(url), nameof(BaseUrlError), nameof(HasBaseUrlError));
+        SetError(
+            ref keyError,
+            ShowsKey && !KeyIsSecret ? InputRules.ValidateEnvironmentVariable(variable) : null,
+            nameof(KeyError),
+            nameof(HasKeyError));
 
-        if (!TryParseHeaders(HeadersText, out var headers, out var badLine))
+        var headersOk = TryParseHeaders(HeadersText, out var headers, out var badLine);
+        SetHeadersError(headersOk ? null : Loc.Instance.Format(ProviderStrings.EditorHeadersInvalidKey, badLine));
+        if (nameError is not null || baseUrlError is not null || keyError is not null || headersError is not null)
         {
-            Error = Loc.Instance.Format(ProviderStrings.EditorHeadersInvalidKey, badLine);
+            Error = null;
             return null;
         }
 
@@ -353,6 +440,28 @@ internal sealed class ProviderEditorViewModel : NotifyingObject
 
     private static string FormatHeaders(IReadOnlyDictionary<string, string> headers) =>
         string.Join(Environment.NewLine, headers.Select(pair => pair.Key + ": " + pair.Value));
+
+    /// <summary>Detaches the language subscription; the window calls this on every close, saved or not.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(NameError));
+        OnPropertyChanged(nameof(HasNameError));
+        OnPropertyChanged(nameof(BaseUrlError));
+        OnPropertyChanged(nameof(HasBaseUrlError));
+        OnPropertyChanged(nameof(KeyError));
+        OnPropertyChanged(nameof(HasKeyError));
+        if (headersError is not null)
+        {
+            RevalidateHeaders();
+        }
+    }
 
     /// <summary>The first button: test when nothing has passed, save when the last test passed.</summary>
     internal async Task TestOrSaveAsync()

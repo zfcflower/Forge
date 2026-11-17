@@ -102,7 +102,7 @@
 
 ## 15.3 设置分区速查
 
-`provider` 100 · `models-visibility` 110 · `rate-limit` 115 · `agents` 120 · `prompts` 130 · `web` 140 · `automations` 150 · `appearance` 200 · `keymap` 210 · `language` 300 · `chat` 320 · `editor` 350 · `files` 360 · `palette` 380 · `git` 500 · `projects` 510 · `notifications` 550 · `notification-permission` 560 · `idle-archive` 570 · `network` 580 · `extensions` 600 · `approvals` 700 · `skills` 710 · `mcp` 720 · `tools` 730 · `inspector` 740 · `updates` 800 · `paths` 900。分组：AGENT（100–150）、界面（200–380、500–510）、系统（550–900）。每个分区的内容见 [07-workbench-ui.md](07-workbench-ui.md) 7.12。
+`provider` 100 · `rate-limit` 115 · `agents` 120 · `prompts` 130 · `web` 140 · `automations` 150 · `appearance` 200 · `keymap` 210 · `language` 300 · `chat` 320 · `editor` 350 · `files` 360 · `palette` 380 · `git` 500 · `projects` 510 · `notifications` 550 · `notification-permission` 560 · `idle-archive` 570 · `network` 580 · `extensions` 600 · `approvals` 700 · `skills` 710 · `mcp` 720 · `tools` 730 · `inspector` 740 · `updates` 800 · `paths` 900。分组：AGENT（100–150）、界面（200–380、500–510）、系统（550–900）。每个分区的内容见 [07-workbench-ui.md](07-workbench-ui.md) 7.12。
 
 ## 15.4 数据文件速查
 

@@ -78,7 +78,7 @@ Forge.App（Native AOT，Avalonia UI，唯一知道全部主程序项目）
 | [04-git-diff-pr.md](04-git-diff-pr.md) | worktree、改动浏览、diff 审阅、步骤提交、PR 工具与检查面板 | `pr_create` 五道闸门；只允许 force-with-lease |
 | [05-spec-graph.md](05-spec-graph.md) | 规格树模型、7 个 spec 工具、面板与写入守卫 | frontmatter 往返无损 |
 | [06-editor-and-code-intelligence.md](06-editor-and-code-intelligence.md) | TextMate、LSP、诊断、补全、重命名、折叠、富预览、行评审 | 语义 token 按行复用 |
-| [07-workbench-ui.md](07-workbench-ui.md) | 停靠布局、项目树、面板、转录、命令面板、通知、设置、外观、本地化 | 28 个设置分区；布局快照 v5 |
+| [07-workbench-ui.md](07-workbench-ui.md) | 停靠布局、项目树、面板、转录、命令面板、通知、设置、外观、本地化 | 27 个设置分区；布局快照 v5 |
 | [08-terminal.md](08-terminal.md) | 交互终端：VT 引擎、线程模型、搜索、重启、流控 | 回滚默认 10000 行；1 MiB 窗口 |
 | [09-prompts-skills-workflows.md](09-prompts-skills-workflows.md) | 三层提示词、模板三态、技能四层、编排注入、声明式工作流 | 内置 4 命令 + 4 Agent + 4 编排技能 |
 | [10-mcp.md](10-mcp.md) | MCP 传输、配置、OAuth、资源订阅、工具选面 | `mcp_tool_search`；工具 schema 64K 上限 |

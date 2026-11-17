@@ -73,6 +73,9 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
     /// <summary>The provider services, so the view can build the editor, login and metadata windows from the same store.</summary>
     internal ProviderServices Services => services;
 
+    /// <summary>The live preferences the model window stages visibility into; null only in a host that built the page without one.</summary>
+    internal AppPreferences? Preferences => preferences;
+
     public AsyncRelayCommand RefreshCommand { get; }
 
     /// <summary>The compaction block under the default context window: thresholds relative to each model's effective window.</summary>
@@ -112,6 +115,36 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
     public string BuiltInHint => Loc.Instance[ProviderStrings.SectionBuiltInHintKey];
 
     public string RefreshText => Loc.Instance[ProviderStrings.SectionRefreshKey];
+
+    /// <summary>
+    /// "All models (23 shown / 100 total)" next to the connected heading: a read-only count over the distinct model names
+    /// every connected provider offers, so it agrees with the hidden set (which is keyed by name, not provider).
+    /// </summary>
+    public string ModelStatsText
+    {
+        get
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var provider in services.Catalog.Providers)
+            {
+                foreach (var model in provider.Models)
+                {
+                    names.Add(model);
+                }
+            }
+
+            var visible = 0;
+            foreach (var name in names)
+            {
+                if (preferences is null || !preferences.IsModelHidden(name))
+                {
+                    visible++;
+                }
+            }
+
+            return ProviderStrings.ModelStats(visible, names.Count);
+        }
+    }
 
     public string DefaultContextWindowLabel => Loc.Instance[ProviderStrings.DefaultContextWindowKey];
 
@@ -240,6 +273,7 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         RebuildAgentRows();
         OnPropertyChanged(nameof(HasProblem));
         OnPropertyChanged(nameof(DefaultId));
+        OnPropertyChanged(nameof(ModelStatsText));
     }
 
     /// <summary>
@@ -339,10 +373,7 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
     public async Task CommitCatalogSourceAsync(CancellationToken cancellationToken = default)
     {
         var text = CatalogSourceUrl.Trim();
-        var valid = text.Length == 0
-                    || (Uri.TryCreate(text, UriKind.Absolute, out var uri)
-                        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps));
-        if (!valid)
+        if (InputRules.ValidateAbsoluteHttpUrl(text, allowEmpty: true) is not null)
         {
             CatalogProblem = ModelCatalogStrings.SourceInvalid;
             return;
@@ -499,7 +530,7 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         Reload();
     }
 
-    /// <summary>A model hidden or shown on the visibility page must reach the agent-defaults combos that are already built.</summary>
+    /// <summary>A model hidden or shown in a model window must reach the agent-defaults combos that are already built.</summary>
     private void OnPreferencesChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(AppPreferences.ModelsHidden))
@@ -509,6 +540,7 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
                 if (!disposed)
                 {
                     RebuildAgentRows();
+                    OnPropertyChanged(nameof(ModelStatsText));
                 }
             });
         }
