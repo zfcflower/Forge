@@ -19,6 +19,10 @@ internal sealed class RemotePairing
 {
     private const string RemoteName = "origin";
 
+    private static readonly System.Text.RegularExpressions.Regex RemoteHelperUrl = new(
+        "^[A-Za-z0-9+.-]+::",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private readonly GitCli git;
     private readonly ConfiguredGh gh;
 
@@ -39,16 +43,26 @@ internal sealed class RemotePairing
             return new GitRemoteResult(GitRemoteFailureKind.Other, "The remote URL is empty or malformed.", string.Empty);
         }
 
+        // "<helper>::<address>" runs a remote helper (ext:: runs an arbitrary command); a pasted address never gets that.
+        if (RemoteHelperUrl.IsMatch(url))
+        {
+            return new GitRemoteResult(GitRemoteFailureKind.Other, "Remote-helper URLs (helper::address) are not accepted.", string.Empty);
+        }
+
         // A URL works wherever a remote name does; the ref is only a probe, an absent one is still "reachable".
         var probe = await git.LsRemoteAsync(workingDirectory, url, "main", options: null, ct).ConfigureAwait(false);
         if (!probe.Result.Success)
         {
-            return probe.Result;
+            return Redacted(probe.Result);
         }
 
         var added = await git.AddRemoteAsync(workingDirectory, RemoteName, url, ct).ConfigureAwait(false);
-        return added;
+        return Redacted(added);
     }
+
+    /// <summary>A message and a stderr that name the address can carry its token (https://token@host/...); they reach a dialog and a log.</summary>
+    private static GitRemoteResult Redacted(GitRemoteResult result) =>
+        result with { Message = GitCli.RedactCredentials(result.Message), StandardError = GitCli.RedactCredentials(result.StandardError) };
 
     /// <summary>Creates the repository <paramref name="name"/> on GitHub with <c>gh</c> and adds it as <c>origin</c>; pushes nothing.</summary>
     public async Task<GitRemoteResult> PairByGitHubAsync(
@@ -81,9 +95,12 @@ internal sealed class RemotePairing
         if (!result.Success)
         {
             var text = result.StandardError.Length > 0 ? result.StandardError : result.StandardOutput;
+            // gh may have created the repository before it failed or timed out, and a retry with the same name then says
+            // "already exists"; the message names the way out.
             return new GitRemoteResult(
                 result.TimedOut ? GitRemoteFailureKind.TimedOut : GitRemoteFailureKind.Other,
-                result.TimedOut ? "gh repo create timed out." : "gh repo create failed: " + text.Trim(),
+                (result.TimedOut ? "gh repo create timed out." : "gh repo create failed: " + text.Trim())
+                + " The repository may already exist on GitHub; if it does, pair it by URL instead of creating it again.",
                 result.StandardError);
         }
 

@@ -103,12 +103,31 @@ public sealed class SubAgentScheduler : ISubAgentControl
     /// fix reaches the session (kinds are a per-host snapshot, so an edited file applies from the next session start or after a hot reload).
     /// </summary>
     internal static string MissingToolsMessage(string name) =>
-        $"Agent '{name}' declares no `tools` list, so it was not started: without one it would get every tool. "
+        $"Agent '{name}' declares no usable `tools` list (missing or empty), so it was not started: without one it would get every tool. "
         + "Ask the user (ask_user) which role it should have, then add a `tools:` line to the frontmatter of its agent file "
         + "(`<workspace>/.forge/agents/<name>.md` you can edit; a file under `~/.forge/agents/` is outside the workspace, so give the user "
         + "the exact line to add). Suggested lists: read-only scout or planner: read, grep, find, ls; implementer: read, grep, find, ls, edit, write, bash; "
         + "reviewer: read, grep, find, ls, git_diff. Agent files are read when a session starts, so the change applies from the next session, or from the next message once the user presses the reload-prompts button in the title bar. "
-        + "For this task use a built-in kind: Scout, Plan, Worker or Reviewer.";
+        + "An agent contributed by a plugin cannot be edited here. For this task use a built-in kind: Scout, Plan, Worker or Reviewer.";
+
+    /// <summary>
+    /// A child is meant to stay within its parent's tools, but this is not enforced (the child's own definition decides).
+    /// When a sub-agent parent's declared list lacks tools the child declares, say so to the user instead of staying silent.
+    /// A root agent's surface is not known here, so only a parent that is itself a sub-agent is compared.
+    /// </summary>
+    private void WarnWhenBroaderThanParent(AgentDefinition child, string parentId, IAgentEventSink sink)
+    {
+        if (!TryGetInstance(parentId, out var parent) || parent.Definition.ToolNames is not { Count: > 0 } allowed)
+        {
+            return;
+        }
+
+        var beyond = child.ToolNames!.Where(name => !allowed.Contains(name, StringComparer.OrdinalIgnoreCase)).ToArray();
+        if (beyond.Length > 0)
+        {
+            sink.Emit(new AgentNotice(parentId, $"Sub-agent '{child.Name}' has tools its parent '{parent.Definition.Name}' does not declare: {string.Join(", ", beyond)}."));
+        }
+    }
 
     private SubAgentControlResult Missing(string agentId)
     {
@@ -154,6 +173,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
         {
             return new SubAgentOutcome(resumeId ?? string.Empty, MissingToolsMessage(definition.Name), IsError: true);
         }
+
+        WarnWhenBroaderThanParent(definition, parentId, sink);
 
         AgentInstance? instance = null;
         SubAgentRun? run = null;

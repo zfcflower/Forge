@@ -15,7 +15,21 @@ internal static class RepositoryRemotes
     public static event Action<string>? Added;
 
     /// <summary>Tells every listener that <paramref name="configPath"/>'s repository now has a remote.</summary>
-    public static void RaiseAdded(string configPath) => Added?.Invoke(configPath);
+    public static void RaiseAdded(string configPath)
+    {
+        // One handler throwing must not keep the other sessions from hearing about the remote.
+        foreach (var handler in Added?.GetInvocationList() ?? [])
+        {
+            try
+            {
+                ((Action<string>)handler)(configPath);
+            }
+            catch (Exception exception)
+            {
+                AppLogs.Session.ZLogWarning($"a remote-added listener failed: {exception.Message}");
+            }
+        }
+    }
 
     /// <summary>Whether two config paths name the same file.</summary>
     public static bool SameConfig(string? left, string? right) =>
@@ -40,7 +54,7 @@ internal static class RepositoryRemotes
                 }
                 else if (File.Exists(dotGit))
                 {
-                    var line = File.ReadLines(dotGit).FirstOrDefault(static l => l.StartsWith("gitdir:", StringComparison.Ordinal));
+                    var line = File.ReadLines(dotGit).FirstOrDefault(static l => l.StartsWith("gitdir:", StringComparison.OrdinalIgnoreCase));
                     if (line is not null)
                     {
                         var gitDir = Path.GetFullPath(Path.Combine(directory.FullName, line["gitdir:".Length..].Trim()));
@@ -58,8 +72,9 @@ internal static class RepositoryRemotes
                 }
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
+            // A malformed "gitdir:" line (a path git itself would refuse) means "no repository found", never a failed caller.
         }
 
         return null;
@@ -78,8 +93,9 @@ internal static class RepositoryRemotes
                 var line = raw.AsSpan().TrimStart();
                 if (line.Length > 8 && line[0] == '[' && line[1..].StartsWith("remote", StringComparison.OrdinalIgnoreCase))
                 {
+                    // [remote "name"], or the deprecated [remote.name] spelling git still reads.
                     var rest = line[7..].TrimStart();
-                    if (rest.Length > 0 && rest[0] == '"')
+                    if (rest.Length > 0 && (rest[0] == '"' || (rest[0] == '.' && line[7] == '.')))
                     {
                         return true;
                     }

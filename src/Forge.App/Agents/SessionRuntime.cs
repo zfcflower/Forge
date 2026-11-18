@@ -1116,6 +1116,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
     private AgentHost Build()
     {
+        // Armed before the sources are read: an edit made while this build runs marks the snapshot stale instead of getting lost.
+        StartPromptWatch();
         var handler = services.Approvals?.CreateHandler(Session);
 
         // A retried build (the first resume failed) replaces the handler; the old one must not keep a dead wait alive.
@@ -1167,8 +1169,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Store = services.Store,
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
-                Reviews = services.ReviewToolEnabled is { } reviewToolEnabled && !reviewToolEnabled() ? null : services.Reviews,
-                StepChanges = services.StepChanges,
+                // A General session has no git tools and its repository is shared by every General session, so a review or a
+                // step gate there would diff and probe other sessions' changes.
+                Reviews = !gitToolsOn || (services.ReviewToolEnabled is { } reviewToolEnabled && !reviewToolEnabled()) ? null : services.Reviews,
+                StepChanges = gitToolsOn ? services.StepChanges : null,
                 StepGatesEnabled = services.StepReviewRequired,
                 ReviewFix = services.ReviewFix,
                 ReviewLimits = services.ReviewLimits,
@@ -1196,7 +1200,6 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         // From here on a plugin or workflow run of this session can call tools through this session's tool set and handler.
         builtHost = built;
         services.ToolRouter?.Register(SessionId, this);
-        StartPromptWatch();
         return built;
     }
 
@@ -1224,7 +1227,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// The prompt cache of the conversation is lost once (the prefix changed). A running turn is not touched; it ends on the
     /// snapshot it started with. Before the first turn there is nothing to reload (the first build reads the files).
     /// </summary>
-    public void HotReloadPrompts()
+    public bool HotReloadPrompts()
     {
         lock (gate)
         {
@@ -1232,7 +1235,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             // reload can be applied once the turn has ended.
             if (disposed || host is null || activeRoot is not null)
             {
-                return;
+                return false;
             }
 
             reloadPending = true;
@@ -1240,6 +1243,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
 
         PromptsStaleChanged?.Invoke();
+        return true;
     }
 
     private void StartPromptWatch()
@@ -1250,7 +1254,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         promptWatcher = watcher;
         promptsStale = false;
         watcher.Arm();
-        previous?.Dispose();
+        if (previous is not null)
+        {
+            // Disposed off the build path: a callback of the old watcher may be waiting for the gate this runs under.
+            _ = Task.Run(previous.Dispose);
+        }
     }
 
     private void OnPromptSourceChanged()

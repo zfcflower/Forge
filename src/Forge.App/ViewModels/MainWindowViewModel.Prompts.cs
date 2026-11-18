@@ -65,7 +65,16 @@ internal sealed partial class MainWindowViewModel
             return;
         }
 
-        session.HotReloadPrompts();
+        if (!session.HotReloadPrompts())
+        {
+            composition.Notifications.Notify(
+                NotificationLevel.Info,
+                SessionStrings.PromptsReloadSkippedTitle,
+                SessionStrings.PromptsReloadSkipped,
+                "prompts-reload-skipped:" + session.SessionId);
+            return;
+        }
+
         composition.Notifications.Notify(
             NotificationLevel.Success,
             SessionStrings.PromptsReloadedTitle,

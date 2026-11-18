@@ -218,7 +218,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public bool CanReloadPrompts => !disposed && !isReadOnlyView && runtime is not null;
 
     /// <summary>Hot reload: the next turn runs on freshly read prompts (see <see cref="SessionRuntime.HotReloadPrompts"/>).</summary>
-    internal void HotReloadPrompts() => runtime?.HotReloadPrompts();
+    internal bool HotReloadPrompts() => runtime?.HotReloadPrompts() ?? false;
 
     /// <summary>Raised on the UI thread when <see cref="PromptsStale"/> may have changed.</summary>
     internal event Action? PromptsStaleChanged;

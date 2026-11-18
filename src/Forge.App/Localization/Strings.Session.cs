@@ -34,6 +34,8 @@ internal static class SessionStrings
     public const string PromptsReloadTipKey = "session.prompts.reloadTip";
     public const string PromptsReloadedKey = "session.prompts.reloaded";
     public const string PromptsReloadedTitleKey = "session.prompts.reloadedTitle";
+    public const string PromptsReloadSkippedKey = "session.prompts.reloadSkipped";
+    public const string PromptsReloadSkippedTitleKey = "session.prompts.reloadSkippedTitle";
     public const string ReadFailedKey = "session.readFailed";
     public const string ProviderMissingKey = "session.providerMissing";
 
@@ -188,6 +190,10 @@ internal static class SessionStrings
     public static LocText PromptsReloadedTitle => new(PromptsReloadedTitleKey);
 
     /// <summary>The notice shown when the stored history cannot be read.</summary>
+    public static LocText PromptsReloadSkipped => new(PromptsReloadSkippedKey);
+
+    public static LocText PromptsReloadSkippedTitle => new(PromptsReloadSkippedTitleKey);
+
     public static LocText ReadFailed(string message) => new(ReadFailedKey, message);
 
     /// <summary>The notice shown when the session started without a model provider.</summary>
@@ -522,6 +528,11 @@ internal static class SessionStrings
 
         // turn card and its notices
         Loc.Register(TurnHeaderKey, "第 {0} 轮 · {1} · {2} · 输入 {3} · 输出 {4}", "Turn {0} · {1} · {2} · in {3} · out {4}");
+        Loc.Register(PromptsReloadSkippedTitleKey, "暂未重载提示词", "Prompts not reloaded");
+        Loc.Register(
+            PromptsReloadSkippedKey,
+            "回合进行中或会话尚未开始，没有可重载的快照：新会话的第一条消息会读取最新提示词，回合结束后可再点一次。",
+            "A turn is running or the session has not started, so there is no snapshot to reload: the first message of a new session reads the latest prompts, and the button can be used again once the turn ends.");
         Loc.Register(TurnRunningKey, "运行中…", "Running…");
         Loc.Register(TurnTokenSummaryKey, "输入 {0} · 输出 {1}", "in {0} · out {1}");
         Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");

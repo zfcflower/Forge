@@ -55,7 +55,8 @@ internal sealed partial class MainWindowViewModel
             case 1:
                 var name = await dialogs.PromptTextAsync(
                         PairingStrings.NamePrompt,
-                        Path.GetFileName(project.RootPath.TrimEnd('\\', '/')))
+                        // gh refuses a name with spaces; the folder name is only a suggestion, so make it a valid one.
+                        string.Join('-', Path.GetFileName(project.RootPath.TrimEnd('\\', '/')).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)))
                     .ConfigureAwait(true);
                 if (string.IsNullOrWhiteSpace(name))
                 {
