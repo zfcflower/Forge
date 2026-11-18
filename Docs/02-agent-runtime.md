@@ -31,7 +31,7 @@
 | 会话 | `todo` | 读/写按参数 | 7 种操作：`list`/`add`/`update`/`remove`/`promote`/`plan_summary_get`/`plan_summary_set`；写操作先确认条目属于本会话 |
 | | `ask_user` | 只读 | 仅在宿主提供问题处理器时注册；问题卡 + 选项/自由文本；支持多选 min/max |
 | | `skill` | 只读 | 按名返回 `SKILL.md` 全文（上限 64000 字符）；名字只在本会话发现的四个技能根里解析 |
-| Agent | `spawn_agent` | 只读 | 派生内置 Scout/Worker/Plan/Reviewer 或用户 Agent；`<kind>-<n>` 登记；深度上限 3；不能关闭子 Agent 时用它停 |
+| Agent | `spawn_agent` | 只读 | 派生内置 Scout/Worker/Plan/Reviewer 或用户 Agent；`<kind>-<n>` 登记；深度上限 2；不能关闭子 Agent 时用它停 |
 | | `subagent_steer` | 只读 | 在工具批次边界重定向子 Agent（已发调用跑完，未开始的补 `skipped`） |
 | | `subagent_followup` | 只读 | 子 Agent 本应结束时注入后续指令并继续 |
 | | `subagent_stop` | 只读 | 只取消该子 Agent，待决工具补 `Cancelled.`，父收到非错误结果 |
@@ -57,7 +57,7 @@
 ### 工具开关与热加载
 
 - `settings.json` 的 `preferences.toolsDisabled` 是开关集合（去空白、去重、按序数排序，为空不写）；`read_artifact`、三个子 Agent 控制工具与 `skill` 是必需项，写了也忽略。
-- 关掉 `spawn_agent` 或 `agents` 分区的“允许派生 Agent”，效果落到同一个禁用集合；`request_review` 在子 Agent 关闭且门禁开启时仍保留。
+- `spawn_agent` 与 `request_review` 各按自己在允许清单里的条目开关；不再有“允许派生 Agent”总开关。
 - 工具面是可替换快照（`ToolSurface`：版本 + 注册表，`Volatile` 读）：版本未变复用同一 `Definitions` 数组，提示词缓存不破；集合没变时不发布。批准后的下一次模型请求就能看到新工具。
 - `AgentHost.AllTools` 列出全部内置与外部工具（含已禁用），供 `tools` 分区显示。
 - `run_code` 的脚本面只收“只读的文件/web/MCP 三类 + 插件工具”（按 `SideEffect == ReadOnly` 判定，不认名字）；`write`/`edit`/`bash`、git/PR 写工具、扩展编写工具一概不进。
@@ -66,7 +66,7 @@
 
 - 内置四种：**Scout**（只读侦察，read/grep/find/ls）、**Worker**（实现一个任务，加 edit/write/bash）、**Plan**（只读产出有序计划）、**Reviewer**（只读评审，多一个只读 `git_diff`）。模型与思考强度可分别设置。
 - 生成：`spawn_agent` 按 `<kind>-<n>` 登记实例，同类型共享稳定提示词前缀以命中缓存；同类型实例可按 id 续跑（当前未在运行）。
-- 并发与深度：嵌套深度上限 3；整棵树的活跃 Agent 数默认 4，可在 `agents` 分区调到 1–16（扩容立即唤醒排队中的 Agent，缩容不打断已在跑的一轮）；父 Agent 等子结果时交还名额，避免嵌套死锁。
+- 并发与深度：嵌套深度上限 2；整棵树的活跃 Agent 数默认 4，可在 `agents` 分区调到 1–16（扩容立即唤醒排队中的 Agent，缩容不打断已在跑的一轮）；父 Agent 等子结果时交还名额，避免嵌套死锁。
 - 生命周期事件：`Started`（父发出）→ 仅在确实等名额时 `Queued` → `Running` → 每个 run 恰一次 `Finished`（含异常与父取消；父取消记 `Stopped "parent cancelled"`）。用量是本 run 增量，耗时从 spawn 起算（含排队）。
 - 控制语义：转向只在工具批次边界生效（批次内多条转向合并成一条消息、一个事件）；后续指令在子 Agent 本应结束时注入；停止只取消该子 Agent。
 - 树上的子 Agent 行有两个来源：存储里按 `parent_session_id` 推出的历史行（重启后也在），与会话加载后的实时名单（带运行状态）；状态从最后几条存储消息推断，推不出显示“已结束”，不把未知当完成。

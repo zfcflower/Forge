@@ -97,7 +97,6 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinAgentsMaxParallelSubAgents = 1;
     public const int MaxAgentsMaxParallelSubAgents = 16;
     public const int DefaultAgentsMaxParallelSubAgents = 4;
-    public const bool DefaultAgentsSubAgentsEnabled = true;
     public const bool DefaultOrchestrationEnabled = true;
     public const bool DefaultWorkflowGatesEnabled = true;
     public const bool DefaultIdleArchiveEnabled = true;
@@ -259,7 +258,6 @@ internal sealed class AppPreferences : ObservableObject
     private string editorColumnRulers = string.Empty;
     private string editorTheme = DefaultEditorTheme;
     private int agentsMaxParallelSubAgents = DefaultAgentsMaxParallelSubAgents;
-    private bool agentsSubAgentsEnabled = DefaultAgentsSubAgentsEnabled;
     private bool orchestrationEnabled = DefaultOrchestrationEnabled;
     private bool workflowGatesEnabled = DefaultWorkflowGatesEnabled;
     private bool idleArchiveEnabled = DefaultIdleArchiveEnabled;
@@ -496,9 +494,6 @@ internal sealed class AppPreferences : ObservableObject
         get => agentsMaxParallelSubAgents;
         set => Set(ref agentsMaxParallelSubAgents, Math.Clamp(value, MinAgentsMaxParallelSubAgents, MaxAgentsMaxParallelSubAgents));
     }
-
-    /// <summary>Whether the <c>spawn_agent</c> tool is offered at all (wave W1).</summary>
-    public bool AgentsSubAgentsEnabled { get => agentsSubAgentsEnabled; set => Set(ref agentsSubAgentsEnabled, value); }
 
     /// <summary>
     /// Whether the default orchestration is injected into the root agent: the skill index and the per-task routing rule
@@ -910,7 +905,6 @@ internal sealed class AppPreferences : ObservableObject
         agentsMaxParallelSubAgents = section.AgentsMaxParallelSubAgents is { } agentsMaxParallelSubAgentsLoaded
             ? Math.Clamp(agentsMaxParallelSubAgentsLoaded, MinAgentsMaxParallelSubAgents, MaxAgentsMaxParallelSubAgents)
             : DefaultAgentsMaxParallelSubAgents;
-        agentsSubAgentsEnabled = section.AgentsSubAgentsEnabled ?? DefaultAgentsSubAgentsEnabled;
         orchestrationEnabled = section.OrchestrationEnabled ?? DefaultOrchestrationEnabled;
         workflowGatesEnabled = section.WorkflowGatesEnabled ?? DefaultWorkflowGatesEnabled;
         idleArchiveEnabled = section.IdleArchiveEnabled ?? DefaultIdleArchiveEnabled;
@@ -1055,7 +1049,6 @@ internal sealed class AppPreferences : ObservableObject
             EditorColumnRulers = editorColumnRulers,
             EditorTheme = editorTheme,
             AgentsMaxParallelSubAgents = agentsMaxParallelSubAgents,
-            AgentsSubAgentsEnabled = agentsSubAgentsEnabled,
             OrchestrationEnabled = orchestrationEnabled,
             WorkflowGatesEnabled = workflowGatesEnabled,
             IdleArchiveEnabled = idleArchiveEnabled,
@@ -1440,8 +1433,6 @@ internal sealed class PreferencesSection
     [JsonPropertyName("agentsMaxParallelSubAgents")]
     public int? AgentsMaxParallelSubAgents { get; set; }
 
-    [JsonPropertyName("agentsSubAgentsEnabled")]
-    public bool? AgentsSubAgentsEnabled { get; set; }
 
     [JsonPropertyName("orchestrationEnabled")]
     public bool? OrchestrationEnabled { get; set; }

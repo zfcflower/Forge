@@ -691,46 +691,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>
-    /// The tools that start a child agent, taken out while sub-agents are switched off. <c>request_review</c> is one of them:
-    /// it runs a Reviewer sub-agent, so leaving it in would let the model start a child the user just switched off.
-    /// </summary>
-    private static readonly string[] SpawningTools = [SpawnAgentTool.Name, RequestReviewTool.Name];
-
-    /// <summary>
-    /// Re-applies the user's tool switches, plus the spawning tools (<see cref="SpawningTools"/>) while sub-agents are
-    /// switched off: the model then has no way to start a child, while the control tools a parent already needs stay
-    /// available, so the children a session started before the switch can still be steered and stopped. Publishes a new tool
-    /// set only when a switch moved.
-    /// <para><c>request_review</c> stays available while the workflow gates are on: the step-completion gate demands an
-    /// approving review for every step that changed code, so taking the tool away would leave such a step impossible to
-    /// finish (and <c>pr_create</c>'s gate 5 then refuses forever). One setting must not silently disable another's only
-    /// way forward.</para>
+    /// Re-applies the user's tool switches. Whether the model may start a child is the allow-list's call (<c>spawn_agent</c>)
+    /// and the depth limit's, nothing else; <c>request_review</c> follows its own entry. Publishes a new tool set only when a
+    /// switch moved.
     /// </summary>
     private void ApplyDisabledTools(AgentHost target)
     {
-        var subAgents = CurrentSubAgentLimits();
-        var spawning = subAgents.Enabled ? [] : GateAwareSpawningTools();
-        if (services.DisabledTools is not { } disabled)
-        {
-            // A runtime without the tools store still honours the sub-agent switch, in both directions.
-            target.SetDisabledTools(spawning);
-            return;
-        }
-
-        var stored = ToolCatalog.EffectiveDisabled(disabled());
-        target.SetDisabledTools(stored.Concat(spawning));
-    }
-
-    /// <summary>
-    /// The spawning tools to take out while sub-agents are switched off, minus <c>request_review</c> when the workflow gates
-    /// are on: the gate cannot be satisfied without it, so the two settings must not add up to a dead end.
-    /// </summary>
-    private string[] GateAwareSpawningTools()
-    {
-        var gates = services.WorkflowGatesEnabled?.Invoke() ?? true;
-        return gates
-            ? [SpawnAgentTool.Name]
-            : SpawningTools;
+        target.SetDisabledTools(services.DisabledTools is { } disabled ? ToolCatalog.EffectiveDisabled(disabled()) : []);
     }
 
     /// <summary>

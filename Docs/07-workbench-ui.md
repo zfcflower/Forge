@@ -149,7 +149,7 @@
 |---|---|---|
 | `provider` 100 | AGENT | 提供商、密钥、模型目录、默认上下文窗口、缓存寿命、模型可见性（模型窗口首列）、内置 Agent 默认、压缩设置 |
 | `rate-limit` 115 | AGENT | 本地限速开关、请求/令牌预算、自动化间隔、每提供商覆盖 |
-| `agents` 120 | AGENT | 子 Agent 并发上限（1–16）、允许派生 Agent |
+| `agents` 120 | AGENT | 子 Agent 并发上限（1–16） |
 | `prompts` 130 | AGENT | 命令/Agent/内置提示词的编辑、复制、追加、还原 |
 | `web` 140 | AGENT | 搜索后端（brave/tavily/searxng/无）、SearXNG 地址、允许私网 |
 | `automations` 150 | AGENT | 自动化定义与运行历史 |

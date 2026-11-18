@@ -37,17 +37,6 @@ internal sealed class AgentsSettingsSectionViewModel : ObservableObject
             OnPropertyChanged();
         }
     }
-
-    /// <summary>Whether a session may spawn sub-agents; off removes <c>spawn_agent</c> from the model's tools from the next turn.</summary>
-    public bool SubAgentsEnabled
-    {
-        get => preferences.AgentsSubAgentsEnabled;
-        set
-        {
-            preferences.AgentsSubAgentsEnabled = value;
-            OnPropertyChanged();
-        }
-    }
 }
 
 /// <summary>One choice of the archive scope picker: the stored token and its label in the current language.</summary>

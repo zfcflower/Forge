@@ -16,10 +16,6 @@ internal static class AgentSettingsStrings
 
     public const string AgentsMaxParallelHintKey = "agents.maxParallelHint";
 
-    public const string AgentsSubAgentsKey = "agents.subAgents";
-
-    public const string AgentsSubAgentsHintKey = "agents.subAgentsHint";
-
     /// <summary>Title of the <c>idle-archive</c> section (housekeeping's archive step).</summary>
     public const string IdleArchiveSectionTitleKey = "idleArchive.section";
 
@@ -46,10 +42,6 @@ internal static class AgentSettingsStrings
     public static string AgentsMaxParallel => Loc.Instance[AgentsMaxParallelKey];
 
     public static string AgentsMaxParallelHint => Loc.Instance[AgentsMaxParallelHintKey];
-
-    public static string AgentsSubAgents => Loc.Instance[AgentsSubAgentsKey];
-
-    public static string AgentsSubAgentsHint => Loc.Instance[AgentsSubAgentsHintKey];
 
     public static string IdleArchiveSectionTitle => Loc.Instance[IdleArchiveSectionTitleKey];
 
@@ -80,11 +72,6 @@ internal static class AgentSettingsStrings
             AgentsMaxParallelHintKey,
             "按派生树计数：正在对话或跑工具的子 Agent 才算占位，等待子结果的不占。改完对正在运行的会话下一回合生效。",
             "Counted over the spawn tree: a sub-agent occupies a slot while it streams a turn or runs tools, not while it waits for its own children. A change reaches a running session at its next turn.");
-        Loc.Register(AgentsSubAgentsKey, "允许派生 Agent", "Allow spawning sub-agents");
-        Loc.Register(
-            AgentsSubAgentsHintKey,
-            "关掉后模型不再拿到 spawn_agent；已经在跑的子 Agent 仍可继续、跟随与停止。",
-            "Off takes spawn_agent out of the model's tools; the sub-agents already running can still be steered, followed up and stopped.");
 
         Loc.Register(IdleArchiveSectionTitleKey, "闲置会话归档", "Idle session archiving");
         Loc.Register(IdleArchiveEnabledKey, "自动归档闲置会话", "Archive idle sessions automatically");

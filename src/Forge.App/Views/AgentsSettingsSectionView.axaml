@@ -25,17 +25,5 @@
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
                Text="{Binding [agents.maxParallelHint], Source={x:Static loc:Loc.Instance}}" />
-    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
-      <TextBlock Classes="label"
-                 VerticalAlignment="Center"
-                 Text="{Binding [agents.subAgents], Source={x:Static loc:Loc.Instance}}" />
-      <CheckBox Grid.Column="1"
-                IsChecked="{Binding SubAgentsEnabled, Mode=TwoWay}"
-                AutomationProperties.AutomationId="agents-sub-agents"
-                AutomationProperties.Name="{Binding [agents.subAgents], Source={x:Static loc:Loc.Instance}}" />
-    </Grid>
-    <TextBlock Classes="caption"
-               TextWrapping="Wrap"
-               Text="{Binding [agents.subAgentsHint], Source={x:Static loc:Loc.Instance}}" />
   </StackPanel>
 </UserControl>

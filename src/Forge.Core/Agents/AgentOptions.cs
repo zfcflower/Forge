@@ -18,7 +18,8 @@ public sealed record AgentOptions
     /// </summary>
     public int MaxParallelSubAgents { get; init; } = 4;
 
-    public int MaxSubAgentDepth { get; init; } = 3;
+    /// <summary>How many generations may spawn: the root (depth 0) and its children (depth 1) can, a grandchild (depth 2) cannot.</summary>
+    public int MaxSubAgentDepth { get; init; } = 2;
 
     /// <summary>
     /// When automatic compaction runs, relative to each model's window. Without a <see cref="CompactionPolicy.ContextWindow"/>
