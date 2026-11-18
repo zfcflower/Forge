@@ -57,7 +57,7 @@
 
 - 缓存策略不可移植，每家各按它的文档：
   - Anthropic：显式断点 + 寿命。系统块与消息末块取同一个 `ttl`；`auto` 先 5 分钟，一旦本实例两次请求间隔 ≥ 5 分钟（`CacheTtlPromotionGap`）就在**下一次写入**时永久升到 1 小时；`5m`/`1h` 直用。
-  - OpenAI 兼容：`prompt_cache_key`（需 `provider.sendPromptCacheKey` 打开，默认关）与 `prompt_cache_retention`（`5m` → `in_memory`，其余 → `24h`）。
+  - OpenAI 兼容与 OpenAI Responses：`prompt_cache_key`（需 `provider.sendPromptCacheKey` 打开，默认关）与 `prompt_cache_retention`（`5m` → `in_memory`，其余 → `24h`）；DeepSeek 不发；网关 400 点名这两个字段时去掉它们重发一次并记住。
   - xAI：`x-grok-conv-id`（自动缓存 + 命中率）。
   - GitHub Copilot：`X-Interaction-Id`（按它分桶，不填几乎拿不到 Claude 模型缓存命中）。
   - DeepSeek/自定义：只有自动前缀缓存，不发任何请求级旋钮。

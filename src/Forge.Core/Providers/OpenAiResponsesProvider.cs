@@ -32,7 +32,40 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
         ProviderOptions? options = null)
         : base(config, http, idleTimeout, options)
     {
+        var knobs = options ?? ProviderOptions.Default;
+        // Same rule as the Chat Completions adapter: DeepSeek caches by prefix on its own, so nothing cache-shaped is sent to it.
+        var tunable = !OpenAiCompatibleProvider.IsDeepSeek(config.BaseUrl);
+        sendPromptCacheKey = knobs.SendPromptCacheKey && tunable;
+        sendPromptCacheRetention = knobs.SendPromptCacheRetention && tunable;
+        downgraded = ProviderDegradations.Contains(DegradationKey);
     }
+
+    private readonly bool sendPromptCacheKey;
+    private readonly bool sendPromptCacheRetention;
+    private bool downgraded;
+
+    /// <summary>Identity under which "this endpoint refused the cache fields" is remembered for the rest of the process.</summary>
+    private string DegradationKey => Id + "|responses|" + Config.BaseUrl;
+
+    /// <summary>
+    /// A 400 naming a cache field means this model or gateway does not know it (a third-party Responses server that only
+    /// implements the core fields): the answer is to send less, not to fail the turn.
+    /// </summary>
+    protected override bool CanDegrade(ProviderException failure) =>
+        !downgraded
+        && failure.StatusCode == 400
+        && (failure.Message.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
+            || failure.Message.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase));
+
+    protected override void Degrade()
+    {
+        downgraded = true;
+        ProviderDegradations.Add(DegradationKey);
+    }
+
+    protected override string? DegradationNotice =>
+        "This model or gateway refused the prompt-cache fields, so the request was resent without them. The answer is unaffected; "
+        + "caching is then whatever the provider does on its own.";
 
     protected override string Endpoint => "responses";
 
@@ -85,6 +118,17 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
 
         // Nothing is kept on the server: the transcript lives in the session, and a stored response would outlive it.
         writer.WriteBoolean("store", false);
+
+        if (sendPromptCacheKey && !downgraded && !string.IsNullOrEmpty(request.CacheRoutingKey))
+        {
+            writer.WriteString("prompt_cache_key", request.CacheRoutingKey);
+        }
+
+        if (sendPromptCacheRetention && !downgraded)
+        {
+            // in_memory is the short lifetime, 24h the long one that bridges a pause of five to sixty minutes.
+            writer.WriteString("prompt_cache_retention", string.Equals(request.Cache?.Ttl, "5m", StringComparison.OrdinalIgnoreCase) ? "in_memory" : "24h");
+        }
     });
 
     /// <summary>The system prompt, plus any system-role message the session appended after it.</summary>
