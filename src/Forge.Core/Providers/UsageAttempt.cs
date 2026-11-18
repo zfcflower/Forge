@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using Forge.Abstractions;
 
 namespace Forge.Core.Providers;
@@ -63,6 +64,14 @@ internal sealed class UsageAttempt
         }
 
         recorded = true;
+        string? toolsHash = null;
+        string? systemHash = null;
+        if (sink.Enabled)
+        {
+            toolsHash = HashTools(request.Tools);
+            systemHash = Hash(request.SystemPrompt);
+        }
+
         sink.Record(new UsageRecord(
             DateTimeOffset.UtcNow,
             request.SessionId,
@@ -77,7 +86,42 @@ internal sealed class UsageAttempt
             usage,
             (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
             requestId,
-            rateLimit));
+            rateLimit,
+            request.Tools.Count,
+            toolsHash,
+            systemHash,
+            request.Messages.Count));
+    }
+
+    private static string HashTools(IReadOnlyList<ToolDefinition> tools)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var tool in tools)
+        {
+            Append(hash, tool.Name);
+            Append(hash, tool.Description);
+            Append(hash, tool.InputSchemaJson);
+        }
+
+        return Convert.ToHexStringLower(hash.GetHashAndReset().AsSpan(0, 6));
+    }
+
+    private static string Hash(string? text)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Append(hash, text);
+        return Convert.ToHexStringLower(hash.GetHashAndReset().AsSpan(0, 6));
+    }
+
+    /// <summary>Feeds one string plus a separator, so ("ab","c") and ("a","bc") do not collide.</summary>
+    private static void Append(IncrementalHash hash, string? text)
+    {
+        if (!string.IsNullOrEmpty(text))
+        {
+            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(text));
+        }
+
+        hash.AppendData([0]);
     }
 
     /// <summary>Closed at the end of the stream, which is also where a completed attempt gets its one record.</summary>

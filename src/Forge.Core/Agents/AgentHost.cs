@@ -18,6 +18,12 @@ public sealed record AgentHostOptions
 
     public required IEnumerable<ITool> Tools { get; init; }
 
+    /// <summary>
+    /// The same tools grouped into the three tool-array segments (see <see cref="ExternalTools"/>). When set it is what the host
+    /// publishes and <see cref="Tools"/> is ignored; when null every tool of <see cref="Tools"/> lands in the conditional segment.
+    /// </summary>
+    public ExternalTools? ToolSegments { get; init; }
+
     /// <summary>Extra agent kinds layered on top of <see cref="BuiltInAgents"/>; same name replaces the built-in.</summary>
     public IEnumerable<AgentDefinition>? Agents { get; init; }
 
@@ -191,7 +197,14 @@ public sealed class AgentHost
                             : NoopCompactor.Instance);
 
         toolSurface = new ToolSurface(builtIns);
-        toolSurface.ReplaceExternal(options.Tools);
+        if (options.ToolSegments is { } segments)
+        {
+            toolSurface.ReplaceExternal(segments);
+        }
+        else
+        {
+            toolSurface.ReplaceExternal(options.Tools);
+        }
         if (options.DisabledTools is { } disabledTools)
         {
             toolSurface.SetDisabled(disabledTools);
@@ -285,6 +298,9 @@ public sealed class AgentHost
     /// cache once. Same-named external tools never shadow a built-in tool.
     /// </summary>
     public void ReplaceExternalTools(IEnumerable<ITool> tools) => toolSurface.ReplaceExternal(tools);
+
+    /// <summary>Replaces the externally supplied tools, keeping their three segments (see <see cref="ExternalTools"/>).</summary>
+    public void ReplaceExternalTools(ExternalTools tools) => toolSurface.ReplaceExternal(tools);
 
     /// <summary>
     /// Switches the named tools off and every other name back on; a no-op when the set is unchanged, so the prompt cache only

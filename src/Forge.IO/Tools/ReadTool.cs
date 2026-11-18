@@ -6,14 +6,21 @@ using Forge.Abstractions;
 namespace Forge.IO.Tools;
 
 /// <summary>Reads a bounded window of a workspace text file and prints it with 1-based line numbers.</summary>
-public sealed class ReadTool : ToolBase
+public sealed class ReadTool : ToolBase, IBoundedOutputTool
 {
+    /// <summary>
+    /// The most characters of file text one call returns. It equals the loop's spill threshold on purpose: a result this size
+    /// stays in the conversation as it is, so a read is never turned into an artifact that needs a second tool call.
+    /// </summary>
+    internal const int MaxResultChars = 32_000;
+
     private const string Schema =
         """{"type":"object","properties":{"path":{"type":"string","description":"File to read, workspace-relative or absolute."},"offset":{"type":"integer","description":"First line to return, 1-based.","minimum":1},"limit":{"type":"integer","description":"How many lines to return.","minimum":1,"maximum":20000},"max_bytes":{"type":"integer","description":"Byte budget of the returned text.","minimum":1,"maximum":1048576}},"required":["path"],"additionalProperties":false}""";
 
     private const string Description =
-        "Read a text file from the workspace with line numbers. A whole-file read is cut at the line budget; the byte " +
-        "budget cuts at a byte offset, so its last line can be partial. Every cut is marked truncated.";
+        "Read a text file from the workspace with line numbers. One call returns at most about 32,000 characters; a cut " +
+        "result names the lines shown and the offset to continue from. Read a large file by range (offset and limit), " +
+        "not whole. The byte budget cuts at a byte offset, so its last line can be partial.";
 
     private readonly Func<ToolOptions> options;
 
@@ -81,21 +88,59 @@ public sealed class ReadTool : ToolBase
     private static string Format(string display, in TextFileWindow window)
     {
         var lines = window.Lines;
-        var lastLine = window.FirstLine + lines.Length - 1;
-        var width = lines.Length == 0 ? 1 : lastLine.ToString(CultureInfo.InvariantCulture).Length;
-        var text = new StringBuilder(display.Length + 32 + (lines.Length * (width + 2)));
-        text.Append(display).Append(": ").Append(lines.Length).Append(" lines\n");
+        var width = lines.Length == 0 ? 1 : (window.FirstLine + lines.Length - 1).ToString(CultureInfo.InvariantCulture).Length;
 
-        Span<char> number = stackalloc char[12];
-        for (var index = 0; index < lines.Length; index++)
+        // Whole lines only, up to the character cap; a first line longer than the cap is cut itself so a call always makes progress.
+        var shown = 0;
+        var chars = 0;
+        var firstCut = false;
+        while (shown < lines.Length)
         {
-            (window.FirstLine + index).TryFormat(number, out var digits, provider: CultureInfo.InvariantCulture);
-            text.Append(' ', width - digits).Append(number[..digits]).Append('→').Append(lines[index]).Append('\n');
+            var cost = lines[shown].Length + width + 3;
+            if (shown > 0 && chars + cost > MaxResultChars)
+            {
+                break;
+            }
+
+            chars += cost;
+            shown++;
+            if (chars > MaxResultChars)
+            {
+                firstCut = true;
+                break;
+            }
         }
 
-        if (window.Truncated)
+        var cutByChars = shown < lines.Length || firstCut;
+        var text = new StringBuilder(Math.Min(chars, MaxResultChars) + display.Length + 160);
+        text.Append(display).Append(": ").Append(shown).Append(" lines\n");
+
+        Span<char> number = stackalloc char[12];
+        for (var index = 0; index < shown; index++)
         {
-            text.Append("… (truncated)");
+            (window.FirstLine + index).TryFormat(number, out var digits, provider: CultureInfo.InvariantCulture);
+            var line = lines[index];
+            var room = MaxResultChars;
+            text.Append(' ', width - digits).Append(number[..digits]).Append('→');
+            if (firstCut && index == 0 && line.Length > room)
+            {
+                line = line[..room];
+            }
+
+            text.Append(line).Append('\n');
+        }
+
+        if (window.Truncated || cutByChars)
+        {
+            var last = window.FirstLine + Math.Max(shown, 1) - 1;
+            text.Append("… (truncated) Shown lines ")
+                .Append(window.FirstLine.ToString(CultureInfo.InvariantCulture)).Append('–')
+                .Append(last.ToString(CultureInfo.InvariantCulture))
+                .Append(". Continue with offset=").Append((last + 1).ToString(CultureInfo.InvariantCulture)).Append('.');
+            if (firstCut)
+            {
+                text.Append(" Line ").Append(window.FirstLine.ToString(CultureInfo.InvariantCulture)).Append(" itself was cut.");
+            }
         }
 
         return text.ToString().TrimEnd('\n');

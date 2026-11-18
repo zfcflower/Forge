@@ -42,10 +42,12 @@ internal sealed class JsonlUsageRecorder : IUsageRecorder
     /// <summary>The file a record written at <paramref name="at"/> goes to; the settings row shows it so the user knows where data lands.</summary>
     public string PathFor(DateTimeOffset at) => Path.Combine(directory, $"usage-{at.UtcDateTime:yyyyMMdd}.jsonl");
 
+    public bool Enabled => settings is not { Current.Enabled: false };
+
     public void Record(UsageRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        if (settings is { Current.Enabled: false })
+        if (!Enabled)
         {
             return;
         }
@@ -58,7 +60,7 @@ internal sealed class JsonlUsageRecorder : IUsageRecorder
                 System.IO.Directory.CreateDirectory(directory);
                 using var stream = new FileStream(PathFor(at), FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
                 using var writer = new Utf8JsonWriter(stream);
-                Write(writer, record with { At = at });
+                Write(writer, record with { At = at }, GapSincePrevious(record.SessionId, at, record.ElapsedMilliseconds));
                 writer.Flush();
                 stream.WriteByte((byte)'\n');
             }
@@ -81,7 +83,36 @@ internal sealed class JsonlUsageRecorder : IUsageRecorder
         }
     }
 
-    private static void Write(Utf8JsonWriter writer, UsageRecord record)
+    private const int MaxTrackedSessions = 256;
+
+    private readonly Dictionary<string, DateTimeOffset> lastCompleted = [];
+
+    /// <summary>
+    /// Milliseconds between the previous request of this session finishing and this one being sent: the number that decides whether a
+    /// five-minute cache lifetime was still alive. Null for the first request seen (this process) of a session. Called under the gate.
+    /// </summary>
+    private long? GapSincePrevious(string? sessionId, DateTimeOffset completedAt, long elapsedMilliseconds)
+    {
+        if (string.IsNullOrEmpty(sessionId))
+        {
+            return null;
+        }
+
+        long? gap = null;
+        if (lastCompleted.TryGetValue(sessionId, out var previous))
+        {
+            gap = Math.Max(0, (long)(completedAt - previous).TotalMilliseconds - elapsedMilliseconds);
+        }
+        else if (lastCompleted.Count >= MaxTrackedSessions)
+        {
+            lastCompleted.Clear();
+        }
+
+        lastCompleted[sessionId] = completedAt;
+        return gap;
+    }
+
+    private static void Write(Utf8JsonWriter writer, UsageRecord record, long? gapMilliseconds)
     {
         writer.WriteStartObject();
         writer.WriteString("at", record.At);
@@ -103,7 +134,17 @@ internal sealed class JsonlUsageRecorder : IUsageRecorder
         writer.WriteNumber("output", record.Usage.OutputTokens);
         writer.WriteNumber("cacheRead", record.Usage.CacheReadTokens);
         writer.WriteNumber("cacheWrite", record.Usage.CacheWriteTokens);
+        writer.WriteNumber("cacheWrite1h", record.Usage.CacheWrite1hTokens);
         writer.WriteEndObject();
+        writer.WriteNumber("toolCount", record.ToolCount);
+        writer.WriteString("toolsHash", record.ToolsHash);
+        writer.WriteString("systemHash", record.SystemHash);
+        writer.WriteNumber("messages", record.MessageCount);
+        if (gapMilliseconds is { } gap)
+        {
+            writer.WriteNumber("gapMs", gap);
+        }
+
         writer.WriteNumber("elapsedMs", record.ElapsedMilliseconds);
         writer.WriteString("requestId", record.RequestId);
 

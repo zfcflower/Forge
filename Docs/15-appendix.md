@@ -45,13 +45,9 @@
 | `pr_comment_resolve` | PR | W | * | 解决 PR 线程 |
 | `review_comment_resolve` | PR | W | * | 解决本地评论 |
 | `pr_screenshots` | PR | X | * | before/after 截图 + 孤儿提交 |
-| `spec_grep` | 规格 | R | * | 规格搜索（默认 200 条/页） |
 | `spec_get` | 规格 | R | * | 读单节点与链接 |
 | `spec_graph` | 规格 | R | * | 图遍历（depth ≤10） |
 | `spec_validate` | 规格 | R | * | 校验重复/缺失/悬挂/环 |
-| `spec_create` | 规格 | W | * | 新建规格 |
-| `spec_update` | 规格 | W | * | 只改 frontmatter |
-| `spec_delete` | 规格 | W | * | 删除规格 |
 | `extension_list` | 扩展编写 | R | * † | 列出已装/待决扩展 |
 | `extension_create` | 扩展编写 | W | * † | 暂存新扩展 |
 | `extension_update` | 扩展编写 | W | * † | 暂存更新 |

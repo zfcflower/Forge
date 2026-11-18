@@ -31,7 +31,10 @@ public sealed record GrepRequest
     /// <summary>Context lines reported before and after every match.</summary>
     public int ContextLines { get; init; }
 
-    /// <summary>Maximum number of matching lines; reaching it truncates the search.</summary>
+    /// <summary>
+    /// Maximum number of matching lines returned. The search does not stop there: it goes on counting (without keeping
+    /// lines), so <see cref="GrepResult.TotalMatches"/> is the real number.
+    /// </summary>
     public int Limit { get; init; } = ToolOptions.DefaultGrepMaxResults;
 
     /// <summary>A file larger than this is not read; it is counted and reported instead.</summary>
@@ -52,6 +55,12 @@ public sealed record GrepResult
 
     /// <summary>True when the limit stopped the search before it ran out of files or lines.</summary>
     public bool Truncated { get; init; }
+
+    /// <summary>
+    /// Every matching line the search found, past the limit too; null when the backend stopped at the limit and cannot
+    /// say (then the true number is at least <see cref="MatchCount"/>).
+    /// </summary>
+    public int? TotalMatches { get; init; }
 
     public int FilesScanned { get; init; }
 
@@ -109,12 +118,11 @@ public static class GrepEngine
         private readonly StringComparison comparison;
         private readonly GlobMatcher? glob;
         private readonly bool singleFile;
+        private readonly byte[]? literalBytes;
         private readonly List<GrepLine> lines = [];
         private readonly List<string> timeouts = [];
         private readonly Lock gate = new();
-        private CancellationTokenSource? stopSource;
         private int matches;
-        private int truncated;
         private int scanned;
         private int tooLarge;
         private int binary;
@@ -134,6 +142,15 @@ public static class GrepEngine
             comparison = request.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
             glob = string.IsNullOrEmpty(request.Glob) ? null : GlobMatcher.Compile(request.Glob);
             singleFile = File.Exists(request.StartPath);
+
+            // A case-sensitive literal with no context is searched on the UTF-8 bytes themselves: one vectorized pass over the
+            // whole buffer, and only a line that matched is decoded. A needle that holds a line break can never match inside
+            // one line, so it keeps the line-by-line path (which then finds nothing, as before).
+            if (!request.Regex && request.CaseSensitive && request.ContextLines == 0
+                && request.Pattern.AsSpan().IndexOfAny((char)10, (char)13) < 0)
+            {
+                literalBytes = Encoding.UTF8.GetBytes(request.Pattern);
+            }
         }
 
         public async Task<GrepResult> RunAsync(CancellationToken ct)
@@ -145,9 +162,7 @@ public static class GrepEngine
                 FullMode = BoundedChannelFullMode.Wait,
             });
 
-            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            stopSource = stop;
-            var token = stop.Token;
+            var token = ct;
 
             var producer = Task.Run(() => ProduceAsync(channel.Writer, token), CancellationToken.None);
             var consumers = new Task[concurrency];
@@ -237,12 +252,8 @@ public static class GrepEngine
                 {
                     while (reader.TryRead(out var entry))
                     {
-                        if (Volatile.Read(ref truncated) != 0)
-                        {
-                            return;
-                        }
-
-                        await ScanAsync(entry, token).ConfigureAwait(false);
+                        token.ThrowIfCancellationRequested();
+                        Scan(entry);
                     }
                 }
             }
@@ -251,20 +262,21 @@ public static class GrepEngine
             }
         }
 
-        private async Task ScanAsync(WalkEntry entry, CancellationToken token)
+        private void Scan(WalkEntry entry)
         {
             byte[]? buffer = null;
             try
             {
-                await using var stream = new FileStream(
+                // A synchronous read on the reader's own thread: the files are small and mostly in the page cache, where an
+                // asynchronous FileStream costs more in state machines than the read itself.
+                using var handle = File.OpenHandle(
                     entry.FullPath,
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete,
-                    bufferSize: 4096,
-                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    FileOptions.SequentialScan);
 
-                var length = stream.Length;
+                var length = RandomAccess.GetLength(handle);
                 if (length == 0)
                 {
                     Interlocked.Increment(ref scanned);
@@ -279,9 +291,17 @@ public static class GrepEngine
 
                 Interlocked.Increment(ref scanned);
                 buffer = ArrayPool<byte>.Shared.Rent((int)length);
-                var read = await stream
-                    .ReadAtLeastAsync(buffer.AsMemory(0, (int)length), (int)length, throwOnEndOfStream: false, token)
-                    .ConfigureAwait(false);
+                var read = 0;
+                while (read < (int)length)
+                {
+                    var got = RandomAccess.Read(handle, buffer.AsSpan(read, (int)length - read), read);
+                    if (got == 0)
+                    {
+                        break;
+                    }
+
+                    read += got;
+                }
 
                 var bytes = buffer.AsSpan(0, read);
                 var probe = bytes[..Math.Min(read, BinarySniffBytes)];
@@ -301,11 +321,17 @@ public static class GrepEngine
                     bytes = bytes[..(probe.Length + beyond)];
                 }
 
-                var text = Encoding.UTF8.GetString(bytes);
                 var scan = new FileScan();
                 try
                 {
-                    ScanText(entry.RelativePath, text, scan);
+                    if (literalBytes is not null)
+                    {
+                        ScanBytes(entry.RelativePath, bytes, scan);
+                    }
+                    else
+                    {
+                        ScanText(entry.RelativePath, Encoding.UTF8.GetString(bytes), scan);
+                    }
                 }
                 catch (RegexMatchTimeoutException)
                 {
@@ -345,6 +371,38 @@ public static class GrepEngine
             }
         }
 
+        /// <summary>The byte-level literal search; same results as <see cref="ScanText"/> for a literal without context.</summary>
+        private void ScanBytes(string path, ReadOnlySpan<byte> bytes, FileScan scan)
+        {
+            var needle = literalBytes!;
+            int position = 0, counted = 0, lineNumber = 1;
+            while (position < bytes.Length)
+            {
+                var found = bytes[position..].IndexOf(needle);
+                if (found < 0)
+                {
+                    break;
+                }
+
+                var hit = position + found;
+                var lineStart = bytes[..hit].LastIndexOf((byte)10) + 1;
+                var toEnd = bytes[hit..].IndexOf((byte)10);
+                var lineEnd = toEnd < 0 ? bytes.Length : hit + toEnd;
+                position = lineEnd + 1;
+                scan.Reserved++;
+                if (!TakeSlot())
+                {
+                    continue;
+                }
+
+                lineNumber += bytes[counted..lineStart].Count((byte)10);
+                counted = lineStart;
+                var textEnd = lineEnd > lineStart && bytes[lineEnd - 1] == 13 ? lineEnd - 1 : lineEnd;
+                scan.Lines ??= new List<GrepLine>();
+                scan.Lines.Add(new GrepLine(path, lineNumber, Encoding.UTF8.GetString(bytes[lineStart..textEnd]), IsMatch: true));
+            }
+        }
+
         private void ScanText(string path, string text, FileScan scan)
         {
             var context = request.ContextLines;
@@ -367,12 +425,21 @@ public static class GrepEngine
                 var line = text.AsSpan(start, length);
                 if (IsMatch(line))
                 {
-                    if (!Reserve())
+                    scan.Reserved++;
+                    if (!TakeSlot())
                     {
-                        break;
+                        // Past the limit a match is only counted: no line is kept, no context is looked up.
+                        if (context > 0)
+                        {
+                            slots[slotCount % context] = new ContextSlot(lineNumber, start, length);
+                            slotCount++;
+                        }
+
+                        lineNumber++;
+                        index = next;
+                        continue;
                     }
 
-                    scan.Reserved++;
                     scan.Lines ??= new List<GrepLine>();
                     if (context > 0)
                     {
@@ -423,36 +490,15 @@ public static class GrepEngine
                 ? compiled.IsMatch(line)
                 : line.IndexOf(request.Pattern.AsSpan(), comparison) >= 0;
 
-        /// <summary>Takes one of the <see cref="GrepRequest.Limit"/> result slots, or stops the search.</summary>
-        private bool Reserve()
-        {
-            if (Interlocked.Increment(ref matches) <= request.Limit)
-            {
-                return true;
-            }
-
-            Interlocked.Exchange(ref truncated, 1);
-            var source = stopSource;
-            if (source is not null)
-            {
-                try
-                {
-                    source.Cancel();
-                }
-                catch (ObjectDisposedException)
-                {
-                    // The call already returned; there is nothing left to stop.
-                }
-            }
-
-            return false;
-        }
+        /// <summary>Counts one more match; true while it still fits under <see cref="GrepRequest.Limit"/> and its line is kept.</summary>
+        private bool TakeSlot() => Interlocked.Increment(ref matches) <= request.Limit;
 
         private GrepResult Build() => new()
         {
             Lines = lines,
             MatchCount = Math.Min(matches, request.Limit),
-            Truncated = truncated != 0,
+            Truncated = matches > request.Limit,
+            TotalMatches = matches,
             FilesScanned = scanned,
             FilesSkippedTooLarge = tooLarge,
             FilesSkippedBinary = binary,

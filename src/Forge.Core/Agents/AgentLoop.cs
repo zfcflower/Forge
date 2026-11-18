@@ -1001,7 +1001,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             return result;
         }
 
-        if (string.Equals(tool.Definition.Name, ReadArtifactTool.Name, StringComparison.Ordinal))
+        if (tool is IBoundedOutputTool || string.Equals(tool.Definition.Name, ReadArtifactTool.Name, StringComparison.Ordinal))
         {
             return result;
         }
@@ -1019,8 +1019,16 @@ public sealed class AgentLoop(AgentLoopServices services)
             .ConfigureAwait(false);
         var preview = Math.Clamp(services.Options.ArtifactPreviewChars, 0, text.Length);
         var builder = new StringBuilder(preview + 256);
-        builder.Append(text, 0, preview);
-        builder.Append("\n\n[output truncated: ").Append(bytes.Length).Append(" bytes stored as artifact '").Append(info.Id)
+        // Head and tail: the end of a command's output (an error summary, a result line) is as useful as its start.
+        var head = preview - preview / 2;
+        var tail = preview / 2;
+        builder.Append(text, 0, head);
+        if (tail > 0)
+        {
+            builder.Append("\n[… ").Append(text.Length - head - tail).Append(" characters omitted …]\n").Append(text, text.Length - tail, tail);
+        }
+
+        builder.Append("\n\n[output truncated:").Append(bytes.Length).Append(" bytes stored as artifact '").Append(info.Id)
             .Append("'. Read it with the read_artifact tool: artifact_id \"").Append(info.Id)
             .Append("\", offset, length.]");
         var spilled = new List<ContentBlock> { new TextBlock(builder.ToString()) };

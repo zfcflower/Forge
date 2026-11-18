@@ -108,15 +108,10 @@ internal static class TimelineNodeMap
             ["find"] = TimelineNodeKind.Search,
             ["grep"] = TimelineNodeKind.Search,
             [SearchHistoryTool.Name] = TimelineNodeKind.Search,
-            ["spec_grep"] = TimelineNodeKind.Search,
-            ["spec_search"] = TimelineNodeKind.Search,
 
             // Writes and edits.
             ["edit"] = TimelineNodeKind.EditFile,
             ["write"] = TimelineNodeKind.EditFile,
-            ["spec_create"] = TimelineNodeKind.EditFile,
-            ["spec_update"] = TimelineNodeKind.EditFile,
-            ["spec_delete"] = TimelineNodeKind.EditFile,
 
             // Commands.
             ["bash"] = TimelineNodeKind.Command,

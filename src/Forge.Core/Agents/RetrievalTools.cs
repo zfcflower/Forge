@@ -12,8 +12,11 @@ public sealed class ReadArtifactTool : ITool
     public const string Name = "read_artifact";
     private const int DefaultLength = 20_000;
 
+    /// <summary>The most one call returns: the same size a spill threshold keeps out of the context, so reading an artifact back never re-creates the problem it was moved for.</summary>
+    private const int MaxLength = 32_000;
+
     private const string SchemaJson =
-        """{"type":"object","properties":{"artifact_id":{"type":"string","description":"Artifact id reported by a truncated tool result."},"offset":{"type":"integer","description":"Byte offset to start at; default 0."},"length":{"type":"integer","description":"Bytes to read; default 20000."}},"required":["artifact_id"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"artifact_id":{"type":"string","description":"Artifact id reported by a truncated tool result."},"offset":{"type":"integer","description":"Byte offset to start at; default 0."},"length":{"type":"integer","description":"Bytes to read; default 20000, at most 32000. Read a larger artifact in several calls."}},"required":["artifact_id"],"additionalProperties":false}""";
 
     private readonly IArtifactStore artifacts;
 
@@ -56,6 +59,8 @@ public sealed class ReadArtifactTool : ITool
             return new ToolResult("read_artifact requires non-negative 'offset' and 'length'.", IsError: true);
         }
 
+        length = Math.Min(length, MaxLength);
+
         try
         {
             var info = await artifacts.GetInfoAsync(id, ct).ConfigureAwait(false);
@@ -68,6 +73,12 @@ public sealed class ReadArtifactTool : ITool
             var builder = new StringBuilder(bytes.Length + 128);
             builder.Append($"artifact '{id}' ({info.SizeBytes} bytes) offset {offset}, {bytes.Length} bytes\n\n");
             builder.Append(Encoding.UTF8.GetString(bytes.Span));
+            var next = offset + bytes.Length;
+            if (next < info.SizeBytes)
+            {
+                builder.Append("\n\n[").Append(info.SizeBytes - next).Append(" bytes remain; continue with offset ").Append(next).Append(".]");
+            }
+
             return new ToolResult(builder.ToString());
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

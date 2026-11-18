@@ -10,25 +10,49 @@ public interface IToolSideEffectResolver
 }
 
 /// <summary>
-/// The tools the host owns, keyed by name and sorted ordinally so two agents with the same definition
-/// send byte-identical tool definitions and keep hitting the same prompt cache entry.
+/// The tools the host owns, keyed by name. By default sorted ordinally so two agents with the same definition send
+/// byte-identical tool definitions and keep hitting the same prompt cache entry; <see cref="ToolSurface"/> builds its own
+/// order (three segments, each sorted) and hands it over with <c>preserveOrder</c>, which keeps the given order.
 /// </summary>
 public sealed class ToolRegistry : IToolRegistry
 {
     private readonly Dictionary<string, ITool> byName;
 
     public ToolRegistry(IEnumerable<ITool> tools)
+        : this(tools, preserveOrder: false)
+    {
+    }
+
+    /// <param name="tools">The tools; for a repeated name the last one wins.</param>
+    /// <param name="preserveOrder">True keeps the order of <paramref name="tools"/> (a repeated name stays at its first position); false sorts by name.</param>
+    public ToolRegistry(IEnumerable<ITool> tools, bool preserveOrder)
     {
         ArgumentNullException.ThrowIfNull(tools);
         byName = new Dictionary<string, ITool>(StringComparer.Ordinal);
+        var firstSeen = new List<string>();
         foreach (var tool in tools)
         {
             ArgumentNullException.ThrowIfNull(tool);
-            byName[tool.Definition.Name] = tool;
+            var name = tool.Definition.Name;
+            if (byName.ContainsKey(name) is false)
+            {
+                firstSeen.Add(name);
+            }
+
+            byName[name] = tool;
         }
 
-        var ordered = byName.Values.ToArray();
-        Array.Sort(ordered, static (left, right) => string.CompareOrdinal(left.Definition.Name, right.Definition.Name));
+        var ordered = new ITool[firstSeen.Count];
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            ordered[index] = byName[firstSeen[index]];
+        }
+
+        if (!preserveOrder)
+        {
+            Array.Sort(ordered, static (left, right) => string.CompareOrdinal(left.Definition.Name, right.Definition.Name));
+        }
+
         Tools = ordered;
         Definitions = Array.ConvertAll(ordered, static tool => tool.Definition);
     }
@@ -64,28 +88,25 @@ public sealed class ToolRegistry : IToolRegistry
         else
         {
             var allowed = new HashSet<string>(toolNames, StringComparer.Ordinal);
+            if (canSpawn)
+            {
+                // The spawn and control tools ride along with any allow-list while spawning is possible; adding them to the
+                // set (rather than appending afterwards) keeps every tool at its position in this registry's order.
+                allowed.UnionWith(subAgentTools);
+            }
+
             foreach (var tool in Tools)
             {
-                if (allowed.Contains(tool.Definition.Name) && (canSpawn || !IsSubAgentTool(tool, subAgentTools))
-                    && (isRoot || !IsExtensionTool(tool.Definition.Name)))
+                var name = tool.Definition.Name;
+                if (allowed.Contains(name) && (canSpawn || !IsSubAgentTool(tool, subAgentTools))
+                    && (isRoot || !IsExtensionTool(name)))
                 {
                     selected.Add(tool);
                 }
             }
-
-            if (canSpawn)
-            {
-                foreach (var name in subAgentTools)
-                {
-                    if (!allowed.Contains(name) && byName.TryGetValue(name, out var tool))
-                    {
-                        selected.Add(tool);
-                    }
-                }
-            }
         }
 
-        return new ToolRegistry(selected);
+        return new ToolRegistry(selected, preserveOrder: true);
     }
 
     private static bool IsExtensionTool(string name) =>
@@ -104,6 +125,18 @@ public sealed class ToolRegistry : IToolRegistry
 
         return false;
     }
+}
+
+/// <summary>
+/// The tools a host supplies besides Core's own, grouped by how stable their presence is, because the group decides the
+/// position in the tool array (and so how much of the prompt cache a change costs): <see cref="Fixed"/> tools are always
+/// there, <see cref="Conditional"/> built-ins exist only while a condition holds, <see cref="Outside"/> tools come from
+/// outside the product (plugins, MCP servers). Each group is sorted by name by the surface; the groups are never merged.
+/// </summary>
+public sealed record ExternalTools(IReadOnlyList<ITool> Fixed, IReadOnlyList<ITool> Conditional, IReadOnlyList<ITool> Outside)
+{
+    /// <summary>Every tool, the groups one after the other.</summary>
+    public IReadOnlyList<ITool> All => [.. Fixed, .. Conditional, .. Outside];
 }
 
 /// <summary>
@@ -127,7 +160,9 @@ public sealed class ToolSurface
     private readonly HashSet<string> builtInNames;
     private readonly Lock publishGate = new();
     private ToolSet current;
-    private ITool[] external = [];
+    private ITool[] externalFixed = [];
+    private ITool[] externalConditional = [];
+    private ITool[] externalOther = [];
     private HashSet<string> disabled = new(StringComparer.Ordinal);
 
     public ToolSurface(IEnumerable<ITool> builtIns)
@@ -148,7 +183,12 @@ public sealed class ToolSurface
         current = new ToolSet(0, this.builtIns);
     }
 
-    /// <summary>Current tool set: the built-ins plus the external tools, sorted by name and deduplicated, without disabled names.</summary>
+    /// <summary>
+    /// Current tool set, deduplicated and without disabled names, in three segments that are each sorted by name and never
+    /// re-sorted together: the fixed tools (Core's built-ins plus the host's always-present ones), then the conditional
+    /// built-ins (present only while their condition holds), then the external tools (plugins, MCP). A change in a later
+    /// segment leaves every earlier tool definition where it was, so it only breaks the prompt cache from its own position on.
+    /// </summary>
     public ToolRegistry Tools => Volatile.Read(ref current).Tools;
 
     /// <summary>Version of the current tool set, starting at 0; compare it to detect that <see cref="Tools"/> was replaced.</summary>
@@ -159,26 +199,56 @@ public sealed class ToolSurface
     /// <summary>The Core built-in tools of this host, including disabled ones; the catalog page lists them with their switch.</summary>
     public IReadOnlyList<ITool> BuiltIns => builtIns.Tools;
 
-    /// <summary>The external tools last published (built-in names already dropped), including disabled ones.</summary>
+    /// <summary>The tools last published through <c>ReplaceExternal</c> (built-in names already dropped), including disabled ones.</summary>
     public IReadOnlyList<ITool> External
     {
         get
         {
             lock (publishGate)
             {
-                return external;
+                return [.. externalFixed, .. externalConditional, .. externalOther];
             }
         }
     }
 
     /// <summary>
-    /// Publishes a new external tool set; safe to call from any thread. Built-ins stay and shadow an external tool of the
-    /// same name. A replacement always publishes a new version, so the next model request re-selects even when the names
-    /// happen to be unchanged.
+    /// Publishes a new external tool set, all of it in the conditional segment; safe to call from any thread. Built-ins stay
+    /// and shadow an external tool of the same name. A replacement always publishes a new version, so the next model request
+    /// re-selects even when the names happen to be unchanged.
     /// </summary>
-    public void ReplaceExternal(IEnumerable<ITool> tools)
+    public void ReplaceExternal(IEnumerable<ITool> tools) => ReplaceExternal([], tools, []);
+
+    /// <summary>Publishes a new external tool set split into its three segments.</summary>
+    public void ReplaceExternal(ExternalTools tools)
     {
         ArgumentNullException.ThrowIfNull(tools);
+        ReplaceExternal(tools.Fixed, tools.Conditional, tools.Outside);
+    }
+
+    /// <summary>
+    /// Publishes a new external tool set split by segment: <paramref name="fixedTools"/> are always present (sorted together
+    /// with the Core built-ins), <paramref name="conditionalTools"/> exist only while a condition holds, and
+    /// <paramref name="externalTools"/> come from outside the product (plugins, MCP). Order inside a segment is by name.
+    /// </summary>
+    public void ReplaceExternal(IEnumerable<ITool> fixedTools, IEnumerable<ITool> conditionalTools, IEnumerable<ITool> externalTools)
+    {
+        ArgumentNullException.ThrowIfNull(fixedTools);
+        ArgumentNullException.ThrowIfNull(conditionalTools);
+        ArgumentNullException.ThrowIfNull(externalTools);
+        var first = Filter(fixedTools);
+        var second = Filter(conditionalTools);
+        var third = Filter(externalTools);
+        lock (publishGate)
+        {
+            externalFixed = first;
+            externalConditional = second;
+            externalOther = third;
+            Publish();
+        }
+    }
+
+    private ITool[] Filter(IEnumerable<ITool> tools)
+    {
         var list = new List<ITool>();
         foreach (var tool in tools)
         {
@@ -189,11 +259,7 @@ public sealed class ToolSurface
             }
         }
 
-        lock (publishGate)
-        {
-            external = [.. list];
-            Publish();
-        }
+        return [.. list];
     }
 
     /// <summary>
@@ -220,24 +286,36 @@ public sealed class ToolSurface
     // Caller holds publishGate.
     private void Publish()
     {
-        var builtInTools = builtIns.Tools;
-        var merged = new List<ITool>(builtInTools.Count + external.Length);
-        foreach (var tool in builtInTools)
+        var merged = new List<ITool>(builtIns.Tools.Count + externalFixed.Length + externalConditional.Length + externalOther.Length);
+        AddEnabled(merged, builtIns.Tools, externalFixed);
+        AddEnabled(merged, externalConditional);
+        AddEnabled(merged, externalOther);
+        Volatile.Write(ref current, new ToolSet(unchecked(current.Version + 1), new ToolRegistry(merged, preserveOrder: true)));
+    }
+
+    /// <summary>Appends the enabled tools of the given sources to <paramref name="into"/> as one segment, sorted by name.</summary>
+    private void AddEnabled(List<ITool> into, params IReadOnlyList<ITool>[] sources)
+    {
+        var start = into.Count;
+        foreach (var source in sources)
         {
-            if (!disabled.Contains(tool.Definition.Name))
+            foreach (var tool in source)
             {
-                merged.Add(tool);
+                if (!disabled.Contains(tool.Definition.Name))
+                {
+                    into.Add(tool);
+                }
             }
         }
 
-        foreach (var tool in external)
-        {
-            if (!disabled.Contains(tool.Definition.Name))
-            {
-                merged.Add(tool);
-            }
-        }
+        into.Sort(start, into.Count - start, SegmentOrder.Instance);
+    }
 
-        Volatile.Write(ref current, new ToolSet(unchecked(current.Version + 1), new ToolRegistry(merged)));
+    private sealed class SegmentOrder : IComparer<ITool>
+    {
+        public static readonly SegmentOrder Instance = new();
+
+        public int Compare(ITool? left, ITool? right) =>
+            string.CompareOrdinal(left!.Definition.Name, right!.Definition.Name);
     }
 }

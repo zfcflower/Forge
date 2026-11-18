@@ -36,17 +36,15 @@ internal sealed class RunCodeProxyTool : ITool
     {
         get
         {
-            var surface = RunCodeToolSurface.Snapshot(registry.Tools);
             var execution = CurrentExecution;
-            var fingerprint = RunCodeToolSurface.Fingerprint(
-                surface, options.DefaultTimeout, options.MaxTimeout, execution);
+            var fingerprint = RunCodeToolSurface.Fingerprint(options.DefaultTimeout, options.MaxTimeout, execution);
             var current = Volatile.Read(ref published);
             if (current is null || fingerprint != current.Fingerprint)
             {
                 // The fingerprint and the definition built from it are one object, so a concurrent reader can never pair
                 // one thread's fingerprint with another thread's definition.
                 current = new Published(
-                    fingerprint, new ToolDefinition(Name, RunCodeDescription.Build(surface, options, execution), SchemaJson));
+                    fingerprint, new ToolDefinition(Name, RunCodeDescription.Build(options, execution), SchemaJson));
                 Volatile.Write(ref published, current);
             }
 
@@ -220,22 +218,13 @@ internal static class RunCodeToolSurface
         return entries;
     }
 
-    /// <summary>Content hash of a snapshot plus the budgets the description states. It covers every field the description
-    /// depends on and nothing else, so a description is rebuilt exactly when the callable surface or one of the stated
-    /// numbers actually changes - not when a tool object is replaced by an equal one, and not when a proxy is added to or
-    /// removed from the registry.</summary>
-    internal static int Fingerprint(List<RunCodeToolEntry> surface, TimeSpan defaultTimeout, TimeSpan maxTimeout, CodeExecutionOptions execution)
+    /// <summary>Hash of the budgets the description states. The description depends on nothing else - the callable tool
+    /// names are deliberately not in it (a script reads them through <c>Tools.List()</c>), so adding or removing a tool
+    /// never changes the tool definition the model is sent and never breaks the prompt cache.</summary>
+    internal static int Fingerprint(TimeSpan defaultTimeout, TimeSpan maxTimeout, CodeExecutionOptions execution)
     {
         ArgumentNullException.ThrowIfNull(execution);
         var hash = new HashCode();
-        foreach (var entry in surface)
-        {
-            hash.Add(entry.Name, StringComparer.Ordinal);
-            hash.Add(entry.Description, StringComparer.Ordinal);
-            hash.Add(entry.SchemaJson, StringComparer.Ordinal);
-            hash.Add((int)entry.SideEffect);
-        }
-
         hash.Add(defaultTimeout);
         hash.Add(maxTimeout);
         hash.Add(execution.MaxConcurrentToolCalls);
@@ -267,16 +256,12 @@ internal static class RunCodeToolSurface
     }
 }
 
-/// <summary>Builds <c>run_code</c>'s description: the script surface, the enforced budgets and the names of the callable
-/// tools. A tool's description and argument schema are deliberately <b>not</b> inlined: the model asks the script for them
-/// through <c>Tools.Describe</c>, so a turn pays for one tool definition instead of one line plus one JSON schema per
-/// callable tool. Output is ordinal-sorted and depends only on the registry and the budgets.</summary>
+/// <summary>Builds <c>run_code</c>'s description: the script surface and the enforced budgets. The callable tool names,
+/// descriptions and schemas are deliberately <b>not</b> inlined: the model asks the script for them through
+/// <c>Tools.List()</c> and <c>Tools.Describe</c>. The text depends only on the budgets, so it stays byte-identical while the
+/// tool set changes (MCP, plugins, switched-off tools) and does not invalidate the prompt cache.</summary>
 internal static class RunCodeDescription
 {
-    /// <summary>Width the tool-name line wraps at; the description is one line per turn of the prompt either way, and a
-    /// wrapped list stays scannable in a client that renders it flat.</summary>
-    private const int NamesLineWidth = 96;
-
     private static readonly (string Form, string Meaning)[] Surface =
     [
         ("""await Tools.Call("tool_name", new { arg = 1 })""", "tool result text; throws ToolCallException when the call fails or is denied"),
@@ -291,10 +276,10 @@ internal static class RunCodeDescription
 
     private static readonly int SurfaceWidth = WidestForm() + 2;
 
-    public static string Build(List<RunCodeToolEntry> callable, RunCodeProxyOptions options, CodeExecutionOptions execution)
+    public static string Build(RunCodeProxyOptions options, CodeExecutionOptions execution)
     {
         ArgumentNullException.ThrowIfNull(execution);
-        var text = new StringBuilder(1024 + (callable.Count * 24));
+        var text = new StringBuilder(2048);
         text.Append("Runs one C# script in the Extension Host's script worker and returns its value once, so a chain of tool calls costs a single round trip instead of one per call.\n\n");
         text.Append("Script surface:\n");
         foreach (var (form, meaning) in Surface)
@@ -321,47 +306,8 @@ internal static class RunCodeDescription
             .Append(").\n");
         text.Append("Each script runs in its own worker process with an exclusive slot: a run that exceeds its budget is terminated with that process, and the main program never runs script code itself. That is process separation, not an OS sandbox - same-account file and network access stays possible through the tools you call. run_code cannot be invoked from inside another extension invocation - a script or a plugin callback - and a plugin may not be called back into while it is already on the call chain. Every inner tool call is approval-checked on its own, exactly like a direct call.\n\n");
 
-        text.Append("Tools (")
-            .Append(callable.Count.ToString(CultureInfo.InvariantCulture))
-            .Append("), sorted by name; Tools.Describe(\"name\") returns one tool's description and argument schema:\n");
-        AppendNames(text, callable);
+        text.Append("Callable tools: this description does not list them, because the set changes between requests. Call Tools.List() for the names available in this run, and Tools.Describe(\"name\") for one tool's description and argument schema.\n");
         return text.ToString();
-    }
-
-    /// <summary>The callable names, comma-separated in one wrapped block. Names only: the side effect, description and
-    /// schema of each are one <c>Tools.Describe</c> call away, which is the whole point of the shorter description.</summary>
-    private static void AppendNames(StringBuilder text, List<RunCodeToolEntry> callable)
-    {
-        if (callable.Count == 0)
-        {
-            text.Append("  (none)\n");
-            return;
-        }
-
-        text.Append("  ");
-        var column = 2;
-        for (var index = 0; index < callable.Count; index++)
-        {
-            var name = callable[index].Name;
-            if (index > 0)
-            {
-                if (column + 2 + name.Length > NamesLineWidth)
-                {
-                    text.Append(",\n  ");
-                    column = 2;
-                }
-                else
-                {
-                    text.Append(", ");
-                    column += 2;
-                }
-            }
-
-            text.Append(name);
-            column += name.Length;
-        }
-
-        text.Append('\n');
     }
 
     private static int WidestForm()

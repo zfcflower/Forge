@@ -23,6 +23,10 @@ namespace Forge.Abstractions;
 /// <param name="ElapsedMilliseconds">Time to the last stream event (or to the failure).</param>
 /// <param name="RequestId">The server's request id, for correlating with a support ticket.</param>
 /// <param name="RateLimit">The account meter the response carried, when it carried one.</param>
+/// <param name="ToolCount">How many tool definitions the request carried.</param>
+/// <param name="ToolsHash">Short fingerprint of the tool array (names, descriptions, schemas, in order); two requests with the same value share a tools prefix.</param>
+/// <param name="SystemHash">Short fingerprint of the system prompt.</param>
+/// <param name="MessageCount">How many messages the request carried.</param>
 public sealed record UsageRecord(
     DateTimeOffset At,
     string? SessionId,
@@ -37,7 +41,11 @@ public sealed record UsageRecord(
     TokenUsage Usage,
     long ElapsedMilliseconds,
     string? RequestId,
-    ProviderRateLimit? RateLimit)
+    ProviderRateLimit? RateLimit,
+    int ToolCount = 0,
+    string? ToolsHash = null,
+    string? SystemHash = null,
+    int MessageCount = 0)
 {
     public const string Ok = "ok";
 
@@ -52,5 +60,11 @@ public sealed record UsageRecord(
 /// </remarks>
 public interface IUsageRecorder
 {
+    /// <summary>
+    /// Whether records are being kept right now. A caller may skip work that only exists to fill a record (fingerprinting a request)
+    /// while this is false.
+    /// </summary>
+    bool Enabled => true;
+
     void Record(UsageRecord record);
 }

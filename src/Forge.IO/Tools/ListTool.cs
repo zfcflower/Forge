@@ -9,7 +9,7 @@ namespace Forge.IO.Tools;
 /// apply: an explicitly listed directory shows what is on disk (<see cref="FileWalker"/> still refuses to enter the
 /// version control directory). The listing stops at <see cref="ToolOptions.ListMaxEntries"/> entries and says so.
 /// </summary>
-public sealed class ListTool : ToolBase
+public sealed class ListTool : ToolBase, IBoundedOutputTool
 {
     private const int DefaultDepth = 1;
     private const int MaxDepth = 5;
@@ -33,7 +33,7 @@ public sealed class ListTool : ToolBase
         : base(
             "ls",
             "List a directory: one line per entry, `d <path>/` for directories and `f <path>` for files, sorted by path. "
-            + "Does not apply .gitignore, and never enters .git. Prints `… (truncated)` past the configured entry cap.",
+            + "Does not apply .gitignore, and never enters .git. Past the configured entry cap it reports the total count.",
             Schema,
             ToolSideEffect.ReadOnly)
     {
@@ -60,13 +60,13 @@ public sealed class ListTool : ToolBase
 
         var maximum = Math.Clamp(bounds.ListMaxEntries, 1, ToolOptions.MaxListMaxEntries);
         var entries = new List<WalkEntry>(64);
-        var truncated = false;
+        var omitted = 0;
         foreach (var entry in FileWalker.Walk(root, start, depth, filter: null, ct))
         {
             if (entries.Count == maximum)
             {
-                truncated = true;
-                break;
+                omitted++;
+                continue;
             }
 
             entries.Add(entry);
@@ -85,9 +85,9 @@ public sealed class ListTool : ToolBase
             });
         }
 
-        if (truncated)
+        if (omitted > 0)
         {
-            lines.Add("… (truncated)");
+            lines.Add($"… (truncated: showing {maximum} of {maximum + omitted} entries)");
         }
 
         if (lines.Count == 0)
@@ -95,7 +95,7 @@ public sealed class ListTool : ToolBase
             lines.Add("(empty)");
         }
 
-        return new ValueTask<ToolResult>(new ToolResult(string.Join('\n', lines)));
+        return new ValueTask<ToolResult>(new ToolResult(BoundedOutput.Join(lines, "List a subdirectory with `path` instead.")));
     }
 
     private static Func<ToolOptions> Fixed(ToolOptions options) => () => options;

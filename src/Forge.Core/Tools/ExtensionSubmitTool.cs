@@ -11,56 +11,7 @@ namespace Forge.Core.Tools;
 public sealed class ExtensionSubmitTool : ITool
 {
     private const string SchemaJson =
-        """
-        {
-            "type": "object",
-            "properties": {
-                "id": {"type": "string", "description": "Stable extension id; it names the plugin directory and is also the id the user sees."},
-                "version": {"type": "string", "description": "Version of this draft. A deleted id and version stay blocked, so a re-created extension needs a new version."},
-                "kind": {"type": "string", "enum": ["plugin", "workflow"], "description": "plugin = C# compiled and run in a worker; workflow = declarative workflow.json run by the host."},
-                "files": {"type": "object", "description": "Relative '/'-separated path -> full file text. plugin: exactly one .cs file. workflow: workflow.json. Never manifest.json, which is generated from these fields.", "additionalProperties": {"type": "string"}},
-                "permissions": {
-                    "type": "array",
-                    "description": "Permissions the extension declares. They appear on the approval card and are covered by the hashes the user approves.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "kind": {"type": "string", "enum": ["ReadFile", "WriteFile", "ExecuteCommand", "Network", "Database"]},
-                            "scope": {"type": "string", "description": "Optional path, host or database name the permission is limited to."}
-                        },
-                        "required": ["kind"],
-                        "additionalProperties": false
-                    }
-                },
-                "dependencies": {
-                    "type": "array",
-                    "description": "NuGet-style dependencies the host resolves for a plugin; any change needs a new approval.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "version": {"type": "string"}
-                        },
-                        "required": ["name", "version"],
-                        "additionalProperties": false
-                    }
-                },
-                "tool": {
-                    "type": "object",
-                    "description": "workflow only: the single tool the workflow exposes. Omit it for a plugin, which declares its tools in code.",
-                    "properties": {
-                        "name": {"type": "string", "description": "Tool name the model will call."},
-                        "description": {"type": "string", "description": "What the tool does, shown to the model."},
-                        "input_schema": {"type": "object", "description": "JSON Schema of the tool's arguments; the call arguments are bound as $input inside the workflow."}
-                    },
-                    "required": ["name", "description", "input_schema"],
-                    "additionalProperties": false
-                }
-            },
-            "required": ["id", "version", "kind", "files"],
-            "additionalProperties": false
-        }
-        """;
+        """{"type":"object","properties":{"id":{"type":"string","description":"Stable extension id; names the plugin directory."},"version":{"type":"string","description":"Version of this draft; a deleted id and version stay blocked."},"kind":{"type":"string","enum":["plugin","workflow"],"description":"plugin = C# run in a worker; workflow = workflow.json run by the host."},"files":{"type":"object","description":"Relative '/'-separated path -> full file text. plugin: one .cs file. workflow: workflow.json. Never manifest.json.","additionalProperties":{"type":"string"}},"permissions":{"type":"array","description":"Declared permissions, shown on the approval card.","items":{"type":"object","properties":{"kind":{"type":"string","enum":["ReadFile","WriteFile","ExecuteCommand","Network","Database"]},"scope":{"type":"string","description":"Optional path, host or database limit."}},"required":["kind"],"additionalProperties":false}},"dependencies":{"type":"array","description":"NuGet-style dependencies for a plugin.","items":{"type":"object","properties":{"name":{"type":"string"},"version":{"type":"string"}},"required":["name","version"],"additionalProperties":false}},"tool":{"type":"object","description":"workflow only: the one tool it exposes; omit for a plugin.","properties":{"name":{"type":"string"},"description":{"type":"string"},"input_schema":{"type":"object","description":"JSON Schema of the arguments, bound as $input in the workflow."}},"required":["name","description","input_schema"],"additionalProperties":false}},"required":["id","version","kind","files"],"additionalProperties":false}""";
 
     private const string CreateIntro =
         "Create an extension that adds new tools to the session. The call stages the draft and then waits for the user to approve or reject it in the approval queue, so a slow call is normal; it returns only after that decision. Approved: the extension is live and its tools can be called from your next model request. Rejected: the draft is discarded and any live version stays exactly as it was. Never claim an approval the result did not report. The manifest is generated from id, version, kind, permissions and dependencies, so never send manifest.json. A deleted id and version stay blocked; submit a new version instead.";

@@ -17,7 +17,7 @@
 
 工具由四类来源合成：Core 内置、App 内置（文件/git/PR/web/spec/扩展编写）、插件工具、MCP 适配器。同名以**首个注册者**为准（内置优先）；`run_code` 的脚本面里插件工具在前、同名先注册者生效。
 
-### 内置工具清单（52 个内置工具 + MCP 服务器工具）
+### 内置工具清单（48 个内置工具 + MCP 服务器工具）
 
 | 组 | 工具 | 副作用 | 说明 |
 |---|---|---|---|
@@ -46,8 +46,7 @@
 | PR | `pr_view` `pr_workflow` `pr_checks` `pr_ci_log` `pr_comments` `review_comments` | 只读 | 13 个 PR 工具中的 6 个只读；见 04 |
 | | `pr_create` `pr_sync` `pr_edit` `pr_comment_reply` `pr_comment_resolve` `review_comment_resolve` | 写 | 五道闸门、verdict 门禁 |
 | | `pr_screenshots` | 执行 | before/after 截图 + 孤儿提交 + 更新 PR 正文 |
-| 规格 | `spec_grep` `spec_get` `spec_graph` `spec_validate` | 只读 | 按内容/正则查找、读单节点与链接、走图、校验悬挂链接与重复 id |
-| | `spec_create` `spec_update` `spec_delete` | 写 | 只能写所属工作区内的文件；frontmatter 仅经 `spec_update` 改 |
+| 规格 | `spec_get` `spec_graph` `spec_validate` | 只读 | 读单节点与链接、走图、校验悬挂链接与重复 id；仅当编排开启或工作区已有带 `id` 的规格时注册（会话启动时一次性决定）；规格的查找与修改用 `grep`/`edit` |
 | 扩展编写 | `extension_list` | 只读 | 列出已装与待决扩展 |
 | | `extension_create` `extension_update` | 写 | 同一 schema；暂存草稿并提交审批卡，阻塞到用户决定 |
 | | `extension_disable` `extension_delete` | 写 | 禁用 / 永久封锁（同 id+version 删除后不可恢复） |

@@ -46,7 +46,7 @@ parent: forge-architecture
 
 ### 读与写
 
-- **`read` 有界且按字节算。** 默认窗口 2000 行 / 256 KiB(硬上限 20000 行 / 1 MiB)。行窗口走流式跳过与截取:读 100 行不会把 100 MiB 读进内存(本机实测三种大小的分配都在 14–16 KB)。行号右对齐,宽度按本次窗口最后一行算;`<path>: N lines` 里的 N 是**本次窗口行数**而不是文件总行数——总行数要扫全文件,与“不得整体读入”直接冲突。
+- **`read` 有界且按字节算。** 默认窗口 2000 行 / 256 KiB(硬上限 20000 行 / 1 MiB)。行窗口走流式跳过与截取:读 100 行不会把 100 MiB 读进内存(本机实测三种大小的分配都在 14–16 KB)。行号右对齐,宽度按本次窗口最后一行算;`<path>: N lines` 里的 N 是**本次窗口行数**而不是文件总行数——总行数要扫全文件,与“不得整体读入”直接冲突。单次返回另有 32,000 字符上限(等于循环的 spill 阈值,`read` 不会被转成 artifact):按整行截断,尾部给出已显示的行范围和续读的 `offset`;首行本身超过上限时只截这一行。`read`、`find`、`ls`、`grep` 都实现 `IBoundedOutputTool`,循环不再对它们的结果做 spill。
 - **编码策略明确。** 嗅探 BOM(UTF-8 / UTF-16LE / UTF-16BE);无 BOM 时按 UTF-8 **严格**解码,且只严格校验前 8 KiB(此后按宽松解码,因为半行截断本就会切在多字节字符中间)。首 8 KiB 含 `0x00` 或严格解码失败的,判为二进制/非 UTF-8 并报错(带字节数),不返回乱码。
 - **`edit` 要求唯一匹配。** 0 次出现、以及多于 1 次又没给 `replace_all`,都返回错误并给出文件行数与前两处行号:猜一处是最坏的结果。读-改-写整段持同一把 `PathGate` 租约,写回走 `AtomicFile`。
 - **`edit` 会把 UTF-16 文件写回 UTF-8。** 这是已知偏差:保留原编码要多一套编码探测与回写路径,而仓库里的文本文件几乎全是 UTF-8。已在工具文档与这里写明,不静默。
@@ -58,7 +58,7 @@ parent: forge-architecture
 - **不跟随链接。** 目录链接会被列出但不进入,文件链接带着 `IsLink` 上报;`find`/`grep` 跳过 `IsLink` 项,`ls` 用 `l <path>` 单列一指。依据有两条:ripgrep 默认也不跟随链接(两后端才能给同一集合),以及一个检入仓库的链接不应让 `grep` 读到工作区外的文件。显式给 `read`/`write` 的路径仍会跟随链接,但由 `WorkspacePath.Resolve` 的逐段解析守住工作区边界。
 - **忽略规则是完整的 gitignore 语义:** `#` 注释、`\` 转义、被转义的行尾空格、`!` 否定、前导 `/` 锚定、含 `/` 的模式相对其 `.gitignore` 所在目录、目录结尾 `/`、`**`;规则按目录压栈(父先子后、同层后写覆盖先写),根 `.git/info/exclude` 参与。被忽略的目录不进入,因此目录内的 `!` 无法重新包含——与 git 一致。不读全局 `core.excludesFile`(推迟,需读 git config)。
 - **隐藏项默认可搜。** `.github`、`.editorconfig` 必须搜得到,所以不套用 rg 的“跳过隐藏项”默认;`ls` 对自己显式列出的目录**不**应用忽略规则(用户已经指名要它),`find`/`grep` 应用全部规则。
-- **两个搜索后端必须给同一集合。** 托管后端是默认实现;`RipgrepPath` 非空时用 rg,并以 `--no-ignore-vcs --no-ignore-parent --no-ignore-global --no-ignore-dot --no-ignore-exclude --hidden` 关掉它自己的忽略判断,每条结果再经**同一个** `GitIgnore`(含祖先语义)过滤。等价性由 fixture 仓库的 parity 测试固定(本机 rg 15.2.0,含“NUL 在探针窗之外”的二进制用例)。已知不等价:rg 的 globset 不支持 `[!...]` 取反字符类;`limit` 的截断位置两后端不同(集合一致、顺序不保证);`FilesSkippedTooLarge` 在 rg 侧拿不到时保持 0;`FilesSkippedBinary` 在 rg 侧只能统计“NUL 之前产生过输出”的二进制文件——没命中的二进制文件 rg 不发 `end` 事件,所以那个数字会偏小(托管侧统计所有被跳过的)。命中集合与 `path:line` 文本仍然逐条相等。
+- **两个搜索后端必须给同一集合。** 托管后端是默认实现;`RipgrepPath` 非空时用 rg,并以 `--no-ignore-vcs --no-ignore-parent --no-ignore-global --no-ignore-dot --no-ignore-exclude --hidden` 关掉它自己的忽略判断,每条结果再经**同一个** `GitIgnore`(含祖先语义)过滤。等价性由 fixture 仓库的 parity 测试固定(本机 rg 15.2.0,含“NUL 在探针窗之外”的二进制用例)。托管后端到达 `limit` 后**不停止**,继续只计数不存行,`GrepResult.TotalMatches` 是真实命中行数(代价:截断的查询也要扫完全部文件;本仓库 1306 个文件实测约 15 ms);rg 后端在 `limit` 处停止,`TotalMatches` 为 null,输出写“至少 limit+1”。大小写敏感、无上下文行的字面量在 UTF-8 字节上整缓冲区向量化搜索,只解码命中的行(与逐行字符串路径的结果逐条相等,本仓库 8 个查询已对比),读文件用同步 `RandomAccess`;`find`/`ls` 超过上限后同样继续计数,输出“showing N of M entries”。已知不等价:rg 的 globset 不支持 `[!...]` 取反字符类;`limit` 的截断位置两后端不同(集合一致、顺序不保证);`FilesSkippedTooLarge` 在 rg 侧拿不到时保持 0;`FilesSkippedBinary` 在 rg 侧只能统计“NUL 之前产生过输出”的二进制文件——没命中的二进制文件 rg 不发 `end` 事件,所以那个数字会偏小(托管侧统计所有被跳过的)。命中集合与 `path:line` 文本仍然逐条相等。
 - **二进制口径两边一致。** 第一个 NUL 落在**前 8 KiB**内的文件整体跳过(不产生任何命中);NUL 在探针之外时,只保留 NUL **之前**的命中并停在那儿(托管引擎把扫描截在 NUL,rg 在 `end.binary_offset` 处停止,并丢弃 `absolute_offset >= binary_offset` 的条目)。两种情形都计入 `FilesSkippedBinary`。没有这条,同一查询换后端就会给出不同结果。
 - **rg 只是加速,失败就退回。** 未配置、启动失败、退出码 ≥2、输出超过采集上限而没到 `limit`,都回退托管实现并在结果尾部写出原因——宁可慢,也不给模型半截结果。退出码 1 是“没有匹配”,不是错误。
 - **并发有界。** 托管 grep 用容量 2×并发 的有界 Channel,消费者固定 `clamp(SearchConcurrency, 1, 8)`;字面量用 `MemoryExtensions.IndexOf`,正则用 `CultureInvariant` + 2 秒 `MatchTimeout`(超时的文件丢弃并列入跳过表)。不为每个文件创建 Task,不对 IO 套 `Task.Run`。
@@ -161,6 +161,6 @@ parent: forge-architecture
 - `edit` 把 UTF-16 文件写回 UTF-8;保留原编码未做。
 - ripgrep 不随应用分发,只接受偏好里给出的路径;是否按 RID 打包待基准数据决定(当前托管实现只比 rg 慢 11–15%)。
 - `GitCli`/`GhCli`/`ScreenshotShell` 仍各自实现进程执行与捕获,尚未改为复用 `ProcessRunner`(它们有各自的 head/tail 与逐行回调契约,单独立项)。
-- `bash` 的输出只在结束时一次性返回,不流式进 UI;`ls` 的截断发生在遍历顺序上而不是排序之后。
+- `bash` 的输出只在结束时一次性返回,不流式进 UI;`ls` 的截断发生在遍历顺序上而不是排序之后(保留的是遍历顺序的前 N 条,再排序)。
 - 已知分配成本(基准实测):`FileWalker` 约 353 B/文件(全路径 + 相对路径 + 分类);托管 `grep` 一次 1 万文件扫描分配约 82 MB、gen0 92 次,主因是每个文件 `rent + Encoding.UTF8.GetString` 整文件成串。两者都不影响内存上界(逐文件释放),但值得在需要时改成按行跨字节解码与复用相对路径缓冲。
 - 回收站服务:过期清理、容量上限、网络盘导出兜底与 jsonl 镜像联动均推迟。

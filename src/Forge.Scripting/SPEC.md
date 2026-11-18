@@ -15,7 +15,7 @@ Extension Host 的动态 C# 插件编译/缓存/加载层,以及 `run_code` 的�
 
 - 插件编译:插件是普通类库(`IPlugin` 入口),不用 CSharpScript;不提供插件发现、注册、manifest 读取(属 ExtensionHost)。
 - 脚本编译服务:公开入口 `ScriptCodeCompiler.CompileAsync(code, options, ct) → ScriptCompilation`(可装载 PE 映像 + `ScriptArtifactDescriptor`),Host 持有**唯一**实例,即唯一缓存所有者。脚本可见表面(`ScriptGlobals`/`ToolsFacade`/`ToolCallException`)在 `Forge.ScriptRuntime`;内层工具调用只经传入的 `IHostFacade` 离开进程,本模块不做工具解析、审批、会话/调用链绑定或结果截断策略(均由主程序执行)。
-- 进程内运行入口:公开 `ScriptCodeRunner : ICodeRunner`(`ExecuteAsync(CodeExecutionRequest, IHostFacade, CancellationToken)`)保留,供测试与同进程用法把“编译 → 内存装载 → `ScriptHarness` 运行”走完整;一次性执行器**不**引用本模块,它只装载产物。
+- 本模块只负责编译与产物校验,不提供进程内运行入口:脚本只在一次性执行器(`Forge.ScriptExecutor`)里装载并运行,执行器**不**引用本模块,它只装载产物。
 - 不做语法白名单/安全分析(插件):权限由 `forge-approval` 审批与 Worker 进程隔离承担,ALC 只负责加载与卸载。脚本侧相反:保留白名单 + 语义检查。
 
 ## 关键决策
@@ -30,9 +30,9 @@ Extension Host 的动态 C# 插件编译/缓存/加载层,以及 `run_code` 的�
 
 **本地二进制识别。** `ManagedImage.ReadNativeBinaryFormat` 只看文件头而与扩展名无关,返回 ELF(`\x7fELF`)、Mach-O(32/64 位与字节序反转的四种 magic)、Mach-O universal/fat(fat 与 fat64)或无 CLI 头的 PE,数据文件返回 `null`。Worker 在装载前用它拒收本地二进制,扩展名不构成放行依据。
 
-**脚本表面 = 白名单 + 语义检查。** `ScriptSurface` 固定引用集(BCL 子集 + `Forge.ScriptRuntime` + `Forge.Plugin.Sdk` + `Forge.Scripting`)与导入(`Forge.Scripting`/`Forge.Plugin.Sdk`,供脚本点名 `ToolCallException`/`HostToolResult` 等),`AllowUnsafe=false`、无元数据/源解析器(普通 `CSharpCompilation`,不是 CSharpScript)、文件路径固定 `script.csx`;`#r`/`#load`/`unsafe`/`typeof`/指针在编译前由语法扫描拒绝,禁用命名空间与受限类型(`Environment`、`AppContext`、`Thread`、`TaskFactory` 等)由语义遍历拒绝。本程序集仍被引用(使其余类型可被点名而不是“查无此类型”,从而能被语义遍历拒绝),`Forge.Scripting` 命名空间只允许 `ScriptGlobals`/`ToolsFacade`/`ToolCallException`:其余公共类型(`VersionedOutputStore` 写文件、`PluginLoadContext` 装载程序集、`ManagedImage` 读文件、`ScriptCompiler` 任意编译、`ScriptCodeRunner` 自身、`ScriptCodeCompiler` 自身)在脚本里按禁用 API 拒绝。诊断与违规都带 `line N, column M`,条数与字符数有界;启用调试信息使运行时栈出现 `script.csx:line N`。这不是进程隔离:内存不限,CPU 空转靠终止 Worker 收拾。
+**脚本表面 = 白名单 + 语义检查。** `ScriptSurface` 固定引用集(BCL 子集 + `Forge.ScriptRuntime` + `Forge.Plugin.Sdk` + `Forge.Scripting`)与导入(`Forge.Scripting`/`Forge.Plugin.Sdk`,供脚本点名 `ToolCallException`/`HostToolResult` 等),`AllowUnsafe=false`、无元数据/源解析器(普通 `CSharpCompilation`,不是 CSharpScript)、文件路径固定 `script.csx`;`#r`/`#load`/`unsafe`/`typeof`/指针在编译前由语法扫描拒绝,禁用命名空间与受限类型(`Environment`、`AppContext`、`Thread`、`TaskFactory` 等)由语义遍历拒绝。本程序集仍被引用(使其余类型可被点名而不是“查无此类型”,从而能被语义遍历拒绝),`Forge.Scripting` 命名空间只允许 `ScriptGlobals`/`ToolsFacade`/`ToolCallException`:其余公共类型(`VersionedOutputStore` 写文件、`PluginLoadContext` 装载程序集、`ManagedImage` 读文件、`ScriptCompiler` 任意编译、`ScriptCodeCompiler` 自身)在脚本里按禁用 API 拒绝。诊断与违规都带 `line N, column M`,条数与字符数有界;启用调试信息使运行时栈出现 `script.csx:line N`。这不是进程隔离:内存不限,CPU 空转靠终止 Worker 收拾。
 
-**按请求重建能力。** 缓存只驻留编译产物与固定编译表面:`ScriptCodeCompiler` 不缓存工具元数据、facade、审批结果或调用上下文。缓存键 = 编译表面指纹(版本 + 导入 + 引用路径 + 三个自有程序集 MVID)+ 源码 + 全部 `CodeExecutionOptions`,因此换选项不会命中上一次的错误文本;失败编译同样入 LRU,重复的错误脚本不再进 Roslyn。工具元数据不进缓存键(脚本按名调用,元数据不进编译),每次运行按本次 `Tools` 重建 `ToolsFacade`,上一请求的工具名在下一请求里即未知。每次运行从编译产物新建可卸载 AssemblyLoadContext 装载入口(`ScriptCodeLoader.Load`),不复用已装载的程序集;每次运行的 globals/log/facade/令牌各自独立。
+**按请求重建能力。** 缓存只驻留编译产物与固定编译表面:`ScriptCodeCompiler` 不缓存工具元数据、facade、审批结果或调用上下文。缓存键 = 编译表面指纹(版本 + 导入 + 引用路径 + 三个自有程序集 MVID)+ 源码 + 全部 `CodeExecutionOptions`,因此换选项不会命中上一次的错误文本;失败编译同样入 LRU,重复的错误脚本不再进 Roslyn。工具元数据不进缓存键(脚本按名调用,元数据不进编译),每次运行按本次 `Tools` 重建 `ToolsFacade`,上一请求的工具名在下一请求里即未知。每次运行由执行器从编译产物新建可卸载 AssemblyLoadContext 装载入口,不复用已装载的程序集;每次运行的 globals/log/facade/令牌各自独立。
 
 **单飞与取消隔离。** 同一缓存键的并发 `CompileAsync` 共享同一次编译(脚本与插件编译器都如此);每个调用者的取消只让它自己立刻抛 `OperationCanceledException`,共享编译只在最后一个等待者取消后才取消,取消的编译不写入缓存,下一次调用重新编译。
 

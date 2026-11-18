@@ -17,13 +17,15 @@ internal static class GrepScenarios
     {
         yield return Query(fixtures, "hit", Fixtures.HitToken);
         yield return Query(fixtures, "miss", Fixtures.MissToken);
+        yield return Query(fixtures, "hit-over-limit", Fixtures.HitToken, limit: 100);
     }
 
-    private static BenchScenario Query(Fixtures fixtures, string label, string token)
+    private static BenchScenario Query(Fixtures fixtures, string label, string token, int limit = Limit)
     {
-        var expected = string.Equals(token, Fixtures.HitToken, StringComparison.Ordinal)
+        var total = string.Equals(token, Fixtures.HitToken, StringComparison.Ordinal)
             ? Fixtures.RepositoryFilesWithToken * Fixtures.LinesOf(Fixtures.RepositoryFileBytes)
             : 0;
+        var expected = Math.Min(total, limit);
 
         return new BenchScenario(
             $"grep.literal.{label}.10k",
@@ -38,7 +40,7 @@ internal static class GrepScenarios
                     Root = root,
                     StartPath = root,
                     Pattern = token,
-                    Limit = Limit,
+                    Limit = limit,
                 };
 
                 Func<CancellationToken, Task<OpResult>>? baseline = ripgrep is null
@@ -64,11 +66,16 @@ internal static class GrepScenarios
                     Run = async ct =>
                     {
                         var result = await GrepEngine.SearchAsync(request, ct).ConfigureAwait(false);
+                        if (result.TotalMatches != total)
+                        {
+                            throw new InvalidOperationException($"the engine counted {result.TotalMatches} matches, expected {total}");
+                        }
+
                         return new OpResult(
                             Items: result.FilesScanned,
                             Signature: result.MatchCount,
                             Observation:
-                                $"matches={result.MatchCount} files={result.FilesScanned} truncated={result.Truncated} (expected {expected})");
+                                $"matches={result.MatchCount} files={result.FilesScanned} truncated={result.Truncated} total={result.TotalMatches} (expected {expected})");
                     },
                     Baseline = baseline,
                     BaselineName = ripgrep is null ? null : "ripgrep backend (rg --version verified)",

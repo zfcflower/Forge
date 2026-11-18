@@ -920,6 +920,7 @@ public sealed class AnthropicProvider : HttpChatProvider
         private int _output;
         private int _cacheRead;
         private int _cacheWrite;
+        private int _cacheWrite1h;
 
         public void Merge(JsonElement usage)
         {
@@ -932,8 +933,12 @@ public sealed class AnthropicProvider : HttpChatProvider
             _output = ProviderJson.Int(usage, "output_tokens") ?? _output;
             _cacheRead = ProviderJson.Int(usage, "cache_read_input_tokens") ?? _cacheRead;
             _cacheWrite = ProviderJson.Int(usage, "cache_creation_input_tokens") ?? _cacheWrite;
+            if (usage.TryGetProperty("cache_creation", out var split) && split.ValueKind == JsonValueKind.Object)
+            {
+                _cacheWrite1h = ProviderJson.Int(split, "ephemeral_1h_input_tokens") ?? _cacheWrite1h;
+            }
         }
 
-        public TokenUsage ToTokenUsage() => new(_input + _cacheRead + _cacheWrite, _output, _cacheRead, _cacheWrite);
+        public TokenUsage ToTokenUsage() => new(_input + _cacheRead + _cacheWrite, _output, _cacheRead, _cacheWrite, _cacheWrite1h);
     }
 }

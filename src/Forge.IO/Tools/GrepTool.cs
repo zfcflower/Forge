@@ -11,12 +11,12 @@ namespace Forge.IO.Tools;
 /// engine, with the reason, whenever ripgrep cannot be trusted. A query without a hit returns <c>no matches</c> and is
 /// not an error.
 /// </summary>
-public sealed class GrepTool : ToolBase
+public sealed class GrepTool : ToolBase, IBoundedOutputTool
 {
     private const int MaxContextLines = ToolOptions.MaxGrepContextLines;
 
     private const string Schema =
-        """{"type":"object","properties":{"pattern":{"type":"string","description":"Text to find, or a .NET regular expression when `regex` is true."},"path":{"type":"string","description":"Directory or file to search, relative to the workspace root; default the root."},"glob":{"type":"string","description":"Only search files whose workspace-relative path matches this glob: `*` inside one segment, `**` across segments, `?`, `[...]`. A glob without `/` matches a name at any depth."},"regex":{"type":"boolean","description":"Treat `pattern` as a .NET regular expression; default false."},"case_sensitive":{"type":"boolean","description":"Case-sensitive matching; default true."},"context":{"type":"integer","description":"Context lines before and after each match; default 0, at most 5."},"limit":{"type":"integer","description":"Maximum matching lines; default 1000, at most 10000. Hitting it marks the output as truncated."}},"required":["pattern"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"pattern":{"type":"string","description":"Text to find, or a .NET regular expression when `regex` is true."},"path":{"type":"string","description":"Directory or file to search, relative to the workspace root; default the root."},"glob":{"type":"string","description":"Only search files whose workspace-relative path matches this glob: `*` inside one segment, `**` across segments, `?`, `[...]`. A glob without `/` matches a name at any depth."},"regex":{"type":"boolean","description":"Treat `pattern` as a .NET regular expression; default false."},"case_sensitive":{"type":"boolean","description":"Case-sensitive matching; default true."},"context":{"type":"integer","description":"Context lines before and after each match; default 0, at most 5."},"limit":{"type":"integer","description":"Maximum matching lines; default 1000, at most 10000. Past it the output says how many lines matched in all."}},"required":["pattern"],"additionalProperties":false}""";
 
     private readonly Func<ToolOptions> options;
     private readonly IProcessRunner? runner;
@@ -128,7 +128,9 @@ public sealed class GrepTool : ToolBase
 
         if (result.Truncated)
         {
-            lines.Add($"… (truncated at {limit} matches)");
+            lines.Add(result.TotalMatches is { } total
+                ? $"… (truncated: showing {limit} of {total} matching lines)"
+                : $"… (truncated: showing {limit} of at least {limit + 1} matching lines)");
         }
 
         if (result.FilesSkippedTooLarge > 0)
@@ -151,7 +153,7 @@ public sealed class GrepTool : ToolBase
             lines.Add($"ripgrep not used: {fallback}");
         }
 
-        return string.Join('\n', lines);
+        return BoundedOutput.Join(lines, "Narrow with `path`, `glob` or a more specific `pattern`.");
     }
 
     /// <summary>

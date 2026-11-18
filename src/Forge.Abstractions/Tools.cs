@@ -102,6 +102,15 @@ public interface ITool
     ValueTask<ToolResult> InvokeAsync(ToolCall call, ToolContext context, CancellationToken ct);
 }
 
+/// <summary>
+/// A tool that bounds its own result well below the loop's spill threshold and tells the model how to continue (<c>read</c>
+/// does: a character cap plus the offset to resume from). The loop never moves such a result into an artifact, so the model
+/// is not sent to a second tool just to read what the first one already cut to size.
+/// </summary>
+public interface IBoundedOutputTool : ITool
+{
+}
+
 public interface IToolRegistry
 {
     IReadOnlyList<ITool> Tools { get; }

@@ -9,7 +9,7 @@ namespace Forge.IO.Tools;
 /// means an ignored directory is never entered. Directories are printed with a trailing <c>/</c>. The listing stops at
 /// the requested limit and says so.
 /// </summary>
-public sealed class FindTool : ToolBase
+public sealed class FindTool : ToolBase, IBoundedOutputTool
 {
     private const string DefaultPattern = "*";
 
@@ -32,7 +32,7 @@ public sealed class FindTool : ToolBase
         : base(
             "find",
             "Find files and directories by path glob below a directory, one workspace-relative path per line, in walk "
-            + "order. Applies .gitignore; directories end with `/`. Prints `… (truncated)` when the limit is reached.",
+            + "order. Applies .gitignore; directories end with `/`. Past the limit it reports the total count.",
             Schema,
             ToolSideEffect.ReadOnly)
     {
@@ -75,7 +75,7 @@ public sealed class FindTool : ToolBase
 
         var ignore = new GitIgnore(root);
         var lines = new List<string>(Math.Min(limit, 256));
-        var truncated = false;
+        var omitted = 0;
         foreach (var entry in FileWalker.Walk(root, start, depth, ignore, ct))
         {
             // A link is reported as a file by the enumeration but never searched: ripgrep does not follow links either,
@@ -92,16 +92,17 @@ public sealed class FindTool : ToolBase
 
             if (lines.Count == limit)
             {
-                truncated = true;
-                break;
+                // Past the limit entries are only counted, so the answer can say how many there are.
+                omitted++;
+                continue;
             }
 
             lines.Add(entry.IsDirectory ? entry.RelativePath + "/" : entry.RelativePath);
         }
 
-        if (truncated)
+        if (omitted > 0)
         {
-            lines.Add("… (truncated)");
+            lines.Add($"… (truncated: showing {limit} of {limit + omitted} entries)");
         }
 
         if (lines.Count == 0)
@@ -109,7 +110,7 @@ public sealed class FindTool : ToolBase
             lines.Add("(empty)");
         }
 
-        return new ValueTask<ToolResult>(new ToolResult(string.Join('\n', lines)));
+        return new ValueTask<ToolResult>(new ToolResult(BoundedOutput.Join(lines, "Narrow with `pattern` or `path`.")));
     }
 
     private static Func<ToolOptions> Fixed(ToolOptions options) => () => options;

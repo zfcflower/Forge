@@ -236,6 +236,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// <summary>The orchestration block of the host being built; empty when the default orchestration is off or has no router.</summary>
     private string orchestration = string.Empty;
 
+    /// <summary>
+    /// Whether the read-only spec tools are offered to this host: decided once per host build (the tool definitions are bytes
+    /// of the cached prefix), true when the orchestration is on or the workspace already holds specs with an id.
+    /// </summary>
+    private bool specToolsOn;
+
     /// <summary>What the chat can draw (diagrams, images, file links), told to the root; a snapshot per host like <see cref="orchestration"/>.</summary>
     private string chatRendering = string.Empty;
 
@@ -1018,6 +1024,27 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
+    private readonly SpecTools specTools = new();
+
+    /// <summary>True when the workspace has at least one spec file with an id. Only asked when the orchestration is off.</summary>
+    private static bool WorkspaceHasSpecs(string workspacePath)
+    {
+        if (string.IsNullOrWhiteSpace(workspacePath) || !Directory.Exists(workspacePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            return Task.Run(async () => (await new SpecGraph(workspacePath).ListAsync().ConfigureAwait(false)).Count > 0)
+                .GetAwaiter().GetResult();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     private AgentHost Build()
     {
         var handler = services.Approvals?.CreateHandler(Session);
@@ -1051,12 +1078,15 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             ? string.Empty
             : OrchestrationPrompt.Build(DiscoverSkills());
         chatRendering = ChatRenderingPrompt.Build();
+        specToolsOn = orchestration.Length > 0 || WorkspaceHasSpecs(Session.WorkspacePath);
         var compaction = services.CurrentCompaction();
+        var toolSegments = BuildTools();
         var built = new AgentHost(
             new AgentHostOptions
             {
                 Providers = services.ProviderFactory,
-                Tools = BuildTools(),
+                Tools = toolSegments.All,
+                ToolSegments = toolSegments,
                 DisabledTools = services.DisabledTools is { } disabledTools ? ToolCatalog.EffectiveDisabled(disabledTools()) : null,
                 Layers = layers,
                 Policy = SessionPolicy,
@@ -1293,40 +1323,76 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// out (a script has no prompt budget to save). The registry also honours the user's tool switches live.
     /// </para>
     /// </summary>
-    private List<ITool> CollectExternalTools()
+    private ExternalTools CollectExternalTools()
     {
-        var tools = new List<ITool>();
+        // Three segments, in this order in the tool array: the always-present tools, the conditional built-ins, then what comes
+        // from outside the product. A change in a later segment (an MCP server connecting, a plugin installed) leaves every
+        // earlier definition where it was, so the prompt cache only breaks from that position on.
+        var fixedTools = new List<ITool>();
+        var conditional = new List<ITool>();
         var plugins = services.HostClient?.Tools ?? [];
         IReadOnlyList<ITool> web = [];
-        if (services.HostClient is not null)
+        fixedTools.AddRange(services.FileTools);
+        fixedTools.Add(skillTool ??= new SkillTool(DiscoverSkills));
+        if (services.HostClient is not null && services.Approvals?.Extensions is { } extensions)
         {
-            tools.AddRange(plugins);
-            if (services.Approvals?.Extensions is { } extensions)
-            {
-                tools.AddRange(ExtensionTools.Create(extensions));
-            }
+            conditional.AddRange(ExtensionTools.Create(extensions));
         }
 
         if (services.Git is { } git)
         {
-            tools.AddRange(git.All);
+            conditional.AddRange(git.All);
         }
 
-        tools.AddRange(services.FileTools);
-        tools.Add(skillTool ??= new SkillTool(DiscoverSkills));
-        tools.AddRange(services.PullRequestTools);
+        if (specToolsOn)
+        {
+            conditional.AddRange(specTools.All);
+        }
+
+        conditional.AddRange(services.PullRequestTools);
         if (services.WebTools is { } webTools)
         {
             web = webTools();
-            tools.AddRange(web);
+            conditional.AddRange(web);
         }
+
+        // A plugin tool never shadows a tool the product owns: the names above win, as they did when plugins came first in
+        // one list and the later duplicate replaced the earlier.
+        var tools = new List<ITool>(fixedTools.Count + conditional.Count + plugins.Count + 8);
+        tools.AddRange(fixedTools);
+        tools.AddRange(conditional);
+        var owned = new HashSet<string>(tools.Count, StringComparer.Ordinal);
+        foreach (var tool in tools)
+        {
+            owned.Add(tool.Definition.Name);
+        }
+
+        var outside = new List<ITool>();
+        if (services.HostClient is not null)
+        {
+            foreach (var plugin in plugins)
+            {
+                if (!owned.Contains(plugin.Definition.Name))
+                {
+                    outside.Add(plugin);
+                }
+            }
+        }
+
+        tools.AddRange(outside);
 
         // Last, so every tool above keeps its name when an MCP server advertises the same one (AppendMcpTools drops the MCP
         // copy), and because the selection is the only part of this list that changes on its own.
         var mcpTools = new List<ITool>();
         if (services.Mcp is { } mcp)
         {
+            var mcpStart = tools.Count;
             AppendMcpTools(tools, mcp);
+            for (var index = mcpStart; index < tools.Count; index++)
+            {
+                outside.Add(tools[index]);
+            }
+
             foreach (var tool in tools)
             {
                 if (tool is McpToolAdapter { SideEffect: ToolSideEffect.ReadOnly })
@@ -1346,11 +1412,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         if (services.HostClient is { } hostClient && scriptTools.Count > 0)
         {
             surface = new CodeModeToolRegistry(scriptTools, CurrentCodeMode, services.DisabledTools);
-            tools.Add(hostClient.CreateRunCodeTool(surface, RunCodeOptions()));
+            conditional.Add(hostClient.CreateRunCodeTool(surface, RunCodeOptions()));
         }
 
         Volatile.Write(ref scriptSurface, surface);
-        return tools;
+        return new ExternalTools(fixedTools, conditional, outside);
     }
 
     /// <summary>The script registry of the last collection, or null when that collection produced no <c>run_code</c>.</summary>
@@ -1441,7 +1507,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>The tool surface one session runs with (see <see cref="CollectExternalTools"/>).</summary>
-    internal IReadOnlyList<ITool> BuildTools() => CollectExternalTools();
+    internal ExternalTools BuildTools() => CollectExternalTools();
 
     /// <summary>
     /// The host's currently published tool registry: a new instance exactly when a new tool set was published, so its identity

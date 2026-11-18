@@ -242,7 +242,7 @@ internal sealed class AppPreferences : ObservableObject
     private string toolsShellPath = string.Empty;
     private string toolsRipgrepPath = string.Empty;
     private int toolsBashTimeoutSeconds = DefaultToolBashTimeoutSeconds;
-    private IReadOnlyList<string> toolsDisabled = [];
+    private IReadOnlyList<string> toolsDisabled = DefaultToolsDisabled;
     private bool editorShowLineNumbers = true;
     private bool editorWordWrap;
     private bool editorShowSpaces;
@@ -452,6 +452,15 @@ internal sealed class AppPreferences : ObservableObject
 
     /// <summary>TextMate theme token: <c>auto</c> (default), <c>light</c> or <c>dark</c>; unknown tokens mean the default.</summary>
     public string EditorTheme { get => editorTheme; set => Set(ref editorTheme, ThemeToken(value)); }
+
+    /// <summary>
+    /// Tools that start switched off until the user turns them on: the five extension-authoring tools are rarely needed, and
+    /// their definitions cost every request. Used only while no switch was ever saved.
+    /// </summary>
+    public static readonly string[] DefaultToolsDisabled =
+    [
+        "extension_list", "extension_create", "extension_update", "extension_disable", "extension_delete",
+    ];
 
     /// <summary>
     /// Names of the built-in tools the user switched off (sorted, deduplicated). Read before every turn of every session, so a
@@ -879,7 +888,8 @@ internal sealed class AppPreferences : ObservableObject
         toolsBashTimeoutSeconds = section.ToolsBashTimeoutSeconds is { } bashTimeout
             ? Math.Clamp(bashTimeout, MinToolBashTimeoutSeconds, MaxToolBashTimeoutSeconds)
             : DefaultToolBashTimeoutSeconds;
-        toolsDisabled = NormalizeNames(section.ToolsDisabled);
+        // Absent means the user never touched a switch: the default-off tools apply. A saved list, even an empty one, is theirs.
+        toolsDisabled = NormalizeNames(section.ToolsDisabled ?? DefaultToolsDisabled);
         editorShowLineNumbers = section.EditorShowLineNumbers ?? true;
         editorWordWrap = section.EditorWordWrap ?? false;
         editorShowSpaces = section.EditorShowSpaces ?? false;
@@ -1028,7 +1038,7 @@ internal sealed class AppPreferences : ObservableObject
             ToolsShellPath = toolsShellPath,
             ToolsRipgrepPath = toolsRipgrepPath,
             ToolsBashTimeoutSeconds = toolsBashTimeoutSeconds,
-            ToolsDisabled = toolsDisabled.Count == 0 ? null : [.. toolsDisabled],
+            ToolsDisabled = [.. toolsDisabled],
             EditorShowLineNumbers = editorShowLineNumbers,
             EditorWordWrap = editorWordWrap,
             EditorShowSpaces = editorShowSpaces,

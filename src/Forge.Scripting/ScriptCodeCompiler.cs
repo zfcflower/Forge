@@ -300,31 +300,3 @@ public sealed class ScriptCodeCompiler
             diagnostic.Location.SourceTree?.FilePath);
     }
 }
-
-/// <summary>
-/// Loads one validated script image from memory into its own <see cref="AssemblyLoadContext"/> and binds the entry point
-/// the descriptor names. There is no <c>Assembly.Load</c> fallback and no disk probing: the bytes that were hashed are
-/// the bytes that are loaded.
-/// </summary>
-public static class ScriptCodeLoader
-{
-    private const BindingFlags EntryPointFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-
-    /// <summary>Validates the descriptor against the bytes, loads the image and returns its entry point delegate.</summary>
-    public static ScriptEntryPoint Load(byte[] image, ScriptArtifactDescriptor descriptor)
-    {
-        ArgumentNullException.ThrowIfNull(image);
-        ArgumentNullException.ThrowIfNull(descriptor);
-        ScriptArtifact.Validate(descriptor, image);
-
-        var context = new AssemblyLoadContext("forge-script-" + descriptor.CacheKey[..12], isCollectible: true);
-        var assembly = context.LoadFromStream(new MemoryStream(image, writable: false));
-        var type = assembly.GetType(descriptor.EntryPointType, throwOnError: false) ??
-            throw new ScriptArtifactException(
-                $"The script image does not contain the entry point type '{descriptor.EntryPointType}'.");
-        var method = type.GetMethod(descriptor.EntryPointMethod, EntryPointFlags) ??
-            throw new ScriptArtifactException(
-                $"The script image does not contain the entry point '{descriptor.EntryPointType}.{descriptor.EntryPointMethod}'.");
-        return method.CreateDelegate<ScriptEntryPoint>();
-    }
-}

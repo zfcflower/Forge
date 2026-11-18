@@ -33,4 +33,4 @@ depends-on: [forge-plugin-sdk]
 
 ## 验证约定
 
-测试须通过 `ScriptCodeRunner` 覆盖值、日志、JSON、内层工具、错误、诊断、截断与运行期校验;失控循环只在可整体回收的子进程里跑,断言 `RequiresTermination`、`abandoned`、`must be terminated` 与预算秒数,不断言宿主能在进程内停下一个不合作的循环。同一语义还须经真实 Host 与一次性执行器覆盖。
+测试须通过真实 Host 与一次性执行器覆盖值、日志、JSON、内层工具、错误、诊断、截断与运行期校验;失控循环只在可整体回收的子进程里跑,断言 `RequiresTermination`、`abandoned`、`must be terminated` 与预算秒数,不断言宿主能在进程内停下一个不合作的循环。

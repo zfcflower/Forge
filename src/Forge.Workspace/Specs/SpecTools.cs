@@ -5,8 +5,8 @@ using Forge.Abstractions;
 namespace Forge.Workspace;
 
 /// <summary>
-/// The spec-graph tool surface: grep, get, graph and validate are read-only; create, update and delete are
-/// writes. Each call resolves a <see cref="SpecGraph"/> for the tool context's working directory, refreshing
+/// The spec-graph tool surface: get, graph and validate, all read-only (writing a spec is a file edit, and searching
+/// one is the ordinary grep). Each call resolves a <see cref="SpecGraph"/> for the tool context's working directory, refreshing
 /// the index first so the model never reads a stale tree.
 /// </summary>
 public sealed class SpecTools
@@ -28,30 +28,18 @@ public sealed class SpecTools
         ArgumentNullException.ThrowIfNull(graphFactory);
         resolve = graphFactory;
 
-        Grep = new SpecGrepTool(graphFactory);
         Get = new SpecGetTool(graphFactory);
         Graph = new SpecGraphTool(graphFactory);
         Validate = new SpecValidateTool(graphFactory);
-        Create = new SpecCreateTool(graphFactory);
-        Update = new SpecUpdateTool(graphFactory);
-        Delete = new SpecDeleteTool(graphFactory);
 
-        All = [Grep, Get, Graph, Validate, Create, Update, Delete];
+        All = [Get, Graph, Validate];
     }
-
-    public ITool Grep { get; }
 
     public ITool Get { get; }
 
     public ITool Graph { get; }
 
     public ITool Validate { get; }
-
-    public ITool Create { get; }
-
-    public ITool Update { get; }
-
-    public ITool Delete { get; }
 
     public IReadOnlyList<ITool> All { get; }
 
@@ -119,49 +107,6 @@ public sealed class SpecTools
         protected ToolResult Success(object payload) => new(SpecToolJson.Serialize(payload));
 
         protected static string? RequiredString(JsonElement root, string name) => SpecToolJson.RequiredString(root, name);
-    }
-
-    private sealed class SpecGrepTool(Func<string, SpecGraph> resolve) : SpecToolBase(
-        resolve,
-        "spec_grep",
-        "Search spec files (frontmatter plus body) by substring or regex, optionally filtered by frontmatter metadata; returns paged path:line hits.",
-        """
-        {"type":"object","properties":{"pattern":{"type":"string","description":"Substring or regex to find in spec text."},"regex":{"type":"boolean","description":"Treat the pattern as a .NET regex; default false."},"ignore_case":{"type":"boolean","description":"Case-insensitive matching; default true."},"type":{"type":"string","description":"Only specs whose frontmatter type equals this value."},"tag":{"type":"string","description":"Only specs carrying this tag."},"parent":{"type":"string","description":"Only specs whose frontmatter parent is this id."},"depends_on":{"type":"string","description":"Only specs that depend on this id."},"limit":{"type":"integer","description":"Matches per page; default 200, at most 1000."},"offset":{"type":"integer","description":"Matches to skip; default 0."},"refresh":{"type":"boolean","description":"Re-read every spec file instead of trusting size and write time; default false."}},"required":["pattern"],"additionalProperties":false}
-        """,
-        ToolSideEffect.ReadOnly)
-    {
-        protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, SpecGraph graph, CancellationToken ct)
-        {
-            var query = new SpecGrepQuery
-            {
-                Pattern = RequiredString(arguments, "pattern")!,
-                Regex = SpecToolJson.Boolean(arguments, "regex", false),
-                IgnoreCase = SpecToolJson.Boolean(arguments, "ignore_case", true),
-                Type = SpecToolJson.String(arguments, "type"),
-                Tag = SpecToolJson.String(arguments, "tag"),
-                Parent = SpecToolJson.String(arguments, "parent"),
-                DependsOn = SpecToolJson.String(arguments, "depends_on"),
-                Limit = SpecToolJson.Integer(arguments, "limit", 200),
-                Offset = SpecToolJson.Integer(arguments, "offset", 0),
-            };
-
-            await RefreshAsync(arguments, graph, ct).ConfigureAwait(false);
-            var page = await graph.GrepAsync(query, ct).ConfigureAwait(false);
-            return Success(new Dictionary<string, object?>
-            {
-                ["matches"] = page.Matches
-                    .Select(static match => (object?)new Dictionary<string, object?>
-                    {
-                        ["id"] = match.Id,
-                        ["path"] = match.Path,
-                        ["line"] = match.Line,
-                        ["text"] = match.Text,
-                    })
-                    .ToArray(),
-                ["total"] = page.Total,
-                ["next_offset"] = page.NextOffset,
-            });
-        }
     }
 
     private sealed class SpecGetTool(Func<string, SpecGraph> resolve) : SpecToolBase(
@@ -270,89 +215,6 @@ public sealed class SpecTools
         }
     }
 
-    private sealed class SpecCreateTool(Func<string, SpecGraph> resolve) : SpecToolBase(
-        resolve,
-        "spec_create",
-        "Create a new spec file with frontmatter; fails when the id is already taken or the path escapes the workspace.",
-        """
-        {"type":"object","properties":{"path":{"type":"string","description":"Workspace-relative .md path, e.g. src/foo/SPEC.md."},"id":{"type":"string","description":"Unique spec id."},"type":{"type":"string","description":"Spec type, e.g. goal-and-requirements, architecture-design, module-design, submodule-design, task-spec."},"title":{"type":"string","description":"Human-readable title."},"status":{"type":"string","description":"Lifecycle status; default draft."},"parent":{"type":"string","description":"Parent spec id."},"depends_on":{"type":"array","items":{"type":"string"}},"references":{"type":"array","items":{"type":"string"}},"implements":{"type":"array","items":{"type":"string"}},"covers":{"type":"array","items":{"type":"string"}},"tags":{"type":"array","items":{"type":"string"}},"body":{"type":"string","description":"Markdown body; defaults to a heading with the title."}},"required":["path","id","type","title"],"additionalProperties":false}
-        """,
-        ToolSideEffect.Write)
-    {
-        private const string DefaultStatus = "draft";
-
-        protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, SpecGraph graph, CancellationToken ct)
-        {
-            var status = SpecToolJson.String(arguments, "status");
-            var request = new SpecCreateRequest
-            {
-                Path = RequiredString(arguments, "path")!,
-                Id = RequiredString(arguments, "id")!,
-                Type = RequiredString(arguments, "type")!,
-                Title = RequiredString(arguments, "title")!,
-                Status = string.IsNullOrWhiteSpace(status) ? DefaultStatus : status,
-                Parent = SpecToolJson.String(arguments, "parent"),
-                DependsOn = SpecToolJson.Strings(arguments, "depends_on"),
-                References = SpecToolJson.Strings(arguments, "references"),
-                Implements = SpecToolJson.Strings(arguments, "implements"),
-                Covers = SpecToolJson.Strings(arguments, "covers"),
-                Tags = SpecToolJson.Strings(arguments, "tags"),
-                Body = SpecToolJson.String(arguments, "body"),
-            };
-
-            var view = await graph.CreateAsync(request, ct).ConfigureAwait(false);
-            return Success(SpecToolJson.Describe(view));
-        }
-    }
-
-    private sealed class SpecUpdateTool(Func<string, SpecGraph> resolve) : SpecToolBase(
-        resolve,
-        "spec_update",
-        "Edit frontmatter of an existing spec, keeping the body and unnamed fields; a null value in 'set' removes the field.",
-        """
-        {"type":"object","properties":{"id":{"type":"string","description":"Spec id to update."},"set":{"type":"object","description":"Scalar fields to set; null removes the field.","additionalProperties":{"type":["string","null"]}},"add":{"type":"object","description":"List entries to append, e.g. {\"depends_on\":[\"other\"]}.","additionalProperties":{"type":"array","items":{"type":"string"}}},"remove":{"type":"object","description":"List entries to remove.","additionalProperties":{"type":"array","items":{"type":"string"}}}},"required":["id"],"additionalProperties":false}
-        """,
-        ToolSideEffect.Write)
-    {
-        protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, SpecGraph graph, CancellationToken ct)
-        {
-            var id = RequiredString(arguments, "id")!;
-            var update = new SpecFrontmatterUpdate
-            {
-                Set = SpecToolJson.ScalarMap(arguments, "set"),
-                Add = SpecToolJson.ListMap(arguments, "add"),
-                Remove = SpecToolJson.ListMap(arguments, "remove"),
-            };
-
-            var view = await graph.UpdateFrontmatterAsync(id, update, ct).ConfigureAwait(false);
-            if (view is null)
-            {
-                return new ToolResult($"No spec with id '{id}' exists in '{graph.WorkspaceRoot}'.", IsError: true);
-            }
-
-            return Success(SpecToolJson.Describe(view));
-        }
-    }
-
-    private sealed class SpecDeleteTool(Func<string, SpecGraph> resolve) : SpecToolBase(
-        resolve,
-        "spec_delete",
-        "Delete a spec file by id; links pointing at it then show up as dangling in spec_validate.",
-        """{"type":"object","properties":{"id":{"type":"string","description":"Spec id to delete."}},"required":["id"],"additionalProperties":false}""",
-        ToolSideEffect.Write)
-    {
-        protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, SpecGraph graph, CancellationToken ct)
-        {
-            var id = RequiredString(arguments, "id")!;
-            var deleted = await graph.DeleteAsync(id, ct).ConfigureAwait(false);
-            if (!deleted)
-            {
-                return new ToolResult($"No spec with id '{id}' exists in '{graph.WorkspaceRoot}'.", IsError: true);
-            }
-
-            return Success(new Dictionary<string, object?> { ["deleted"] = id });
-        }
-    }
 }
 
 internal static class SpecToolJson
@@ -391,84 +253,6 @@ internal static class SpecToolJson
         && value.TryGetInt32(out var number)
             ? number
             : fallback;
-
-    public static IReadOnlyList<string>? Strings(JsonElement root, string name)
-    {
-        if (root.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty(name, out var value)
-            || value.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
-
-        var items = new List<string>();
-        foreach (var item in value.EnumerateArray())
-        {
-            if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } text)
-            {
-                items.Add(text);
-            }
-        }
-
-        return items;
-    }
-
-    public static IReadOnlyDictionary<string, string?>? ScalarMap(JsonElement root, string name)
-    {
-        if (root.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty(name, out var value)
-            || value.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        var map = new Dictionary<string, string?>(StringComparer.Ordinal);
-        foreach (var property in value.EnumerateObject())
-        {
-            map[NormalizeName(property.Name)] = property.Value.ValueKind switch
-            {
-                JsonValueKind.Null => null,
-                JsonValueKind.String => property.Value.GetString(),
-                _ => throw new ArgumentException($"'{property.Name}' in '{name}' must be a string or null."),
-            };
-        }
-
-        return map;
-    }
-
-    public static IReadOnlyDictionary<string, IReadOnlyList<string>>? ListMap(JsonElement root, string name)
-    {
-        if (root.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty(name, out var value)
-            || value.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        var map = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-        foreach (var property in value.EnumerateObject())
-        {
-            if (property.Value.ValueKind != JsonValueKind.Array)
-            {
-                throw new ArgumentException($"'{property.Name}' in '{name}' must be an array of strings.");
-            }
-
-            var items = new List<string>();
-            foreach (var item in property.Value.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.String)
-                {
-                    throw new ArgumentException($"'{property.Name}' in '{name}' must be an array of strings.");
-                }
-
-                items.Add(item.GetString()!);
-            }
-
-            map[NormalizeName(property.Name)] = items;
-        }
-
-        return map;
-    }
 
     public static SpecEdgeKind? ParseEdge(string? name) => name switch
     {

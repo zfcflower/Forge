@@ -70,10 +70,15 @@ public sealed record ChatMessage(MessageRole Role, IReadOnlyList<ContentBlock> C
     public static ChatMessage Assistant(string text) => new(MessageRole.Assistant, [new TextBlock(text)]);
 }
 
-public sealed record TokenUsage(int InputTokens, int OutputTokens, int CacheReadTokens = 0, int CacheWriteTokens = 0)
+/// <param name="CacheWrite1hTokens">
+/// The part of <paramref name="CacheWriteTokens"/> written with the one-hour lifetime (Anthropic reports the split); the rest is the
+/// five-minute write. Analysis only: it is neither stored in a session nor priced separately.
+/// </param>
+public sealed record TokenUsage(int InputTokens, int OutputTokens, int CacheReadTokens = 0, int CacheWriteTokens = 0, int CacheWrite1hTokens = 0)
 {
     public static TokenUsage Empty { get; } = new(0, 0);
     public static TokenUsage operator +(TokenUsage a, TokenUsage b) =>
         new(a.InputTokens + b.InputTokens, a.OutputTokens + b.OutputTokens,
-            a.CacheReadTokens + b.CacheReadTokens, a.CacheWriteTokens + b.CacheWriteTokens);
+            a.CacheReadTokens + b.CacheReadTokens, a.CacheWriteTokens + b.CacheWriteTokens,
+            a.CacheWrite1hTokens + b.CacheWrite1hTokens);
 }
