@@ -181,6 +181,9 @@ internal sealed partial class ProjectTreeViewModel
     /// <summary>Ids of the registered projects whose root the last refresh found not to be a git repository.</summary>
     private HashSet<string> plainProjects = new(StringComparer.Ordinal);
 
+    /// <summary>Repository projects whose git config names no remote, as the last refresh read it; they get the "pair a remote" button.</summary>
+    private HashSet<string> remotelessProjects = new(StringComparer.Ordinal);
+
     /// <summary>"Link an existing workspace…" (7.10) of a repository project row; set by the shell.</summary>
     public Func<ProjectInfo, CancellationToken, Task>? LinkWorkspace { get; set; }
 
@@ -517,6 +520,27 @@ internal sealed partial class ProjectTreeViewModel
         }
 
         return plain;
+    }
+
+    /// <summary>
+    /// Repository projects whose git config has no remote. Reads one small file per project (no git process); a project
+    /// that is not a repository (or whose config cannot be found) is not offered the pairing.
+    /// </summary>
+    private static HashSet<string> RemotelessProjectsOf(IReadOnlyList<ProjectInfo> all, HashSet<string> plain)
+    {
+        var remoteless = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var project in all)
+        {
+            if (project.Kind == ProjectKind.Repository
+                && !plain.Contains(project.Id)
+                && Forge.App.Git.RepositoryRemotes.FindConfig(project.RootPath) is { } config
+                && !Forge.App.Git.RepositoryRemotes.ConfigHasRemote(config))
+            {
+                remoteless.Add(project.Id);
+            }
+        }
+
+        return remoteless;
     }
 
     /// <summary>A registered project whose root is a git repository, as the last refresh found it.</summary>

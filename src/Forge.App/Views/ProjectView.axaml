@@ -24,7 +24,7 @@
     </Style>
     <!-- The row's own tool button is 22 px, so it fits the 24 px name surface instead of pushing the surface (and with it the
          row) back to Button.icon's 26 px minimum. -->
-    <Style Selector="Button.tree-plus">
+    <Style Selector="Button.tree-plus, Button.tree-tool">
       <Setter Property="MinWidth" Value="22" />
       <Setter Property="MinHeight" Value="22" />
     </Style>
@@ -93,7 +93,7 @@
                                  Classes.active-session="{Binding IsActiveSession}"
                                  Data="{Binding Icon}"
                                  Margin="6,0,4,0" />
-                  <Grid Grid.Column="2" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
+                  <Grid Grid.Column="2" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
                     <!-- A project's own name is the heading of its subtree, so it reads one weight above the rows under it. -->
                     <TextBlock Text="{Binding Title}"
                                Classes.project-name="{Binding IsProject}"
@@ -137,6 +137,20 @@
                                    IsVisible="{Binding IsAutomationSession}"
                                    ToolTip.Tip="{Binding [automations.session.createdBy], Source={x:Static loc:Loc.Instance}}" />
                     <Ellipse Grid.Column="5" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
+                    <!-- A repository project without a remote: one click pairs it with one (a URL, or a new GitHub repository
+                         through gh); the button is gone once a remote exists. -->
+                    <Button Grid.Column="6"
+                            Classes="ghost icon tree-tool"
+                            Width="22"
+                            Height="22"
+                            Margin="4,0,0,0"
+                            IsVisible="{Binding NeedsRemote}"
+                            Command="{Binding PairRemoteCommand}"
+                            ToolTip.Tip="{Binding PairRemoteTooltip}"
+                            AutomationProperties.AutomationId="project-pair-remote"
+                            AutomationProperties.Name="{Binding PairRemoteTooltip}">
+                      <wc:FluentIcon Data="{StaticResource IconPlug}" Width="12" Height="12" />
+                    </Button>
                   </Grid>
                   <!-- The section's own "new conversation" tool, or the project's "new workspace": same button, two actions,
                        so the glyph and the tooltip tell them apart instead of sharing one plus. On a workspace row it is the

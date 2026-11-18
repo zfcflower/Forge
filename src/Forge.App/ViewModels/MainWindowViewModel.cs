@@ -1451,6 +1451,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         tree.IsWorkspaceConflicted = states.IsConflicted;
         tree.IsSessionBusy = IsSessionBusy;
         WireRemoval(tree);
+        WirePairing(tree);
         WireMenu(tree);
         RemoveForkWorkspace ??= RemoveForkWorkspaceAsync;
     }

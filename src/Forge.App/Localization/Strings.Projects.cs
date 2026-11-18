@@ -22,6 +22,7 @@ internal static class ProjectStrings
     public const string RunningLabelKey = "project.running";
     public const string TreeNameKey = "project.treeName";
     public const string MainCheckoutDetachedKey = "project.mainCheckout.detached";
+    public const string PairRemoteTipKey = "project.pairRemote.tip";
 
     // ---------------------------------------------------------------- the new-branch dialog
     public const string NewBranchTitleKey = "project.newBranch.title";
@@ -241,4 +242,81 @@ internal static class ProjectStrings
     public static string NewWorkspace => Loc.Instance[NewWorkspaceKey];
 
     public static string NewGeneralSessionTooltip => Loc.Instance[NewGeneralSessionTooltipKey];
+}
+
+
+/// <summary>The "pair a remote" flow of a project row (<c>project.pairRemote.*</c>).</summary>
+internal static class PairingStrings
+{
+    public const string TitleKey = "project.pairRemote.title";
+    public const string QuestionKey = "project.pairRemote.question";
+    public const string ByUrlKey = "project.pairRemote.byUrl";
+    public const string ByGitHubKey = "project.pairRemote.byGitHub";
+    public const string CancelKey = "project.pairRemote.cancel";
+    public const string UrlPromptKey = "project.pairRemote.urlPrompt";
+    public const string NamePromptKey = "project.pairRemote.namePrompt";
+    public const string VisibilityTitleKey = "project.pairRemote.visibilityTitle";
+    public const string VisibilityQuestionKey = "project.pairRemote.visibilityQuestion";
+    public const string PrivateKey = "project.pairRemote.private";
+    public const string PublicKey = "project.pairRemote.public";
+    public const string FailedKey = "project.pairRemote.failed";
+    public const string DoneTitleKey = "project.pairRemote.doneTitle";
+    public const string DoneKey = "project.pairRemote.done";
+
+    public static string Title => Loc.Instance[TitleKey];
+
+    public static string Question(string project) => Loc.Instance.Format(QuestionKey, project);
+
+    public static string ByUrl => Loc.Instance[ByUrlKey];
+
+    public static string ByGitHub => Loc.Instance[ByGitHubKey];
+
+    public static string Cancel => Loc.Instance[CancelKey];
+
+    public static string UrlPrompt => Loc.Instance[UrlPromptKey];
+
+    public static string NamePrompt => Loc.Instance[NamePromptKey];
+
+    public static string VisibilityTitle => Loc.Instance[VisibilityTitleKey];
+
+    public static string VisibilityQuestion(string name) => Loc.Instance.Format(VisibilityQuestionKey, name);
+
+    public static string Private => Loc.Instance[PrivateKey];
+
+    public static string Public => Loc.Instance[PublicKey];
+
+    public static string Failed(string reason) => Loc.Instance.Format(FailedKey, reason);
+
+    public static LocText DoneTitle => new(DoneTitleKey);
+
+    public static LocText Done(string project) => new(DoneKey, project);
+
+    [ModuleInitializer]
+    internal static void Register()
+    {
+        Loc.Register(TitleKey, "配对远程仓库", "Pair a remote repository");
+        Loc.Register(
+            QuestionKey,
+            "项目「{0}」还没有远程仓库，推送和拉取请求都需要它。怎么配对？",
+            "Project \"{0}\" has no remote repository yet; pushing and pull requests need one. How do you want to pair it?");
+        Loc.Register(ByUrlKey, "输入远程地址", "Enter a remote URL");
+        Loc.Register(ByGitHubKey, "在 GitHub 创建仓库", "Create a GitHub repository");
+        Loc.Register(CancelKey, "取消", "Cancel");
+        Loc.Register(UrlPromptKey, "远程仓库地址（会先用 git ls-remote 验证）", "Remote repository URL (verified with git ls-remote first)");
+        Loc.Register(NamePromptKey, "GitHub 仓库名（可写成 所有者/名称）", "GitHub repository name (or owner/name)");
+        Loc.Register(VisibilityTitleKey, "仓库可见性", "Repository visibility");
+        Loc.Register(
+            VisibilityQuestionKey,
+            "用 gh 创建 GitHub 仓库「{0}」并设为 origin；只创建，不推送。",
+            "Create the GitHub repository \"{0}\" with gh and set it as origin; nothing is pushed.");
+        Loc.Register(PrivateKey, "私有", "Private");
+        Loc.Register(PublicKey, "公开", "Public");
+        Loc.Register(FailedKey, "配对失败，没有改动任何配置：{0}", "Pairing failed; nothing was changed: {0}");
+        Loc.Register(DoneTitleKey, "已配对远程仓库", "Remote paired");
+        Loc.Register(
+            DoneKey,
+            "项目「{0}」的 origin 已就绪。已开的会话从下一回合起提供拉取请求工具（提示缓存从该工具组起失效一次）。",
+            "origin of \"{0}\" is set. Open sessions offer the pull request tools from their next turn (the prompt cache is lost once, from that tool group on).");
+        Loc.Register(ProjectStrings.PairRemoteTipKey, "配对远程仓库", "Pair a remote repository");
+    }
 }

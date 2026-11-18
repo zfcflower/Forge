@@ -192,6 +192,22 @@ public sealed partial class GitCli
             string.Empty);
     }
 
+    /// <summary>Adds the remote <paramref name="name"/> pointing at <paramref name="url"/>; fails when the name is taken or either value is unusable.</summary>
+    public async Task<GitRemoteResult> AddRemoteAsync(string workingDirectory, string name, string url, CancellationToken ct = default)
+    {
+        var invalid = RejectOptionLike(name, "remote name") ?? RejectOptionLike(url, "remote URL");
+        if (invalid is not null)
+        {
+            return invalid;
+        }
+
+        var arguments = Args("remote", "add", name, url);
+        var result = await RunAsync(workingDirectory, arguments, ct).ConfigureAwait(false);
+        return result.Success
+            ? GitRemoteResult.Ok($"Added remote {name} ({url}).")
+            : ToRemoteFailure(result, $"Could not add remote {name}.");
+    }
+
     /// <summary>Sets the upstream of <paramref name="branch"/> (current branch when null) to <paramref name="upstream"/>, e.g. <c>origin/feature</c>.</summary>
     public async Task<GitRemoteResult> SetUpstreamAsync(string workingDirectory, string? branch, string upstream, CancellationToken ct = default)
     {

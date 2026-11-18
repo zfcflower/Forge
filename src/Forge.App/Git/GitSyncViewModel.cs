@@ -171,6 +171,16 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         // Every formatted text follows a language switch, the same way the settings sections do. The subscription is
         // dropped by Dispose, which the main window view model calls with itself.
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        RepositoryRemotes.Added += OnRemoteAdded;
+    }
+
+    /// <summary>The pairing action added a remote: when it is the attached repository's, the row re-reads so it offers push and pull requests.</summary>
+    private void OnRemoteAdded(string configPath)
+    {
+        if (!disposed && HasContext && RepositoryRemotes.SameConfig(configPath, RepositoryRemotes.FindConfig(context.WorkingDirectory)))
+        {
+            RequestRefresh();
+        }
     }
 
     /// <summary>True when the attached session is in a repository; the row is hidden otherwise.</summary>
@@ -1358,6 +1368,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         }
 
         disposed = true;
+        RepositoryRemotes.Added -= OnRemoteAdded;
         refreshQueued = false;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
 

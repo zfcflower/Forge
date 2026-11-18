@@ -143,6 +143,7 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     private Geometry newSessionGlyph = TreeIcons.Plus;
     private string newSessionTipKey = ProjectStrings.NewSessionTooltipKey;
     private int historyCount;
+    private bool needsRemote;
     private bool archived;
     private bool isMainCheckout;
     private string? forkOfBranch;
@@ -309,6 +310,18 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         set => SetAndNotify(ref newSessionTipKey, value, nameof(NewSessionTooltip));
     }
 
+    /// <summary>True on a repository project row whose repository has no remote; shows the "pair a remote" button.</summary>
+    public bool NeedsRemote
+    {
+        get => needsRemote;
+        set => Set(ref needsRemote, value);
+    }
+
+    /// <summary>The "pair a remote" button's command; null on every row but a project row.</summary>
+    public ICommand? PairRemoteCommand { get; set; }
+
+    public string PairRemoteTooltip => Loc.Instance[ProjectStrings.PairRemoteTipKey];
+
     /// <summary>The trailing "+"; a project that is not a git repository has no "new workspace…" to offer (5.2).</summary>
     public bool HasNewSession => NewSessionCommand is not null && !IsPlainProject;
 
@@ -349,6 +362,7 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         OnPropertyChanged(nameof(Subtitle));
         OnPropertyChanged(nameof(RunningText));
         OnPropertyChanged(nameof(NewSessionTooltip));
+        OnPropertyChanged(nameof(PairRemoteTooltip));
         OnPropertyChanged(nameof(ForkLabel));
         OnPropertyChanged(nameof(ForkHeader));
         OnPropertyChanged(nameof(MergeBackHeader));
@@ -926,6 +940,9 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// <summary>"Delete all sessions permanently…" of a recycled workspace row (7.5).</summary>
     public Func<WorkspaceTarget, CancellationToken, Task>? PurgeAll { get; set; }
 
+    /// <summary>The project row's "pair a remote" button: asks how (a URL or a new GitHub repository), runs it and reports the outcome.</summary>
+    public Func<ProjectInfo, CancellationToken, Task>? PairRemote { get; set; }
+
     /// <summary>"Close project…" (7.7): the soft close; the hard <see cref="IProjectRegistry.RemoveAsync"/> is never offered.</summary>
     public Func<ProjectInfo, CancellationToken, Task>? CloseProject { get; set; }
 
@@ -1138,6 +1155,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             var heads = await headsRead.ConfigureAwait(true);
             var git = await gitRead.ConfigureAwait(true);
             plainProjects = PlainProjectsOf(all, heads);
+            remotelessProjects = await Task.Run(() => RemotelessProjectsOf(all, plainProjects), ct).ConfigureAwait(true);
             var planned = await Task.Run(() => Plan(all, roots, sessions, running, agents, heads, git), ct).ConfigureAwait(true);
             var plans = planned.Plans;
             storedChildren = planned.StoredChildren;
@@ -1803,6 +1821,8 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                     remove: null);
                 break;
             case TreeNodeKind.Project when plan.Project is { } project:
+                node.NeedsRemote = IsRepository(project) && remotelessProjects.Contains(project.Id) && PairRemote is not null;
+                node.PairRemoteCommand = new AsyncRelayCommand(ct => PairRemote?.Invoke(project, ct) ?? Task.CompletedTask, () => PairRemote is not null, OnFailed);
                 node.SetCommands(
                     open: null,
                     newSession: new AsyncRelayCommand(ct => CreateWorktreeSessionAsync(project, ct), () => true, OnFailed),

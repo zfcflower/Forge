@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Forge.Abstractions;
 using Forge.App.Approval;
+using Forge.App.Git;
 using Forge.Core.Agents;
 using Forge.Core.Prompts;
 using Forge.Core.Prompts.Templates;
@@ -251,11 +252,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// <summary>False for a general-area session: its folder lives inside the shared General repository, so git tools would show every general session's changes at once.</summary>
     private bool gitToolsOn = true;
 
-    /// <summary>True when the session's repository has a remote; the PR tools are only offered then. Re-checked each turn through <see cref="remoteConfigStamp"/>.</summary>
+    /// <summary>True when the session's repository has a remote; the PR tools are only offered then. Re-decided when FORGE's pairing action reports a remote (<see cref="remoteAdded"/>); a remote added from outside is not noticed.</summary>
     private bool pullRequestToolsOn;
 
-    /// <summary>Last write time and length of the repository's git config when <see cref="pullRequestToolsOn"/> was decided.</summary>
-    private (DateTime Written, long Length) remoteConfigStamp;
+    /// <summary>Set by <see cref="RepositoryRemotes.Added"/> for this session's repository; consumed at the next turn boundary.</summary>
+    private bool remoteAdded;
 
     /// <summary>What the chat can draw (diagrams, images, file links), told to the root; a snapshot per host like <see cref="orchestration"/>.</summary>
     private string chatRendering = string.Empty;
@@ -303,6 +304,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         {
             changes.Changed += OnCompactionChanged;
         }
+
+        RepositoryRemotes.Added += OnRemoteAdded;
     }
 
     public SessionInfo Session { get; }
@@ -1040,28 +1043,35 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>
-    /// Whether the working directory's repository has a remote, read straight from the git config (no git process), and the
-    /// config's stamp so the next turns can skip the read. A directory without a repository has no remote.
+    /// Whether the working directory's repository has a remote, read straight from the git config (no git process). A
+    /// directory without a repository has no remote.
     /// </summary>
-    private bool ProbeRemote()
+    private bool ProbeRemote() => RepositoryRemotes.HasRemote(Session.WorkspacePath);
+
+    /// <summary>
+    /// FORGE's pairing action added a remote to a repository (the event is keyed by the repository's git config): when it is
+    /// this session's repository, the PR group is re-decided at the next turn boundary, never under a running turn.
+    /// </summary>
+    private void OnRemoteAdded(string configPath)
     {
-        var path = FindGitConfig(Session.WorkspacePath);
-        remoteConfigStamp = StampOf(path);
-        return path is not null && ConfigHasRemote(path);
+        if (RepositoryRemotes.SameConfig(configPath, RepositoryRemotes.FindConfig(Session.WorkspacePath)))
+        {
+            Volatile.Write(ref remoteAdded, true);
+        }
     }
 
     /// <summary>
-    /// Re-decides the PR group when the repository's git config changed since the last decision (a remote added or removed):
-    /// one file stat per turn, and a re-read of that small file only after a change. Replaces the external tools only when the
-    /// answer moved, so the prefix breaks from the PR group on, never before it. Caller holds <see cref="gate"/>.
+    /// Adds the PR group when the pairing action gave the repository a remote since the last decision: replaces the external
+    /// tools only when the answer moved, so the prefix breaks from the PR group on, never before it. Caller holds <see cref="gate"/>.
     /// </summary>
     private void RefreshPullRequestTools(AgentHost target)
     {
-        if (!gitToolsOn || StampOf(FindGitConfig(Session.WorkspacePath)) == remoteConfigStamp)
+        if (!gitToolsOn || !Volatile.Read(ref remoteAdded))
         {
             return;
         }
 
+        remoteAdded = false;
         var wanted = ProbeRemote();
         if (wanted == pullRequestToolsOn)
         {
@@ -1070,92 +1080,6 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
         pullRequestToolsOn = wanted;
         target.ReplaceExternalTools(CollectExternalTools());
-    }
-
-    private static (DateTime Written, long Length) StampOf(string? configPath)
-    {
-        try
-        {
-            var info = configPath is null ? null : new FileInfo(configPath);
-            return info is { Exists: true } ? (info.LastWriteTimeUtc, info.Length) : default;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return default;
-        }
-    }
-
-    /// <summary>
-    /// The git config that holds the remotes: <c>.git/config</c> of the repository the directory belongs to; a worktree's
-    /// <c>.git</c> file points (through <c>gitdir</c> and <c>commondir</c>) at the main repository's config. Null when the
-    /// directory is not in a repository or the paths cannot be read.
-    /// </summary>
-    internal static string? FindGitConfig(string workingDirectory)
-    {
-        try
-        {
-            for (var directory = new DirectoryInfo(workingDirectory); directory is not null; directory = directory.Parent)
-            {
-                var dotGit = Path.Combine(directory.FullName, ".git");
-                string? common = null;
-                if (Directory.Exists(dotGit))
-                {
-                    common = dotGit;
-                }
-                else if (File.Exists(dotGit))
-                {
-                    var line = File.ReadLines(dotGit).FirstOrDefault(static l => l.StartsWith("gitdir:", StringComparison.Ordinal));
-                    if (line is not null)
-                    {
-                        var gitDir = Path.GetFullPath(Path.Combine(directory.FullName, line["gitdir:".Length..].Trim()));
-                        var commonFile = Path.Combine(gitDir, "commondir");
-                        common = File.Exists(commonFile)
-                            ? Path.GetFullPath(Path.Combine(gitDir, File.ReadAllText(commonFile).Trim()))
-                            : gitDir;
-                    }
-                }
-
-                if (common is not null)
-                {
-                    var config = Path.Combine(common, "config");
-                    return File.Exists(config) ? config : null;
-                }
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Whether the config file has a <c>[remote "name"]</c> section. Section names are case-insensitive in git; a remote
-    /// configured through an included file or <c>config.worktree</c> is not seen (rare, and the PR tools then stay off).
-    /// </summary>
-    internal static bool ConfigHasRemote(string configPath)
-    {
-        try
-        {
-            foreach (var raw in File.ReadLines(configPath))
-            {
-                var line = raw.AsSpan().TrimStart();
-                if (line.Length > 8 && line[0] == '[' && line[1..].StartsWith("remote", StringComparison.OrdinalIgnoreCase))
-                {
-                    var rest = line[7..].TrimStart();
-                    if (rest.Length > 0 && rest[0] == '"')
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            AppLogs.Session.ZLogWarning($"the git config could not be read: {exception.Message}");
-        }
-
-        return false;
     }
 
     /// <summary>True when the workspace has at least one spec file with an id. Only asked when the orchestration is off.</summary>
@@ -1213,6 +1137,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         specToolsOn = orchestration.Length > 0 || WorkspaceHasSpecs(Session.WorkspacePath);
         gitToolsOn = !IsGeneralSession();
         pullRequestToolsOn = gitToolsOn && ProbeRemote();
+        remoteAdded = false;
         var compaction = services.CurrentCompaction();
         var toolSegments = BuildTools();
         var built = new AgentHost(
@@ -1741,6 +1666,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         lock (gate)
         {
             disposed = true;
+            RepositoryRemotes.Added -= OnRemoteAdded;
             aliases = [.. childSessions.Values];
             childSessions.Clear();
             builtHost = null;
