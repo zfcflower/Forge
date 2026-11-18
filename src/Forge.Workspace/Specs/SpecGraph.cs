@@ -14,14 +14,12 @@ public sealed class SpecGraph
     private const int MaxGrepLimit = 1000;
     private const int MaxGraphDepth = 10;
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
-    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private static readonly StringComparer PathComparer =
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     private readonly SpecGraphOptions options;
     private readonly SemaphoreSlim mutex = new(1, 1);
-    private readonly HashSet<string> stalePaths = new(PathComparer);
     private Snapshot snapshot = Snapshot.Empty;
     private bool loaded;
 
@@ -192,182 +190,6 @@ public sealed class SpecGraph
         return new SpecValidationResult(issues);
     }
 
-    public async Task<SpecNodeView> CreateAsync(SpecCreateRequest request, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Id);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Type);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Title);
-        var fullPath = ResolvePath(request.Path);
-        WorkspacePaths.EnsurePlainPathInside(WorkspaceRoot, fullPath, nameof(request));
-
-        await mutex.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ScanAsync(force: false, ct).ConfigureAwait(false);
-
-            if (snapshot.ById.ContainsKey(request.Id))
-            {
-                throw new InvalidOperationException($"A spec with id '{request.Id}' already exists.");
-            }
-
-            var fields = new List<SpecField>
-            {
-                new(SpecFrontmatter.IdField, [request.Id]),
-                new(SpecFrontmatter.TypeField, [request.Type]),
-                new(SpecFrontmatter.TitleField, [request.Title]),
-            };
-            if (!string.IsNullOrWhiteSpace(request.Status))
-            {
-                fields.Add(new(SpecFrontmatter.StatusField, [request.Status]));
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.Parent))
-            {
-                fields.Add(new(SpecFrontmatter.ParentField, [request.Parent]));
-            }
-
-            AddList(fields, SpecFrontmatter.DependsOnField, request.DependsOn);
-            AddList(fields, SpecFrontmatter.ReferencesField, request.References);
-            AddList(fields, SpecFrontmatter.ImplementsField, request.Implements);
-            AddList(fields, SpecFrontmatter.CoversField, request.Covers);
-            AddList(fields, SpecFrontmatter.TagsField, request.Tags);
-
-            var body = request.Body is null ? $"\n# {request.Title}\n" : request.Body.StartsWith('\n') ? request.Body : "\n" + request.Body;
-            var frontmatter = new SpecFrontmatter(fields);
-            var parent = Path.GetDirectoryName(fullPath);
-            if (!string.IsNullOrEmpty(parent))
-            {
-                Directory.CreateDirectory(parent);
-            }
-
-            await WriteNewFileAsync(fullPath, frontmatter.ToMarkdown(body), ct).ConfigureAwait(false);
-            stalePaths.Add(fullPath);
-            await ScanAsync(force: false, ct).ConfigureAwait(false);
-            return BuildView(snapshot, request.Id)
-                ?? throw new InvalidOperationException($"Spec '{request.Id}' was written to '{fullPath}' but not indexed.");
-        }
-        finally
-        {
-            mutex.Release();
-        }
-    }
-
-    /// <summary>Edits frontmatter in place, keeping the body and every field the update does not name.</summary>
-    public async Task<SpecNodeView?> UpdateFrontmatterAsync(string id, SpecFrontmatterUpdate update, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        ArgumentNullException.ThrowIfNull(update);
-
-        await mutex.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ScanAsync(force: false, ct).ConfigureAwait(false);
-
-            var entry = FindById(snapshot, id);
-            if (entry is null)
-            {
-                return null;
-            }
-
-            WorkspacePaths.EnsurePlainPathInside(WorkspaceRoot, entry.FullPath, nameof(id));
-
-            var frontmatter = entry.Frontmatter;
-            if (update.Set is not null)
-            {
-                foreach (var pair in update.Set)
-                {
-                    frontmatter = pair.Value is null ? frontmatter.Remove(pair.Key) : frontmatter.With(pair.Key, pair.Value);
-                }
-            }
-
-            if (update.Add is not null)
-            {
-                foreach (var pair in update.Add)
-                {
-                    frontmatter = frontmatter.AddToList(pair.Key, pair.Value);
-                }
-            }
-
-            if (update.Remove is not null)
-            {
-                foreach (var pair in update.Remove)
-                {
-                    frontmatter = frontmatter.RemoveFromList(pair.Key, pair.Value);
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(frontmatter.Id) || string.IsNullOrWhiteSpace(frontmatter.Type))
-            {
-                throw new InvalidOperationException($"Update would remove 'id' or 'type' from spec '{id}'.");
-            }
-
-            var lineEnding = entry.RawText.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-            await AtomicFile.WriteAllBytesAsync(entry.FullPath, Utf8NoBom.GetBytes(frontmatter.ToMarkdown(entry.Body, lineEnding)), cancellationToken: ct).ConfigureAwait(false);
-            stalePaths.Add(entry.FullPath);
-            await ScanAsync(force: false, ct).ConfigureAwait(false);
-            return BuildView(snapshot, frontmatter.Id!);
-        }
-        finally
-        {
-            mutex.Release();
-        }
-    }
-
-    /// <summary>Deletes the spec file; links pointing at it become dangling and show up in <see cref="ValidateAsync"/>.</summary>
-    public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        await mutex.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ScanAsync(force: false, ct).ConfigureAwait(false);
-
-            var entry = FindById(snapshot, id);
-            if (entry is null)
-            {
-                return false;
-            }
-
-            WorkspacePaths.EnsurePlainPathInside(WorkspaceRoot, entry.FullPath, nameof(id));
-            File.Delete(entry.FullPath);
-            stalePaths.Remove(entry.FullPath);
-            await ScanAsync(force: false, ct).ConfigureAwait(false);
-            return true;
-        }
-        finally
-        {
-            mutex.Release();
-        }
-    }
-
-    /// <summary>
-    /// Writes a new file atomically: the create fails instead of overwriting, so a file that appeared after the
-    /// caller's check keeps its original bytes.
-    /// </summary>
-    private async Task WriteNewFileAsync(string fullPath, string text, CancellationToken ct)
-    {
-        var bytes = Utf8NoBom.GetBytes(text);
-        try
-        {
-            await using var stream = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, useAsync: true);
-            await stream.WriteAsync(bytes, ct).ConfigureAwait(false);
-            await stream.FlushAsync(ct).ConfigureAwait(false);
-        }
-        catch (IOException exception) when (File.Exists(fullPath))
-        {
-            throw new InvalidOperationException($"Spec file '{fullPath}' already exists; it was left unchanged.", exception);
-        }
-    }
-
-    private static void AddList(List<SpecField> fields, string name, IReadOnlyList<string>? values)
-    {
-        if (values is { Count: > 0 })
-        {
-            fields.Add(new SpecField(name, values.ToArray()));
-        }
-    }
-
     private async Task EnsureLoadedAsync(CancellationToken ct)
     {
         if (loaded)
@@ -418,8 +240,7 @@ public sealed class SpecGraph
                     continue;
                 }
 
-                var markedStale = stalePaths.Remove(file.FullName);
-                if (!force && !markedStale && cached.Length == length && cached.LastWriteTicks == ticks)
+                if (!force && cached.Length == length && cached.LastWriteTicks == ticks)
                 {
                     next[file.FullName] = cached;
                     continue;
@@ -810,25 +631,6 @@ public sealed class SpecGraph
         }
 
         return true;
-    }
-
-    private string ResolvePath(string path)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var full = Path.IsPathRooted(path)
-            ? Path.GetFullPath(path)
-            : Path.GetFullPath(Path.Combine(WorkspaceRoot, path));
-        if (!WorkspacePaths.IsUnder(full, WorkspaceRoot))
-        {
-            throw new ArgumentException($"'{path}' is outside the workspace '{WorkspaceRoot}'.", nameof(path));
-        }
-
-        if (!string.Equals(Path.GetExtension(full), options.Extension, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException($"Spec files must end in '{options.Extension}'.", nameof(path));
-        }
-
-        return full;
     }
 
     private sealed record SpecEntry

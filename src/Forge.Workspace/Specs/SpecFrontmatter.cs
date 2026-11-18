@@ -95,65 +95,9 @@ public sealed class SpecFrontmatter
     public IReadOnlyList<string> List(string name) =>
         indexByName.TryGetValue(name, out var index) ? Fields[index].Values : Array.Empty<string>();
 
-    /// <summary>Returns a copy with the field set to one value, or removed when <paramref name="value"/> is null.</summary>
-    public SpecFrontmatter With(string name, string? value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        var fields = Fields.Where(field => !string.Equals(field.Name, name, StringComparison.Ordinal)).ToList();
-        if (value is not null)
-        {
-            fields.Add(new SpecField(name, [value]));
-        }
-
-        return new SpecFrontmatter(fields);
-    }
-
-    /// <summary>Returns a copy with the field replaced by the given list; an empty list keeps an explicit <c>[]</c>.</summary>
-    public SpecFrontmatter WithList(string name, IReadOnlyList<string> values)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(values);
-        var fields = Fields.Where(field => !string.Equals(field.Name, name, StringComparison.Ordinal)).ToList();
-        fields.Add(new SpecField(name, values.ToArray()));
-        return new SpecFrontmatter(fields);
-    }
-
-    public SpecFrontmatter Remove(string name)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return new SpecFrontmatter(Fields.Where(field => !string.Equals(field.Name, name, StringComparison.Ordinal)).ToList());
-    }
-
-    public SpecFrontmatter AddToList(string name, IReadOnlyList<string> values)
-    {
-        ArgumentNullException.ThrowIfNull(values);
-        var existing = indexByName.ContainsKey(name) ? List(name).ToList() : [];
-        foreach (var value in values)
-        {
-            if (!existing.Contains(value, StringComparer.Ordinal))
-            {
-                existing.Add(value);
-            }
-        }
-
-        return WithList(name, existing);
-    }
-
-    public SpecFrontmatter RemoveFromList(string name, IReadOnlyList<string> values)
-    {
-        ArgumentNullException.ThrowIfNull(values);
-        if (!indexByName.ContainsKey(name))
-        {
-            return this;
-        }
-
-        var remaining = List(name).Where(value => !values.Contains(value, StringComparer.Ordinal)).ToArray();
-        return WithList(name, remaining);
-    }
-
     /// <summary>
     /// Parses a file that starts with a <c>---</c> line. <paramref name="body"/> is everything after the closing
-    /// line, keeping its leading newline, so <see cref="ToMarkdown"/> reproduces the file.
+    /// line, keeping its leading newline.
     /// </summary>
     public static bool TryParse(string text, out SpecFrontmatter frontmatter, out string body)
     {
@@ -202,41 +146,6 @@ public sealed class SpecFrontmatter
         }
 
         return false;
-    }
-
-    /// <param name="lineEnding">Line ending of the frontmatter block; callers pass the file's own ending so an update does not mix endings.</param>
-    public string ToMarkdown(string body, string lineEnding = "\n")
-    {
-        ArgumentNullException.ThrowIfNull(body);
-        ArgumentException.ThrowIfNullOrEmpty(lineEnding);
-        var builder = new StringBuilder((Fields.Count + 1) * lineEnding.Length);
-        builder.Append("---").Append(lineEnding);
-        foreach (var field in Fields)
-        {
-            if (field.RawText is not null)
-            {
-                builder.Append(string.Join(lineEnding, field.RawText.Split((char)10))).Append(lineEnding);
-                continue;
-            }
-
-            builder.Append(field.Name).Append(':');
-            if (field.Values.Count == 1 && !ListFields.Contains(field.Name))
-            {
-                builder.Append(' ').Append(FormatValue(field.Values[0]));
-            }
-            else
-            {
-                builder.Append(" [")
-                    .Append(string.Join(", ", field.Values.Select(FormatListItem)))
-                    .Append(']');
-            }
-
-            builder.Append(lineEnding);
-        }
-
-        builder.Append("---").Append(lineEnding);
-        builder.Append(body);
-        return builder.ToString();
     }
 
     public static SpecFrontmatter Empty { get; } = new(Array.Empty<SpecField>());
@@ -561,36 +470,6 @@ public sealed class SpecFrontmatter
         return builder.ToString();
     }
 
-    private static string FormatValue(string value) => NeedsQuoting(value) ? Quote(value) : value;
-
-    private static string FormatListItem(string value) =>
-        NeedsQuoting(value) || ContainsAnyOf(value, ",[]{}") ? Quote(value) : value;
-
-    private static string Quote(string value)
-    {
-        var builder = new StringBuilder(value.Length + 2);
-        builder.Append('"');
-        foreach (var ch in value)
-        {
-            AppendEscaped(builder, ch);
-        }
-
-        return builder.Append('"').ToString();
-    }
-
-    private static void AppendEscaped(StringBuilder builder, char value)
-    {
-        switch (value)
-        {
-            case '\\': builder.Append("\\\\"); break;
-            case '"': builder.Append("\\\""); break;
-            case '\n': builder.Append("\\n"); break;
-            case '\r': builder.Append("\\r"); break;
-            case '\t': builder.Append("\\t"); break;
-            default: builder.Append(value); break;
-        }
-    }
-
     private static bool ContainsAnyOf(ReadOnlySpan<char> value, ReadOnlySpan<char> candidates)
     {
         foreach (var ch in value)
@@ -602,30 +481,5 @@ public sealed class SpecFrontmatter
         }
 
         return false;
-    }
-
-    private static bool NeedsQuoting(string value)
-    {
-        if (value.Length == 0 || value[0] is ' ' or '\t' or '[' or ']' or '{' or '}' or '"' or '\'' or '#' or '-' or '&' or '*' or '!' or '|' or '>' or '%' or '@' or '`')
-        {
-            return true;
-        }
-
-        if (value[^1] is ' ' or '\t')
-        {
-            return true;
-        }
-
-        if (ContainsAnyOf(value, "\n\r\t\\\""))
-        {
-            return true;
-        }
-
-        if (value.Contains(": ", StringComparison.Ordinal) || value.EndsWith(':') || value.Contains(" #", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return value is "null" or "true" or "false" or "~";
     }
 }

@@ -31,12 +31,11 @@
 - 刷新按钮；刷新是整表替换（滚动位置回到顶部）。
 - 行有引导线（竖线对齐父级箭头中线），与文件树同一套缩进样式。
 
-## 5.4 写入守卫与无损往返
+## 5.4 只读索引与解析
 
-- 以下写入守卫属于 `SpecGraph` 库 API(`CreateAsync`/`UpdateFrontmatterAsync`/`DeleteAsync`),目前没有工具或界面调用它们;Agent 改规格走 `edit`/`write`。规格写入限制在所属工作区内：创建/更新/删除前解析符号链接与 junction 的真实目标，越界即拒绝（`WorkspacePathException`）。
-- 更新 frontmatter 时把整份 Markdown（UTF-8 无 BOM、沿用原有行尾）交给 `AtomicFile.WriteAllBytesAsync`：同目录临时文件 + `fsync` + 改名覆盖，读者不会看到半文件；目标是只读文件或目录时立即失败且原文件逐字节不变，临时文件被删除。
-- frontmatter 列表解析与序列化互逆（引号、逗号、转义）；解析器不支持的语法保留 `RawText` 原样回写，不静默重写。
-- `spec_validate` 是唯一的图健康检查入口；界面不提供“批量修复”，悬挂链接与环只报告、不猜。
+- 规格只读:`SpecGraph` 与三个工具都不写文件;Agent 改规格走 `edit`/`write`,索引按文件大小 + 修改时间发现变化后重读。
+- 解析器不支持的 frontmatter 语法保留 `RawText` 原样输出,不静默丢弃。
+- `spec_validate` 是唯一的图健康检查入口;界面不提供“批量修复”,悬挂链接与环只报告、不猜。
 
 ## 5.5 在 Agent 工作流中的位置
 

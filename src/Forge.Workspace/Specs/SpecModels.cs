@@ -73,45 +73,6 @@ public sealed record SpecGraphSlice(
     IReadOnlyList<SpecGraphNode> Nodes,
     IReadOnlyList<SpecGraphEdgeLink> Edges);
 
-public sealed record SpecCreateRequest
-{
-    /// <summary>Workspace-relative or absolute path; must end in <c>.md</c> and stay inside the workspace.</summary>
-    public required string Path { get; init; }
-
-    public required string Id { get; init; }
-
-    public required string Type { get; init; }
-
-    public required string Title { get; init; }
-
-    public string? Status { get; init; }
-
-    public string? Parent { get; init; }
-
-    public IReadOnlyList<string>? DependsOn { get; init; }
-
-    public IReadOnlyList<string>? References { get; init; }
-
-    public IReadOnlyList<string>? Implements { get; init; }
-
-    public IReadOnlyList<string>? Covers { get; init; }
-
-    public IReadOnlyList<string>? Tags { get; init; }
-
-    public string? Body { get; init; }
-}
-
-/// <summary>Frontmatter edit; keys not listed are left untouched, including fields the parser does not know.</summary>
-public sealed record SpecFrontmatterUpdate
-{
-    /// <summary>Scalar fields to set; a null value removes the field.</summary>
-    public IReadOnlyDictionary<string, string?>? Set { get; init; }
-
-    public IReadOnlyDictionary<string, IReadOnlyList<string>>? Add { get; init; }
-
-    public IReadOnlyDictionary<string, IReadOnlyList<string>>? Remove { get; init; }
-}
-
 public sealed record SpecRefreshResult(int FilesScanned, int SpecsIndexed, int Added, int Updated, int Removed);
 
 public sealed record SpecGraphOptions
