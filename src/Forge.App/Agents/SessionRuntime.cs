@@ -1228,7 +1228,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         lock (gate)
         {
-            if (disposed || host is null)
+            // A running turn keeps its host (its approval and question handlers live there); the stale flag stays so the
+            // reload can be applied once the turn has ended.
+            if (disposed || host is null || activeRoot is not null)
             {
                 return;
             }
