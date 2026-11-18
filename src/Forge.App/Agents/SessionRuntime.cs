@@ -111,9 +111,6 @@ internal sealed record AgentRuntimeServices(
     /// </summary>
     public IProjectRegistry? Projects { get; set; }
 
-    /// <summary>Whether the repository at a working directory has at least one remote; decides whether the PR tools are offered.</summary>
-    public Func<string, CancellationToken, Task<bool>>? HasRemote { get; set; }
-
     /// <summary>
     /// The workspace file and shell tools (<c>read</c>, <c>write</c>, <c>edit</c>, <c>ls</c>, <c>find</c>, <c>grep</c>,
     /// <c>bash</c>) from <c>Forge.IO</c>. Stateless across sessions: every call takes the session's worktree from its
@@ -1042,37 +1039,25 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
-    /// <summary>Asks git whether the working directory has a remote, and remembers the config stamp so the next turns can skip the question.</summary>
+    /// <summary>
+    /// Whether the working directory's repository has a remote, read straight from the git config (no git process), and the
+    /// config's stamp so the next turns can skip the read. A directory without a repository has no remote.
+    /// </summary>
     private bool ProbeRemote()
     {
-        if (services.HasRemote is not { } hasRemote)
-        {
-            return services.PullRequestTools.Count > 0;
-        }
-
-        var stamp = ReadConfigStamp(Session.WorkspacePath);
-        try
-        {
-            var found = Task.Run(() => hasRemote(Session.WorkspacePath, CancellationToken.None)).GetAwaiter().GetResult();
-            remoteConfigStamp = stamp;
-            return found;
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            AppLogs.Session.ZLogWarning($"the remote probe failed: {exception.Message}");
-            remoteConfigStamp = stamp;
-            return false;
-        }
+        var path = FindGitConfig(Session.WorkspacePath);
+        remoteConfigStamp = StampOf(path);
+        return path is not null && ConfigHasRemote(path);
     }
 
     /// <summary>
     /// Re-decides the PR group when the repository's git config changed since the last decision (a remote added or removed):
-    /// one file stat per turn, and a <c>git remote</c> call only after a change. Replaces the external tools only when the answer
-    /// moved, so the prefix breaks from the PR group on, never before it. Caller holds <see cref="gate"/>.
+    /// one file stat per turn, and a re-read of that small file only after a change. Replaces the external tools only when the
+    /// answer moved, so the prefix breaks from the PR group on, never before it. Caller holds <see cref="gate"/>.
     /// </summary>
     private void RefreshPullRequestTools(AgentHost target)
     {
-        if (!gitToolsOn || services.HasRemote is null || ReadConfigStamp(Session.WorkspacePath) == remoteConfigStamp)
+        if (!gitToolsOn || StampOf(FindGitConfig(Session.WorkspacePath)) == remoteConfigStamp)
         {
             return;
         }
@@ -1087,8 +1072,25 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         target.ReplaceExternalTools(CollectExternalTools());
     }
 
-    /// <summary>The write time and length of the git config that holds the remotes, or a default when it cannot be found.</summary>
-    private static (DateTime Written, long Length) ReadConfigStamp(string workingDirectory)
+    private static (DateTime Written, long Length) StampOf(string? configPath)
+    {
+        try
+        {
+            var info = configPath is null ? null : new FileInfo(configPath);
+            return info is { Exists: true } ? (info.LastWriteTimeUtc, info.Length) : default;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return default;
+        }
+    }
+
+    /// <summary>
+    /// The git config that holds the remotes: <c>.git/config</c> of the repository the directory belongs to; a worktree's
+    /// <c>.git</c> file points (through <c>gitdir</c> and <c>commondir</c>) at the main repository's config. Null when the
+    /// directory is not in a repository or the paths cannot be read.
+    /// </summary>
+    internal static string? FindGitConfig(string workingDirectory)
     {
         try
         {
@@ -1115,8 +1117,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
                 if (common is not null)
                 {
-                    var info = new FileInfo(Path.Combine(common, "config"));
-                    return info.Exists ? (info.LastWriteTimeUtc, info.Length) : default;
+                    var config = Path.Combine(common, "config");
+                    return File.Exists(config) ? config : null;
                 }
             }
         }
@@ -1124,7 +1126,36 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         {
         }
 
-        return default;
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the config file has a <c>[remote "name"]</c> section. Section names are case-insensitive in git; a remote
+    /// configured through an included file or <c>config.worktree</c> is not seen (rare, and the PR tools then stay off).
+    /// </summary>
+    internal static bool ConfigHasRemote(string configPath)
+    {
+        try
+        {
+            foreach (var raw in File.ReadLines(configPath))
+            {
+                var line = raw.AsSpan().TrimStart();
+                if (line.Length > 8 && line[0] == '[' && line[1..].StartsWith("remote", StringComparison.OrdinalIgnoreCase))
+                {
+                    var rest = line[7..].TrimStart();
+                    if (rest.Length > 0 && rest[0] == '"')
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AppLogs.Session.ZLogWarning($"the git config could not be read: {exception.Message}");
+        }
+
+        return false;
     }
 
     /// <summary>True when the workspace has at least one spec file with an id. Only asked when the orchestration is off.</summary>

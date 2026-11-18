@@ -619,7 +619,6 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.ClaimsOfficialIdentity = () => providers.Catalog.ClaimsOfficialIdentity;
         runtimeServices.PullRequestTools = pullRequestTools;
         runtimeServices.Projects = projects;
-        runtimeServices.HasRemote = async (directory, token) => (await git.GetRemotesAsync(directory, token).ConfigureAwait(false)).Count > 0;
         // Compaction thresholds follow each model's effective window: the same resolution chain the context gauge shows
         // (catalog snapshot → provider report → default context window → per-model override).
         runtimeServices.ContextWindow = model => providers.Catalog.MetadataFor(model.Model, model.ProviderId).ContextWindow;
