@@ -274,6 +274,15 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private SessionQuestionHandler? questionHandler;
     private AgentHost? builtHost;
     private ExtensionHostClient? listenedClient;
+
+    /// <summary>Watches the files the prompt snapshot was built from; replaced by every host build.</summary>
+    private PromptSourceWatcher? promptWatcher;
+
+    /// <summary>True once a prompt source changed after the current host's snapshot; cleared by <see cref="HotReloadPrompts"/>.</summary>
+    private bool promptsStale;
+
+    /// <summary>A hot reload was asked for: the next turn builds a fresh host (new snapshot) and resumes the root from the store.</summary>
+    private bool reloadPending;
     private CompactionSettings? appliedCompaction;
     // Built eagerly / published once: the turn thread (RefreshMcpTools) and a tool thread (the search callback) both reach them,
     // and a second exposure instance created by a race would silently drop the pins the other one holds.
@@ -668,7 +677,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (host is not null && root is not null && !rootStale)
+            if (host is not null && root is not null && !rootStale && !reloadPending)
             {
                 ApplyDisabledTools(host);
                 ApplySubAgentLimits(host);
@@ -681,14 +690,15 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
             // A changed root definition reuses the host (its tools, approval handler and router registration) and only
             // rebuilds the root agent from the store.
-            built = host ?? Build();
+            built = host is not null && !reloadPending ? host : Build();
             definition = rootDefinition;
         }
 
         agent = await built.ResumeRootAsync(SessionId, Session.WorkspacePath, CancellationToken.None, WithOrchestration(definition)).ConfigureAwait(false);
         lock (gate)
         {
-            host ??= built;
+            host = built;
+            reloadPending = false;
             root = agent;
             ApplyDisabledTools(host);
             ApplySubAgentLimits(host);
@@ -1215,7 +1225,74 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         // From here on a plugin or workflow run of this session can call tools through this session's tool set and handler.
         builtHost = built;
         services.ToolRouter?.Register(SessionId, this);
+        StartPromptWatch();
         return built;
+    }
+
+    /// <summary>Raised (on any thread) when <see cref="PromptsStale"/> changes: a prompt source changed, or a reload was requested.</summary>
+    public event Action? PromptsStaleChanged;
+
+    /// <summary>
+    /// Whether a template, agent, skill or <c>AGENTS.md</c> file changed after this session's agent host took its prompt
+    /// snapshot. False before the first turn (nothing was snapshotted yet).
+    /// </summary>
+    public bool PromptsStale
+    {
+        get
+        {
+            lock (gate)
+            {
+                return promptsStale;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Re-reads every prompt source: from the next turn on the session runs on a fresh agent host (templates, system slot,
+    /// layers, agent kinds, skill index) and the root agent is resumed from the store, so the conversation keeps its context.
+    /// The prompt cache of the conversation is lost once (the prefix changed). A running turn is not touched; it ends on the
+    /// snapshot it started with. Before the first turn there is nothing to reload (the first build reads the files).
+    /// </summary>
+    public void HotReloadPrompts()
+    {
+        lock (gate)
+        {
+            if (disposed || host is null)
+            {
+                return;
+            }
+
+            reloadPending = true;
+            promptsStale = false;
+        }
+
+        PromptsStaleChanged?.Invoke();
+    }
+
+    private void StartPromptWatch()
+    {
+        var previous = promptWatcher;
+        var watcher = new PromptSourceWatcher(AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
+        watcher.Changed += OnPromptSourceChanged;
+        promptWatcher = watcher;
+        promptsStale = false;
+        watcher.Arm();
+        previous?.Dispose();
+    }
+
+    private void OnPromptSourceChanged()
+    {
+        lock (gate)
+        {
+            if (disposed || reloadPending || promptsStale)
+            {
+                return;
+            }
+
+            promptsStale = true;
+        }
+
+        PromptsStaleChanged?.Invoke();
     }
 
     /// <summary>
@@ -1638,6 +1715,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             builtHost = null;
             host = null;
             root = null;
+            promptWatcher?.Dispose();
+            promptWatcher = null;
             handler = approvalHandler;
             approvalHandler = null;
             questionDisposable = questionHandler;

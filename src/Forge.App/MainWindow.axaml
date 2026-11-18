@@ -106,6 +106,62 @@
                            Height="16"
                            Foreground="{DynamicResource TextMutedBrush}" />
           </Button>
+          <!-- Reload prompts of the active session: a session reads templates, agents, skills and AGENTS.md once, so an edit
+               on disk reaches it only through this choice - hot reload (cache lost once) or a new session in the same place.
+               The dot says a watched file changed after the session's snapshot. -->
+          <Button x:Name="PromptReloadButton"
+                  Classes="ghost icon"
+                  Width="30"
+                  Height="26"
+                  IsEnabled="{Binding CanReloadPrompts}"
+                  ToolTip.Tip="{Binding [session.prompts.reloadTip], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="prompts-reload"
+                  AutomationProperties.Name="{Binding [session.prompts.reloadTip], Source={x:Static loc:Loc.Instance}}">
+            <Grid>
+              <wc:FluentIcon Data="{StaticResource IconRefresh}"
+                             Width="16"
+                             Height="16"
+                             Foreground="{DynamicResource TextMutedBrush}" />
+              <Ellipse Width="7"
+                       Height="7"
+                       Margin="0,-2,-3,0"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Top"
+                       Fill="{DynamicResource AccentWarmBrush}"
+                       IsVisible="{Binding HasPromptsStale}" />
+            </Grid>
+            <Button.Flyout>
+              <Flyout Placement="BottomEdgeAlignedRight">
+                <StackPanel MinWidth="300" MaxWidth="360" Spacing="4">
+                  <TextBlock Classes="caption"
+                             TextWrapping="Wrap"
+                             Text="{Binding [session.prompts.reloadHeader], Source={x:Static loc:Loc.Instance}}" />
+                  <views:PickerRow Command="{Binding HotReloadPromptsCommand}"
+                                   Click="OnPromptReloadPicked"
+                                   AutomationProperties.AutomationId="prompts-hot-reload"
+                                   AutomationProperties.Name="{Binding [session.prompts.hotReload], Source={x:Static loc:Loc.Instance}}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="{Binding [session.prompts.hotReload], Source={x:Static loc:Loc.Instance}}" FontWeight="Medium" />
+                      <TextBlock Classes="caption"
+                                 TextWrapping="Wrap"
+                                 Text="{Binding [session.prompts.hotReloadHint], Source={x:Static loc:Loc.Instance}}" />
+                    </StackPanel>
+                  </views:PickerRow>
+                  <views:PickerRow Command="{Binding NewSessionForPromptsCommand}"
+                                   Click="OnPromptReloadPicked"
+                                   AutomationProperties.AutomationId="prompts-new-session"
+                                   AutomationProperties.Name="{Binding [session.prompts.newSession], Source={x:Static loc:Loc.Instance}}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="{Binding [session.prompts.newSession], Source={x:Static loc:Loc.Instance}}" FontWeight="Medium" />
+                      <TextBlock Classes="caption"
+                                 TextWrapping="Wrap"
+                                 Text="{Binding [session.prompts.newSessionHint], Source={x:Static loc:Loc.Instance}}" />
+                    </StackPanel>
+                  </views:PickerRow>
+                </StackPanel>
+              </Flyout>
+            </Button.Flyout>
+          </Button>
           <!-- The plan panel of the active session: one click opens the plan summary, the steps and the revision
                history, and a second click closes it again. Disabled while no session is open, because there is no plan. -->
           <Button Classes="ghost icon"

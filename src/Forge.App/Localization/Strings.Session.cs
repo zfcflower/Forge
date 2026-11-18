@@ -27,6 +27,17 @@ internal static class SessionStrings
     public const string StopTurnKey = "session.stopTurn";
     public const string StopNameKey = "session.stopName";
     public const string StoppedKey = "session.stopped";
+
+    // The prompt reload button (title bar) and the toast that points at it.
+    public const string PromptsChangedTitleKey = "session.prompts.changedTitle";
+    public const string PromptsChangedBodyKey = "session.prompts.changedBody";
+    public const string PromptsReloadTipKey = "session.prompts.reloadTip";
+    public const string PromptsReloadHeaderKey = "session.prompts.reloadHeader";
+    public const string PromptsHotReloadKey = "session.prompts.hotReload";
+    public const string PromptsHotReloadHintKey = "session.prompts.hotReloadHint";
+    public const string PromptsNewSessionKey = "session.prompts.newSession";
+    public const string PromptsNewSessionHintKey = "session.prompts.newSessionHint";
+    public const string PromptsReloadedKey = "session.prompts.reloaded";
     public const string ReadFailedKey = "session.readFailed";
     public const string ProviderMissingKey = "session.providerMissing";
 
@@ -171,6 +182,16 @@ internal static class SessionStrings
 
     /// <summary>A turn the user cancelled; stored as the card's footnote.</summary>
     public static LocText Stopped => new(StoppedKey);
+
+    public static LocText PromptsChangedTitle => new(PromptsChangedTitleKey);
+
+    public static LocText PromptsChangedBody(string title) => new(PromptsChangedBodyKey, title);
+
+    public static LocText PromptsReloaded => new(PromptsReloadedKey);
+
+    public static LocText PromptsHotReloadTitle => new(PromptsHotReloadKey);
+
+    public static LocText PromptsNewSessionTitle => new(PromptsNewSessionKey);
 
     /// <summary>The notice shown when the stored history cannot be read.</summary>
     public static LocText ReadFailed(string message) => new(ReadFailedKey, message);
@@ -490,6 +511,24 @@ internal static class SessionStrings
         Loc.Register(ComposerCommandKey, "命令", "Command");
         Loc.Register(ComposerNoMatchesKey, "没有匹配项", "No matches");
         Loc.Register(StoppedKey, "已停止", "Stopped");
+        Loc.Register(PromptsChangedTitleKey, "提示词文件已更改", "Prompt files changed");
+        Loc.Register(
+            PromptsChangedBodyKey,
+            "会话「{0}」使用的提示词有改动，但仍在用旧快照。点标题栏的“重载提示词”按钮，选择热重载或新开会话；热重载会让该会话的提示缓存失效一次。",
+            "Prompts used by \"{0}\" changed, but the session still runs on the old snapshot. Use the reload-prompts button in the title bar to hot-reload or start a new session; a hot reload invalidates this session's prompt cache once.");
+        Loc.Register(PromptsReloadTipKey, "重载提示词", "Reload prompts");
+        Loc.Register(PromptsReloadHeaderKey, "重新读取模板、Agent、技能和 AGENTS.md", "Re-read templates, agents, skills and AGENTS.md");
+        Loc.Register(PromptsHotReloadKey, "热重载", "Hot reload");
+        Loc.Register(
+            PromptsHotReloadHintKey,
+            "保留当前对话，下一条消息起使用新提示词；缓存失效一次，下一轮按未缓存计费。",
+            "Keep this conversation; the next message uses the new prompts. The prompt cache is lost once, so the next turn is billed uncached.");
+        Loc.Register(PromptsNewSessionKey, "新开会话", "New session");
+        Loc.Register(
+            PromptsNewSessionHintKey,
+            "在同一位置开一个新会话，使用新提示词；当前会话保持不变，缓存不受影响。",
+            "Start a new session in the same place with the new prompts; this session stays as it is and its cache is untouched.");
+        Loc.Register(PromptsReloadedKey, "提示词将在下一条消息起重新加载", "Prompts will reload from the next message");
         Loc.Register(ReadFailedKey, "读取会话失败：{0}", "Could not read the session: {0}");
         Loc.Register(ProviderMissingKey, "尚未配置模型提供商：{0}", "No model provider is configured: {0}");
         Loc.Register(BreadcrumbBackToParentKey, "返回父会话 {0}", "Back to {0}");

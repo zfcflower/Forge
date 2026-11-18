@@ -347,6 +347,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         // The plan panel's view model and the command that opens it (wave W7). Created before the window binds, so the
         // overlay in MainWindow.axaml has its data context from the first frame.
         InitializePlan();
+        InitializePrompts();
 
         // The palette's view model and its three opening gestures. Created here, before the window binds, so the overlay
         // in MainWindow.axaml has its data context from the first frame.

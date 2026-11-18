@@ -203,9 +203,45 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
 
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        if (runtime is not null)
+        {
+            runtime.PromptsStaleChanged += OnRuntimePromptsStaleChanged;
+        }
     }
 
     public SessionInfo Info { get; private set; }
+
+    /// <summary>True when a prompt source changed after this session's agent host took its snapshot (and no reload was asked for since).</summary>
+    public bool PromptsStale => runtime?.PromptsStale == true;
+
+    /// <summary>Whether the prompt reload button applies: a live session, not a read-only view.</summary>
+    public bool CanReloadPrompts => !disposed && !isReadOnlyView && runtime is not null;
+
+    /// <summary>Hot reload: the next turn runs on freshly read prompts (see <see cref="SessionRuntime.HotReloadPrompts"/>).</summary>
+    internal void HotReloadPrompts() => runtime?.HotReloadPrompts();
+
+    /// <summary>Raised on the UI thread when <see cref="PromptsStale"/> may have changed.</summary>
+    internal event Action? PromptsStaleChanged;
+
+    private void OnRuntimePromptsStaleChanged() => Forge.App.Approval.UiThreadDispatcher.Instance.Post(() =>
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(PromptsStale));
+        PromptsStaleChanged?.Invoke();
+        if (PromptsStale)
+        {
+            // Said once per change: the flag only rises again after a reload (or a new host) cleared it.
+            notifications.Notify(
+                NotificationLevel.Info,
+                SessionStrings.PromptsChangedTitle,
+                SessionStrings.PromptsChangedBody(Info.Title),
+                "prompts-stale:" + Info.Id);
+        }
+    });
 
     public string SessionId => Info.Id;
 
@@ -401,6 +437,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         Info = current;
         isReadOnlyView = true;
+        if (runtime is not null)
+        {
+            runtime.PromptsStaleChanged -= OnRuntimePromptsStaleChanged;
+        }
+
         runtime = null;
         OnPropertyChanged(nameof(IsReadOnlyView));
         OnPropertyChanged(nameof(ReadOnlyBanner));
@@ -2066,6 +2107,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        if (runtime is not null)
+        {
+            runtime.PromptsStaleChanged -= OnRuntimePromptsStaleChanged;
+        }
+
         ClearLiveTools();
         ReleaseInspectorListeners();
         Instruments.Dispose();
