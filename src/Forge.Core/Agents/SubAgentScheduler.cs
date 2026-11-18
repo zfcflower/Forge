@@ -97,6 +97,19 @@ public sealed class SubAgentScheduler : ISubAgentControl
     public SubAgentControlResult Stop(string agentId, string? reason) =>
         TryGetRun(agentId, out var run) ? run.Stop(reason) : Missing(agentId);
 
+    /// <summary>
+    /// Why an agent without a <c>tools</c> list is not started: it would receive every tool, which is rarely what its author meant,
+    /// and a sub-agent sees the whole tool array as its cacheable prefix. The text tells the model what to ask the user and how the
+    /// fix reaches the session (kinds are a per-host snapshot, so an edited file applies from the next session start).
+    /// </summary>
+    internal static string MissingToolsMessage(string name) =>
+        $"Agent '{name}' declares no `tools` list, so it was not started: without one it would get every tool. "
+        + "Ask the user (ask_user) which role it should have, then add a `tools:` line to the frontmatter of its agent file "
+        + "(`<workspace>/.forge/agents/<name>.md` you can edit; a file under `~/.forge/agents/` is outside the workspace, so give the user "
+        + "the exact line to add). Suggested lists: read-only scout or planner: read, grep, find, ls; implementer: read, grep, find, ls, edit, write, bash; "
+        + "reviewer: read, grep, find, ls, git_diff. Agent files are read when a session starts, so the change applies from the next session. "
+        + "For this task use a built-in kind: Scout, Plan, Worker or Reviewer.";
+
     private SubAgentControlResult Missing(string agentId)
     {
         if (string.IsNullOrWhiteSpace(agentId))
@@ -135,6 +148,11 @@ public sealed class SubAgentScheduler : ISubAgentControl
         if (!catalog.TryGet(kind, out var definition))
         {
             return new SubAgentOutcome(resumeId ?? string.Empty, $"Unknown agent kind '{kind}'.", IsError: true);
+        }
+
+        if (definition.ToolNames is not { Count: > 0 })
+        {
+            return new SubAgentOutcome(resumeId ?? string.Empty, MissingToolsMessage(definition.Name), IsError: true);
         }
 
         AgentInstance? instance = null;

@@ -31,7 +31,7 @@
 | 会话 | `todo` | 读/写按参数 | 7 种操作：`list`/`add`/`update`/`remove`/`promote`/`plan_summary_get`/`plan_summary_set`；写操作先确认条目属于本会话 |
 | | `ask_user` | 只读 | 仅在宿主提供问题处理器时注册；问题卡 + 选项/自由文本；支持多选 min/max |
 | | `skill` | 只读 | 按名返回 `SKILL.md` 全文（上限 64000 字符）；名字只在本会话发现的四个技能根里解析 |
-| Agent | `spawn_agent` | 只读 | 派生内置 Scout/Worker/Plan/Reviewer 或用户 Agent；`<kind>-<n>` 登记；深度上限 2；不能关闭子 Agent 时用它停 |
+| Agent | `spawn_agent` | 只读 | 派生内置 Scout/Worker/Plan/Reviewer 或用户 Agent；`<kind>-<n>` 登记；深度上限 2；没有 `tools` 列表的用户 Agent 会被拒绝派生（返回错误并引导模型问用户选角色）；不能关闭子 Agent 时用它停 |
 | | `subagent_steer` | 只读 | 在工具批次边界重定向子 Agent（已发调用跑完，未开始的补 `skipped`） |
 | | `subagent_followup` | 只读 | 子 Agent 本应结束时注入后续指令并继续 |
 | | `subagent_stop` | 只读 | 只取消该子 Agent，待决工具补 `Cancelled.`，父收到非错误结果 |
