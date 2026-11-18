@@ -12,7 +12,8 @@ namespace Forge.App.Git;
 /// <c>scratch/</c> session (no worktree of its own), a sub-agent session (it shares its parent's worktree, so the parent's
 /// steps own those changes), a worktree directory that is gone, or a directory that is not a git repository.
 /// <see cref="StepChangeState.Clean"/>: <c>git status</c> is empty, untracked files included. <see cref="StepChangeState.Dirty"/>:
-/// it is not. <see cref="StepChangeState.Unknown"/>: the worktree could not be resolved or git failed; the gate then refuses
+/// it is not; both carry the worktree's content fingerprint (<see cref="StepChangeProbe.Tree"/>, <c>GitCli.SnapshotTreeAsync</c>).
+/// <see cref="StepChangeState.Unknown"/>: the worktree could not be resolved or git failed; the gate then refuses
 /// the step (fail closed). Expected failures are answers, never exceptions; only cancellation throws, and it propagates.</para>
 /// </summary>
 internal sealed class GitStepChangeProbe : IStepChangeProbe
@@ -89,13 +90,17 @@ internal sealed class GitStepChangeProbe : IStepChangeProbe
             }
 
             var changes = await git.GetStatusAsync(directory, includeUntracked: true, ct).ConfigureAwait(false);
+
+            // The content fingerprint of the whole worktree (a temporary index: the user's index, HEAD and refs stay untouched).
+            var tree = await git.SnapshotTreeAsync(directory, ct).ConfigureAwait(false);
             return changes.Count == 0
-                ? new StepChangeProbe(StepChangeState.Clean)
+                ? new StepChangeProbe(StepChangeState.Clean, Tree: tree)
                 : new StepChangeProbe(
                     StepChangeState.Dirty,
                     changes.Count == 1
                         ? "1 uncommitted change in the worktree."
-                        : changes.Count + " uncommitted changes in the worktree.");
+                        : changes.Count + " uncommitted changes in the worktree.",
+                    tree);
         }
         catch (Exception exception) when (IsExpected(exception))
         {

@@ -186,7 +186,7 @@ public sealed class AgentHost
         if (options.Reviews is { } reviews)
         {
             builtIns.Add(new RequestReviewTool(
-                scheduler, reviews, options.Todos, options.ReviewLimits, options.ReviewConclusions, stepReviews, options.ReviewFix));
+                scheduler, reviews, options.Todos, options.ReviewLimits, options.ReviewConclusions, stepReviews, options.ReviewFix, options.StepChanges));
         }
 
         var compactor = options.Compactor

@@ -18,7 +18,7 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
     private const string InsertColumns =
         "id, session_id, title, status, note, order_index, updated_at, group_id, origin";
 
-    private const string Columns = InsertColumns + ", commit_subject, summary, verification, commit_id, commit_error";
+    private const string Columns = InsertColumns + ", commit_subject, summary, verification, commit_id, commit_error, baseline_tree";
 
     private const string GroupColumns = "id, session_id, title, order_index, updated_at";
 
@@ -201,12 +201,13 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
                     Verification = MergeStepField(step?.Verification, existing.Verification),
                     CommitId = reopened ? null : existing.CommitId,
                     CommitError = reopened ? null : existing.CommitError,
+                    BaselineTree = MergeStepField(step?.BaselineTree, existing.BaselineTree),
                     UpdatedAt = DateTimeOffset.UtcNow,
                 };
                 await ExecuteAsync(
                     connection,
                     transaction,
-                    "UPDATE todos SET title = $title, status = $status, note = $note, commit_subject = $subject, summary = $summary, verification = $verification, commit_id = $commit, commit_error = $error, updated_at = $at WHERE id = $id",
+                    "UPDATE todos SET title = $title, status = $status, note = $note, commit_subject = $subject, summary = $summary, verification = $verification, commit_id = $commit, commit_error = $error, baseline_tree = $baseline, updated_at = $at WHERE id = $id",
                     ct,
                     ("$title", item.Title),
                     ("$status", StatusName(item.Status)),
@@ -216,6 +217,7 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
                     ("$verification", item.Verification ?? (object)DBNull.Value),
                     ("$commit", item.CommitId ?? (object)DBNull.Value),
                     ("$error", item.CommitError ?? (object)DBNull.Value),
+                    ("$baseline", item.BaselineTree ?? (object)DBNull.Value),
                     ("$at", StorageDb.FormatTimestamp(item.UpdatedAt)),
                     ("$id", item.Id)).ConfigureAwait(false);
                 if (item.Status == TodoStatus.InProgress)
@@ -698,7 +700,8 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
             StorageDb.ReadOptionalText(reader, 12, "commit_id", _databasePath, row),
             StorageDb.ReadOptionalText(reader, 13, "commit_error", _databasePath, row),
             StorageDb.ReadOptionalText(reader, 7, "group_id", _databasePath, row),
-            ParseOrigin(StorageDb.ReadOptionalText(reader, 8, "origin", _databasePath, row), _databasePath, row));
+            ParseOrigin(StorageDb.ReadOptionalText(reader, 8, "origin", _databasePath, row), _databasePath, row),
+            StorageDb.ReadOptionalText(reader, 14, "baseline_tree", _databasePath, row));
     }
 
     private TodoGroup ReadGroup(SqliteDataReader reader)

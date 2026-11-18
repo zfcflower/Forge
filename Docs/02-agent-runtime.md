@@ -110,7 +110,7 @@
 **改了代码的步骤要标 done，必须先有 `request_review` 的 approve 结论与非空、且不是 `not verified` 的 verification；没改代码的步骤直接放行。**
 
 - 证据来源是窄接口 `IStepChangeProbe.ProbeAsync(sessionId, workingDirectory, ct)`，返回 `NotApplicable` / `Clean` / `Dirty` / `Unknown`：
-  - 无 probe、`NotApplicable` → 放行；`Unknown` → **失败关闭**并写出 git 的原因；`Clean` 且该步骤没有自己的 `CommitId` → 放行；其余要 approve + 有效 verification。
+  - 无 probe、`NotApplicable` → 放行；`Unknown` → **失败关闭**并写出 git 的原因；`Clean` 且该步骤没有自己的 `CommitId`、也没有基线 → 放行；步骤基线（首次转 `in_progress` 时记下的工作树内容指纹）与当前相等 → 放行；其余要 approve + 有效 verification，且评审结论记录的工作树指纹必须等于当前指纹（评审后内容变过即过期，需重新评审；`Clean` 但内容与基线不同表示代码在步骤自己的提交之外被提交了，同样要评审）。
 - 门禁在写状态**之前**判定：拒绝时条目状态不变、不提交；只上抛取消，probe 其它异常按 `Unknown`。
 - 结论落 per-host `StepReviewLedger`（按 session + step），**不持久化**：重启后每个步骤要重新评审；步骤离开 done 时 `Forget`。
 - 三个相互独立的开关（均在 `settings.json`，原总开关 `workflowGatesEnabled` 已删除，旧文件里的 `false` 迁移为第二项关）：`reviewToolEnabled`（默认开）——Agent 能否自行发起评审，即是否提供 `request_review`，建宿主时读取；关掉则没有证据来源，步骤门禁随之不存在；`stepReviewRequired`（默认开）——改了代码的步骤标 done 是否要过本节门禁，每次尝试读取；`reviewAutoFix`（默认开）+ `reviewAutoFixMaxRounds`（默认 3，1–10）——`request changes` 后 Agent 自己修复并再评审，同一步骤已完成的非 approve 评审达到上限时停止并用 `ask_user` 问用户，一次评审的发现要合并在一轮里全部修；关掉自动修复则只向用户汇报并等待。`ledger.Rounds` 在 approve 或步骤离开 done 时清零。非空 verification 与 `pr_create` 的五道闸门是固定行为，不可关。

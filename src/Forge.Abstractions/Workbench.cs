@@ -65,7 +65,8 @@ public sealed record TodoItem(
     string? CommitId = null,
     string? CommitError = null,
     string? GroupId = null,
-    TodoOrigin Origin = TodoOrigin.Agent);
+    TodoOrigin Origin = TodoOrigin.Agent,
+    string? BaselineTree = null);
 
 /// <summary>
 /// A named plan in the session's TODO panel: a title plus the steps that belong to it (<c>TodoItem.GroupId</c>). A group
@@ -90,7 +91,11 @@ public sealed record TodoAddRequest(
 /// The agent-written step fields of a checklist item. A null property leaves the stored value unchanged; an empty string
 /// clears it.
 /// </summary>
-public sealed record TodoStepFields(string? CommitSubject = null, string? Summary = null, string? Verification = null);
+public sealed record TodoStepFields(
+    string? CommitSubject = null,
+    string? Summary = null,
+    string? Verification = null,
+    string? BaselineTree = null);
 
 /// <summary>The session-level plan summary (Summary / Changes / Testing sections) that becomes the PR body.</summary>
 public sealed record PlanSummary(string SessionId, string Text, DateTimeOffset UpdatedAt);

@@ -37,6 +37,7 @@ public sealed class RequestReviewTool : ITool
     private readonly IReviewConclusionStore? conclusions;
     private readonly StepReviewLedger? ledger;
     private readonly Func<ReviewFixPolicy>? fixPolicy;
+    private readonly IStepChangeProbe? changeProbe;
 
     /// <param name="scheduler">Runs the read-only Reviewer sub-agent.</param>
     /// <param name="changeSets">The git side of the review (Core has no git).</param>
@@ -48,6 +49,7 @@ public sealed class RequestReviewTool : ITool
     /// </param>
     /// <param name="ledger">Where a step review's verdict is recorded for the step completion gate; null = nothing records verdicts.</param>
     /// <param name="fixPolicy">The auto-fix loop settings, read on every result; null = the default wording without a round limit.</param>
+    /// <param name="changeProbe">Takes the worktree fingerprint a step review's verdict is bound to; null = the verdict carries none, which the step gate never accepts.</param>
     public RequestReviewTool(
         SubAgentScheduler scheduler,
         IReviewChangeSetSource changeSets,
@@ -55,9 +57,11 @@ public sealed class RequestReviewTool : ITool
         Func<ReviewPackageLimits>? limits = null,
         IReviewConclusionStore? conclusions = null,
         StepReviewLedger? ledger = null,
-        Func<ReviewFixPolicy>? fixPolicy = null)
+        Func<ReviewFixPolicy>? fixPolicy = null,
+        IStepChangeProbe? changeProbe = null)
     {
         this.fixPolicy = fixPolicy;
+        this.changeProbe = changeProbe;
         ArgumentNullException.ThrowIfNull(scheduler);
         ArgumentNullException.ThrowIfNull(changeSets);
         this.scheduler = scheduler;
@@ -168,6 +172,9 @@ public sealed class RequestReviewTool : ITool
             return new ToolResult($"Nothing to review: {DescribeEmpty(changeSet, request.Commit is not null)}. No reviewer was started.");
         }
 
+        // The fingerprint is taken before the reviewer starts, so the verdict is bound to what the reviewer is shown.
+        var tree = arguments.StepId is not null ? await TakeTreeAsync(context, ct).ConfigureAwait(false) : null;
+
         var package = ReviewPackageText.Render(brief, changeSet, limits?.Invoke());
         SubAgentOutcome outcome;
         await using (scope.Permit.Detach(ct))
@@ -215,7 +222,7 @@ public sealed class RequestReviewTool : ITool
         // weaker one.
         if (arguments.StepId is not null)
         {
-            ledger?.Record(context.SessionId, arguments.StepId, verdict, changeSet.HeadCommit);
+            ledger?.Record(context.SessionId, arguments.StepId, verdict, changeSet.HeadCommit, tree);
         }
         var builder = new StringBuilder(384 + Math.Min(outcome.Text.Length, RequestReviewVerdict.MaxReviewChars));
         builder.Append(RequestReviewVerdict.VerdictLine(verdict)).Append('\n');
@@ -258,6 +265,29 @@ public sealed class RequestReviewTool : ITool
     /// <para>The write ignores the caller's cancellation: the review is already over, and cancelling the turn a moment later
     /// must not be the reason a verdict disappears from the history.</para>
     /// </summary>
+    /// <summary>The worktree fingerprint the step verdict is bound to; null when there is no probe or it cannot tell. Only cancellation throws.</summary>
+    private async Task<string?> TakeTreeAsync(ToolContext context, CancellationToken ct)
+    {
+        if (changeProbe is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var answer = await changeProbe.ProbeAsync(context.SessionId, context.WorkingDirectory, ct).ConfigureAwait(false);
+            return answer.State is StepChangeState.Clean or StepChangeState.Dirty ? answer.Tree : null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     private async ValueTask RecordAsync(
         ToolContext context,
         TodoItem? step,

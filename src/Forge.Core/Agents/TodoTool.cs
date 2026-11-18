@@ -354,9 +354,17 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             }
         }
 
-        var step = commitSubject is null && summary is null && verification is null
+        // A step that starts gets the fingerprint of the worktree it starts from, once: the gate later tells "nothing changed"
+        // and "code committed outside this step" apart with it. A reopened step keeps the baseline it already has.
+        string? baseline = null;
+        if (gate is not null && parsed == TodoStatus.InProgress && before.Status != TodoStatus.InProgress && before.BaselineTree is null)
+        {
+            baseline = await gate.CaptureBaselineAsync(sessionId, workingDirectory, ct).ConfigureAwait(false);
+        }
+
+        var step = commitSubject is null && summary is null && verification is null && baseline is null
             ? null
-            : new TodoStepFields(commitSubject, summary, verification);
+            : new TodoStepFields(commitSubject, summary, verification, baseline);
         var item = await store.UpdateAsync(id, title, parsed, note, step, ct).ConfigureAwait(false);
         if (item is null)
         {

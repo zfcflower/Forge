@@ -25,9 +25,11 @@ public enum StepChangeState
 
 /// <summary>
 /// The probe's answer; <see cref="Detail"/> carries the reason when the state is <see cref="StepChangeState.Unknown"/> (or
-/// anything the caller should tell the model).
+/// anything the caller should tell the model). <see cref="Tree"/> is the content fingerprint of the whole worktree
+/// (tracked and untracked, ignore rules honoured) for <see cref="StepChangeState.Clean"/> and
+/// <see cref="StepChangeState.Dirty"/> answers; it is null for the others.
 /// </summary>
-public sealed record StepChangeProbe(StepChangeState State, string? Detail = null);
+public sealed record StepChangeProbe(StepChangeState State, string? Detail = null, string? Tree = null);
 
 /// <summary>
 /// The only git capability the step gate holds. Core has no git: the app implements this over its own git layer and hands
@@ -45,8 +47,11 @@ public interface IStepChangeProbe
     Task<StepChangeProbe> ProbeAsync(string sessionId, string workingDirectory, CancellationToken ct);
 }
 
-/// <summary>One step's last review verdict, kept per host (never persisted, never shown in the plan panel).</summary>
-public sealed record StepReviewRecord(ReviewVerdict Verdict, string? CommitId, DateTimeOffset At);
+/// <summary>
+/// One step's last review verdict, kept per host (never persisted, never shown in the plan panel). <see cref="Tree"/> is the
+/// content fingerprint of the worktree the reviewer was shown; null when it could not be taken, which no later check accepts.
+/// </summary>
+public sealed record StepReviewRecord(ReviewVerdict Verdict, string? CommitId, DateTimeOffset At, string? Tree = null);
 
 /// <summary>
 /// The review verdicts of one host, keyed by session and step. <c>request_review</c> records one when a step review
@@ -63,7 +68,7 @@ public sealed class StepReviewLedger
     /// Stores the verdict of a finished step review. A blank session or step id is ignored (such a call cannot be matched to
     /// a step later), and so is a blank commit id, which stays <c>null</c>.
     /// </summary>
-    public void Record(string sessionId, string stepId, ReviewVerdict verdict, string? commitId)
+    public void Record(string sessionId, string stepId, ReviewVerdict verdict, string? commitId, string? tree = null)
     {
         if (!IsUsable(sessionId) || !IsUsable(stepId))
         {
@@ -73,7 +78,8 @@ public sealed class StepReviewLedger
         records[(sessionId, stepId)] = new StepReviewRecord(
             verdict,
             string.IsNullOrWhiteSpace(commitId) ? null : commitId,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            string.IsNullOrWhiteSpace(tree) ? null : tree);
         if (verdict == ReviewVerdict.Approve)
         {
             rounds.TryRemove((sessionId, stepId), out _);
@@ -140,11 +146,15 @@ public sealed record StepGateDecision(bool Allowed, string? Reason = null, strin
 /// step through only when the step has no commit of its own - it then changed no code at all. Everything else (a dirty
 /// worktree, or a step that already committed) needs an <see cref="ReviewVerdict.Approve"/> entry in the
 /// <see cref="StepReviewLedger"/> and a verification that says more than "not verified".</para>
-/// <para>Known limits, both honest rather than fixed. (1) The gate proves that this step was approved at some point; it
-/// cannot prove the worktree was not changed again after that review. (2) A clean worktree with no commit of the step's own is
-/// let through as "changed nothing", which is also what an agent that committed outside the step machinery (a bare
-/// <c>git commit</c> through <c>bash</c>) leaves behind - closing that needs a per-step baseline (the HEAD the step started
-/// from), which this gate does not hold.</para>
+/// <para>Content binding. A verdict is recorded together with the worktree fingerprint the reviewer was shown
+/// (<see cref="StepChangeProbe.Tree"/>), and the gate accepts it only while the worktree still has that fingerprint: a change
+/// after the review, committed or not, makes the verdict stale and the step needs another review. A step that went in
+/// progress also carries the fingerprint it started from (<see cref="TodoItem.BaselineTree"/>, taken by
+/// <see cref="CaptureBaselineAsync"/>): a worktree equal to it changed nothing, whatever git status says, and a clean
+/// worktree that differs from it holds code committed outside the step's own commit, which is then gated like any other.</para>
+/// <para>Remaining limits. A step that was never put in progress has no baseline and is judged by git status and its own commit
+/// only. The ledger is in memory, so a restarted host asks for a new review. A file the build or the tests write into the
+/// worktree after the review (outside the ignore rules) changes the fingerprint and makes the verdict stale.</para>
 /// </summary>
 public sealed class StepGate
 {
@@ -169,6 +179,33 @@ public sealed class StepGate
 
     /// <summary>The verdicts this gate reads; the host hands the same instance to <c>request_review</c>.</summary>
     public StepReviewLedger Ledger { get; }
+
+    /// <summary>
+    /// The worktree fingerprint to store as the baseline of a step that is going in progress, or null when the gate is off,
+    /// has no probe, or the probe cannot tell (not applicable, unknown, an exception): a step without a baseline is judged by
+    /// the older rules. Only cancellation throws.
+    /// </summary>
+    public async Task<string?> CaptureBaselineAsync(string sessionId, string workingDirectory, CancellationToken ct)
+    {
+        if (probe is null || (enabled is not null && !enabled()))
+        {
+            return null;
+        }
+
+        try
+        {
+            var answer = await probe.ProbeAsync(sessionId, workingDirectory, ct).ConfigureAwait(false);
+            return answer.State is StepChangeState.Clean or StepChangeState.Dirty ? answer.Tree : null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// Judges one attempt to mark <paramref name="step"/> done. <paramref name="verification"/> is the value the step will
@@ -216,11 +253,17 @@ public sealed class StepGate
                 return StepGateDecision.Allow;
             case StepChangeState.Unknown:
                 return Unproven(change.Detail);
-            case StepChangeState.Clean when string.IsNullOrWhiteSpace(step.CommitId):
+            case StepChangeState.Clean when string.IsNullOrWhiteSpace(step.CommitId) && step.BaselineTree is null:
                 // No uncommitted work is attributed to this step and it owns no commit of its own, so there is nothing here to
                 // review or verify. That is the intended path for a check, an analysis or a plan edit - and, by the same rule,
-                // for a step whose code was committed outside the step machinery; see the class-level known limits.
+                // for a step without a baseline whose code was committed outside the step machinery; see the class-level limits.
                 return StepGateDecision.Allow;
+        }
+
+        if (step.BaselineTree is { } baseline && change.Tree is { } current && string.Equals(baseline, current, StringComparison.Ordinal))
+        {
+            // The worktree is exactly what it was when the step started: nothing of this step is left to judge.
+            return StepGateDecision.Allow;
         }
 
         var changeText = DescribeChange(change.State, step);
@@ -239,6 +282,15 @@ public sealed class StepGate
                 false,
                 $"Step #{step.Id} cannot be marked done yet: {changeText}, and its last review is not an approval ({DescribeVerdict(record.Verdict)}).",
                 "Fix what that review reported, commit the fix, then call request_review with the same step_id at the new HEAD; only an approve verdict lets the step be done.");
+        }
+
+        if (record.Tree is null || change.Tree is null || !string.Equals(record.Tree, change.Tree, StringComparison.Ordinal))
+        {
+            return new StepGateDecision(
+                false,
+                $"Step #{step.Id} cannot be marked done yet: {changeText}, and the worktree is no longer what its approving review saw"
+                + (record.Tree is null ? " (that review recorded no content fingerprint)." : " (the content changed after the review)."),
+                "Call request_review with the same step_id again so the review covers the current content, act on its findings, and mark the step done only once its verdict line reads verdict: approve.");
         }
 
         if (!IsVerified(verification))
@@ -266,6 +318,11 @@ public sealed class StepGate
         if (state == StepChangeState.Dirty)
         {
             return "the step's worktree has uncommitted changes";
+        }
+
+        if (string.IsNullOrWhiteSpace(step.CommitId))
+        {
+            return "the worktree content differs from where the step started, although nothing is uncommitted (code committed outside the step's own commit)";
         }
 
         var commit = step.CommitId ?? string.Empty;
