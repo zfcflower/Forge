@@ -18,7 +18,7 @@ namespace Forge.Bench;
 /// </summary>
 internal static partial class TranscriptScenarios
 {
-    private static readonly string[] FrameCases = ["wheel", "thumb", "thumb-stock", "toggle", "toggle-text", "extent", "extent-varied", "extent-varied-stock","thumb-gap", "thumb-gap-stock", "thumb-gap-long", "thumb-gap-long-stock", "rowcost", "rowcost-composer", "popup-styles", "scoped-sheets", "gutter", "thumb-unpooled", "thumb-follow", "thumb-follow-stock", "thumb-follow-long", "thumb-follow-long-stock", "pool-pixels", "reuse", "reuse-unpooled", "rebind", "attach", "attach-plain"];
+    private static readonly string[] FrameCases = ["wheel", "thumb", "thumb-stock", "toggle", "toggle-text", "extent", "extent-varied", "extent-varied-stock","thumb-gap", "thumb-gap-stock", "thumb-gap-varied", "thumb-gap-long", "thumb-gap-long-stock", "rowcost", "rowcost-composer", "popup-styles", "scoped-sheets", "gutter", "thumb-unpooled", "thumb-follow", "thumb-follow-stock", "thumb-follow-long", "thumb-follow-long-stock", "pool-pixels", "reuse", "reuse-unpooled", "rebind", "attach", "attach-plain"];
 
     private static IEnumerable<BenchScenario> FrameScenarios() => FrameCases.Select(FrameCase);
 
@@ -95,7 +95,7 @@ internal static partial class TranscriptScenarios
                 }
 
                 Unpooled = name.EndsWith("-unpooled");
-                var probe = await MountAsync(name.StartsWith("extent-varied", StringComparison.Ordinal) ? BuildVaried(40) : BuildRich(name.Contains("long") ? 200 : 40, false), pinned: !name.EndsWith("-stock")).ConfigureAwait(true);
+                var probe = await MountAsync(name.StartsWith("extent-varied", StringComparison.Ordinal) ? BuildVaried(40) : name == "thumb-gap-varied" ? BuildVaried(600) : BuildRich(name.Contains("long") ? 200 : 40, false), pinned: !name.EndsWith("-stock")).ConfigureAwait(true);
                 try
                 {
                     probe.Follower.StopFollowing();
@@ -189,6 +189,7 @@ internal static partial class TranscriptScenarios
 
                         case "thumb-gap":
                         case "thumb-gap-stock":
+                        case "thumb-gap-varied":
                         case "thumb-gap-long":
                         case "thumb-gap-long-stock":
                             return await ThumbGapAsync(probe, !name.EndsWith("-stock")).ConfigureAwait(true);

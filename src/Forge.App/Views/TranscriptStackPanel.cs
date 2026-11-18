@@ -275,6 +275,24 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
         if (FirstRealizedIndex == 0 && ContainerFromIndex(0) is { } first && Math.Abs(first.Bounds.Top) > 0.5)
         {
             var shift = first.Bounds.Top;
+            var bottom = 0d;
+            foreach (var container in GetRealizedContainers() ?? [])
+            {
+                bottom = Math.Max(bottom, container.Bounds.Bottom);
+            }
+
+            if (viewport.Height > 0 && Items is { } all && bottom - shift < viewport.Y)
+            {
+                // Row 0 was reached from an estimated anchor that was off by more than the viewport is from the top (a drag to the top
+                // of a long transcript walks rows whose estimated places drifted by the estimate's error): moving the rows to 0 would
+                // leave the viewport with nothing in it. The offset is what the user put the thumb at, so drop the realized rows and
+                // let the next measure pick its anchor from the offset again.
+                base.OnItemsChanged(all, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+                Reconciled++;
+                InvalidateMeasure();
+                return size;
+            }
+
             foreach (var container in GetRealizedContainers() ?? [])
             {
                 var bounds = container.Bounds;
