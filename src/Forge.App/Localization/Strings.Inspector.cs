@@ -161,6 +161,10 @@ internal static class InspectorStrings
     public const string ReviewLineRangePattern = "review.lineRange";
     public const string ReviewStatusPattern = "review.status";
     public const string ReviewResolved = "review.resolved";
+    public const string ReviewReplyPattern = "review.reply";
+    public const string ReviewReplyApply = "review.reply.apply";
+    public const string ReviewReplyPushBack = "review.reply.pushBack";
+    public const string ReviewReplyClarify = "review.reply.clarify";
     public const string ReviewUnresolved = "review.unresolved";
     public const string ReviewSent = "review.sent";
     public const string ReviewDraft = "review.draft";
@@ -320,6 +324,10 @@ internal static class InspectorStrings
         Loc.Register(ReviewLineRangePattern, "L{0}–{1}", "L{0}–{1}");
         Loc.Register(ReviewStatusPattern, "{0} · {1}", "{0} · {1}");
         Loc.Register(ReviewResolved, "已解决", "Resolved");
+        Loc.Register(ReviewReplyPattern, "Agent({0}):{1}", "Agent ({0}): {1}");
+        Loc.Register(ReviewReplyApply, "已修改", "applied");
+        Loc.Register(ReviewReplyPushBack, "不同意", "disagrees");
+        Loc.Register(ReviewReplyClarify, "提问", "asks");
         Loc.Register(ReviewUnresolved, "未解决", "Unresolved");
         Loc.Register(ReviewSent, "已发送", "Sent");
         Loc.Register(ReviewDraft, "草稿", "Draft");
@@ -388,6 +396,24 @@ internal static class InspectorStrings
             ReviewStatusPattern,
             Loc.Instance[resolved ? ReviewResolved : ReviewUnresolved],
             Loc.Instance[sent ? ReviewSent : ReviewDraft]);
+
+    /// <summary>The agent's answer to a comment, "Agent(提问):…" / "Agent (asks): …"; empty when it has not answered.</summary>
+    public static string ReviewReply(string? verdict, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(verdict))
+        {
+            return string.Empty;
+        }
+
+        var name = verdict switch
+        {
+            "apply" => Loc.Instance[ReviewReplyApply],
+            "push_back" => Loc.Instance[ReviewReplyPushBack],
+            "clarify" => Loc.Instance[ReviewReplyClarify],
+            _ => verdict,
+        };
+        return Loc.Instance.Format(ReviewReplyPattern, name, text ?? string.Empty);
+    }
 
     /// <summary>"12 份规格" / "12 specs".</summary>
     public static LocText SpecCount(int count) => LocText.Plural(SpecCountBase, count, TextFormat.Number(count));

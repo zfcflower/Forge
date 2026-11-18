@@ -20,7 +20,9 @@ public sealed record ReviewComment(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? SentAt,
     string? BaseCommit,
-    DiffAnchor? Anchor);
+    DiffAnchor? Anchor,
+    string? ReplyVerdict = null,
+    string? ReplyText = null);
 
 public sealed record NewReviewComment
 {

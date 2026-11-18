@@ -88,7 +88,7 @@
 | `pr_edit` | 写 | 读-改-核对 |
 | `pr_comment_reply` | 写 | 必须带 verdict（`apply`/`push_back`/`clarify`）；`apply` 引用的提交按 PR 实际 head 核对 |
 | `pr_comment_resolve` | 写 | 只对已回复且 verdict 为 apply/push_back 的线程生效；verdict 之后任何新评论都阻塞 |
-| `review_comment_resolve` | 写 | 本地评论；草稿（未 Sent）不可 resolve |
+| `review_comment_resolve` | 写 | 本地评论；草稿（未 Sent）不可 resolve；verdict apply/push_back 存回答并解决，clarify 存提问、保持未解决 |
 | `pr_screenshots` | 执行 | 在会话 worktree 跑 after、在 `origin/<base>` 临时分离 worktree 跑 before，按文件名配对；图片经孤儿提交推到 `refs/heads/assets/<分支 slug>` 并更新正文 `## Screenshots` 段；返回文本报告 + 已发布图片块 |
 
 - 没有工具会**合并 PR** 或**标记可评审**：这两个只有 UI 在用户点击后调用；接口默认实现直接拒绝，平台不支持时调用方拿到明确答复。

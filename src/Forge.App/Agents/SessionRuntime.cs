@@ -101,6 +101,9 @@ internal sealed record AgentRuntimeServices(
     /// <summary>Where <c>request_review</c> records each finished review (handed to <c>AgentHostOptions.ReviewConclusions</c>). Null: nothing is recorded.</summary>
     public IReviewConclusionStore? ReviewConclusions { get; set; }
 
+    /// <summary>Where the step review ledger is persisted (handed to <c>AgentHostOptions.StepReviewStore</c>). Null: in memory only.</summary>
+    public IStepReviewStore? StepReviewStore { get; set; }
+
     /// <summary>
     /// Where oversized tool output is stored (handed to <c>AgentHostOptions.Artifacts</c>, which also adds the tool that
     /// reads it back). Null when the runtime was assembled without the composition root: output then stays inline.
@@ -1170,6 +1173,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 ReviewFix = services.ReviewFix,
                 ReviewLimits = services.ReviewLimits,
                 ReviewConclusions = services.ReviewConclusions,
+                StepReviewStore = services.StepReviewStore,
                 Artifacts = services.Artifacts,
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),

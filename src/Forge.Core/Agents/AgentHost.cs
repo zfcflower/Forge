@@ -83,6 +83,12 @@ public sealed record AgentHostOptions
     public IReviewConclusionStore? ReviewConclusions { get; init; }
 
     /// <summary>
+    /// Where the step review ledger keeps its verdicts across restarts; the app writes them into <c>reviews.db</c>. Null keeps
+    /// them in memory only (a restarted host asks for new reviews).
+    /// </summary>
+    public IStepReviewStore? StepReviewStore { get; init; }
+
+    /// <summary>
     /// The prompt templates this host was built from (<see cref="Prompts.Templates.PromptTemplateStore.Resolve"/>). The
     /// default compactor takes its summarizer prompt from the <c>compaction.summarizer</c> slot. Null = compiled-in texts.
     /// The system slot is not read from here: it is <see cref="Layers"/>' <see cref="PromptLayers.System"/>.
@@ -162,8 +168,8 @@ public sealed class AgentHost
         if (options.Todos is { } todos)
         {
             // One ledger per host: request_review writes a step's verdict into it and the gate reads it back, so both tools
-            // must hold the same instance. It is never persisted, so a restarted host asks for new reviews.
-            stepReviews = new StepReviewLedger();
+            // must hold the same instance. Without a store it is in memory only, so a restarted host asks for new reviews.
+            stepReviews = new StepReviewLedger(options.StepReviewStore);
             // The gate only exists where its own evidence can be obtained: without request_review there is no way to earn
             // an approving verdict, so gating there would make every code step impossible to finish rather than safer.
             var gate = options.Reviews is null

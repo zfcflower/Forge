@@ -58,9 +58,10 @@
 
 ## 12.3 `reviews.db`
 
-- 三张表：`review_comments`、`review_marks`、`review_conclusions`。
+- 四张表：`review_comments`、`review_marks`、`review_conclusions`、`step_review_verdicts`。
 - **schema 没有版本号**：`EnsureInitializedAsync` 跑一份幂等脚本（`PRAGMA journal_mode=WAL` + `CREATE TABLE/INDEX IF NOT EXISTS`），后续波次加表只是往这份脚本里追加，已有库下次打开即补齐，任何版本都不 drop 或改写列。
-- `review_comments`：行/块评论、草稿与已发送；`sent_at` 幂等（重复标记不改写原始时间）。
+- `review_comments`：行/块评论、草稿与已发送；`sent_at` 幂等（重复标记不改写原始时间）；`reply_verdict`/`reply_text` 是 Agent 的回答（apply / push_back / clarify 与说明，旧库启动时补列）。
+- `step_review_verdicts`：步骤评审台账，主键 (session, step)——verdict 整数、commit、时间、工作树指纹、非 approve 轮数；步骤离开 done 时删行，会话彻底删除时一并删。
 - `review_marks`：已查看按文件 diff 指纹、已保留按块内容哈希（内容相同的块按出现序号区分）。
 - `review_conclusions`：一次 `request_review` 一行——session、工作目录、`step_id` 或 `base`、HEAD、`outcome` 整数（`0 Unstructured / 1 Approve / 2 RequestChanges / 3 Stopped / 4 Failed`，只允许在末尾追加新值）、Reviewer 原文、时间。
 - 三张表都按 session 归属：`CopySessionAsync`（接管/分叉）复制且只换 `session_id`；`DeleteSessionAsync`（彻底删除）一起删。

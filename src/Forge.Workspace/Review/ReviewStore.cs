@@ -17,7 +17,7 @@ public sealed partial class ReviewStore
     private const int MaxQueryLimit = 5000;
 
     private const string Columns =
-        "id, workspace_path, session_id, file_path, new_line_start, new_line_end, body, status, is_resolved, created_at, updated_at, sent_at, base_commit, anchor_json";
+        "id, workspace_path, session_id, file_path, new_line_start, new_line_end, body, status, is_resolved, created_at, updated_at, sent_at, base_commit, anchor_json, reply_verdict, reply_text";
 
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS review_comments (
@@ -47,6 +47,16 @@ public sealed partial class ReviewStore
             created_at TEXT NOT NULL,
             PRIMARY KEY (workspace_path, session_id, kind, file_path, item_hash)
         );
+        CREATE TABLE IF NOT EXISTS step_review_verdicts (
+            session_id TEXT NOT NULL,
+            step_id TEXT NOT NULL,
+            verdict INTEGER NOT NULL,
+            commit_id TEXT NULL,
+            at TEXT NOT NULL,
+            tree TEXT NULL,
+            rounds INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (session_id, step_id)
+        ) WITHOUT ROWID;
         CREATE TABLE IF NOT EXISTS review_conclusions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             workspace_path TEXT NOT NULL,
@@ -356,9 +366,9 @@ public sealed partial class ReviewStore
         command.CommandText = """
             INSERT INTO review_comments
                 (workspace_path, session_id, file_path, new_line_start, new_line_end, body, status, is_resolved,
-                 created_at, updated_at, sent_at, base_commit, anchor_json)
+                 created_at, updated_at, sent_at, base_commit, anchor_json, reply_verdict, reply_text)
             SELECT workspace_path, $to, file_path, new_line_start, new_line_end, body, status, is_resolved,
-                   created_at, updated_at, sent_at, base_commit, anchor_json
+                   created_at, updated_at, sent_at, base_commit, anchor_json, reply_verdict, reply_text
             FROM review_comments WHERE workspace_path = $workspace AND session_id = $from ORDER BY id;
             """;
         command.Parameters.AddWithValue("$workspace", workspacePath);
@@ -392,8 +402,67 @@ public sealed partial class ReviewStore
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         command.CommandText = "DELETE FROM review_conclusions WHERE session_id = $session";
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        command.CommandText = "DELETE FROM step_review_verdicts WHERE session_id = $session";
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         await transaction.CommitAsync(ct).ConfigureAwait(false);
         return removed;
+    }
+
+    /// <summary>
+    /// Stores the agent's answer to a sent comment: the verdict (<c>apply</c>, <c>push_back</c> or <c>clarify</c>) and its
+    /// text, replacing an earlier answer. <paramref name="resolve"/> also marks the comment resolved in the same write; a
+    /// clarifying question leaves it open. Returns false when the comment does not exist.
+    /// </summary>
+    public async Task<bool> SetReplyAsync(long id, string verdict, string? text, bool resolve, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(verdict);
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = resolve
+            ? "UPDATE review_comments SET reply_verdict = $verdict, reply_text = $text, is_resolved = 1, updated_at = $now WHERE id = $id"
+            : "UPDATE review_comments SET reply_verdict = $verdict, reply_text = $text, updated_at = $now WHERE id = $id";
+        command.Parameters.AddWithValue("$verdict", verdict);
+        command.Parameters.AddWithValue("$text", string.IsNullOrWhiteSpace(text) ? DBNull.Value : text.Trim());
+        command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
+        command.Parameters.AddWithValue("$id", id);
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
+    /// <summary>
+    /// Adds the two reply columns to a <c>review_comments</c> table created before they existed. The schema script cannot do
+    /// it (<c>CREATE TABLE IF NOT EXISTS</c> leaves an existing table alone), so the columns are looked up and added once;
+    /// a second process racing the same ALTER only loses with "duplicate column", which is the state wanted.
+    /// </summary>
+    private static async Task EnsureCommentReplyColumnsAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var info = connection.CreateCommand())
+        {
+            info.CommandText = "PRAGMA table_info(review_comments)";
+            await using var reader = await info.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                existing.Add(reader.GetString(1));
+            }
+        }
+
+        foreach (var column in new[] { "reply_verdict", "reply_text" })
+        {
+            if (existing.Contains(column))
+            {
+                continue;
+            }
+
+            try
+            {
+                await using var alter = connection.CreateCommand();
+                alter.CommandText = "ALTER TABLE review_comments ADD COLUMN " + column + " TEXT NULL";
+                await alter.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (SqliteException exception) when (exception.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+            {
+            }
+        }
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
@@ -435,6 +504,7 @@ public sealed partial class ReviewStore
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             command.CommandText = SchemaSql;
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            await EnsureCommentReplyColumnsAsync(connection, ct).ConfigureAwait(false);
             initialized = true;
         }
         finally
@@ -457,7 +527,9 @@ public sealed partial class ReviewStore
         ParseTimestamp(reader.GetString(10)),
         reader.IsDBNull(11) ? null : ParseTimestamp(reader.GetString(11)),
         reader.IsDBNull(12) ? null : reader.GetString(12),
-        reader.IsDBNull(13) ? null : JsonSerializer.Deserialize(reader.GetString(13), WorkspaceJsonContext.Default.DiffAnchor));
+        reader.IsDBNull(13) ? null : JsonSerializer.Deserialize(reader.GetString(13), WorkspaceJsonContext.Default.DiffAnchor),
+        reader.IsDBNull(14) ? null : reader.GetString(14),
+        reader.IsDBNull(15) ? null : reader.GetString(15));
 
     private static string StatusText(ReviewCommentStatus status) => status == ReviewCommentStatus.Draft ? "draft" : "sent";
 

@@ -86,9 +86,15 @@ internal sealed class ReviewCommentsTool(GitCli git, ReviewStore reviews) : GitT
             {
                 text.Append("     ").Append(line).Append('\n');
             }
+
+            if (!string.IsNullOrWhiteSpace(comment.ReplyVerdict))
+            {
+                text.Append("     your earlier answer (").Append(comment.ReplyVerdict).Append("): ")
+                    .Append((comment.ReplyText ?? string.Empty).ReplaceLineEndings(" ")).Append('\n');
+            }
         }
 
-        text.Append("\nNext: judge each comment first (apply or push_back), then change code, then review_comment_resolve with your verdict. See pr_workflow, phase review-comments.\n");
+        text.Append("\nNext: judge each comment first (apply, push_back, or clarify when you cannot judge it), then change code, then review_comment_resolve with your verdict. See pr_workflow, phase review-comments.\n");
         return new ToolResult(text.ToString());
     }
 

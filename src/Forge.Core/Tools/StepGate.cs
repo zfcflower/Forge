@@ -53,16 +53,157 @@ public interface IStepChangeProbe
 /// </summary>
 public sealed record StepReviewRecord(ReviewVerdict Verdict, string? CommitId, DateTimeOffset At, string? Tree = null);
 
+/// <summary>One persisted ledger entry: a step's last verdict and its count of non-approving rounds.</summary>
+public sealed record StepReviewEntry(string StepId, StepReviewRecord Record, int Rounds);
+
+/// <summary>
+/// Where a <see cref="StepReviewLedger"/> keeps its entries across host restarts. Implementations may throw; the ledger
+/// treats a failed load as "no entries" (the safe side: the step is reviewed again) and a failed write as lost.
+/// </summary>
+public interface IStepReviewStore
+{
+    /// <summary>Every entry of one session.</summary>
+    Task<IReadOnlyList<StepReviewEntry>> LoadAsync(string sessionId, CancellationToken ct);
+
+    /// <summary>Inserts or replaces one step's entry.</summary>
+    Task SaveAsync(string sessionId, StepReviewEntry entry, CancellationToken ct);
+
+    /// <summary>Removes one step's entry; a missing one is not an error.</summary>
+    Task DeleteAsync(string sessionId, string stepId, CancellationToken ct);
+}
+
 /// <summary>
 /// The review verdicts of one host, keyed by session and step. <c>request_review</c> records one when a step review
 /// finishes, the gate reads it when that step is marked done, and a step that leaves done forgets its entry, so its fix has
-/// to be reviewed again. Entries live in memory only: a restarted host knows no verdict and every step has to be reviewed
-/// once more, which is the safe side. Thread-safe.
+/// to be reviewed again. Memory is the authority while the host runs. With a <see cref="IStepReviewStore"/> every change is
+/// also written behind, in order, and <see cref="EnsureLoadedAsync"/> brings a session's stored entries in before they are
+/// read, so a restarted host keeps its verdicts; without one a restart knows none and every step is reviewed once more,
+/// which is the safe side. Thread-safe.
 /// </summary>
 public sealed class StepReviewLedger
 {
     private readonly ConcurrentDictionary<(string SessionId, string StepId), StepReviewRecord> records = new();
     private readonly ConcurrentDictionary<(string SessionId, string StepId), int> rounds = new();
+    private readonly IStepReviewStore? store;
+    private readonly Dictionary<string, Task> loads = new(StringComparer.Ordinal);
+    private readonly HashSet<(string SessionId, string StepId)> touched = [];
+    private readonly object chainLock = new();
+    private Task chain = Task.CompletedTask;
+
+    /// <param name="store">Persists the entries; null keeps them in memory only.</param>
+    public StepReviewLedger(IStepReviewStore? store = null)
+    {
+        this.store = store;
+    }
+
+    /// <summary>Completes when every write and load queued so far has finished (tests, shutdown).</summary>
+    public Task FlushAsync()
+    {
+        lock (chainLock)
+        {
+            return chain;
+        }
+    }
+
+    /// <summary>
+    /// Brings the stored entries of <paramref name="sessionId"/> into memory once. A step recorded or forgotten in this host
+    /// is never overwritten by its stored row (the host's own change is newer), and the load runs behind every write already
+    /// queued, so it cannot read a row that is about to be deleted. A failing store leaves the session without stored entries
+    /// and is retried by the next call. Waiting can be cancelled; the load itself still completes.
+    /// </summary>
+    public async Task EnsureLoadedAsync(string sessionId, CancellationToken ct)
+    {
+        if (store is null || !IsUsable(sessionId))
+        {
+            return;
+        }
+
+        Task load;
+        lock (chainLock)
+        {
+            if (!loads.TryGetValue(sessionId, out var existing))
+            {
+                var created = EnqueueLocked(() => LoadAsync(sessionId));
+                loads[sessionId] = created;
+                existing = created;
+            }
+
+            load = existing;
+        }
+
+        await load.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task LoadAsync(string sessionId)
+    {
+        IReadOnlyList<StepReviewEntry> entries;
+        try
+        {
+            entries = await store!.LoadAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The store is unreachable: treat the session as having no stored entries now, and try again on the next call.
+            lock (chainLock)
+            {
+                loads.Remove(sessionId);
+            }
+
+            return;
+        }
+
+        lock (chainLock)
+        {
+            foreach (var entry in entries)
+            {
+                var key = (sessionId, entry.StepId);
+                if (touched.Contains(key))
+                {
+                    continue;
+                }
+
+                records[key] = entry.Record;
+                if (entry.Rounds > 0)
+                {
+                    rounds[key] = entry.Rounds;
+                }
+            }
+        }
+    }
+
+    private Task EnqueueLocked(Func<Task> work)
+    {
+        chain = chain.ContinueWith(_ => work(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+        return chain;
+    }
+
+    private void PersistLocked(string sessionId, string stepId, StepReviewEntry? entry)
+    {
+        touched.Add((sessionId, stepId));
+        if (store is null)
+        {
+            return;
+        }
+
+        EnqueueLocked(async () =>
+        {
+            try
+            {
+                if (entry is null)
+                {
+                    await store.DeleteAsync(sessionId, stepId, CancellationToken.None).ConfigureAwait(false);
+                }
+                else
+                {
+                    await store.SaveAsync(sessionId, entry, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            catch (Exception)
+            {
+                // A lost write only means the step is reviewed again after a restart.
+            }
+        });
+    }
 
     /// <summary>
     /// Stores the verdict of a finished step review. A blank session or step id is ignored (such a call cannot be matched to
@@ -75,18 +216,28 @@ public sealed class StepReviewLedger
             return;
         }
 
-        records[(sessionId, stepId)] = new StepReviewRecord(
+        var record = new StepReviewRecord(
             verdict,
             string.IsNullOrWhiteSpace(commitId) ? null : commitId,
             DateTimeOffset.UtcNow,
             string.IsNullOrWhiteSpace(tree) ? null : tree);
-        if (verdict == ReviewVerdict.Approve)
+
+        // The memory change and the queued write happen under one lock, so the database sees the same order as memory.
+        lock (chainLock)
         {
-            rounds.TryRemove((sessionId, stepId), out _);
-        }
-        else
-        {
-            rounds.AddOrUpdate((sessionId, stepId), 1, static (_, count) => count + 1);
+            records[(sessionId, stepId)] = record;
+            int count;
+            if (verdict == ReviewVerdict.Approve)
+            {
+                rounds.TryRemove((sessionId, stepId), out _);
+                count = 0;
+            }
+            else
+            {
+                count = rounds.AddOrUpdate((sessionId, stepId), 1, static (_, existing) => existing + 1);
+            }
+
+            PersistLocked(sessionId, stepId, new StepReviewEntry(stepId, record, count));
         }
     }
 
@@ -105,8 +256,12 @@ public sealed class StepReviewLedger
             return;
         }
 
-        records.TryRemove((sessionId, stepId), out _);
-        rounds.TryRemove((sessionId, stepId), out _);
+        lock (chainLock)
+        {
+            records.TryRemove((sessionId, stepId), out _);
+            rounds.TryRemove((sessionId, stepId), out _);
+            PersistLocked(sessionId, stepId, null);
+        }
     }
 
     /// <summary>
@@ -153,7 +308,7 @@ public sealed record StepGateDecision(bool Allowed, string? Reason = null, strin
 /// <see cref="CaptureBaselineAsync"/>): a worktree equal to it changed nothing, whatever git status says, and a clean
 /// worktree that differs from it holds code committed outside the step's own commit, which is then gated like any other.</para>
 /// <para>Remaining limits. A step that was never put in progress has no baseline and is judged by git status and its own commit
-/// only. The ledger is in memory, so a restarted host asks for a new review. A file the build or the tests write into the
+/// only. The ledger is stored (<see cref="IStepReviewStore"/>), so a restarted host keeps its verdicts. A file the build or the tests write into the
 /// worktree after the review (outside the ignore rules) changes the fingerprint and makes the verdict stale.</para>
 /// </summary>
 public sealed class StepGate
@@ -268,6 +423,7 @@ public sealed class StepGate
         }
 
         var changeText = DescribeChange(change.State, step);
+        await Ledger.EnsureLoadedAsync(step.SessionId, ct).ConfigureAwait(false);
         var record = Ledger.Find(step.SessionId, step.Id);
         if (record is null)
         {

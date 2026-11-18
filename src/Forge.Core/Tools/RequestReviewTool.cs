@@ -224,9 +224,11 @@ public sealed class RequestReviewTool : ITool
         // Only a finished step review feeds the completion gate, under the step it reviewed: the empty change set returned
         // above started no review, and a stopped one has no verdict, so neither may overwrite an earlier verdict with a
         // weaker one.
-        if (arguments.StepId is not null)
+        if (arguments.StepId is not null && ledger is not null)
         {
-            ledger?.Record(context.SessionId, arguments.StepId, verdict, changeSet.HeadCommit, tree);
+            // Stored rounds are loaded first so the count keeps growing across a restart instead of starting over.
+            await ledger.EnsureLoadedAsync(context.SessionId, ct).ConfigureAwait(false);
+            ledger.Record(context.SessionId, arguments.StepId, verdict, changeSet.HeadCommit, tree);
         }
         var builder = new StringBuilder(384 + Math.Min(outcome.Text.Length, RequestReviewVerdict.MaxReviewChars));
         builder.Append(RequestReviewVerdict.VerdictLine(verdict)).Append('\n');

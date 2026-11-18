@@ -672,7 +672,9 @@ internal sealed class AppComposition : IAsyncDisposable
         // Each finished review is recorded into reviews.db (wave W17b), so a verdict outlives the turn that produced it. The
         // same store the review panels use; without a workspace services block the fallback is the same reviews directory
         // the purge path falls back to.
-        runtimeServices.ReviewConclusions = new ReviewConclusionStore(workspace?.Reviews ?? new ReviewStore(paths.ReviewsDirectory));
+        var reviewStore = workspace?.Reviews ?? new ReviewStore(paths.ReviewsDirectory);
+        runtimeServices.ReviewConclusions = new ReviewConclusionStore(reviewStore);
+        runtimeServices.StepReviewStore = new StepReviewLedgerStore(reviewStore);
         runtimeServices.Mcp = mcp;
         runtimeServices.ToolRouter = toolRouter;
         runtimeServices.Artifacts = artifacts;

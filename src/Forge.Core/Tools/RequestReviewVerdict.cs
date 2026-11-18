@@ -6,9 +6,10 @@ namespace Forge.Core.Tools;
 /// <summary>What a review ended with. <see cref="Unstructured"/> is never an approval: the reviewer missed its verdict line.</summary>
 public enum ReviewVerdict
 {
-    Unstructured,
-    Approve,
-    RequestChanges,
+    // The numbers are stored (the step review ledger in reviews.db): never renumber, only append.
+    Unstructured = 0,
+    Approve = 1,
+    RequestChanges = 2,
 }
 
 /// <summary>

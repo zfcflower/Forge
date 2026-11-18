@@ -8,14 +8,14 @@ namespace Forge.Workspace;
 internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) : GitToolBase(
     git,
     PrCommentTools.ReviewResolveName,
-    "Mark one local review comment resolved. verdict is apply (you changed the code) or push_back (you disagree: note is " +
-    "required and must give the reasons); a comment you cannot judge is not resolved, ask the user in your answer " +
-    "instead. Only comments of this session's worktree that were actually sent to the reviewer can be resolved: a draft " +
-    "(never sent) has nobody to answer and is refused. The resolved flag is all the review store " +
-    "keeps: verdict and note are returned to you and show up in the conversation, they are not stored with the comment. " +
-    "Read pr_workflow (phase review-comments) first.",
+    "Answer one local review comment. verdict is apply (you changed the code), push_back (you disagree: note is required " +
+    "and must give the reasons) or clarify (you cannot judge it yet: note is required and is your question to the reviewer; " +
+    "the comment stays open). apply and push_back also mark the comment resolved. Only comments of this session's worktree " +
+    "that were actually sent to the reviewer can be answered: a draft (never sent) has nobody to answer and is refused. " +
+    "The verdict and note are stored with the comment and shown to the reviewer in the review panel; a later answer " +
+    "replaces an earlier one. Read pr_workflow (phase review-comments) first.",
     """
-    {"type":"object","properties":{"id":{"type":"integer","description":"Comment id from review_comments."},"verdict":{"type":"string","enum":["apply","push_back"],"description":"What you concluded about the comment."},"note":{"type":"string","description":"What you changed, or why you disagree; required for push_back."}},"required":["id","verdict"],"additionalProperties":false}
+    {"type":"object","properties":{"id":{"type":"integer","description":"Comment id from review_comments."},"verdict":{"type":"string","enum":["apply","push_back","clarify"],"description":"What you concluded about the comment."},"note":{"type":"string","description":"What you changed, why you disagree, or your question; required for push_back and clarify."}},"required":["id","verdict"],"additionalProperties":false}
     """,
     ToolSideEffect.Write)
 {
@@ -28,13 +28,9 @@ internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) 
 
         var id = ReadId(arguments);
         var verdictText = GitToolJson.RequiredString(arguments, "verdict");
-        if (!PrReplyLedger.TryParseVerdict(verdictText, out var verdict) || verdict == PrReplyVerdict.Clarify)
+        if (!PrReplyLedger.TryParseVerdict(verdictText, out var verdict))
         {
-            return new ToolResult(
-                verdictText == "clarify"
-                    ? "A local comment is resolved only after apply or push_back. If you cannot judge it, ask the user in your answer and leave it open."
-                    : $"Unknown verdict '{verdictText}'; use apply or push_back.",
-                IsError: true);
+            return new ToolResult($"Unknown verdict '{verdictText}'; use apply, push_back or clarify.", IsError: true);
         }
 
         var note = GitToolJson.String(arguments, "note")?.Trim();
@@ -42,6 +38,13 @@ internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) 
         {
             return new ToolResult(
                 "push_back needs 'note' with your reasons: a comment that is resolved without a change must say why.",
+                IsError: true);
+        }
+
+        if (verdict == PrReplyVerdict.Clarify && string.IsNullOrEmpty(note))
+        {
+            return new ToolResult(
+                "clarify needs 'note' with your question: the reviewer reads it in the review panel, and without it there is nothing to answer.",
                 IsError: true);
         }
 
@@ -60,9 +63,16 @@ internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) 
                 IsError: true);
         }
 
-        if (comment.IsResolved)
+        if (comment.IsResolved && verdict != PrReplyVerdict.Clarify)
         {
             return new ToolResult($"Review comment {idText} is already resolved. Nothing to do.");
+        }
+
+        if (comment.IsResolved)
+        {
+            return new ToolResult(
+                $"Review comment {idText} is already resolved; a question on a resolved comment is not shown as open. Ask the user in your answer instead.",
+                IsError: true);
         }
 
         if (comment.Status != ReviewCommentStatus.Sent)
@@ -73,12 +83,16 @@ internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) 
                 IsError: true);
         }
 
-        if (!await reviews.SetResolvedAsync(id, true, ct).ConfigureAwait(false))
+        var resolve = verdict != PrReplyVerdict.Clarify;
+        if (!await reviews.SetReplyAsync(id, PrReplyLedger.VerdictName(verdict), note, resolve, ct).ConfigureAwait(false))
         {
-            return new ToolResult($"Review comment {idText} disappeared before it could be resolved.", IsError: true);
+            return new ToolResult($"Review comment {idText} disappeared before it could be answered.", IsError: true);
         }
 
-        var result = $"Resolved review comment {idText} ({comment.FilePath}:{comment.NewLineStart.ToString(CultureInfo.InvariantCulture)}), verdict {PrReplyLedger.VerdictName(verdict)}.";
+        var place = $"({comment.FilePath}:{comment.NewLineStart.ToString(CultureInfo.InvariantCulture)})";
+        var result = resolve
+            ? $"Resolved review comment {idText} {place}, verdict {PrReplyLedger.VerdictName(verdict)}."
+            : $"Asked for clarification on review comment {idText} {place}; it stays open until the reviewer answers.";
         return new ToolResult(string.IsNullOrEmpty(note) ? result : result + "\nNote: " + note);
     }
 

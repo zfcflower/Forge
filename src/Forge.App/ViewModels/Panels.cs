@@ -2059,8 +2059,13 @@ internal sealed class ReviewEntryViewModel : ObservableObject
     private readonly bool resolved;
     private readonly bool sent;
 
-    public ReviewEntryViewModel(string path, int lineStart, int lineEnd, string body, bool resolved, bool sent)
+    private readonly string? replyVerdict;
+    private readonly string? replyText;
+
+    public ReviewEntryViewModel(string path, int lineStart, int lineEnd, string body, bool resolved, bool sent, string? replyVerdict = null, string? replyText = null)
     {
+        this.replyVerdict = replyVerdict;
+        this.replyText = replyText;
         Path = path;
         this.lineStart = lineStart;
         this.lineEnd = lineEnd;
@@ -2077,11 +2082,17 @@ internal sealed class ReviewEntryViewModel : ObservableObject
 
     public string Status => InspectorStrings.ReviewStatus(resolved, sent);
 
+    /// <summary>The agent's answer (apply, push back or a clarifying question); empty until it has answered.</summary>
+    public string Reply => InspectorStrings.ReviewReply(replyVerdict, replyText);
+
+    public bool HasReply => !string.IsNullOrWhiteSpace(replyVerdict);
+
     /// <summary>Re-reads the two localized texts after a language switch; the panel calls this for every row.</summary>
     internal void RefreshText()
     {
         OnPropertyChanged(nameof(Line));
         OnPropertyChanged(nameof(Status));
+        OnPropertyChanged(nameof(Reply));
     }
 }
 
@@ -2154,7 +2165,9 @@ internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
                     comment.NewLineEnd,
                     comment.Body,
                     comment.IsResolved,
-                    comment.Status == ReviewCommentStatus.Sent));
+                    comment.Status == ReviewCommentStatus.Sent,
+                    comment.ReplyVerdict,
+                    comment.ReplyText));
             }
 
             SetSummary(InspectorStrings.ReviewSummary(Items.Count));
