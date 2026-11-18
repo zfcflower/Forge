@@ -65,30 +65,103 @@
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
-    <!-- The pin lives in the model list: a hollow star while the model is not pinned, the filled one while it is. Glyphs, not
-         icons: a row is built many times per open and an icon is a templated control. Colour tells the two apart besides the shape. -->
-    <Style Selector="TextBlock.star">
-      <Setter Property="Text" Value="☆" />
+    <!-- Rows of the model picker: the pinned caption, one header per provider and the models under it. A model row carries the
+         list's one light rule at its bottom, and hovering paints the whole row, pin included, so the hit target and the
+         highlight are the same rectangle. -->
+    <Style Selector="Border.model-row">
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.model-row:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
+    <Style Selector="Border.picker-row.model-group">
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="CornerRadius" Value="0" />
+    </Style>
+    <Style Selector="TextBlock.model-group-name">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <!-- The pinned section is a caption, not a group to open: smaller, quieter, no chevron. -->
+    <Style Selector="Border.picker-row.model-group.section">
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+    <Style Selector="Border.picker-row.model-group.section TextBlock.model-group-name">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.6" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.model-price">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <!-- The pin: hollow while the model is not pinned, filled while it is. Icons rather than glyphs, like every other mark in the
+         app; the state is told twice, by shape and by colour. -->
+    <Style Selector="wc|FluentIcon.pin-icon">
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
       <Setter Property="Opacity" Value="0.6" />
     </Style>
-    <Style Selector="TextBlock.star.pinned">
-      <Setter Property="Text" Value="★" />
+    <Style Selector="wc|FluentIcon.pin-icon.pinned">
       <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
       <Setter Property="Opacity" Value="1" />
     </Style>
     <Style Selector="Border.effort-track">
-      <Setter Property="Height" Value="4" />
-      <Setter Property="CornerRadius" Value="2" />
+      <!-- The gradient is the scale, not a progress read: it always spans the whole track, so the low end stays light and
+           the high end stays deep wherever the thumb sits. -->
+      <Setter Property="Height" Value="6" />
+      <Setter Property="CornerRadius" Value="3" />
       <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Margin" Value="6,0" />
       <Setter Property="Background">
         <LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
           <GradientStop Offset="0" Color="{DynamicResource SystemAccentColorLight3}" />
-          <GradientStop Offset="1" Color="{DynamicResource SystemAccentColorDark1}" />
+          <GradientStop Offset="1" Color="{DynamicResource SystemAccentColorDark2}" />
         </LinearGradientBrush>
       </Setter>
     </Style>
+    <Style Selector="TextBlock.effort-title">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.8" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <!-- The step labels under the track: one per accepted step, placed by EffortTickPanel on the thumb's own stops (the row is
+         inset by the thumb's radius in Views/ComposerToolbar). The chosen step is inked as a chip - the thumb alone is too small
+         to read the value off. -->
+    <Style Selector="Border.effort-tick">
+      <Setter Property="Padding" Value="3,1" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+    </Style>
+    <Style Selector="Border.effort-tick > TextBlock">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <!-- One line each, and never shortened: the panel pushes a label that would collide instead of trimming it, so at a full
+           seven-step dial the row may reach a few pixels into the popup's padding at the ends. -->
+      <Setter Property="TextWrapping" Value="NoWrap" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <!-- The stop mark on the track: a slice of the surface colour, so a pixel row of the bar reads as a position without
+         needing a second colour slot. The thumb, which carries the same surface tint, covers the chosen stop's notch. -->
+    <Style Selector="Border.effort-notch">
+      <Setter Property="Width" Value="2" />
+      <Setter Property="Height" Value="6" />
+      <Setter Property="CornerRadius" Value="1" />
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+      <Setter Property="Opacity" Value="0.55" />
+    </Style>
+    <Style Selector="Border.effort-tick.selected">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+    </Style>
+    <Style Selector="Border.effort-tick.selected > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
+    </Style>
+    <!-- Fluent's own slider keeps the behaviour; only its geometry and the colours that would draw a second, straight track
+         over the gradient are redirected. The thumb is a circle wearing the same brand tint and outline as the picker's
+         footer buttons, so the dial reads as one family with the actions under it. -->
     <Style Selector="Slider.effort">
       <Style.Resources>
         <SolidColorBrush x:Key="SliderTrackFill" Color="Transparent" />
@@ -97,6 +170,57 @@
         <SolidColorBrush x:Key="SliderTrackValueFill" Color="Transparent" />
         <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="Transparent" />
         <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderContainerBackground" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderContainerBackgroundPointerOver" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderContainerBackgroundPressed" Color="Transparent" />
+        <SolidColorBrush x:Key="SliderContainerBackgroundDisabled" Color="Transparent" />
+        <x:Double x:Key="SliderHorizontalHeight">22</x:Double>
+        <!-- The two margins and the 22 above must add up to the 16 px thumb below: the thumb then sits centred on the 6 px
+             track, where a bare 22 left the leftover 6 px under it and the circle rode 2 px high. -->
+        <GridLength x:Key="SliderPreContentMargin">3</GridLength>
+        <GridLength x:Key="SliderPostContentMargin">3</GridLength>
+        <CornerRadius x:Key="SliderThumbCornerRadius">8</CornerRadius>
       </Style.Resources>
+    </Style>
+    <!-- The thumb is named `thumb` by Fluent's horizontal slider template (the vertical one is `SliderThumb`); a theme update
+         that renames it leaves the defaults in place rather than failing loudly, so this selector is the thing to re-check
+         after an Avalonia upgrade. -->
+    <Style Selector="Slider.effort /template/ Thumb#thumb">
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Slider.effort:pointerover /template/ Thumb#thumb">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
+    </Style>
+    <Style Selector="Slider.effort:pressed /template/ Thumb#thumb">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
+    </Style>
+    <Style Selector="Slider.effort:disabled /template/ Thumb#thumb">
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
+    <!-- The picker's two footer actions: one weight for both, since neither is the popup's primary action. A brand tint
+         under a brand outline, with the body text ink so the label stays the strongest thing in the button. -->
+    <Style Selector="Button.composer-row.outlined">
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Padding" Value="8,3" />
+    </Style>
+    <Style Selector="Button.composer-row.outlined:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
+    </Style>
+    <Style Selector="Button.composer-row.outlined:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+    </Style>
+    <Style Selector="Button.composer-row.outlined:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Opacity" Value="0.5" />
     </Style>
 </Styles>

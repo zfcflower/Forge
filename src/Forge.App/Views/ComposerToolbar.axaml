@@ -31,7 +31,12 @@
                         Click="OnAgentPicked"
                         AutomationProperties.Name="{Binding Name}">
                   <Grid ColumnDefinitions="18,*">
-                    <TextBlock Text="✓" IsVisible="{Binding IsSelected}" VerticalAlignment="Top" />
+                    <wc:FluentIcon Data="{StaticResource IconCheck}"
+                                   Width="12"
+                                   Height="12"
+                                   IsVisible="{Binding IsSelected}"
+                                   Foreground="{DynamicResource BrandActionBrush}"
+                                   VerticalAlignment="Top" />
                     <StackPanel Grid.Column="1" Spacing="1">
                       <TextBlock Text="{Binding Name}" FontWeight="Medium" />
                       <TextBlock Classes="caption"
@@ -90,7 +95,9 @@
                             AutomationProperties.AutomationId="composer-model-list">
                 <ItemsControl.Template>
                   <ControlTemplate>
-                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <!-- The right padding is the scroll bar's own strip: the bar is drawn over the ScrollViewer's edge, so without
+                         it a thin bar sits on top of the row's pin star. -->
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled" Padding="0,0,16,0">
                       <ItemsPresenter x:Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
                     </ScrollViewer>
                   </ControlTemplate>
@@ -100,66 +107,175 @@
                     <VirtualizingStackPanel />
                   </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:ComposerModelOption">
-                    <Grid ColumnDefinitions="*,Auto">
-                      <views:PickerRow Command="{Binding SelectCommand}"
-                              Click="OnModelPicked"
-                              AutomationProperties.Name="{Binding Name}">
-                        <Grid ColumnDefinitions="18,*,Auto">
-                          <TextBlock Text="✓" IsVisible="{Binding IsSelected}" />
-                          <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                          <TextBlock Grid.Column="2"
-                                     Margin="8,0,0,0"
-                                     Classes="caption"
-                                     IsVisible="{Binding ShowProviderCaption}"
-                                     Text="{Binding Caption}"
-                                     VerticalAlignment="Center" />
-                        </Grid>
-                      </views:PickerRow>
-                      <views:PickerRow Grid.Column="1"
-                                       Classes="pin"
-                                       Command="{Binding TogglePinCommand}"
-                                       AutomationProperties.Name="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}"
-                                       ToolTip.Tip="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}">
-                        <TextBlock Classes="star" Classes.pinned="{Binding IsPinned}" />
-                      </views:PickerRow>
-                    </Grid>
+                <ItemsControl.DataTemplates>
+                  <!-- A provider group: the tree's own chevron, so expanding here reads like expanding a folder. The pinned
+                       section reuses the header without the chevron, count or toggle. -->
+                  <DataTemplate DataType="{x:Type vm:ComposerModelGroupOption}" x:DataType="vm:ComposerModelGroupOption">
+                    <views:PickerRow Classes="picker-row model-group"
+                                     Classes.section="{Binding IsSection}"
+                                     Command="{Binding ToggleCommand}"
+                                     AutomationProperties.Name="{Binding Name}">
+                      <Grid ColumnDefinitions="14,*,Auto">
+                        <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
+                                       Classes="tree-chevron"
+                                       Classes.expanded="{Binding IsExpanded}"
+                                       IsVisible="{Binding !IsSection}"
+                                       Width="12"
+                                       Height="12" />
+                        <TextBlock Grid.Column="1"
+                                   Classes="model-group-name"
+                                   Text="{Binding Name}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2"
+                                   Margin="8,0,0,0"
+                                   Classes="caption"
+                                   IsVisible="{Binding !IsSection}"
+                                   Text="{Binding Count}"
+                                   VerticalAlignment="Center" />
+                      </Grid>
+                    </views:PickerRow>
                   </DataTemplate>
-                </ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="{x:Type vm:ComposerModelOption}" x:DataType="vm:ComposerModelOption">
+                    <Border Classes="model-row">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <views:PickerRow Command="{Binding SelectCommand}"
+                                Click="OnModelPicked"
+                                AutomationProperties.Name="{Binding Name}">
+                          <Grid ColumnDefinitions="18,*,Auto,Auto">
+                            <wc:FluentIcon Data="{StaticResource IconCheck}"
+                                           Width="12"
+                                           Height="12"
+                                           IsVisible="{Binding IsSelected}"
+                                           Foreground="{DynamicResource BrandActionBrush}"
+                                           VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding Name}"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" />
+                            <wc:FluentIcon Grid.Column="2"
+                                           Data="{StaticResource IconChat}"
+                                           Margin="8,0,0,0"
+                                           Width="12"
+                                           Height="12"
+                                           IsVisible="{Binding IsDefaultModel}"
+                                           Foreground="{DynamicResource BrandActionBrush}"
+                                           VerticalAlignment="Center"
+                                           ToolTip.Tip="{Binding [session.composer.defaultModel], Source={x:Static loc:Loc.Instance}}" />
+                            <TextBlock Grid.Column="3"
+                                       Margin="6,0,0,0"
+                                       Classes="model-price"
+                                       IsVisible="{Binding HasPriceText}"
+                                       Text="{Binding PriceText}"
+                                       VerticalAlignment="Center" />
+                          </Grid>
+                        </views:PickerRow>
+                        <views:PickerRow Grid.Column="1"
+                                         Classes="pin"
+                                         Command="{Binding TogglePinCommand}"
+                                         AutomationProperties.Name="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}"
+                                         ToolTip.Tip="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}">
+                          <Panel>
+                            <wc:FluentIcon Data="{StaticResource IconPin}"
+                                           Classes="pin-icon"
+                                           Width="12"
+                                           Height="12"
+                                           IsVisible="{Binding !IsPinned}" />
+                            <wc:FluentIcon Data="{StaticResource IconPinSolid}"
+                                           Classes="pin-icon pinned"
+                                           Width="12"
+                                           Height="12"
+                                           IsVisible="{Binding IsPinned}" />
+                          </Panel>
+                        </views:PickerRow>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.DataTemplates>
             </ItemsControl>
             <TextBlock Classes="caption"
                        IsVisible="{Binding HasNoModels}"
                        Text="{Binding [session.composer.noModels], Source={x:Static loc:Loc.Instance}}" />
             <Separator />
-            <Grid ColumnDefinitions="*,Auto" Margin="2,0">
-              <TextBlock Classes="label" Text="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
-              <TextBlock Grid.Column="1" Classes="caption" Text="{Binding EffortName}" />
-            </Grid>
-            <Panel Margin="2,0">
-              <Border Classes="effort-track" />
-              <Slider Classes="effort"
-                      Minimum="0"
-                      Maximum="{Binding EffortMaximum, Mode=OneWay}"
-                      TickFrequency="1"
-                      IsSnapToTickEnabled="True"
-                      Value="{Binding EffortValue, Mode=TwoWay}"
-                      AutomationProperties.AutomationId="composer-effort"
-                      AutomationProperties.Name="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
-            </Panel>
+            <!-- The effort track: the gradient itself is the scale (light = least, deep = most), so the whole bar stays
+                 visible and only the thumb marks the chosen step. The ticks under it are the steps this model accepts,
+                 one label each, the chosen one inked. -->
+            <StackPanel Margin="2,0" Spacing="5">
+              <TextBlock Classes="effort-title"
+                         Text="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
+              <Panel>
+                <Border Classes="effort-track" />
+                <!-- The stops themselves, drawn as notches in the bar: two pixels of the popup surface, so each step reads as a
+                     position on the scale rather than as a number the gradient only hints at. Same panel and inset as the labels
+                     row below, which is what keeps the two lined up. -->
+                <ItemsControl Classes="effort-notches"
+                              ItemsSource="{Binding EffortTicks}"
+                              IsHitTestVisible="False"
+                              AutomationProperties.AutomationId="composer-effort-notches">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <views:EffortTickPanel Margin="8,0" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ComposerEffortTickViewModel">
+                      <Border Classes="effort-notch" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Slider Classes="effort"
+                        Minimum="0"
+                        Maximum="{Binding EffortMaximum, Mode=OneWay}"
+                        SmallChange="1"
+                        LargeChange="1"
+                        Value="{Binding EffortValue, Mode=TwoWay}"
+                        PointerReleased="OnEffortReleased"
+                        PointerCaptureLost="OnEffortReleased"
+                        AutomationProperties.AutomationId="composer-effort"
+                        AutomationProperties.Name="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}"
+                        AutomationProperties.HelpText="{Binding EffortName}" />
+              </Panel>
+              <ItemsControl ItemsSource="{Binding EffortTicks}"
+                            AutomationProperties.AutomationId="composer-effort-ticks">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <!-- Inset by the thumb's radius (16 px thumb, see Slider.effort in Views/ComposerStyles): the row's ends are
+                         then the dial's first and last stops, so EffortTickPanel puts each label under its own notch. -->
+                    <views:EffortTickPanel Margin="8,0" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ComposerEffortTickViewModel">
+                    <Border Classes="effort-tick"
+                            Classes.selected="{Binding IsSelected}"
+                            ToolTip.Tip="{Binding Name}">
+                      <TextBlock Text="{Binding Name}" />
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
             <Separator />
-            <Button Classes="composer-row"
-                    Command="{Binding SaveDefaultsCommand}"
-                    AutomationProperties.AutomationId="composer-save-defaults"
-                    Content="{Binding [session.composer.saveDefaults], Source={x:Static loc:Loc.Instance}}" />
-            <Button Classes="composer-row"
-                    Command="{Binding RefreshCommand}"
-                    AutomationProperties.AutomationId="composer-refresh">
-              <StackPanel Orientation="Horizontal" Spacing="6">
-                <wc:FluentIcon Data="{DynamicResource IconRefresh}" Width="14" Height="14" />
-                <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
-              </StackPanel>
-            </Button>
+            <!-- One row, two ends: refreshing the catalogue on the left, saving this pick as the new-session default on
+                 the right. Same weight for both — neither is the popup's primary action. -->
+            <Grid ColumnDefinitions="Auto,*,Auto" Margin="2,0">
+              <Button Classes="composer-row outlined"
+                      Command="{Binding RefreshCommand}"
+                      AutomationProperties.AutomationId="composer-refresh">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                  <wc:FluentIcon Data="{DynamicResource IconRefresh}" Width="12" Height="12" />
+                  <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
+                </StackPanel>
+              </Button>
+              <Button Grid.Column="2"
+                      Classes="composer-row outlined"
+                      Command="{Binding SaveDefaultsCommand}"
+                      AutomationProperties.AutomationId="composer-save-defaults">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                  <wc:FluentIcon Data="{DynamicResource IconSave}" Width="12" Height="12" />
+                  <TextBlock Text="{Binding [session.composer.saveDefaults], Source={x:Static loc:Loc.Instance}}" />
+                </StackPanel>
+              </Button>
+            </Grid>
             <TextBlock Classes="caption"
                        Margin="8,0"
                        IsVisible="{Binding HasStatus}"
@@ -200,7 +316,12 @@
                         Click="OnOrchestrationPicked"
                         AutomationProperties.Name="{Binding Name}">
                   <Grid ColumnDefinitions="18,*">
-                    <TextBlock Text="✓" IsVisible="{Binding IsSelected}" VerticalAlignment="Top" />
+                    <wc:FluentIcon Data="{StaticResource IconCheck}"
+                                   Width="12"
+                                   Height="12"
+                                   IsVisible="{Binding IsSelected}"
+                                   Foreground="{DynamicResource BrandActionBrush}"
+                                   VerticalAlignment="Top" />
                     <StackPanel Grid.Column="1" Spacing="1">
                       <TextBlock Text="{Binding Name}" FontWeight="Medium" />
                       <TextBlock Classes="caption"

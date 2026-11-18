@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Forge.Abstractions;
 
@@ -57,6 +58,9 @@ internal static class SessionStrings
     public const string ComposerSearchModelsKey = "session.composer.searchModels";
     public const string ComposerNoModelsKey = "session.composer.noModels";
     public const string ComposerPinKey = "session.composer.pin";
+    public const string ComposerPinnedSectionKey = "session.composer.pinnedSection";
+    public const string ComposerDefaultModelKey = "session.composer.defaultModel";
+    public const string ComposerModelPriceKey = "session.composer.modelPrice";
     public const string ComposerEffortKey = "session.composer.effort";
     public const string ComposerEffortOffKey = "session.composer.effort.off";
     public const string ComposerEffortMinimalKey = "session.composer.effort.minimal";
@@ -64,6 +68,7 @@ internal static class SessionStrings
     public const string ComposerEffortMediumKey = "session.composer.effort.medium";
     public const string ComposerEffortHighKey = "session.composer.effort.high";
     public const string ComposerEffortXHighKey = "session.composer.effort.xhigh";
+    public const string ComposerEffortXHighCompactKey = "session.composer.effort.xhighCompact";
     public const string ComposerEffortMaxKey = "session.composer.effort.max";
     public const string ComposerSaveDefaultsKey = "session.composer.saveDefaults";
     public const string ComposerDefaultsSavedKey = "session.composer.defaultsSaved";
@@ -189,11 +194,11 @@ internal static class SessionStrings
 
     public static LocText PromptsReloadedTitle => new(PromptsReloadedTitleKey);
 
-    /// <summary>The notice shown when the stored history cannot be read.</summary>
     public static LocText PromptsReloadSkipped => new(PromptsReloadSkippedKey);
 
     public static LocText PromptsReloadSkippedTitle => new(PromptsReloadSkippedTitleKey);
 
+    /// <summary>The notice shown when the stored history cannot be read.</summary>
     public static LocText ReadFailed(string message) => new(ReadFailedKey, message);
 
     /// <summary>The notice shown when the session started without a model provider.</summary>
@@ -238,6 +243,48 @@ internal static class SessionStrings
         ThinkingEffort.Max => ComposerEffortMaxKey,
         _ => ComposerEffortOffKey,
     }];
+
+    /// <summary>
+    /// The step's name for a narrow label — the model picker's tick row, where a seventh of the track is all a label gets.
+    /// Only XHigh differs ("Extra high" does not fit); every roomier surface keeps <see cref="ComposerEffortName"/>.
+    /// </summary>
+    public static string ComposerEffortTickName(ThinkingEffort effort) => effort == ThinkingEffort.XHigh
+        ? Loc.Instance[ComposerEffortXHighCompactKey]
+        : ComposerEffortName(effort);
+
+    /// <summary>The pinned section's caption, above the models the user pinned.</summary>
+    public static string ComposerPinnedSection => Loc.Instance[ComposerPinnedSectionKey];
+
+    /// <summary>The hint behind the icon on the row a new session starts with.</summary>
+    public static string ComposerDefaultModelHint => Loc.Instance[ComposerDefaultModelKey];
+
+    /// <summary>
+    /// The price line on a model picker row: input and output price per million tokens, then the context window, e.g.
+    /// "每百万 $0.15 / $0.6 · 1M". Whatever is unknown is left out rather than shown as zero; nothing known gives an empty
+    /// string, and the row then shows no line at all.
+    /// </summary>
+    public static string ComposerModelMeta(ModelMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var price = metadata.Pricing is { } pricing && (pricing.Input > 0 || pricing.Output > 0)
+            ? Loc.Instance.Format(ComposerModelPriceKey, Amount(pricing.Input), Amount(pricing.Output))
+            : string.Empty;
+        var window = metadata.ContextWindow is { } tokens && tokens > 0 ? Window(tokens) : string.Empty;
+        return price.Length == 0 ? window
+            : window.Length == 0 ? price
+            : price + " · " + window;
+    }
+
+    /// <summary>A price with no trailing zeros: 0.15, 0.6, 15.</summary>
+    private static string Amount(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    /// <summary>A context window in the compact form the instruments use: 200k, 1M, 1.5M.</summary>
+    private static string Window(int tokens) => tokens switch
+    {
+        >= 1_000_000 => (tokens / 1_000_000d).ToString("0.#", CultureInfo.InvariantCulture) + "M",
+        >= 1_000 => (tokens / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "k",
+        _ => tokens.ToString(CultureInfo.InvariantCulture),
+    };
 
     public static LocText ComposerInterjectedNotice(string text) => new(ComposerInterjectedNoticeKey, text);
 
@@ -475,6 +522,9 @@ internal static class SessionStrings
         Loc.Register(ComposerSearchModelsKey, "搜索模型", "Search models");
         Loc.Register(ComposerNoModelsKey, "没有匹配的模型", "No matching models");
         Loc.Register(ComposerPinKey, "固定到顶部", "Pin to top");
+        Loc.Register(ComposerPinnedSectionKey, "收藏", "Pinned");
+        Loc.Register(ComposerDefaultModelKey, "新会话的默认模型", "The model new sessions start with");
+        Loc.Register(ComposerModelPriceKey, "每百万 ${0} / ${1}", "per 1M ${0} / ${1}");
         Loc.Register(ComposerEffortKey, "推理", "Reasoning");
         Loc.Register(ComposerEffortOffKey, "关闭", "Off");
         Loc.Register(ComposerEffortMinimalKey, "极低", "Minimal");
@@ -482,6 +532,7 @@ internal static class SessionStrings
         Loc.Register(ComposerEffortMediumKey, "中", "Medium");
         Loc.Register(ComposerEffortHighKey, "高", "High");
         Loc.Register(ComposerEffortXHighKey, "超高", "Extra high");
+        Loc.Register(ComposerEffortXHighCompactKey, "超高", "XHigh");
         Loc.Register(ComposerEffortMaxKey, "最高", "Max");
         Loc.Register(ComposerSaveDefaultsKey, "设为默认", "Set default");
         Loc.Register(ComposerDefaultsSavedKey, "已保存为新会话的默认值", "Saved as defaults for new sessions");
@@ -518,6 +569,11 @@ internal static class SessionStrings
             "Prompts used by \"{0}\" changed, but the session still runs on the old snapshot. The reload-prompts button in the title bar refreshes it, at the cost of losing this session's prompt cache once (the next turn is billed uncached); you can also open a new session by hand.");
         Loc.Register(PromptsReloadTipKey, "重载提示词（提示缓存会失效一次）", "Reload prompts (the prompt cache is lost once)");
         Loc.Register(PromptsReloadedTitleKey, "提示词已刷新", "Prompts reloaded");
+        Loc.Register(PromptsReloadSkippedTitleKey, "暂未重载提示词", "Prompts not reloaded");
+        Loc.Register(
+            PromptsReloadSkippedKey,
+            "回合进行中或会话尚未开始，没有可重载的快照：新会话的第一条消息会读取最新提示词，回合结束后可再点一次。",
+            "A turn is running or the session has not started, so there is no snapshot to reload: the first message of a new session reads the latest prompts, and the button can be used again once the turn ends.");
         Loc.Register(
             PromptsReloadedKey,
             "下一条消息起使用新提示词，提示缓存已失效一次。为避免长会话反复浪费成本，建议手动新开会话。",
@@ -528,11 +584,6 @@ internal static class SessionStrings
 
         // turn card and its notices
         Loc.Register(TurnHeaderKey, "第 {0} 轮 · {1} · {2} · 输入 {3} · 输出 {4}", "Turn {0} · {1} · {2} · in {3} · out {4}");
-        Loc.Register(PromptsReloadSkippedTitleKey, "暂未重载提示词", "Prompts not reloaded");
-        Loc.Register(
-            PromptsReloadSkippedKey,
-            "回合进行中或会话尚未开始，没有可重载的快照：新会话的第一条消息会读取最新提示词，回合结束后可再点一次。",
-            "A turn is running or the session has not started, so there is no snapshot to reload: the first message of a new session reads the latest prompts, and the button can be used again once the turn ends.");
         Loc.Register(TurnRunningKey, "运行中…", "Running…");
         Loc.Register(TurnTokenSummaryKey, "输入 {0} · 输出 {1}", "in {0} · out {1}");
         Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");

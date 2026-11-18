@@ -102,17 +102,23 @@ internal sealed class ComposerOrchestrationOption : ObservableObject
     }
 }
 
+/// <summary>One row of the model picker's flat row list: a provider group's header, the pinned section's header, or a model.</summary>
+internal interface IComposerModelRow;
+
 /// <summary>One row of the model picker.</summary>
-internal sealed class ComposerModelOption : ObservableObject
+internal sealed class ComposerModelOption : ObservableObject, IComposerModelRow
 {
+    private readonly Func<string>? priceSource;
     private bool isPinned;
     private bool isSelected;
+    private bool isDefaultModel;
 
-    public ComposerModelOption(string name, string providerId, string providerName, bool pinned)
+    public ComposerModelOption(string name, string providerId, string providerName, bool pinned, Func<string>? priceSource = null)
     {
         Name = name;
         ProviderId = providerId;
         ProviderName = providerName;
+        this.priceSource = priceSource;
         isPinned = pinned;
         SelectCommand = new RelayCommand(() => Selected?.Invoke(this));
         TogglePinCommand = new RelayCommand(() => PinToggled?.Invoke(this));
@@ -125,11 +131,28 @@ internal sealed class ComposerModelOption : ObservableObject
 
     public string ProviderName { get; }
 
-    /// <summary>The provider name shown after the model when more than one provider is connected; empty otherwise.</summary>
-    public string Caption => ShowProviderCaption ? ProviderName : string.Empty;
+    /// <summary>
+    /// The price line on the right of the row: "每百万 $0.15 / $0.6 · 1M" (input / output per million tokens, then the context
+    /// window). Read from the catalogue on each request rather than captured once: the models.dev snapshot lands on the pool
+    /// after the rows exist, so a value taken at build time would stay blank until the picker was rebuilt.
+    /// </summary>
+    public string PriceText => priceSource?.Invoke() ?? string.Empty;
 
-    /// <summary>Set by the composer: a single-provider setup does not repeat the provider on every row.</summary>
-    public bool ShowProviderCaption { get; init; }
+    public bool HasPriceText => PriceText.Length > 0;
+
+    /// <summary>Re-reads the price line after the catalogue's metadata changed underneath it.</summary>
+    public void RefreshPrice()
+    {
+        OnPropertyChanged(nameof(PriceText));
+        OnPropertyChanged(nameof(HasPriceText));
+    }
+
+    /// <summary>True on the model a new session starts with (the one "设为默认" stored), which is what the icon marks.</summary>
+    public bool IsDefaultModel
+    {
+        get => isDefaultModel;
+        set => Set(ref isDefaultModel, value);
+    }
 
     public bool IsPinned
     {
@@ -150,6 +173,47 @@ internal sealed class ComposerModelOption : ObservableObject
     internal event Action<ComposerModelOption>? Selected;
 
     internal event Action<ComposerModelOption>? PinToggled;
+}
+
+/// <summary>
+/// A header row of the model picker: one provider's collapsed/expanded group, or the pinned section's caption (which has no
+/// chevron, no count and no toggle).
+/// </summary>
+internal sealed class ComposerModelGroupOption : ObservableObject, IComposerModelRow
+{
+    private bool isExpanded;
+    private int count;
+
+    public ComposerModelGroupOption(string name, bool isSection)
+    {
+        Name = name;
+        IsSection = isSection;
+        ToggleCommand = new RelayCommand(
+            () => Toggled?.Invoke(this),
+            () => !isSection);
+    }
+
+    public string Name { get; }
+
+    /// <summary>How many models the group lists right now (after hiding, before the search filter); zero on the pinned caption.</summary>
+    public int Count
+    {
+        get => count;
+        set => Set(ref count, value);
+    }
+
+    /// <summary>The pinned section's caption, not a provider group.</summary>
+    public bool IsSection { get; }
+
+    public bool IsExpanded
+    {
+        get => isExpanded;
+        set => Set(ref isExpanded, value);
+    }
+
+    public RelayCommand ToggleCommand { get; }
+
+    internal event Action<ComposerModelGroupOption>? Toggled;
 }
 
 /// <summary>One bar of the composer's effort readout: the accepted steps of the current model, filled up to the chosen one.</summary>
@@ -173,6 +237,41 @@ internal sealed class ComposerEffortBarViewModel : NotifyingObject
     }
 
     public double Opacity => isActive ? 1 : 0.3;
+}
+
+/// <summary>
+/// One label under the effort track: the accepted step's name and whether it is the chosen one. Where the label sits is the
+/// panel's business (<see cref="Views.EffortTickPanel"/>), not the item's.
+/// </summary>
+internal sealed class ComposerEffortTickViewModel : NotifyingObject
+{
+    private readonly ThinkingEffort step;
+    private bool isSelected;
+
+    public ComposerEffortTickViewModel(ThinkingEffort step)
+    {
+        this.step = step;
+        Name = SessionStrings.ComposerEffortTickName(step);
+    }
+
+    public string Name { get; private set; }
+
+    public bool IsSelected
+    {
+        get => isSelected;
+        set => Set(ref isSelected, value);
+    }
+
+    /// <summary>Re-reads the step's name after a language switch; the selected step is unchanged by one.</summary>
+    public void RefreshText()
+    {
+        var name = SessionStrings.ComposerEffortTickName(step);
+        if (!string.Equals(name, Name, StringComparison.Ordinal))
+        {
+            Name = name;
+            OnPropertyChanged(nameof(Name));
+        }
+    }
 }
 
 /// <summary>A message waiting above the input: queued for after the running turn, or interjected and not yet delivered.</summary>
@@ -311,8 +410,14 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     private readonly Func<string?, string?, IReadOnlyList<ThinkingEffort>> thinkingLevels;
     private readonly List<ComposerModelOption> allModels = [];
 
+    /// <summary>One provider's header plus the models it lists, in catalogue order; the pinned caption lives apart from these.</summary>
+    private readonly List<ComposerModelProviderGroup> providerGroups = [];
+    private readonly ComposerModelGroupOption pinnedSection = new(SessionStrings.ComposerPinnedSection, isSection: true);
+
     /// <summary>Reused by <see cref="FilterModels"/>: a keystroke must not allocate a list of the whole catalogue.</summary>
-    private readonly List<ComposerModelOption> visibleModels = [];
+    private readonly List<ComposerModelOption> visiblePinned = [];
+    private readonly List<ComposerModelOption> visibleGroupModels = [];
+    private readonly List<IComposerModelRow> visibleRows = [];
     private IReadOnlyList<ThinkingEffort> effortSteps = [ThinkingEffort.Off];
     private string providerId = string.Empty;
     private ComposerAgentOption selectedAgent;
@@ -320,6 +425,10 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     private ComposerOrchestrationOption? selectedOrchestration;
     private string model = string.Empty;
     private ThinkingEffort effort;
+    // The thumb's continuous position while it is being dragged, and whether the step is being read from that position rather
+    // than written to it (so a drag can move the thumb without the step setter pulling it back onto a notch).
+    private double effortPosition;
+    private bool draggingPosition;
     private string modelSearch = string.Empty;
     private string? status;
     private IReadOnlyList<SlashEntry>? skills;
@@ -365,6 +474,10 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         {
             appPreferences.PropertyChanged += OnAppPreferencesChanged;
         }
+
+        // The models.dev snapshot and the provider model lists land on the pool after the rows exist: their prices show up when
+        // the catalogue says so, without rebuilding the list (which would drop the group the user just opened).
+        services.ModelCatalog.Changed += OnModelCatalogChanged;
 
         this.workspace = workspace ?? string.Empty;
         this.fileSource = fileSource ?? ListWorkspaceFilesAsync;
@@ -427,6 +540,8 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         {
             appPreferences.PropertyChanged -= OnAppPreferencesChanged;
         }
+
+        services.ModelCatalog.Changed -= OnModelCatalogChanged;
     }
 
     public IReadOnlyList<ComposerAgentOption> Agents { get; }
@@ -578,9 +693,10 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     public bool HasModel => catalog.IsConfigured;
 
     /// <summary>The visible model rows: the search filter applied, pinned ones first.</summary>
-    public RangeObservableCollection<ComposerModelOption> Models { get; }
+    public RangeObservableCollection<IComposerModelRow> Models { get; }
 
-    public bool HasNoModels => Models.Count == 0;
+    public bool HasNoModels { get; private set; } = true;
+
 
     public string Model
     {
@@ -630,9 +746,15 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             }
 
             UpdateEffortBars();
-            OnPropertyChanged(nameof(EffortValue));
+            UpdateEffortTicks();
             OnPropertyChanged(nameof(EffortName));
             Apply();
+            // A step chosen from anywhere but the dial pulls the thumb onto its notch; during a drag the thumb stays where the
+            // pointer put it and only the step follows (see EffortValue).
+            if (!draggingPosition)
+            {
+                SetEffortPosition(ThinkingEfforts.IndexOf(effort, effortSteps));
+            }
         }
     }
 
@@ -642,27 +764,62 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     /// <summary>The slider's top position: the last accepted step's index.</summary>
     public double EffortMaximum => Math.Max(0, effortSteps.Count - 1);
 
-    /// <summary>The slider's position: the accepted step list's index, never the enum value, so a model with gaps still
-    /// lands on a step it takes.</summary>
+    /// <summary>
+    /// The dial's thumb position in accepted-step indices: continuous while the pointer drags, so a four-step model still gives
+    /// a thumb that follows the pointer, while the step itself changes only when the thumb crosses a notch's midpoint
+    /// (never the enum value, so a model with gaps still lands on a step it takes). <see cref="SnapEffort"/> pulls the thumb
+    /// onto that step when the drag ends.
+    /// </summary>
     public double EffortValue
     {
-        get => ThinkingEfforts.IndexOf(effort, effortSteps);
+        get => effortPosition;
         set
         {
-            if (effortSteps.Count == 0)
+            if (effortSteps.Count == 0 || !double.IsFinite(value))
             {
                 return;
             }
 
-            var index = Math.Clamp((int)Math.Round(value), 0, effortSteps.Count - 1);
-            Effort = effortSteps[index];
+            var position = Math.Clamp(value, 0, EffortMaximum);
+            if (!Set(ref effortPosition, position))
+            {
+                return;
+            }
+
+            var index = Math.Clamp((int)Math.Round(position, MidpointRounding.AwayFromZero), 0, effortSteps.Count - 1);
+            draggingPosition = true;
+            try
+            {
+                Effort = effortSteps[index];
+            }
+            finally
+            {
+                draggingPosition = false;
+            }
         }
+    }
+
+    /// <summary>Puts the thumb back on the step it landed on; the view calls this when the pointer lets go of the dial.</summary>
+    public void SnapEffort() => SetEffortPosition(ThinkingEfforts.IndexOf(effort, effortSteps));
+
+    private void SetEffortPosition(double position)
+    {
+        if (!double.IsFinite(position) || position == effortPosition)
+        {
+            return;
+        }
+
+        effortPosition = position;
+        OnPropertyChanged(nameof(EffortValue));
     }
 
     public string EffortName => SessionStrings.ComposerEffortName(effort);
 
     /// <summary>The small bars on the model chip: one per accepted step, lit up to the chosen one.</summary>
     public ObservableCollection<ComposerEffortBarViewModel> EffortBars { get; } = [];
+
+    /// <summary>The labels under the effort track in the model picker: one per accepted step, the chosen one highlighted.</summary>
+    public ObservableCollection<ComposerEffortTickViewModel> EffortTicks { get; } = [];
 
     /// <summary>A short confirmation under the model list ("saved as defaults"); empty when there is none.</summary>
     public string? Status
@@ -869,7 +1026,14 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 
         OnPropertyChanged(nameof(AgentLabel));
         OnPropertyChanged(nameof(EffortName));
+        foreach (var tick in EffortTicks)
+        {
+            tick.RefreshText();
+        }
+
         RefreshImageText();
+        // The row labels, the price line and the pinned caption are localised, so the picker's rows are rebuilt for the new language.
+        RebuildModels();
         Status = null;
     }
 
@@ -1033,8 +1197,11 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         var accepted = thinkingLevels(model, providerId);
         effortSteps = accepted is { Count: > 0 } ? accepted : [ThinkingEffort.Off];
         effort = ThinkingEfforts.Clamp(effort, effortSteps);
+        effortPosition = ThinkingEfforts.IndexOf(effort, effortSteps);
         RebuildEffortBars();
+        RebuildEffortTicks();
         UpdateEffortBars();
+        UpdateEffortTicks();
         RefreshImageGate();
         OnPropertyChanged(nameof(EffortSteps));
         OnPropertyChanged(nameof(EffortMaximum));
@@ -1058,6 +1225,24 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         for (var index = 0; index < EffortBars.Count; index++)
         {
             EffortBars[index].IsActive = index <= selected;
+        }
+    }
+
+    private void RebuildEffortTicks()
+    {
+        EffortTicks.Clear();
+        foreach (var step in effortSteps)
+        {
+            EffortTicks.Add(new ComposerEffortTickViewModel(step));
+        }
+    }
+
+    private void UpdateEffortTicks()
+    {
+        var selected = ThinkingEfforts.IndexOf(effort, effortSteps);
+        for (var index = 0; index < EffortTicks.Count; index++)
+        {
+            EffortTicks[index].IsSelected = index == selected;
         }
     }
 
@@ -1086,24 +1271,39 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             option.PinToggled -= OnPinToggled;
         }
 
+        foreach (var group in providerGroups)
+        {
+            group.Header.Toggled -= OnGroupToggled;
+        }
+
         allModels.Clear();
+        providerGroups.Clear();
         if (catalog.IsConfigured)
         {
-            var showProvider = catalog.Providers.Count > 1;
             foreach (var provider in catalog.Providers)
             {
+                var group = new ComposerModelProviderGroup(provider.DisplayName);
+                group.Header.Toggled += OnGroupToggled;
                 foreach (var name in provider.Models)
                 {
-                    var option = new ComposerModelOption(name, provider.Id, provider.DisplayName, preferences.IsPinned(name))
+                    var option = new ComposerModelOption(
+                        name,
+                        provider.Id,
+                        provider.DisplayName,
+                        preferences.IsPinned(name),
+                        () => SessionStrings.ComposerModelMeta(catalog.MetadataFor(name, provider.Id)))
                     {
-                        ShowProviderCaption = showProvider,
+                        IsDefaultModel = string.Equals(name, preferences.DefaultModel, StringComparison.Ordinal),
                         IsSelected = string.Equals(name, model, StringComparison.Ordinal) &&
                                      string.Equals(provider.Id, providerId, StringComparison.Ordinal),
                     };
                     option.Selected += OnModelSelected;
                     option.PinToggled += OnPinToggled;
                     allModels.Add(option);
+                    group.Models.Add(option);
                 }
+
+                providerGroups.Add(group);
             }
 
             // A pinned model that no connected provider lists any more still shows, so a pin is not silently lost.
@@ -1113,7 +1313,6 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
                 {
                     var option = new ComposerModelOption(pinned, providerId, string.Empty, pinned: true)
                     {
-                        ShowProviderCaption = false,
                         IsSelected = string.Equals(pinned, model, StringComparison.Ordinal),
                     };
                     option.Selected += OnModelSelected;
@@ -1123,41 +1322,103 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             }
         }
 
+        // The group holding the session's own model opens; the rest start collapsed, which is the picker's default shape.
+        foreach (var group in providerGroups)
+        {
+            group.Header.IsExpanded = group.Models.Exists(IsCurrentModel);
+        }
+
         FilterModels();
     }
 
+    private void OnGroupToggled(ComposerModelGroupOption header)
+    {
+        header.IsExpanded = !header.IsExpanded;
+        FilterModels();
+    }
+
+    /// <summary>
+    /// Builds the picker's flat row list: the pinned section first (its rows stay at the top, out of the provider groups), then
+    /// one header per provider with that provider's surviving models under it. A search overrides the collapsed state — typing
+    /// is a request to see matches, not to click a group open afterwards — and drops the groups that matched nothing.
+    /// </summary>
     private void FilterModels()
     {
         var query = modelSearch.Trim();
-        // Two passes over the catalogue instead of LINQ (no iterator, no sorted copy): pinned rows first, each pass keeping
-        // the catalogue order, which is what OrderByDescending did. The buffer is a field so a keystroke allocates nothing.
-        visibleModels.Clear();
-        for (var pass = 0; pass < 2; pass++)
+        var searching = query.Length > 0;
+
+        visiblePinned.Clear();
+        foreach (var option in allModels)
         {
-            var pinned = pass == 0;
-            foreach (var option in allModels)
+            if (option.IsPinned && Shows(option, query))
             {
-                if (option.IsPinned == pinned && Shows(option, query))
+                visiblePinned.Add(option);
+            }
+        }
+
+        visibleRows.Clear();
+        if (visiblePinned.Count > 0)
+        {
+            pinnedSection.Count = visiblePinned.Count;
+            visibleRows.Add(pinnedSection);
+            foreach (var option in visiblePinned)
+            {
+                visibleRows.Add(option);
+            }
+        }
+
+        var modelsShowing = 0;
+        foreach (var group in providerGroups)
+        {
+            visibleGroupModels.Clear();
+            foreach (var option in group.Models)
+            {
+                // A pinned model is listed once, in the pinned section, so the group is what is left of it.
+                if (!option.IsPinned && Shows(option, query))
                 {
-                    visibleModels.Add(option);
+                    visibleGroupModels.Add(option);
+                }
+            }
+
+            group.Header.Count = visibleGroupModels.Count;
+            if (visibleGroupModels.Count == 0)
+            {
+                continue;
+            }
+
+            modelsShowing += visibleGroupModels.Count;
+            visibleRows.Add(group.Header);
+            if (searching || group.Header.IsExpanded)
+            {
+                foreach (var option in visibleGroupModels)
+                {
+                    visibleRows.Add(option);
                 }
             }
         }
 
-        // Typing a character that narrows nothing (or unhiding a model) must not churn a bound collection of ~180 rows.
+        modelsShowing += visiblePinned.Count;
         if (SameAsVisible())
         {
             return;
         }
 
-        var hadModels = Models.Count > 0;
         // One Reset instead of ~180 Add notifications: the picker rebuilds its rows once.
-        Models.ReplaceAll(visibleModels);
+        Models.ReplaceAll(visibleRows);
 
-        if (hadModels != (Models.Count > 0))
+        if (HasNoModels != (modelsShowing == 0))
         {
+            HasNoModels = modelsShowing == 0;
             OnPropertyChanged(nameof(HasNoModels));
         }
+    }
+
+    /// <summary>One provider's header and the models it lists; <see cref="FilterModels"/> folds them into the row list.</summary>
+    private sealed class ComposerModelProviderGroup(string name)
+    {
+        public ComposerModelGroupOption Header { get; } = new(name, isSection: false);
+
+        public List<ComposerModelOption> Models { get; } = [];
     }
 
     /// <summary>
@@ -1183,14 +1444,14 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 
     private bool SameAsVisible()
     {
-        if (Models.Count != visibleModels.Count)
+        if (Models.Count != visibleRows.Count)
         {
             return false;
         }
 
-        for (var index = 0; index < visibleModels.Count; index++)
+        for (var index = 0; index < visibleRows.Count; index++)
         {
-            if (!ReferenceEquals(Models[index], visibleModels[index]))
+            if (!ReferenceEquals(Models[index], visibleRows[index]))
             {
                 return false;
             }
@@ -1198,6 +1459,17 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 
         return true;
     }
+
+    private void OnModelCatalogChanged(object? sender, EventArgs e) =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () =>
+            {
+                foreach (var option in allModels)
+                {
+                    option.RefreshPrice();
+                }
+            },
+            Avalonia.Threading.DispatcherPriority.Background);
 
     /// <summary>A hidden flag moved on the settings page: re-filter in place, the rows themselves are unchanged.</summary>
     private void OnAppPreferencesChanged(object? sender, PropertyChangedEventArgs e)
@@ -1211,6 +1483,12 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     private void SaveDefaults()
     {
         preferences.SetDefaults(selectedAgent.IsDefault ? null : selectedAgent.Key, model, effort);
+        // The icon marks the model a new session starts with, which just changed.
+        foreach (var option in allModels)
+        {
+            option.IsDefaultModel = string.Equals(option.Name, model, StringComparison.Ordinal);
+        }
+
         Status = SessionStrings.ComposerDefaultsSaved;
     }
 

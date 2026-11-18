@@ -25,6 +25,9 @@ internal static class ComposerPopupScenarios
 {
     private const double BudgetMs = 33.4;
 
+    /// <summary>One frame at 60 Hz, the budget a single notch of a drag gets.</summary>
+    private const double FrameBudgetMs = 16.7;
+
     public static IEnumerable<BenchScenario> Create(Fixtures fixtures)
     {
         yield return Open(fixtures, "model", "ModelChip");
@@ -32,6 +35,9 @@ internal static class ComposerPopupScenarios
         yield return Open(fixtures, "agent", "AgentChip");
         yield return Filter(fixtures);
         yield return ToolbarCreate(fixtures);
+        yield return EffortStep(fixtures);
+        yield return EffortSweep(fixtures);
+        yield return EffortModel(fixtures);
     }
 
     private static BenchScenario Open(Fixtures fixtures, string picker, string chipName) =>
@@ -119,6 +125,105 @@ internal static class ComposerPopupScenarios
                 };
             });
 
+    /// <summary>
+    /// One notch on the reasoning dial while the picker sits open: from the value change to the next presented frame. This is
+    /// what a drag feels like — one notch per pointer move — and it is the row that catches per-notch work added to the view
+    /// model (bars, tick classes, automation properties) that only shows up once the popup is on screen.
+    /// </summary>
+    private static BenchScenario EffortStep(Fixtures fixtures) =>
+        new(
+            "composer.effort.step",
+            "composer",
+            Heavy: false,
+            PrepareAsync: async cancellationToken =>
+            {
+                var rig = await Rig.GetAsync(fixtures, cancellationToken).ConfigureAwait(false);
+                return new BenchCase
+                {
+                    Warmup = 5,
+                    Iterations = 60,
+                    ProcessWideAllocation = true,
+                    BaselineName = "idle window, one frame",
+                    Note = $"{rig.EffortSteps} steps; one notch, to the next presented frame",
+                    Run = async _ =>
+                    {
+                        var ms = await rig.StepEffortAsync().ConfigureAwait(false);
+                        return new OpResult(Items: 1, Observation: $"notch={ms:F1} ms");
+                    },
+                    Baseline = async _ =>
+                    {
+                        await rig.FramesAsync(1).ConfigureAwait(false);
+                        return new OpResult(Items: 1);
+                    },
+                    Check = comparison => comparison.Baseline is { } baseline
+                        ? new Verdict(
+                            "one effort notch costs less than one frame over an idle wait (p95)",
+                            $"{comparison.Implementation.P95Ms.ToString("F1", CultureInfo.InvariantCulture)} ms vs idle "
+                            + $"{baseline.P50Ms.ToString("F1", CultureInfo.InvariantCulture)} ms",
+                            comparison.Implementation.P95Ms <= baseline.P50Ms + FrameBudgetMs)
+                        : null,
+                };
+            });
+
+    /// <summary>
+    /// A fast drag: a pointer move that crosses every notch before the next frame. One frame's worth of dial work, so a
+    /// per-notch cost that is invisible at 60 Hz (a notch per frame) shows up here multiplied by the step count.
+    /// </summary>
+    private static BenchScenario EffortSweep(Fixtures fixtures) =>
+        new(
+            "composer.effort.sweep",
+            "composer",
+            Heavy: false,
+            PrepareAsync: async cancellationToken =>
+            {
+                var rig = await Rig.GetAsync(fixtures, cancellationToken).ConfigureAwait(false);
+                return new BenchCase
+                {
+                    Warmup = 5,
+                    Iterations = 60,
+                    ProcessWideAllocation = true,
+                    BaselineName = "idle window, one frame",
+                    Note = $"{rig.EffortSteps} steps; every notch in one frame",
+                    Run = async _ =>
+                    {
+                        var ms = await rig.SweepEffortAsync().ConfigureAwait(false);
+                        return new OpResult(Items: rig.EffortSteps, Observation: $"sweep={ms:F1} ms");
+                    },
+                    Baseline = async _ =>
+                    {
+                        await rig.FramesAsync(1).ConfigureAwait(false);
+                        return new OpResult(Items: 1);
+                    },
+                };
+            });
+
+    /// <summary>
+    /// The same notch with no frame presented and the picker closed: the view model and binding cost alone. Run it beside
+    /// <c>composer.effort.step</c> — when the two agree, the wait is the screen, not the code.
+    /// </summary>
+    private static BenchScenario EffortModel(Fixtures fixtures) =>
+        new(
+            "composer.effort.model",
+            "composer",
+            Heavy: false,
+            PrepareAsync: async cancellationToken =>
+            {
+                var rig = await Rig.GetAsync(fixtures, cancellationToken).ConfigureAwait(false);
+                await rig.ClosePickerAsync().ConfigureAwait(false);
+                return new BenchCase
+                {
+                    Warmup = 5,
+                    Iterations = 60,
+                    ProcessWideAllocation = true,
+                    Note = $"{rig.EffortSteps} steps; one notch, picker closed, no frame",
+                    Run = async _ =>
+                    {
+                        var ms = await rig.StepEffortOnlyAsync().ConfigureAwait(false);
+                        return new OpResult(Items: 1, Observation: $"notch={ms:F2} ms");
+                    },
+                };
+            });
+
     private static double Median(List<double> values)
     {
         var sorted = values.OrderBy(value => value).ToArray();
@@ -140,6 +245,7 @@ internal static class ComposerPopupScenarios
 
         public int ModelCount { get; private set; }
 
+        public int EffortSteps => composer.EffortSteps.Count;
         public static Task<Rig> GetAsync(Fixtures fixtures, CancellationToken cancellationToken) =>
             starting ??= StartAsync(fixtures, cancellationToken);
 
@@ -244,6 +350,76 @@ internal static class ComposerPopupScenarios
                 picker.Close(restoreFocus: false);
                 return shown;
             });
+
+        /// <summary>One notch on the reasoning dial with the picker open; returns the time to the next presented frame.</summary>
+        public Task<double> StepEffortAsync() =>
+            Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                var picker = toolbar.Picker("ModelChip");
+                if (!picker.IsOpen)
+                {
+                    picker.Open();
+                    await NextFrameAsync().ConfigureAwait(true);
+                    await NextFrameAsync().ConfigureAwait(true);
+                }
+
+                var watch = Stopwatch.StartNew();
+                StepEffort();
+                await NextFrameAsync().ConfigureAwait(true);
+                return watch.Elapsed.TotalMilliseconds;
+            });
+
+        /// <summary>One notch with no frame presented and the picker already closed: the view model's own cost.</summary>
+        public async Task<double> StepEffortOnlyAsync()
+        {
+            var elapsed = 0.0;
+            var operation = Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                var watch = Stopwatch.StartNew();
+                StepEffort();
+                elapsed = watch.Elapsed.TotalMilliseconds;
+            });
+            await operation;
+            return elapsed;
+        }
+
+        /// <summary>Every notch in one frame: what a pointer move that crosses the whole dial costs before it is drawn.</summary>
+        public Task<double> SweepEffortAsync() =>
+            Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                var picker = toolbar.Picker("ModelChip");
+                if (!picker.IsOpen)
+                {
+                    picker.Open();
+                    await NextFrameAsync().ConfigureAwait(true);
+                    await NextFrameAsync().ConfigureAwait(true);
+                }
+
+                var maximum = composer.EffortMaximum;
+                var watch = Stopwatch.StartNew();
+                // Half steps: the dial reports continuous positions while dragging, so this walks the same mapping a pointer does.
+                for (var position = 0.0; position <= maximum; position += 0.5)
+                {
+                    composer.EffortValue = position;
+                }
+
+                await NextFrameAsync().ConfigureAwait(true);
+                return watch.Elapsed.TotalMilliseconds;
+            });
+
+        /// <summary>Closes the model picker and lets the frame settle, outside any timed window.</summary>
+        public Task ClosePickerAsync() =>
+            Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                toolbar.Picker("ModelChip").Close(restoreFocus: false);
+                await NextFrameAsync().ConfigureAwait(true);
+            });
+
+        private void StepEffort()
+        {
+            var maximum = composer.EffortMaximum;
+            composer.EffortValue = composer.EffortValue >= maximum ? 0 : composer.EffortValue + 1;
+        }
 
         public Task<int> FilterAsync(string search) =>
             Dispatcher.UIThread.InvokeAsync(async () =>

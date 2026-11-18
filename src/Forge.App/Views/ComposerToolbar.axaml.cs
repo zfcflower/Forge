@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
 
@@ -80,4 +81,11 @@ public partial class ComposerToolbar : UserControl
     private void OnModelPicked(object? sender, RoutedEventArgs e) => model.Close(restoreFocus: true);
 
     private void OnOrchestrationPicked(object? sender, RoutedEventArgs e) => orchestration.Close(restoreFocus: true);
+
+    /// <summary>
+    /// The pointer let go of the reasoning dial. The dial reports a continuous thumb position while it is dragged, so the thumb
+    /// is pulled onto the step it landed on here instead of jumping there mid-drag.
+    /// </summary>
+    private void OnEffortReleased(object? sender, RoutedEventArgs e) =>
+        (DataContext as ComposerViewModel)?.SnapEffort();
 }
