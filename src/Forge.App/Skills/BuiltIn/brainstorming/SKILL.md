@@ -42,7 +42,9 @@ a preference between valid designs, a requirement that is missing, a cost they s
 - Which module and which spec owns this? The specs are plain Markdown in the repository: `architecture.md` and
   `goal-and-requirements.md` at the root, `src/<Module>/SPEC.md` per module. The read-only `spec_get`/`spec_graph`/`spec_validate` tools exist only when the orchestration is on or the
   workspace already has specs with an `id`; otherwise `grep` and `read` find and read them (the `read` tool only accepts paths inside the workspace), `edit` and `write` to
-  change them.
+  change them. New spec files start with a frontmatter block: `id` (stable, unique), `type`, `title`, `status`, and, when they
+  apply, `parent`, `depends-on`, `references`, `implements`, `covers`, `tags`. Give every spec you create an `id` so the spec
+  tools can see it.
 - What is the smallest design that satisfies the product answers? Prefer extending what exists over adding a
   parallel implementation; name the code you will reuse.
 - What did you reject, and why, in one line each? A design without a rejected alternative is usually a guess.
