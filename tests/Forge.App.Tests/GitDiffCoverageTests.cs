@@ -106,7 +106,7 @@ public sealed class GitDiffCoverageTests : IDisposable
 
         var text = await Diff();
 
-        Assert.True(text.Length < MaxChars + 2_000, $"length {text.Length}");
+        Assert.True(text.Length <= MaxChars, $"length {text.Length}");
         Assert.Contains("files shown", text);
         var unread = ledger.Unread(Session, repo, Head())!;
         Assert.NotEmpty(unread);
@@ -189,5 +189,18 @@ public sealed class GitDiffCoverageTests : IDisposable
 
         Assert.Contains("rename from old.txt", text);
         Assert.Contains("rename to new.txt", text);
+    }
+
+    [Fact]
+    public void A_slow_record_for_an_older_head_does_not_wipe_a_newer_one()
+    {
+        var older = ledger.BeginRead();
+        var newer = ledger.BeginRead();
+        ledger.RecordFullRead(Session, repo, "H2", newer, ["a"], ["a"]);
+
+        ledger.RecordShown(Session, repo, "H1", older, ["b"]);
+
+        Assert.Empty(ledger.Unread(Session, repo, "H2")!);
+        Assert.Null(ledger.Unread(Session, repo, "H1"));
     }
 }

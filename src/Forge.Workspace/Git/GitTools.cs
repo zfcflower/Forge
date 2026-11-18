@@ -27,6 +27,9 @@ public sealed class GitReviewLedger
     {
         public string Head = string.Empty;
 
+        /// <summary>The start ticket of the read that last set <see cref="Head"/>.</summary>
+        public long Ticket;
+
         /// <summary>The files of the last unfiltered read at <see cref="Head"/>; null until there was one.</summary>
         public HashSet<string>? Required;
 
@@ -36,29 +39,45 @@ public sealed class GitReviewLedger
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, State>> bySession =
         new(StringComparer.Ordinal);
 
+    private long tickets;
+
+    /// <summary>
+    /// Numbers a read when it starts. A record that arrives for another HEAD than the stored one only replaces it when
+    /// its read started later, so a slow read of an old HEAD cannot wipe what a newer read recorded.
+    /// </summary>
+    public long BeginRead() => Interlocked.Increment(ref tickets);
+
     /// <summary>
     /// Records an unfiltered read at <paramref name="headCommit"/>: <paramref name="allFiles"/> is every changed file the
     /// read found and <paramref name="shownFiles"/> those whose diff it showed in full. Files shown earlier at the same HEAD
     /// stay covered.
     /// </summary>
-    public void RecordFullRead(string sessionId, string workingDirectory, string headCommit, IEnumerable<string> allFiles, IEnumerable<string> shownFiles)
+    public void RecordFullRead(string sessionId, string workingDirectory, string headCommit, long ticket, IEnumerable<string> allFiles, IEnumerable<string> shownFiles)
     {
         var state = StateFor(sessionId, workingDirectory, headCommit);
         lock (state)
         {
-            ResetOnNewHead(state, headCommit);
+            if (!ResetOnNewHead(state, headCommit, ticket))
+            {
+                return;
+            }
+
             state.Required = new HashSet<string>(allFiles, StringComparer.Ordinal);
             state.Covered.UnionWith(shownFiles);
         }
     }
 
     /// <summary>Records files shown in full by a read narrowed with paths; it never changes which files are required.</summary>
-    public void RecordShown(string sessionId, string workingDirectory, string headCommit, IEnumerable<string> shownFiles)
+    public void RecordShown(string sessionId, string workingDirectory, string headCommit, long ticket, IEnumerable<string> shownFiles)
     {
         var state = StateFor(sessionId, workingDirectory, headCommit);
         lock (state)
         {
-            ResetOnNewHead(state, headCommit);
+            if (!ResetOnNewHead(state, headCommit, ticket))
+            {
+                return;
+            }
+
             state.Covered.UnionWith(shownFiles);
         }
     }
@@ -130,14 +149,25 @@ public sealed class GitReviewLedger
         return paths.GetOrAdd(WorkspacePaths.Normalize(workingDirectory), static _ => new State());
     }
 
-    private static void ResetOnNewHead(State state, string headCommit)
+    /// <summary>Switches the state to <paramref name="headCommit"/>; false when that would go back to an older read's HEAD.</summary>
+    private static bool ResetOnNewHead(State state, string headCommit, long ticket)
     {
-        if (!string.Equals(state.Head, headCommit, StringComparison.Ordinal))
+        if (string.Equals(state.Head, headCommit, StringComparison.Ordinal))
         {
-            state.Head = headCommit;
-            state.Required = null;
-            state.Covered.Clear();
+            state.Ticket = Math.Max(state.Ticket, ticket);
+            return true;
         }
+
+        if (ticket < state.Ticket)
+        {
+            return false;
+        }
+
+        state.Head = headCommit;
+        state.Ticket = ticket;
+        state.Required = null;
+        state.Covered.Clear();
+        return true;
     }
 }
 

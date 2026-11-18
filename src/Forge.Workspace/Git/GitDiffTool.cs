@@ -72,6 +72,7 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
         }
 
         string text;
+        var ticket = ledger.BeginRead();
         DiffRead? read = null;
         try
         {
@@ -99,11 +100,11 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
             // being built is not part of what the agent just read.
             if (paths.Count == 0)
             {
-                ledger.RecordFullRead(context.SessionId, directory, head, read.All, read.Shown);
+                ledger.RecordFullRead(context.SessionId, directory, head, ticket, read.All, read.Shown);
             }
             else
             {
-                ledger.RecordShown(context.SessionId, directory, head, read.Shown);
+                ledger.RecordShown(context.SessionId, directory, head, ticket, read.Shown);
             }
         }
 
@@ -167,26 +168,46 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
         Add(false, stagedTask.Result);
         Add(false, uncommittedTask.Result);
 
-        var text = new StringBuilder(Math.Min(MaxChars, 8 * 1024));
-        var shown = new List<string>(units.Count);
-        var left = new List<Unit>();
-        foreach (var unit in units)
+        var blocks = new List<string>(units.Count);
+        var used = 0;
+        var fit = 0;
+        for (; fit < units.Count; fit++)
         {
-            var block = RenderUnit(unit, range);
-            if (shown.Count > 0 && text.Length + block.Length > MaxChars)
+            var block = RenderUnit(units[fit], range);
+            if (fit > 0 && used + block.Length > MaxChars)
             {
-                left.Add(unit);
-                continue;
+                break;
             }
 
-            text.Append(block);
-            shown.Add(unit.Path);
+            blocks.Add(block);
+            used += block.Length;
         }
 
-        if (left.Count > 0)
+        // The "not shown" footer counts against the cap too: give up the last shown files until both fit (the first stays).
+        var footer = new StringBuilder();
+        while (fit < units.Count)
         {
-            AppendLeftOut(text, shown.Count, units.Count, left);
+            footer.Clear();
+            AppendLeftOut(footer, fit, units.Count, units.GetRange(fit, units.Count - fit));
+            if (fit <= 1 || used + footer.Length <= MaxChars)
+            {
+                break;
+            }
+
+            fit--;
+            used -= blocks[fit].Length;
+            blocks.RemoveAt(fit);
         }
+
+        var text = new StringBuilder(used + footer.Length);
+        var shown = new List<string>(fit);
+        for (var i = 0; i < fit; i++)
+        {
+            text.Append(blocks[i]);
+            shown.Add(units[i].Path);
+        }
+
+        text.Append(footer);
 
         var all = new List<string>(units.Count);
         foreach (var unit in units)
