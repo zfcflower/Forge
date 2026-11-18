@@ -821,9 +821,17 @@ public sealed partial class SqliteSessionStore
                 }
             }
 
-            foreach (var table in new[] { "summaries", "todos", "todo_groups", "plan_summaries", "plan_summary_revisions", "turn_checkpoints", "turn_metrics" })
+            foreach (var table in new[] { "summaries", "todos", "todo_groups", "plan_summaries", "plan_summary_revisions", "turn_checkpoints" })
             {
                 await DeleteSessionRowsAsync(connection, transaction, table, json).ConfigureAwait(false);
+            }
+
+            // turn_metrics rides the V1 build script without a ladder step (the no-backcompat stance), so a database from
+            // before the feature has no such table. The purge must not fail on one: the feature bypasses such a database
+            // entirely, so the rows cannot exist and the delete is simply skipped.
+            if (await TableExistsAsync(connection, transaction, "turn_metrics").ConfigureAwait(false))
+            {
+                await DeleteSessionRowsAsync(connection, transaction, "turn_metrics", json).ConfigureAwait(false);
             }
 
             await using (var sessions = Command(connection, transaction, "DELETE FROM sessions WHERE id IN (SELECT value FROM json_each($ids))"))
