@@ -106,6 +106,15 @@ internal sealed record AgentRuntimeServices(
     public IReadOnlyList<ITool> PullRequestTools { get; set; } = [];
 
     /// <summary>
+    /// The project registry, used once per host build to tell a general-area session (no git or PR tools) from a repository
+    /// one. Null without the composition root: every session is then treated as a repository session.
+    /// </summary>
+    public IProjectRegistry? Projects { get; set; }
+
+    /// <summary>Whether the repository at a working directory has at least one remote; decides whether the PR tools are offered.</summary>
+    public Func<string, CancellationToken, Task<bool>>? HasRemote { get; set; }
+
+    /// <summary>
     /// The workspace file and shell tools (<c>read</c>, <c>write</c>, <c>edit</c>, <c>ls</c>, <c>find</c>, <c>grep</c>,
     /// <c>bash</c>) from <c>Forge.IO</c>. Stateless across sessions: every call takes the session's worktree from its
     /// <see cref="ToolContext"/>. Empty without the composition root, where an agent therefore cannot touch files at all. The read-only
@@ -241,6 +250,15 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// of the cached prefix), true when the orchestration is on or the workspace already holds specs with an id.
     /// </summary>
     private bool specToolsOn;
+
+    /// <summary>False for a general-area session: its folder lives inside the shared General repository, so git tools would show every general session's changes at once.</summary>
+    private bool gitToolsOn = true;
+
+    /// <summary>True when the session's repository has a remote; the PR tools are only offered then. Re-checked each turn through <see cref="remoteConfigStamp"/>.</summary>
+    private bool pullRequestToolsOn;
+
+    /// <summary>Last write time and length of the repository's git config when <see cref="pullRequestToolsOn"/> was decided.</summary>
+    private (DateTime Written, long Length) remoteConfigStamp;
 
     /// <summary>What the chat can draw (diagrams, images, file links), told to the root; a snapshot per host like <see cref="orchestration"/>.</summary>
     private string chatRendering = string.Empty;
@@ -655,6 +673,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 ApplyDisabledTools(host);
                 ApplySubAgentLimits(host);
                 RefreshWebTools(host);
+                RefreshPullRequestTools(host);
                 RefreshMcpTools(host);
                 ApplyCompaction(host);
                 return (host, root);
@@ -993,6 +1012,111 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
     private readonly SpecTools specTools = new();
 
+    /// <summary>Whether this session belongs to the General project. Decided once per host build; a lookup failure keeps the git tools.</summary>
+    private bool IsGeneralSession()
+    {
+        if (Session.ProjectId is not { Length: > 0 } projectId || services.Projects is not { } registry)
+        {
+            return false;
+        }
+
+        try
+        {
+            var list = Task.Run(() => registry.ListAsync(CancellationToken.None)).GetAwaiter().GetResult();
+            return list.Any(project => string.Equals(project.Id, projectId, StringComparison.Ordinal) && project.Kind == ProjectKind.General);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"the project kind could not be read: {exception.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>Asks git whether the working directory has a remote, and remembers the config stamp so the next turns can skip the question.</summary>
+    private bool ProbeRemote()
+    {
+        if (services.HasRemote is not { } hasRemote)
+        {
+            return services.PullRequestTools.Count > 0;
+        }
+
+        var stamp = ReadConfigStamp(Session.WorkspacePath);
+        try
+        {
+            var found = Task.Run(() => hasRemote(Session.WorkspacePath, CancellationToken.None)).GetAwaiter().GetResult();
+            remoteConfigStamp = stamp;
+            return found;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"the remote probe failed: {exception.Message}");
+            remoteConfigStamp = stamp;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Re-decides the PR group when the repository's git config changed since the last decision (a remote added or removed):
+    /// one file stat per turn, and a <c>git remote</c> call only after a change. Replaces the external tools only when the answer
+    /// moved, so the prefix breaks from the PR group on, never before it. Caller holds <see cref="gate"/>.
+    /// </summary>
+    private void RefreshPullRequestTools(AgentHost target)
+    {
+        if (!gitToolsOn || services.HasRemote is null || ReadConfigStamp(Session.WorkspacePath) == remoteConfigStamp)
+        {
+            return;
+        }
+
+        var wanted = ProbeRemote();
+        if (wanted == pullRequestToolsOn)
+        {
+            return;
+        }
+
+        pullRequestToolsOn = wanted;
+        target.ReplaceExternalTools(CollectExternalTools());
+    }
+
+    /// <summary>The write time and length of the git config that holds the remotes, or a default when it cannot be found.</summary>
+    private static (DateTime Written, long Length) ReadConfigStamp(string workingDirectory)
+    {
+        try
+        {
+            for (var directory = new DirectoryInfo(workingDirectory); directory is not null; directory = directory.Parent)
+            {
+                var dotGit = Path.Combine(directory.FullName, ".git");
+                string? common = null;
+                if (Directory.Exists(dotGit))
+                {
+                    common = dotGit;
+                }
+                else if (File.Exists(dotGit))
+                {
+                    var line = File.ReadLines(dotGit).FirstOrDefault(static l => l.StartsWith("gitdir:", StringComparison.Ordinal));
+                    if (line is not null)
+                    {
+                        var gitDir = Path.GetFullPath(Path.Combine(directory.FullName, line["gitdir:".Length..].Trim()));
+                        var commonFile = Path.Combine(gitDir, "commondir");
+                        common = File.Exists(commonFile)
+                            ? Path.GetFullPath(Path.Combine(gitDir, File.ReadAllText(commonFile).Trim()))
+                            : gitDir;
+                    }
+                }
+
+                if (common is not null)
+                {
+                    var info = new FileInfo(Path.Combine(common, "config"));
+                    return info.Exists ? (info.LastWriteTimeUtc, info.Length) : default;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        return default;
+    }
+
     /// <summary>True when the workspace has at least one spec file with an id. Only asked when the orchestration is off.</summary>
     private static bool WorkspaceHasSpecs(string workspacePath)
     {
@@ -1046,6 +1170,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             : OrchestrationPrompt.Build(DiscoverSkills());
         chatRendering = ChatRenderingPrompt.Build();
         specToolsOn = orchestration.Length > 0 || WorkspaceHasSpecs(Session.WorkspacePath);
+        gitToolsOn = !IsGeneralSession();
+        pullRequestToolsOn = gitToolsOn && ProbeRemote();
         var compaction = services.CurrentCompaction();
         var toolSegments = BuildTools();
         var built = new AgentHost(
@@ -1308,7 +1434,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
         if (services.Git is { } git)
         {
-            conditional.AddRange(git.All);
+            if (gitToolsOn)
+            {
+                conditional.AddRange(git.All);
+            }
         }
 
         if (specToolsOn)
@@ -1316,7 +1445,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             conditional.AddRange(specTools.All);
         }
 
-        conditional.AddRange(services.PullRequestTools);
+        if (pullRequestToolsOn)
+        {
+            conditional.AddRange(services.PullRequestTools);
+        }
+
         if (services.WebTools is { } webTools)
         {
             web = webTools();

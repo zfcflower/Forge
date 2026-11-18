@@ -41,9 +41,9 @@
 | | `read_artifact` | 只读 | 读回超长输出转存的 Artifact（不可关闭） |
 | Web | `web_fetch` | 只读 | 只取 http/https；默认拒绝回环/私网/链路本地；手动跟随最多 5 跳、每跳重查；正文上限 5 MB、30 秒超时；HTML 转纯文本 |
 | | `web_search` | 只读 | 后端 Brave / Tavily / SearXNG；未配置时工具不注册；后端工厂每次调用现取 |
-| Git | `git_status` `git_log` `git_diff` `git_fetch` | 只读 | 远程失败以结构化结果返回而非抛异常；`git_diff` 支持 `base`、`paths`、`stat_only` |
+| Git | `git_status` `git_log` `git_diff` `git_fetch` | 只读 | 仅仓库项目的会话提供（General 常规会话不提供：其目录在共享的 General 仓库内，git 工具会看到所有常规会话的改动）；远程失败以结构化结果返回而非抛异常；`git_diff` 支持 `base`、`paths`、`stat_only` |
 | | `git_branch` `git_sync` | 写 | 按工具名固定划分；推送只允许 `--force-with-lease`；拉取策略来自用户设置 |
-| PR | `pr_view` `pr_workflow` `pr_checks` `pr_ci_log` `pr_comments` `review_comments` | 只读 | 13 个 PR 工具中的 6 个只读；见 04 |
+| PR | `pr_view` `pr_workflow` `pr_checks` `pr_ci_log` `pr_comments` `review_comments` | 只读 | 13 个 PR 工具中的 6 个只读；仅当会话所在仓库有远程时提供（会话启动时判定，之后每回合只比对 git 配置文件的修改时间，变了才重判）；见 04 |
 | | `pr_create` `pr_sync` `pr_edit` `pr_comment_reply` `pr_comment_resolve` `review_comment_resolve` | 写 | 五道闸门、verdict 门禁 |
 | | `pr_screenshots` | 执行 | before/after 截图 + 孤儿提交 + 更新 PR 正文 |
 | 规格 | `spec_get` `spec_graph` `spec_validate` | 只读 | 读单节点与链接、走图、校验悬挂链接与重复 id；仅当编排开启或工作区已有带 `id` 的规格时注册（会话启动时一次性决定）；规格的查找与修改用 `grep`/`edit` |
