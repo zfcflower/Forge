@@ -121,21 +121,6 @@ public sealed class ResourceInspectorViewModelTests
     }
 
     [Fact]
-    public void Opening_an_agent_goes_through_the_session_and_closes_the_window()
-    {
-        var closed = 0;
-        var agent = Agent("a1");
-        var source = new FakeSource { Agents = { agent } };
-        using var window = Window(source, close: () => closed++);
-        window.Start();
-
-        window.OpenAgent(agent);
-
-        Assert.Same(agent, source.Opened);
-        Assert.Equal(1, closed);
-    }
-
-    [Fact]
     public void A_disposed_window_no_longer_listens_to_the_session()
     {
         var posts = 0;

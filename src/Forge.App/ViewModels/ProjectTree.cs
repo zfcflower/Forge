@@ -1155,7 +1155,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             var heads = await headsRead.ConfigureAwait(true);
             var git = await gitRead.ConfigureAwait(true);
             plainProjects = PlainProjectsOf(all, heads);
-            remotelessProjects = await Task.Run(() => RemotelessProjectsOf(all, plainProjects), ct).ConfigureAwait(true);
+            remotelessProjects = await RemotelessProjectsOfAsync(all, plainProjects, ct).ConfigureAwait(true);
             var planned = await Task.Run(() => Plan(all, roots, sessions, running, agents, heads, git), ct).ConfigureAwait(true);
             var plans = planned.Plans;
             storedChildren = planned.StoredChildren;

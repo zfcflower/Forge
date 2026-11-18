@@ -526,22 +526,46 @@ internal sealed partial class ProjectTreeViewModel
     /// Repository projects whose git config has no remote. Reads one small file per project (no git process); a project
     /// that is not a repository (or whose config cannot be found) is not offered the pairing.
     /// </summary>
-    private static HashSet<string> RemotelessProjectsOf(IReadOnlyList<ProjectInfo> all, HashSet<string> plain)
+    private static async Task<HashSet<string>> RemotelessProjectsOfAsync(IReadOnlyList<ProjectInfo> all, HashSet<string> plain, CancellationToken ct)
     {
-        var remoteless = new HashSet<string>(StringComparer.Ordinal);
+        // Each project is read on its own pool task and the whole read is bounded: a root on an unreachable network drive can
+        // block in the file system for a long time, and a refresh of the tree must not wait for it. A project that did not
+        // answer in time (or whose read failed) is simply not offered the pairing until the next refresh.
+        var probes = new List<(string Id, Task<bool> Remoteless)>();
         foreach (var project in all)
         {
-            if (project.Kind == ProjectKind.Repository
-                && !plain.Contains(project.Id)
-                && Forge.App.Git.RepositoryRemotes.FindConfig(project.RootPath) is { } config
-                && !Forge.App.Git.RepositoryRemotes.ConfigHasRemote(config))
+            if (project.Kind == ProjectKind.Repository && !plain.Contains(project.Id))
             {
-                remoteless.Add(project.Id);
+                var root = project.RootPath;
+                probes.Add((project.Id, Task.Run(
+                    () => Forge.App.Git.RepositoryRemotes.FindConfig(root) is { } config
+                        && !Forge.App.Git.RepositoryRemotes.ConfigHasRemote(config),
+                    CancellationToken.None)));
+            }
+        }
+
+        try
+        {
+            await Task.WhenAll(probes.Select(static probe => probe.Remoteless)).WaitAsync(RemoteProbeTimeout, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // TimeoutException or a failed read: the ones that finished are used below, the others are left out.
+        }
+
+        var remoteless = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (id, probe) in probes)
+        {
+            if (probe.IsCompletedSuccessfully && probe.Result)
+            {
+                remoteless.Add(id);
             }
         }
 
         return remoteless;
     }
+
+    private static readonly TimeSpan RemoteProbeTimeout = TimeSpan.FromSeconds(3);
 
     /// <summary>A registered project whose root is a git repository, as the last refresh found it.</summary>
     private bool IsRepository(ProjectInfo? project) =>

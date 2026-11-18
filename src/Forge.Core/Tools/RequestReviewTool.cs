@@ -176,6 +176,15 @@ public sealed class RequestReviewTool : ITool
 
         if (changeSet.Files.Count == 0 && changeSet.Commits.Count == 0 && changeSet.DiffText.Length == 0)
         {
+            // The gate can ask for a review of a worktree whose content differs from the step's baseline although the change set
+            // is empty (edits made and undone, a file touched back to its old bytes). Nothing is left for a reviewer to judge, so
+            // the empty set is recorded as the approval of this fingerprint; otherwise the step could never be marked done.
+            if (arguments.StepId is not null && ledger is not null && tree is not null)
+            {
+                await ledger.EnsureLoadedAsync(context.SessionId, CancellationToken.None).ConfigureAwait(false);
+                ledger.Record(context.SessionId, arguments.StepId, ReviewVerdict.Approve, changeSet.HeadCommit, tree);
+            }
+
             return new ToolResult($"Nothing to review: {DescribeEmpty(changeSet, request.Commit is not null)}. No reviewer was started.");
         }
 

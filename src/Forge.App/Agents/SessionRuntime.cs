@@ -1304,7 +1304,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         var previous = promptWatcher;
         var watcher = new PromptSourceWatcher(AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
-        watcher.Changed += OnPromptSourceChanged;
+        watcher.Changed += () => OnPromptSourceChanged(watcher);
         promptWatcher = watcher;
         promptsStale = false;
         watcher.Arm();
@@ -1315,11 +1315,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
-    private void OnPromptSourceChanged()
+    private void OnPromptSourceChanged(PromptSourceWatcher source)
     {
         lock (gate)
         {
-            if (disposed || (reloadPending && !reloadBuilt) || promptsStale)
+            // A replaced watcher is disposed off-thread, so for a moment it can still signal an edit the new snapshot has read.
+            if (disposed || !ReferenceEquals(source, promptWatcher) || (reloadPending && !reloadBuilt) || promptsStale)
             {
                 return;
             }
