@@ -70,7 +70,32 @@ public static class RequestReviewVerdict
     };
 
     /// <summary>What the caller must do next, per verdict (2 sentences max).</summary>
-    public static string NextStep(ReviewVerdict verdict) => verdict switch
+    public static string NextStep(ReviewVerdict verdict, ReviewFixPolicy? policy = null, int round = 0)
+    {
+        if (verdict != ReviewVerdict.Approve && policy is { } fix)
+        {
+            if (!fix.AutoFix)
+            {
+                return "Do not fix these findings on your own. Report them to the user, with the verdict, and wait for their decision; do not call request_review again until they ask for it. Do not report the step as done.";
+            }
+
+            if (round > 0 && round >= Math.Max(1, fix.MaxRounds))
+            {
+                return $"This was review round {round}, the limit of {Math.Max(1, fix.MaxRounds)} automatic rounds. Stop fixing and do not call request_review again: summarize the findings that still stand and ask the user with ask_user how to proceed. Do not report the step as done.";
+            }
+
+            if (verdict == ReviewVerdict.RequestChanges)
+            {
+                return "Fix all the blocking and major findings of this review together in one pass (not one finding per review), commit the fix, then call request_review again at the new HEAD"
+                    + (round > 0 ? $" (round {round} of {Math.Max(1, fix.MaxRounds)} used)" : string.Empty)
+                    + ". Do not report the step as done while a blocking finding stands.";
+            }
+        }
+
+        return NextStepDefault(verdict);
+    }
+
+    private static string NextStepDefault(ReviewVerdict verdict) => verdict switch
     {
         ReviewVerdict.Approve =>
             "Nothing blocking was found. State in the step's verification (or in your reply) what was reviewed and that the review approved.",

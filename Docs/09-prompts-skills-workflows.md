@@ -61,7 +61,7 @@
 - 只追加到**根 Agent 的 role 层**（不写回根定义，`SameDefinition` 仍比较用户所选，不会每回合重建根）；**不进 system 层**——system 层整棵 Agent 树共享，注入它会让被派活的子 Agent 也去选工作流、访谈用户。
 - 用户选定的 Agent 种类若带显式工具白名单且不含 `skill`，不注入；索引与路由是每次建宿主的快照。
 - 开关 `preferences.orchestrationEnabled`（默认开）：关掉即不注入；四份内置技能是模型输入，英文、不本地化。
-- 编排的约束力是混合的：路由、头脑风暴、计划都是**提示引导**（Agent 可以不遵守）；两个节点由代码强制——改了代码的 TODO 步骤标 done 要过步骤完成门禁（02.7），`pr_create` 要求本会话计划的分组步骤全部 done（04.7）。开关 `preferences.workflowGatesEnabled`（默认开）。
+- 编排的约束力是混合的：路由、头脑风暴、计划都是**提示引导**（Agent 可以不遵守）；两个节点由代码强制——改了代码的 TODO 步骤标 done 要过步骤完成门禁（02.7），`pr_create` 要求本会话计划的分组步骤全部 done（04.7）。步骤门禁与自动修复的开关见 02.7（`reviewToolEnabled`/`stepReviewRequired`/`reviewAutoFix`）；`pr_create` 的闸门不可关。
 
 ## 9.7 两种“工作流”形态
 

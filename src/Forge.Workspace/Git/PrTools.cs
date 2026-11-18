@@ -22,19 +22,13 @@ public sealed class PrTools
     /// The user's override of one <c>pr_workflow</c> phase text (phase name, the call's working directory), or null to
     /// serve the compiled-in <see cref="PrWorkflowText"/>. Asked on every call, so an edit applies to the next read.
     /// </param>
-    /// <param name="gatesEnabled">
-    /// The user's workflow-gates preference, read when <c>pr_create</c> reaches gate 5 (every plan step is done): false
-    /// skips that gate, null keeps it enabled. Asked on every call, so a preference change applies to the next
-    /// <c>pr_create</c>.
-    /// </param>
     public PrTools(
         GitCli git,
         IPrPlatform platform,
         GitToolSettings settings,
         GitReviewLedger ledger,
         ITodoStore todos,
-        Func<string, string, string?>? workflowText = null,
-        Func<bool>? gatesEnabled = null)
+        Func<string, string, string?>? workflowText = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(platform);
@@ -43,7 +37,7 @@ public sealed class PrTools
         ArgumentNullException.ThrowIfNull(todos);
 
         View = new PrViewTool(git, platform);
-        Create = new PrCreateTool(git, platform, settings, ledger, todos, gatesEnabled);
+        Create = new PrCreateTool(git, platform, settings, ledger, todos);
         Sync = new PrSyncTool(git, platform, settings);
         Edit = new PrEditTool(git, platform);
         Workflow = new PrWorkflowTool(git, workflowText);

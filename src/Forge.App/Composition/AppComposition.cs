@@ -594,8 +594,7 @@ internal sealed class AppComposition : IAsyncDisposable
                 gitToolSettings,
                 reviewLedger,
                 todos,
-                (phase, directory) => promptTemplates.PrWorkflowOverride(phase, directory),
-                () => preferences.Current.WorkflowGatesEnabled).All,
+                (phase, directory) => promptTemplates.PrWorkflowOverride(phase, directory)).All,
             .. new ScreenshotTools(git, prPlatform, gitToolSettings).All,
             .. new PrCheckTools(prPlatform, prChecksPoller, checksOptions).All,
             .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, gh.UserResolver).All,
@@ -664,7 +663,9 @@ internal sealed class AppComposition : IAsyncDisposable
         // The step-completion gate's git side, over the same worktree resolution the step committer uses: a session with
         // no worktree of its own (general scratch) and a sub-agent session are not gated, because they never commit a step.
         runtimeServices.StepChanges = new GitStepChangeProbe(git, StepCommitter.WorktreeOf(sessions));
-        runtimeServices.WorkflowGatesEnabled = () => preferences.Current.WorkflowGatesEnabled;
+        runtimeServices.StepReviewRequired = () => preferences.Current.StepReviewRequired;
+        runtimeServices.ReviewToolEnabled = () => preferences.Current.ReviewToolEnabled;
+        runtimeServices.ReviewFix = () => new Forge.Core.Tools.ReviewFixPolicy(preferences.Current.ReviewAutoFix, preferences.Current.ReviewAutoFixMaxRounds);
         // The default orchestration is a prompt snapshot taken when a host is built, like the prompt templates above.
         runtimeServices.OrchestrationEnabled = () => preferences.Current.OrchestrationEnabled;
         runtimeServices.ReviewLimits = () => GitToolPreferences.ReviewLimits(preferences.Current);

@@ -66,10 +66,20 @@ internal sealed record AgentRuntimeServices(
     public IStepChangeProbe? StepChanges { get; set; }
 
     /// <summary>
-    /// Whether the mechanical workflow gates hold (<c>preferences.workflowGatesEnabled</c>), read on every gated call by
-    /// the step gate and by <c>pr_create</c>. Null = on.
+    /// Whether completing a checklist step that changed code needs an approving review (<c>preferences.stepReviewRequired</c>),
+    /// read on every attempt by the step gate. Null = on.
     /// </summary>
-    public Func<bool>? WorkflowGatesEnabled { get; set; }
+    public Func<bool>? StepReviewRequired { get; set; }
+
+    /// <summary>
+    /// Whether the agent is offered <c>request_review</c> (<c>preferences.reviewToolEnabled</c>). Read when a host is built,
+    /// like the other tool-set decisions: the tool definition is bytes of the cached prefix. Without the tool there is no
+    /// step gate either (nothing could earn the verdict). Null = on.
+    /// </summary>
+    public Func<bool>? ReviewToolEnabled { get; set; }
+
+    /// <summary>The auto-fix loop settings (<c>preferences.reviewAutoFix</c>, <c>reviewAutoFixMaxRounds</c>), read on every review result. Null = defaults.</summary>
+    public Func<ReviewFixPolicy>? ReviewFix { get; set; }
 
     /// <summary>
     /// Whether the default orchestration is injected into the root agent (<c>preferences.orchestrationEnabled</c>). Read
@@ -1154,9 +1164,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Store = services.Store,
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
-                Reviews = services.Reviews,
+                Reviews = services.ReviewToolEnabled is { } reviewToolEnabled && !reviewToolEnabled() ? null : services.Reviews,
                 StepChanges = services.StepChanges,
-                StepGatesEnabled = services.WorkflowGatesEnabled,
+                StepGatesEnabled = services.StepReviewRequired,
+                ReviewFix = services.ReviewFix,
                 ReviewLimits = services.ReviewLimits,
                 ReviewConclusions = services.ReviewConclusions,
                 Artifacts = services.Artifacts,

@@ -103,7 +103,7 @@
 2. 现 fetch 后 `origin/<base>` 是 HEAD 祖先。
 3. 本会话对**这个确切 HEAD** 读过完整 `git_diff`（`GitReviewLedger` 记下真正 diff 的那个 HEAD；代码只能强制“重读”，清理是否彻底是 Agent 的判断）。
 4. 正文 `## Testing` 非空且非空话（最小长度 + 禁用词）。
-5. 本会话**计划的分组步骤全部 done**（只算 `GroupId` 非空的条目；待排散项不拦；拒绝时列出未完成步骤的 id 与标题，最多 10 条，超出写 `... and N more`，标题压平换行并截到 120 字符）。第五道由 `preferences.workflowGatesEnabled`（默认开）控制，前四道不受影响。
+5. 本会话**计划的分组步骤全部 done**（只算 `GroupId` 非空的条目；待排散项不拦；拒绝时列出未完成步骤的 id 与标题，最多 10 条，超出写 `... and N more`，标题压平换行并截到 120 字符）。五道闸门都是固定行为，不可配置。
 
 闸门通过后重读 HEAD 与工作树，再把推送钉死到被审阅的提交：refspec 写成 `<sha>:refs/heads/<branch>`，push 前再核一次 HEAD，所以闸门之后落到 HEAD 的新提交不可能被发布（gate-to-push 竞态被拒绝而非静默发布）；`-u` 对 sha refspec 不生效，成功后补写 `branch.<n>.remote` / `branch.<n>.merge`。
 

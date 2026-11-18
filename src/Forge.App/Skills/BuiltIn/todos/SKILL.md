@@ -80,9 +80,11 @@ A step that changed no code (the tree is clean and the step produced no commit o
 review. Anything else - `verdict: request changes`, an unstructured review, a stopped review - is not an approval.
 `request changes` is acted on: fix the findings, commit, and review the step again at the new commit.
 
-The gate is code, not advice: the `todo` tool refuses the update and says what is missing. It can be switched off
-(`preferences.workflowGatesEnabled` in `settings.json`, on by default); with it off the tool no longer refuses and
-what the user asks for decides - but never write a verification you did not run.
+The gate is code, not advice: the `todo` tool refuses the update and says what is missing. The user can
+switch it off (`preferences.stepReviewRequired` in `settings.json`, on by default); with it off the tool no longer
+refuses and what the user asks for decides - but never write a verification you did not run. If a review returns
+`request changes`, fix all its findings together before asking again; when its result says the round limit is
+reached, stop and ask the user instead.
 
 ## Fixes reopen the same step
 

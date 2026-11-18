@@ -59,10 +59,13 @@ public sealed record AgentHostOptions
     public IStepChangeProbe? StepChanges { get; init; }
 
     /// <summary>
-    /// Reads the <c>workflowGatesEnabled</c> preference before every attempt to mark a step done, so a settings change
+    /// Reads the <c>stepReviewRequired</c> preference before every attempt to mark a step done, so a settings change
     /// applies to the next attempt. Null means the gate is always on when <see cref="StepChanges"/> is set.
     /// </summary>
     public Func<bool>? StepGatesEnabled { get; init; }
+
+    /// <summary>The auto-fix loop settings <c>request_review</c> reads on every result; null = defaults. Only used together with <see cref="Reviews"/>.</summary>
+    public Func<ReviewFixPolicy>? ReviewFix { get; init; }
 
     /// <summary>Registers the <c>request_review</c> tool when set; the app implements it over its git layer (Core has no git).</summary>
     public IReviewChangeSetSource? Reviews { get; init; }
@@ -183,7 +186,7 @@ public sealed class AgentHost
         if (options.Reviews is { } reviews)
         {
             builtIns.Add(new RequestReviewTool(
-                scheduler, reviews, options.Todos, options.ReviewLimits, options.ReviewConclusions, stepReviews));
+                scheduler, reviews, options.Todos, options.ReviewLimits, options.ReviewConclusions, stepReviews, options.ReviewFix));
         }
 
         var compactor = options.Compactor

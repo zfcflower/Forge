@@ -15,8 +15,7 @@ internal sealed class PrCreateTool(
     IPrPlatform platform,
     GitToolSettings settings,
     GitReviewLedger ledger,
-    ITodoStore todos,
-    Func<bool>? gatesEnabled = null) : PrLifecycleToolBase(
+    ITodoStore todos) : PrLifecycleToolBase(
     git,
     platform,
     PrTools.CreateName,
@@ -300,11 +299,6 @@ internal sealed class PrCreateTool(
     /// </summary>
     private async Task<ToolResult?> CheckPlanStepsDoneAsync(string sessionId, CancellationToken ct)
     {
-        if (gatesEnabled is not null && !gatesEnabled())
-        {
-            return null;
-        }
-
         var items = await todos.ListAsync(sessionId, ct).ConfigureAwait(false);
         List<TodoItem> unfinished = [];
         foreach (var item in items)

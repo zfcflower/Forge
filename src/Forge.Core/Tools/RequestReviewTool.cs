@@ -36,6 +36,7 @@ public sealed class RequestReviewTool : ITool
     private readonly Func<ReviewPackageLimits>? limits;
     private readonly IReviewConclusionStore? conclusions;
     private readonly StepReviewLedger? ledger;
+    private readonly Func<ReviewFixPolicy>? fixPolicy;
 
     /// <param name="scheduler">Runs the read-only Reviewer sub-agent.</param>
     /// <param name="changeSets">The git side of the review (Core has no git).</param>
@@ -46,14 +47,17 @@ public sealed class RequestReviewTool : ITool
     /// conclusions were stored, which is what a host without a store gets.
     /// </param>
     /// <param name="ledger">Where a step review's verdict is recorded for the step completion gate; null = nothing records verdicts.</param>
+    /// <param name="fixPolicy">The auto-fix loop settings, read on every result; null = the default wording without a round limit.</param>
     public RequestReviewTool(
         SubAgentScheduler scheduler,
         IReviewChangeSetSource changeSets,
         ITodoStore? todos = null,
         Func<ReviewPackageLimits>? limits = null,
         IReviewConclusionStore? conclusions = null,
-        StepReviewLedger? ledger = null)
+        StepReviewLedger? ledger = null,
+        Func<ReviewFixPolicy>? fixPolicy = null)
     {
+        this.fixPolicy = fixPolicy;
         ArgumentNullException.ThrowIfNull(scheduler);
         ArgumentNullException.ThrowIfNull(changeSets);
         this.scheduler = scheduler;
@@ -234,7 +238,8 @@ public sealed class RequestReviewTool : ITool
             builder.Append("\nnote: the diff was cut and the reviewer was told how to read the rest with git_diff.");
         }
 
-        builder.Append("\n\n").Append(RequestReviewVerdict.NextStep(verdict))
+        var round = arguments.StepId is not null && ledger is not null ? ledger.Rounds(context.SessionId, arguments.StepId) : 0;
+        builder.Append("\n\n").Append(RequestReviewVerdict.NextStep(verdict, fixPolicy?.Invoke(), round))
             .Append(ResultSeparator)
             .Append(RequestReviewVerdict.Clamp(outcome.Text));
         if (outcome.AgentId.Length > 0)

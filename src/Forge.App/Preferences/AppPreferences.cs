@@ -98,7 +98,12 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxAgentsMaxParallelSubAgents = 16;
     public const int DefaultAgentsMaxParallelSubAgents = 4;
     public const bool DefaultOrchestrationEnabled = true;
-    public const bool DefaultWorkflowGatesEnabled = true;
+    public const bool DefaultReviewToolEnabled = true;
+    public const bool DefaultStepReviewRequired = true;
+    public const bool DefaultReviewAutoFix = true;
+    public const int MinReviewAutoFixMaxRounds = 1;
+    public const int MaxReviewAutoFixMaxRounds = 10;
+    public const int DefaultReviewAutoFixMaxRounds = 3;
     public const bool DefaultIdleArchiveEnabled = true;
     public const int MinIdleArchiveDays = 1;
     public const int MaxIdleArchiveDays = 365;
@@ -259,7 +264,10 @@ internal sealed class AppPreferences : ObservableObject
     private string editorTheme = DefaultEditorTheme;
     private int agentsMaxParallelSubAgents = DefaultAgentsMaxParallelSubAgents;
     private bool orchestrationEnabled = DefaultOrchestrationEnabled;
-    private bool workflowGatesEnabled = DefaultWorkflowGatesEnabled;
+    private bool reviewToolEnabled = DefaultReviewToolEnabled;
+    private bool stepReviewRequired = DefaultStepReviewRequired;
+    private bool reviewAutoFix = DefaultReviewAutoFix;
+    private int reviewAutoFixMaxRounds = DefaultReviewAutoFixMaxRounds;
     private bool idleArchiveEnabled = DefaultIdleArchiveEnabled;
     private int idleArchiveDays = DefaultIdleArchiveDays;
     private bool notificationPermissionReprompt = DefaultNotificationPermissionReprompt;
@@ -503,11 +511,30 @@ internal sealed class AppPreferences : ObservableObject
     public bool OrchestrationEnabled { get => orchestrationEnabled; set => Set(ref orchestrationEnabled, value); }
 
     /// <summary>
-    /// Whether the mechanical workflow gates hold: a checklist step that changed code needs an approving review and a
-    /// real verification before it may be marked done, and <c>pr_create</c> needs every grouped step done. Read on every
-    /// gated call, so turning it off applies to the next call.
+    /// Whether the agent is offered <c>request_review</c> (it may start an independent review on its own). Read when a
+    /// session's agent host is built; without the tool the step gate below cannot exist either.
     /// </summary>
-    public bool WorkflowGatesEnabled { get => workflowGatesEnabled; set => Set(ref workflowGatesEnabled, value); }
+    public bool ReviewToolEnabled { get => reviewToolEnabled; set => Set(ref reviewToolEnabled, value); }
+
+    /// <summary>
+    /// Whether a checklist step that changed code needs an approving review and a real verification before it may be marked
+    /// done. Read on every attempt, so turning it off applies to the next one. (<c>pr_create</c>'s own five gates are not
+    /// configurable.)
+    /// </summary>
+    public bool StepReviewRequired { get => stepReviewRequired; set => Set(ref stepReviewRequired, value); }
+
+    /// <summary>
+    /// Whether the agent fixes the findings of a "request changes" review itself and asks for another review; off, it
+    /// reports them to the user and waits. Read on every review result.
+    /// </summary>
+    public bool ReviewAutoFix { get => reviewAutoFix; set => Set(ref reviewAutoFix, value); }
+
+    /// <summary>Non-approving reviews of one step the auto-fix loop may spend before it stops and asks the user; clamped to [1, 10].</summary>
+    public int ReviewAutoFixMaxRounds
+    {
+        get => reviewAutoFixMaxRounds;
+        set => Set(ref reviewAutoFixMaxRounds, Math.Clamp(value, MinReviewAutoFixMaxRounds, MaxReviewAutoFixMaxRounds));
+    }
 
     /// <summary>Whether idle workspaces are archived automatically (wave W1).</summary>
     public bool IdleArchiveEnabled { get => idleArchiveEnabled; set => Set(ref idleArchiveEnabled, value); }
@@ -906,7 +933,14 @@ internal sealed class AppPreferences : ObservableObject
             ? Math.Clamp(agentsMaxParallelSubAgentsLoaded, MinAgentsMaxParallelSubAgents, MaxAgentsMaxParallelSubAgents)
             : DefaultAgentsMaxParallelSubAgents;
         orchestrationEnabled = section.OrchestrationEnabled ?? DefaultOrchestrationEnabled;
-        workflowGatesEnabled = section.WorkflowGatesEnabled ?? DefaultWorkflowGatesEnabled;
+        reviewToolEnabled = section.ReviewToolEnabled ?? DefaultReviewToolEnabled;
+        // The old master switch (workflowGatesEnabled) became three independent settings; an old file that turned it off keeps
+        // the step gate off (its pr_create half is now fixed behaviour).
+        stepReviewRequired = section.StepReviewRequired ?? section.WorkflowGatesEnabled ?? DefaultStepReviewRequired;
+        reviewAutoFix = section.ReviewAutoFix ?? DefaultReviewAutoFix;
+        reviewAutoFixMaxRounds = section.ReviewAutoFixMaxRounds is { } reviewRounds
+            ? Math.Clamp(reviewRounds, MinReviewAutoFixMaxRounds, MaxReviewAutoFixMaxRounds)
+            : DefaultReviewAutoFixMaxRounds;
         idleArchiveEnabled = section.IdleArchiveEnabled ?? DefaultIdleArchiveEnabled;
         idleArchiveDays = section.IdleArchiveDays is { } idleArchiveDaysLoaded
             ? Math.Clamp(idleArchiveDaysLoaded, MinIdleArchiveDays, MaxIdleArchiveDays)
@@ -1050,7 +1084,10 @@ internal sealed class AppPreferences : ObservableObject
             EditorTheme = editorTheme,
             AgentsMaxParallelSubAgents = agentsMaxParallelSubAgents,
             OrchestrationEnabled = orchestrationEnabled,
-            WorkflowGatesEnabled = workflowGatesEnabled,
+            ReviewToolEnabled = reviewToolEnabled,
+            StepReviewRequired = stepReviewRequired,
+            ReviewAutoFix = reviewAutoFix,
+            ReviewAutoFixMaxRounds = reviewAutoFixMaxRounds,
             IdleArchiveEnabled = idleArchiveEnabled,
             IdleArchiveDays = idleArchiveDays,
             NotificationPermissionReprompt = notificationPermissionReprompt,
@@ -1437,8 +1474,22 @@ internal sealed class PreferencesSection
     [JsonPropertyName("orchestrationEnabled")]
     public bool? OrchestrationEnabled { get; set; }
 
+    /// <summary>The retired master switch: read so an old file keeps its meaning, never written back.</summary>
     [JsonPropertyName("workflowGatesEnabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? WorkflowGatesEnabled { get; set; }
+
+    [JsonPropertyName("reviewToolEnabled")]
+    public bool? ReviewToolEnabled { get; set; }
+
+    [JsonPropertyName("stepReviewRequired")]
+    public bool? StepReviewRequired { get; set; }
+
+    [JsonPropertyName("reviewAutoFix")]
+    public bool? ReviewAutoFix { get; set; }
+
+    [JsonPropertyName("reviewAutoFixMaxRounds")]
+    public int? ReviewAutoFixMaxRounds { get; set; }
 
     [JsonPropertyName("idleArchiveEnabled")]
     public bool? IdleArchiveEnabled { get; set; }

@@ -57,6 +57,7 @@ public sealed record StepReviewRecord(ReviewVerdict Verdict, string? CommitId, D
 public sealed class StepReviewLedger
 {
     private readonly ConcurrentDictionary<(string SessionId, string StepId), StepReviewRecord> records = new();
+    private readonly ConcurrentDictionary<(string SessionId, string StepId), int> rounds = new();
 
     /// <summary>
     /// Stores the verdict of a finished step review. A blank session or step id is ignored (such a call cannot be matched to
@@ -73,7 +74,22 @@ public sealed class StepReviewLedger
             verdict,
             string.IsNullOrWhiteSpace(commitId) ? null : commitId,
             DateTimeOffset.UtcNow);
+        if (verdict == ReviewVerdict.Approve)
+        {
+            rounds.TryRemove((sessionId, stepId), out _);
+        }
+        else
+        {
+            rounds.AddOrUpdate((sessionId, stepId), 1, static (_, count) => count + 1);
+        }
     }
+
+    /// <summary>
+    /// How many finished non-approving reviews that step has had since it was last approved or forgotten; the auto-fix loop
+    /// compares it with <see cref="ReviewFixPolicy.MaxRounds"/>. Call after <see cref="Record"/>.
+    /// </summary>
+    public int Rounds(string sessionId, string stepId) =>
+        IsUsable(sessionId) && IsUsable(stepId) && rounds.TryGetValue((sessionId, stepId), out var count) ? count : 0;
 
     /// <summary>Drops the verdict of one step, so it needs another review before it can be done again.</summary>
     public void Forget(string sessionId, string stepId)
@@ -84,6 +100,7 @@ public sealed class StepReviewLedger
         }
 
         records.TryRemove((sessionId, stepId), out _);
+        rounds.TryRemove((sessionId, stepId), out _);
     }
 
     /// <summary>
@@ -141,7 +158,7 @@ public sealed class StepGate
 
     /// <param name="ledger">Where the step review verdicts live; shared with the host's <c>request_review</c> tool.</param>
     /// <param name="probe">The git evidence source; null means this host has no gate.</param>
-    /// <param name="enabled">Reads the <c>workflowGatesEnabled</c> preference on every check; null means the gate is on whenever <paramref name="probe"/> is set.</param>
+    /// <param name="enabled">Reads the "step completion requires a review" preference (<c>stepReviewRequired</c>) on every check; null means the gate is on whenever <paramref name="probe"/> is set.</param>
     public StepGate(StepReviewLedger ledger, IStepChangeProbe? probe = null, Func<bool>? enabled = null)
     {
         ArgumentNullException.ThrowIfNull(ledger);
