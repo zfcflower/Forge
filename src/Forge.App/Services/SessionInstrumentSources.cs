@@ -9,24 +9,20 @@ using ZLogger;
 namespace Forge.App.Services;
 
 /// <summary>
-/// Everything the composer's instrument strip reads that does not belong to one session: the app-wide counts it shows
-/// next to the session's own ones, the model metadata chain, and the two ways to open the session's project folder.
-/// <para>The shell implements it once per window. The blocking members (<see cref="Skills"/>) are only ever called from a
-/// pool thread, the async ones come back on the caller's context.</para>
+/// Everything the composer's instrument strip reads that does not belong to one session: the app-wide MCP health it shows
+/// on the resource button, the model metadata chain, and the two ways to open the session's project folder.
+/// <para>The shell implements it once per window; the async members come back on the caller's context.</para>
 /// </summary>
 internal interface ISessionInstrumentSources
 {
-    /// <summary>Approval cards queued for one session right now. UI thread only (the queue belongs to it).</summary>
-    int PendingApprovals(string sessionId);
+    /// <summary>True while at least one enabled MCP server is in the failed state: the resource button's dot turns red.</summary>
+    bool McpFailed();
 
-    /// <summary>Records in the approvals database, or null when it cannot be read; runs off the UI thread.</summary>
-    Task<int?> ApprovalRecordsAsync(CancellationToken ct);
-
-    /// <summary>Servers that reported ready and servers configured, in that order.</summary>
-    (int Ready, int Configured) McpServers();
-
-    /// <summary>Skills discoverable for one workspace. Blocking: call it on a pool thread.</summary>
-    IReadOnlyList<SlashEntry> Skills(string workspacePath);
+    /// <summary>
+    /// An MCP server changed state or its tool list changed. Raised on any thread; a subscriber that touches UI state posts
+    /// to the UI thread itself.
+    /// </summary>
+    event Action? McpStateChanged;
 
     /// <summary>What the metadata chain (local table → provider → user override) knows about one model.</summary>
     /// <summary>What is known about the model the composer shows, in the context of the provider that serves it.</summary>
@@ -40,9 +36,6 @@ internal interface ISessionInstrumentSources
 
     /// <summary>Reveals one folder in the platform file manager.</summary>
     void OpenInExplorer(string path);
-
-    /// <summary>Opens the settings page on one section id (the counters' click target).</summary>
-    void OpenSettingsSection(string sectionId);
 
     /// <summary>
     /// The main turns a session already recorded in <c>turn_checkpoints</c>, summed for the usage summary: how many turns
@@ -86,36 +79,67 @@ internal readonly record struct SessionTurnHistory(int Turns, TimeSpan Duration)
     }
 }
 
-/// <summary>The shell's implementation: composition services, the approval queue and the platform launchers.</summary>
+/// <summary>The shell's implementation: composition services and the platform launchers.</summary>
 internal sealed class SessionInstrumentSources : ISessionInstrumentSources
 {
     private readonly AppComposition composition;
-    private readonly Func<string, int> pendingApprovals;
-    private readonly Action<string> openSettingsSection;
     private readonly Lazy<string?> vsCode = new(ResolveVsCode, LazyThreadSafetyMode.PublicationOnly);
 
-    public SessionInstrumentSources(
-        AppComposition composition,
-        Func<string, int> pendingApprovals,
-        Action<string> openSettingsSection)
+    public SessionInstrumentSources(AppComposition composition)
     {
         ArgumentNullException.ThrowIfNull(composition);
         this.composition = composition;
-        this.pendingApprovals = pendingApprovals ?? throw new ArgumentNullException(nameof(pendingApprovals));
-        this.openSettingsSection = openSettingsSection ?? throw new ArgumentNullException(nameof(openSettingsSection));
     }
 
     public bool HasVsCode => vsCode.Value is { Length: > 0 };
 
-    public int PendingApprovals(string sessionId) => pendingApprovals(sessionId);
+    public bool McpFailed()
+    {
+        if (composition.Mcp is not { } mcp)
+        {
+            return false;
+        }
 
-    public Task<int?> ApprovalRecordsAsync(CancellationToken ct) => composition.ApprovalsCounter.CountAsync(ct);
+        foreach (var state in mcp.States)
+        {
+            if (state is { Enabled: true, Status: Forge.Mcp.McpServerStatus.Failed })
+            {
+                return true;
+            }
+        }
 
-    public (int Ready, int Configured) McpServers() =>
-        composition.Mcp is { } mcp ? (mcp.ReadyCount(), mcp.ConfiguredServers) : (0, 0);
+        return false;
+    }
 
-    public IReadOnlyList<SlashEntry> Skills(string workspacePath) =>
-        SkillCatalog.Discover(workspacePath, AgentRuntimeServices.UserDirectory(), AgentRuntimeServices.ProductSkillsDirectory);
+    /// <summary>Forwards the manager's state and tool-list events; hooked only while someone listens.</summary>
+    public event Action? McpStateChanged
+    {
+        add
+        {
+            if (changed is null && composition.Mcp is { } mcp)
+            {
+                mcp.Manager.StateChanged += OnState;
+                mcp.Manager.ToolsChanged += OnTools;
+            }
+
+            changed += value;
+        }
+        remove
+        {
+            changed -= value;
+            if (changed is null && composition.Mcp is { } mcp)
+            {
+                mcp.Manager.StateChanged -= OnState;
+                mcp.Manager.ToolsChanged -= OnTools;
+            }
+        }
+    }
+
+    private Action? changed;
+
+    private void OnState(Forge.Mcp.McpServerState state) => changed?.Invoke();
+
+    private void OnTools() => changed?.Invoke();
 
     public ModelMetadata ModelMetadata(string modelId, string? providerId = null) =>
         composition.Providers.Catalog.MetadataFor(modelId, providerId);
@@ -149,14 +173,6 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
                 ? new ProcessStartInfo { FileName = "open", Arguments = "\"" + path + "\"", UseShellExecute = true }
                 : new ProcessStartInfo { FileName = "xdg-open", Arguments = "\"" + path + "\"", UseShellExecute = true };
         TryStart(start);
-    }
-
-    public void OpenSettingsSection(string sectionId)
-    {
-        if (!string.IsNullOrWhiteSpace(sectionId))
-        {
-            openSettingsSection(sectionId);
-        }
     }
 
     /// <summary>
@@ -241,13 +257,13 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
 
     public bool HasVsCode => false;
 
-    public int PendingApprovals(string sessionId) => 0;
+    public bool McpFailed() => false;
 
-    public Task<int?> ApprovalRecordsAsync(CancellationToken ct) => Task.FromResult<int?>(0);
-
-    public (int Ready, int Configured) McpServers() => (0, 0);
-
-    public IReadOnlyList<SlashEntry> Skills(string workspacePath) => [];
+    public event Action? McpStateChanged
+    {
+        add { }
+        remove { }
+    }
 
     public ModelMetadata ModelMetadata(string modelId, string? providerId = null) => Abstractions.ModelMetadata.Unknown;
 

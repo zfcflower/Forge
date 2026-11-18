@@ -7,7 +7,7 @@ using Forge.App.ViewModels;
 namespace Forge.App.Views;
 
 /// <summary>
-/// The resource inspector's overlay (wave W8). Only what needs the visual tree lives here: the keyboard lands on the close
+/// The resource window's overlay. Only what needs the visual tree lives here: the keyboard lands on the close
 /// button so Escape works the moment the panel opens, a click on the scrim (and only on it) closes the panel, and Escape does
 /// the same. Everything the rows show and do is bound.
 /// </summary>
@@ -58,6 +58,15 @@ public partial class ResourceInspectorView : UserControl
 
         e.Handled = true;
         Close();
+    }
+
+    /// <summary>A click on an automation agent's name opens its tab (the model closes the window).</summary>
+    private void OnOpenAgent(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: SubAgentViewModel agent })
+        {
+            model?.OpenAgent(agent);
+        }
     }
 
     private void Close()

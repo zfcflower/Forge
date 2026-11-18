@@ -32,7 +32,7 @@ FORGE 自写 MCP 客户端与服务器管理，不引用 MCP SDK：JSON-RPC 与�
 - 副作用默认 `Execute`，配置 `readOnlyTools` 可标只读；脚本/MCP 工具调用仍走主程序审批。
 - **体积上限**：`inputSchema` 超过 `MaxToolSchemaChars`（默认 64 K 字符，0 关闭）的工具不提供给模型，并在该服务器 `LastError` 写明跳过了几个、第一个是谁；描述超过 `MaxToolDescriptionChars`（默认 4 K）截断加省略号、不拆代理对。
 - **结果按块保留**：`tools/call` 的 `content` 不去程扁平化；图片块解码后超过 5 MB 的丢弃字节只留占位，一次结果合计超过 20 MB 时其后的图片同样只留占位（安全边界，不是可配值）；`audio` 不保留字节。适配器返回块列表（文本优先，随后每张图一个 `ImageBlock`）。
-- **进度**：`tools/call` 携带 `_meta.progressToken`，`notifications/progress` 按 token 路由到该调用的 `ToolContext.Progress`（最新尾快照语义），资源检查器直接消费；无 token 的进度通知落通用事件。
+- **进度**：`tools/call` 携带 `_meta.progressToken`，`notifications/progress` 按 token 路由到该调用的 `ToolContext.Progress`（最新尾快照语义），工具行的实时尾部直接消费；无 token 的进度通知落通用事件。
 - **工具选面上限**（`mcpToolSearchLimit`，0 = 不限，默认 0）：
   - 0：全部就绪工具都给模型（与引入上限前一致）。
   - >0：固定的（pin，多于上限时取最近固定的）→ 按本回合用户文本打分的前若干名（小写词包含：暴露名 > 工具名/服务器名 > 描述），不够时按目录顺序补足；每个（目录快照, 上限, 请求文本）算一次并缓存，结果按暴露名排序以保证集合不变时定义字节不变。

@@ -8,16 +8,12 @@ namespace Forge.App.ViewModels;
 
 /// <summary>
 /// One session's readout: the composer strip above the input. Left of the strip it answers "what is this session doing"
-/// (running state, working directory, branch, ahead/behind, CI, how full the context window is); right of it, the buttons
-/// that answer "what is it allowed to use and what has it used" — sub-agents, approvals, skills, MCP servers and tools —
-/// plus the project the session belongs to.
+/// (running state, working directory, branch, ahead/behind, CI, how full the context window is); right of it, the resource
+/// button (it opens the resource window) and the sub-agent toggle, plus the project the session belongs to.
 /// <para>Everything here is derived, never authoritative. Usage is the root agent's, because that is what the context
 /// window measures and what the selected model prices; a sub-agent's own spend stays on its tab. A source that knows
 /// nothing leaves the readout blank instead of inventing a percentage or a price.</para>
-/// <para>Threading: UI thread only. <see cref="RefreshCounters"/> is synchronous and cheap (tool list, MCP states, the
-/// approval queue); <see cref="RefreshSources"/> adds the two reads that touch a database and the file system, and applies
-/// their results on the UI thread. A stale answer is dropped by its token, and the skill scan runs at most once per session
-/// because skills do not change while a session is open.</para>
+/// <para>Threading: UI thread only; an MCP state change that arrives on another thread is posted to it.</para>
 /// </summary>
 /// <summary>One slanted segment of the context gauge: filled up to the rounded fraction, hollow after it.</summary>
 internal sealed record ContextSegment(bool IsFilled)
@@ -48,7 +44,7 @@ internal enum ContextLevel
 
 /// <summary>
 /// One session's readout: the composer strip above the input.
-/// <para>Left of the strip it answers "what is this session doing" (branch, ahead/behind, CI, the four counters and the
+/// <para>Left of the strip it answers "what is this session doing" (branch, ahead/behind, CI, the resource button and the
 /// workspace button); the far right carries the token reading — <c>RC</c> cache-read hit rate, the five-segment gauge and
 /// <c>2%/1.0M</c>.</para>
 /// </summary>
@@ -56,19 +52,15 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 {
     private readonly SessionInfo session;
     private readonly ISessionInstrumentSources sources;
-    private readonly Func<IReadOnlyList<string>> availableTools;
     private readonly Func<string> currentModel;
     private readonly Func<string?> currentProvider;
-    private readonly HashSet<string> usedTools = new(StringComparer.Ordinal);
-    private readonly HashSet<string> usedSkills = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The window's resource inspector; null leaves its menu row out rather than showing a dead entry.</summary>
+    /// <summary>The window's resource window; null leaves the strip's button disabled rather than a dead entry.</summary>
     private readonly Action? openInspector;
     private int runningResources;
+    private bool mcpFailed;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
 
-    private IReadOnlyList<SlashEntry> skills = [];
-    private IReadOnlyList<string> tools = [];
     private TokenUsage usage = TokenUsage.Empty;
     private ProviderRateLimit? rateLimit;
     private string? rateLimitProvider;
@@ -77,16 +69,10 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private int? usableTokens;
     private int? triggerTokens;
     private ContextLevel contextLevel;
-    private int approvalRecords;
-    private (int Ready, int Configured) mcp;
     private string aheadBehind = string.Empty;
     private string projectName = string.Empty;
     private string? projectRoot;
     private bool projectIsGeneral;
-    private string latestDraft = string.Empty;
-    private bool skillsLoaded;
-    private bool skillsLoading;
-    private int refreshToken;
     private bool disposed;
 
     /// <summary>The turns the session already recorded, read from <c>turn_checkpoints</c> once per strip.</summary>
@@ -103,7 +89,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     public SessionInstrumentsViewModel(
         SessionInfo session,
         ISessionInstrumentSources sources,
-        Func<IReadOnlyList<string>> availableTools,
         Func<string> currentModel,
         Func<string?>? currentProvider = null,
         Action? openInspector = null)
@@ -111,17 +96,12 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         ArgumentNullException.ThrowIfNull(session);
         this.session = session;
         this.sources = sources ?? EmptySessionInstrumentSources.Instance;
-        this.availableTools = availableTools ?? (static () => []);
         this.currentModel = currentModel ?? (static () => string.Empty);
         this.currentProvider = currentProvider ?? (static () => null);
         this.openInspector = openInspector;
 
         OpenInspectorCommand = new RelayCommand(() => this.openInspector?.Invoke(), () => CanOpenInspector);
 
-        OpenApprovalsCommand = new RelayCommand(() => this.sources.OpenSettingsSection(Preferences.SettingsSectionIds.Approvals));
-        OpenSkillsCommand = new RelayCommand(() => this.sources.OpenSettingsSection(Preferences.SettingsSectionIds.Skills));
-        OpenMcpCommand = new RelayCommand(() => this.sources.OpenSettingsSection(Preferences.SettingsSectionIds.Mcp));
-        OpenToolsCommand = new RelayCommand(() => this.sources.OpenSettingsSection(Preferences.SettingsSectionIds.Tools));
         OpenProjectInVsCodeCommand = new RelayCommand(
             () => OpenInVsCode(projectRoot),
             () => CanOpenProjectInVsCode);
@@ -136,11 +116,9 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
             () => CanOpenWorkspaceInExplorer);
 
         Loc.Instance.LanguageChanged += OnLanguageChanged;
-
-        // Opening a tab reads the two cheap things only: the in-memory counters and the approvals record count (one
-        // read-only query). The workspace's skills are scanned when a turn starts or when the settings page shows them.
-        RefreshCounters();
-        _ = RefreshApprovalsAsync(++refreshToken);
+        this.sources.McpStateChanged += OnMcpStateChanged;
+        mcpFailed = this.sources.McpFailed();
+        RaiseQuota();
         RefreshTurnHistory();
     }
 
@@ -830,84 +808,39 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(UsageAverageInputText));
         OnPropertyChanged(nameof(UsageAverageOutputText));
         OnPropertyChanged(nameof(UsageAverageCostText));
-    }    // ---------------------------------------------------------------- right half: the counters
+    }    // ---------------------------------------------------------------- the resource button
 
-    public string ApprovalText => InstrumentsStrings.CountPair(PendingApprovals, approvalRecords);
-
-    public string ApprovalTooltip => InstrumentsStrings.ApprovalsTooltip(PendingApprovals, approvalRecords);
-
-    public string SkillText => InstrumentsStrings.CountPair(usedSkills.Count, skills.Count);
-
-    public string SkillTooltip => InstrumentsStrings.SkillsTooltip(usedSkills.Count, skills.Count);
-
-    public string McpText => InstrumentsStrings.CountPair(mcp.Ready, mcp.Configured);
-
-    public string McpTooltip => InstrumentsStrings.McpTooltip(mcp.Ready, mcp.Configured);
-
-    /// <summary>
-    /// "11/21": tools called over tools available. Before the first turn has built the agent host the denominator is still
-    /// zero and the readout says <c>0/0</c> — a number the strip can always show, rather than a question mark.
-    /// </summary>
-    public string ToolText => InstrumentsStrings.CountPair(usedTools.Count, tools.Count);
-
-    public string ToolTooltip => InstrumentsStrings.ToolsTooltip(usedTools.Count, tools.Count);
-
-    /// <summary>Counters shown as labels; when the strip is too narrow they are replaced by one overflow button.</summary>
-    public string ApprovalsLabel => InstrumentsStrings.ApprovalsLabel;
-
-    public string SkillsLabel => InstrumentsStrings.SkillsLabel;
-
-    public string McpLabel => InstrumentsStrings.McpLabel;
-
-    public string ToolsLabel => InstrumentsStrings.ToolsLabel;
-
-    /// <summary>The label of the one button that carries all four counters.</summary>
+    /// <summary>The resource button's label; the window it opens has the detail.</summary>
     public string ResourcesLabel => InstrumentsStrings.Resources;
 
-    public string ResourcesTooltip => InstrumentsStrings.ResourcesTooltip;
+    /// <summary>The button's tooltip: how many automation agents run, or that a server failed, otherwise what the window is.</summary>
+    public string ResourcesTooltip => runningResources > 0
+        ? ResourceInspectorStrings.ButtonRunningTooltip(runningResources)
+        : mcpFailed
+            ? ResourceInspectorStrings.ButtonFailedTooltip
+            : ResourceInspectorStrings.ButtonTooltip;
 
-    /// <summary>One overflow-menu row per counter: the same label and pair the button shows, as plain text.</summary>
-    public string ApprovalMenuText => InstrumentsStrings.MenuEntry(ApprovalsLabel, ApprovalText);
-
-    public string SkillMenuText => InstrumentsStrings.MenuEntry(SkillsLabel, SkillText);
-
-    public string McpMenuText => InstrumentsStrings.MenuEntry(McpLabel, McpText);
-
-    public string ToolMenuText => InstrumentsStrings.MenuEntry(ToolsLabel, ToolText);
-
-    public RelayCommand OpenApprovalsCommand { get; }
-
-    public RelayCommand OpenSkillsCommand { get; }
-
-    public RelayCommand OpenMcpCommand { get; }
-
-    public RelayCommand OpenToolsCommand { get; }
-
-    // ---------------------------------------------------------------- the resources menu's inspector row
-
-    /// <summary>False only when no window wired the overlay (a standalone view), which hides the row instead of disabling it.</summary>
+    /// <summary>False only when no window wired the overlay (a standalone view); the button is then disabled.</summary>
     public bool CanOpenInspector => openInspector is not null;
 
-    /// <summary>Opens the window's resource inspector; the row lives in the strip's resources menu.</summary>
+    /// <summary>Opens the resource window for this session.</summary>
     public RelayCommand OpenInspectorCommand { get; }
 
-    /// <summary>
-    /// "运行中的资源…", with this session's live count when something runs: the strip sits in the composer, so it is the one
-    /// place a user can see that commands are still going without opening the inspector. Derived on every read, so a
-    /// language switch and a count change both only re-raise it.
-    /// </summary>
-    public string OpenInspectorMenuText => runningResources > 0
-        ? ResourceInspectorStrings.MenuCount(runningResources)
-        : ResourceInspectorStrings.Menu;
-
-    public string OpenInspectorTooltip => ResourceInspectorStrings.MenuTooltip;
-
-    /// <summary>Rows the inspector would list right now (running calls plus every live sub-agent, a queued child included).</summary>
+    /// <summary>Automation agents of this session that are queued or running; the number beside the green dot.</summary>
     public int RunningResources => runningResources;
 
+    /// <summary>The green dot and its number: at least one automation agent runs.</summary>
+    public bool HasRunningResources => runningResources > 0;
+
+    /// <summary>The dot is red instead of green: an MCP server failed to connect (a running agent's count stays beside it).</summary>
+    public bool HasResourceProblem => mcpFailed;
+
+    /// <summary>The button carries a dot at all: something runs, or a server failed.</summary>
+    public bool ShowResourceDot => runningResources > 0 || mcpFailed;
+
     /// <summary>
-    /// Records how many rows the inspector would list right now (running calls plus every live sub-agent, a queued child
-    /// included); the session pushes it whenever that set changes. Equal counts are ignored, so a redundant push costs nothing.
+    /// Records how many automation agents run right now; the session pushes it whenever that set changes. Equal counts are
+    /// ignored, so a redundant push costs nothing.
     /// </summary>
     public void NoteRunningResources(int running)
     {
@@ -918,42 +851,10 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         }
 
         runningResources = next;
-        OnPropertyChanged(nameof(RunningResources));
-        OnPropertyChanged(nameof(OpenInspectorMenuText));
+        RaiseResourceButton();
     }
 
-    /// <summary>Records one tool call of this session (root or child): the numerator of the tool counter.</summary>
-    public void NoteToolUsed(string? toolName)
-    {
-        if (string.IsNullOrWhiteSpace(toolName) || !usedTools.Add(toolName))
-        {
-            return;
-        }
-
-        OnPropertyChanged(nameof(ToolText));
-        OnPropertyChanged(nameof(ToolTooltip));
-    }
-
-    /// <summary>
-    /// Records the skills a sent draft references (<c>/name</c>, word-bounded), matched against what was discovered for this
-    /// workspace. A skill is prose the agent then follows, so this is the only place that can see one being picked. The draft
-    /// is kept, because the first turn can be sent before the discovery has landed.
-    /// </summary>
-    public void NoteDraft(string? draft)
-    {
-        if (string.IsNullOrEmpty(draft))
-        {
-            return;
-        }
-
-        latestDraft = draft;
-        MatchDraftSkills();
-    }
-
-    /// <summary>
-    /// Re-reads the cheap counters: the session's tool list, the MCP states and the approval queue. Synchronous by design —
-    /// it runs on every queue change and on every turn start, so it must not touch a database or the file system.
-    /// </summary>
+    /// <summary>Re-reads the one thing the strip needs besides the pushed count: the composer's provider can have changed.</summary>
     public void RefreshCounters()
     {
         if (disposed)
@@ -961,92 +862,51 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        tools = availableTools() ?? [];
-        mcp = sources.McpServers();
-        RaiseCounters();
         // The composer's provider can have changed since the last request; a reading from another account stops showing here.
         RaiseQuota();
     }
 
-    /// <summary>
-    /// Re-reads what has to be read off the UI thread: the approvals database and the workspace's skills. The skill scan runs
-    /// once per session (skills do not change while a session is open); the approval count is re-read every time because the
-    /// approval queue is exactly what changes behind the session's back.
-    /// </summary>
-    public void RefreshSources()
+    /// <summary>An MCP server changed state, possibly on a pool thread; the dot is only read on the UI thread.</summary>
+    private void OnMcpStateChanged()
     {
         if (disposed)
         {
             return;
         }
 
-        RefreshCounters();
-        var token = ++refreshToken;
-        var workspace = session.WorkspacePath;
-        _ = RefreshSourcesAsync(token, workspace);
-    }
-
-    private async Task RefreshSourcesAsync(int token, string workspace)
-    {
-        await RefreshApprovalsAsync(token).ConfigureAwait(true);
-        await LoadSkillsOnceAsync(workspace).ConfigureAwait(true);
-    }
-
-    /// <summary>One read-only count against the approvals database; a locked or corrupt one reads as "unknown", not zero.</summary>
-    private async Task RefreshApprovalsAsync(int token)
-    {
-        int? records;
-        try
+        if (Environment.CurrentManagedThreadId == uiThread)
         {
-            records = await sources.ApprovalRecordsAsync(CancellationToken.None).ConfigureAwait(true);
-        }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or InvalidDataException
-            or Microsoft.Data.Sqlite.SqliteException)
-        {
-            records = null;
-        }
-
-        if (disposed || token != refreshToken)
-        {
+            ReadMcpFailed();
             return;
         }
 
-        approvalRecords = records ?? 0;
-        RaiseCounters();
+        Avalonia.Threading.Dispatcher.UIThread.Post(ReadMcpFailed);
     }
 
-    private async Task LoadSkillsOnceAsync(string workspace)
+    private void ReadMcpFailed()
     {
-        if (skillsLoaded || skillsLoading)
-        {
-            return;
-        }
-
-        skillsLoading = true;
-        IReadOnlyList<SlashEntry> discovered = [];
-        try
-        {
-            discovered = await BackgroundRead
-                .RunAsync(_ => Task.FromResult(sources.Skills(workspace)), CancellationToken.None)
-                .ConfigureAwait(true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            // No skills is a valid state; the counter then reads "0/0" instead of the strip coming apart over a directory.
-        }
-
-        skillsLoading = false;
         if (disposed)
         {
             return;
         }
 
-        skillsLoaded = true;
-        skills = discovered;
-        RaiseCounters();
+        var failed = sources.McpFailed();
+        if (failed == mcpFailed)
+        {
+            return;
+        }
 
-        // A draft sent before the scan finished still counts against the skills it mentions.
-        MatchDraftSkills();
+        mcpFailed = failed;
+        RaiseResourceButton();
+    }
+
+    private void RaiseResourceButton()
+    {
+        OnPropertyChanged(nameof(RunningResources));
+        OnPropertyChanged(nameof(HasRunningResources));
+        OnPropertyChanged(nameof(HasResourceProblem));
+        OnPropertyChanged(nameof(ShowResourceDot));
+        OnPropertyChanged(nameof(ResourcesTooltip));
     }
 
     public void Dispose()
@@ -1058,9 +918,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
         disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        sources.McpStateChanged -= OnMcpStateChanged;
     }
-
-    private int PendingApprovals => sources.PendingApprovals(session.Id);
 
     /// <summary>Re-reads what the four "open …" menu items can do; the project arrives after the strip already exists.</summary>
     private void RaiseOpenTargets()
@@ -1075,48 +934,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OpenWorkspaceInExplorerCommand.NotifyCanExecuteChanged();
     }
 
-    private void MatchDraftSkills()
-    {
-        if (skills.Count == 0 || latestDraft.Length == 0)
-        {
-            return;
-        }
-
-        var changed = false;
-        foreach (var skill in skills)
-        {
-            if (usedSkills.Contains(skill.Name) || !MentionsSkill(latestDraft, skill.Name))
-            {
-                continue;
-            }
-
-            usedSkills.Add(skill.Name);
-            changed = true;
-        }
-
-        if (changed)
-        {
-            OnPropertyChanged(nameof(SkillText));
-            OnPropertyChanged(nameof(SkillTooltip));
-        }
-    }
-
-    private void RaiseCounters()
-    {
-        OnPropertyChanged(nameof(ApprovalText));
-        OnPropertyChanged(nameof(ApprovalTooltip));
-        OnPropertyChanged(nameof(SkillText));
-        OnPropertyChanged(nameof(SkillTooltip));
-        OnPropertyChanged(nameof(McpText));
-        OnPropertyChanged(nameof(McpTooltip));
-        OnPropertyChanged(nameof(ToolText));
-        OnPropertyChanged(nameof(ToolTooltip));
-        OnPropertyChanged(nameof(ApprovalMenuText));
-        OnPropertyChanged(nameof(SkillMenuText));
-        OnPropertyChanged(nameof(McpMenuText));
-        OnPropertyChanged(nameof(ToolMenuText));
-    }
-
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         // A notification from another thread belongs to a window that is gone; re-reading here would touch
@@ -1126,43 +943,14 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        RaiseCounters();
         RaiseUsageSummary();
         OnPropertyChanged(nameof(ContextLabel));
         OnPropertyChanged(nameof(ContextTooltip));
         OnPropertyChanged(nameof(UsageTooltip));
         RaiseQuota();
         OnPropertyChanged(nameof(WorkspaceTooltip));
-        OnPropertyChanged(nameof(ApprovalsLabel));
-        OnPropertyChanged(nameof(SkillsLabel));
-        OnPropertyChanged(nameof(McpLabel));
-        OnPropertyChanged(nameof(ToolsLabel));
         OnPropertyChanged(nameof(ResourcesLabel));
         OnPropertyChanged(nameof(ResourcesTooltip));
-        OnPropertyChanged(nameof(OpenInspectorMenuText));
-        OnPropertyChanged(nameof(OpenInspectorTooltip));
-        OnPropertyChanged(nameof(ApprovalMenuText));
-        OnPropertyChanged(nameof(SkillMenuText));
-        OnPropertyChanged(nameof(McpMenuText));
-        OnPropertyChanged(nameof(ToolMenuText));
-    }
-
-    private static bool MentionsSkill(string draft, string name)
-    {
-        var needle = "/" + name;
-        var index = draft.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
-        while (index >= 0)
-        {
-            var after = index + needle.Length;
-            if (after >= draft.Length || char.IsWhiteSpace(draft[after]))
-            {
-                return true;
-            }
-
-            index = draft.IndexOf(needle, index + 1, StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
     }
 
     /// <summary>Token counts the way a strip reads them: <c>900</c>, <c>36k</c>, <c>1.0M</c>.</summary>

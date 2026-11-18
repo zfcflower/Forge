@@ -196,15 +196,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         Status = new StatusBarViewModel(composition);
         Settings = new SettingsViewModel(composition);
-        instruments = new SessionInstrumentSources(composition, CountPendingApprovals, OpenSettingsSection);
+        instruments = new SessionInstrumentSources(composition);
         composition.ActiveSessionTools = () => activeSession?.ToolNames() ?? [];
         composition.ActiveSessionToolCatalog = () => activeSession?.DescribeTools() ?? [];
         composition.ActiveSessionWorkspace = () => activeSession?.WorkDir;
-        if (ApprovalServices.Current is { } approvalServices)
-        {
-            approvalServices.Queue.Changed += OnApprovalQueueChanged;
-        }
-
         Projects = new ProjectTreeViewModel(
             composition.Projects,
             composition.Catalog,
@@ -2902,38 +2897,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         dialogs is null ? null : await dialogs.PickNewBranchAsync(request, ct).ConfigureAwait(true);
 
     /// <summary>
-    /// Approval cards waiting for one session. The queue belongs to the UI thread, so this is only ever read from a view model
-    /// that lives there too; a plugin approval card carries no session and counts for none.
-    /// </summary>
-    private static int CountPendingApprovals(string sessionId)
-    {
-        if (sessionId.Length == 0 || ApprovalServices.Current is not { } approvals)
-        {
-            return 0;
-        }
-
-        var pending = 0;
-        foreach (var card in approvals.Queue.Items)
-        {
-            if (string.Equals(card.SessionId, sessionId, StringComparison.Ordinal))
-            {
-                pending++;
-            }
-        }
-
-        foreach (var card in approvals.Queue.Questions)
-        {
-            if (string.Equals(card.SessionId, sessionId, StringComparison.Ordinal))
-            {
-                pending++;
-            }
-        }
-
-        return pending;
-    }
-
-    /// <summary>
-    /// Opens the settings page on one section: the click target of the strip's four counters. The window is created on
+    /// Opens the settings page on one section: the click target of the app's "open settings" links. The window is created on
     /// demand and reused; selecting the section before showing it means the window opens on the right page.
     /// </summary>
     private void OpenSettingsSection(string sectionId)
@@ -3006,7 +2970,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>Cards come and go on their own schedule, so the active strip re-reads its approval count on every change.</summary>
-    private void OnApprovalQueueChanged() => activeSession?.Instruments.RefreshCounters();
 
     /// <summary>Gives one session's strip the project it belongs to, from the cache the registry read fills.</summary>
     private void ApplyProject(SessionWorkspaceViewModel session)
@@ -3181,11 +3144,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             host.StatusChanged -= OnHostStatusChanged;
             host.SurfaceChanged -= OnHostSurfaceChanged;
-        }
-
-        if (ApprovalServices.Current is { } approvalServices)
-        {
-            approvalServices.Queue.Changed -= OnApprovalQueueChanged;
         }
 
         // The overlay reads every open session's live work; it goes before the sessions it reads do.

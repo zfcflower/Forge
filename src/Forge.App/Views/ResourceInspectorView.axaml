@@ -9,14 +9,13 @@
 
   <UserControl.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-    <!-- The scrim covers the whole workbench row: it dims what is behind the panel and takes the click that closes it. -->
+    <!-- The scrim covers the whole workbench row: it dims what is behind the window and takes the click that closes it. -->
     <Style Selector="Grid.inspector-scrim">
       <Setter Property="Background" Value="{DynamicResource BackdropScrimBrush}" />
     </Style>
 
-    <!-- One card, centred and capped. Wider than the plan panel: a row carries a command line and its output. -->
     <Style Selector="Border.inspector-card">
-      <Setter Property="MaxWidth" Value="880" />
+      <Setter Property="MaxWidth" Value="760" />
       <Setter Property="MaxHeight" Value="680" />
       <Setter Property="Margin" Value="16,0" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -28,56 +27,57 @@
       <Setter Property="BoxShadow" Value="{DynamicResource ShadowMd}" />
     </Style>
 
-    <!-- The count beside the title: the same chip shape the strip uses for its sub-agent badge. -->
-    <Style Selector="Border.inspector-count">
+    <!-- A bordered table: the frame, and a tinted header band. -->
+    <Style Selector="Border.res-table">
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="Border.res-head">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+      <Setter Property="Padding" Value="10,4" />
+    </Style>
+    <Style Selector="Border.res-row">
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    </Style>
+    <Style Selector="Border.res-total">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.res-total TextBlock">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.res-num">
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="TextAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- Dots: green while a server is ready, red when it failed. -->
+    <Style Selector="Ellipse.res-dot">
+      <Setter Property="Width" Value="8" />
+      <Setter Property="Height" Value="8" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Fill" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="Ellipse.res-dot.ready">
+      <Setter Property="Fill" Value="{DynamicResource StatusSuccessBrush}" />
+    </Style>
+    <Style Selector="Ellipse.res-dot.failed">
+      <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
+    </Style>
+
+    <Style Selector="Border.res-chip">
       <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
       <Setter Property="Padding" Value="6,1" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
-    <Style Selector="Border.inspector-count TextBlock">
+    <Style Selector="Border.res-chip TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    </Style>
-
-    <!-- The row list: no chrome of its own, no selection tint; rows are virtualized by the ListBox. -->
-    <Style Selector="ListBox.inspector-rows">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="0" />
-    </Style>
-    <Style Selector="ListBox.inspector-rows ListBoxItem">
-      <Setter Property="Padding" Value="0" />
-      <Setter Property="Focusable" Value="False" />
-    </Style>
-    <Style Selector="ListBox.inspector-rows ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="Transparent" />
-    </Style>
-
-    <!-- One row: a flat band separated from the next one by a single rule. -->
-    <Style Selector="Border.inspector-row">
-      <Setter Property="Padding" Value="14,8" />
-      <Setter Property="BorderThickness" Value="0,0,0,1" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-    </Style>
-
-    <!-- A session's group header: a tinted band above that session's rows. -->
-    <Style Selector="Border.inspector-group">
-      <Setter Property="Padding" Value="14,6" />
-      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
-      <Setter Property="BorderThickness" Value="0,0,0,1" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-    </Style>
-
-    <!-- The streamed output: sunken, monospaced, scrollable on its own so a chatty command cannot stretch the panel. -->
-    <Style Selector="Border.inspector-tail">
-      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
-      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
-      <Setter Property="Padding" Value="8,6" />
-    </Style>
-    <Style Selector="Border.inspector-tail SelectableTextBlock">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
   </UserControl.Styles>
 
@@ -88,25 +88,17 @@
         KeyDown="OnKeyDown">
     <Border Classes="inspector-card">
       <Grid RowDefinitions="Auto,*">
-        <!-- Title row: what the list is, how much is running, and the way out. -->
         <Border Grid.Row="0"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource BorderBrush}"
                 Padding="14,10,10,10">
-          <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+          <Grid ColumnDefinitions="*,Auto">
             <TextBlock Classes="label"
                        FontWeight="SemiBold"
                        FontSize="{DynamicResource FontSizeBase}"
                        VerticalAlignment="Center"
                        Text="{Binding Title}" />
-            <Border Grid.Column="1"
-                    Classes="inspector-count"
-                    Margin="8,0,0,0"
-                    IsVisible="{Binding HasRunning}"
-                    AutomationProperties.AutomationId="inspector-count">
-              <TextBlock Text="{Binding CountText}" />
-            </Border>
-            <Button Grid.Column="3"
+            <Button Grid.Column="1"
                     x:Name="CloseButton"
                     Classes="ghost icon"
                     Width="28"
@@ -120,168 +112,192 @@
           </Grid>
         </Border>
 
-        <Grid Grid.Row="1">
-          <ListBox Classes="inspector-rows"
-                   ItemsSource="{Binding Items}"
-                   IsVisible="{Binding HasRunning}"
-                   SelectionMode="Single"
-                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-            <ListBox.DataTemplates>
-              <!-- A session's group header: its title, its own count, and a tag on the session the window shows. -->
-              <DataTemplate x:DataType="vm:ResourceInspectorGroupViewModel">
-                <Border Classes="inspector-group">
-                  <Grid ColumnDefinitions="*,Auto,Auto">
-                    <TextBlock Classes="label"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis"
-                               Text="{Binding Title}"
-                               ToolTip.Tip="{Binding Title}" />
-                    <Border Grid.Column="1"
-                            Classes="inspector-count"
-                            Margin="8,0,0,0"
-                            IsVisible="{Binding IsActive}"
-                            AutomationProperties.AutomationId="inspector-group-active">
-                      <TextBlock Text="{Binding ActiveText}" />
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="14,10,14,14" Spacing="16">
+
+            <!-- 1. Automation agents that are running: names open the agent's tab. -->
+            <StackPanel Spacing="6">
+              <TextBlock Classes="label" FontWeight="SemiBold" Text="{Binding AgentsTitle}" />
+              <TextBlock Classes="caption" IsVisible="{Binding !HasAgents}" Text="{Binding AgentsEmpty}" />
+              <ItemsControl ItemsSource="{Binding Agents}" IsVisible="{Binding HasAgents}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:SubAgentViewModel">
+                    <Border Classes="res-row" BorderThickness="0,0,0,1">
+                      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                        <Ellipse Classes="status-dot running" VerticalAlignment="Center" />
+                        <Button Grid.Column="1"
+                                Classes="link"
+                                Margin="8,0,0,0"
+                                HorizontalAlignment="Left"
+                                Click="OnOpenAgent"
+                                ToolTip.Tip="{Binding [resources.agents.openTooltip], Source={x:Static loc:Loc.Instance}}"
+                                AutomationProperties.AutomationId="inspector-open-agent">
+                          <TextBlock Classes="mono" TextTrimming="CharacterEllipsis" Text="{Binding TabTitle}" />
+                        </Button>
+                        <TextBlock Grid.Column="2"
+                                   Classes="caption"
+                                   Margin="8,0"
+                                   VerticalAlignment="Center"
+                                   Text="{Binding StatusText}" />
+                        <TextBlock Grid.Column="3"
+                                   Classes="mono"
+                                   Margin="0,0,10,0"
+                                   VerticalAlignment="Center"
+                                   Text="{Binding ElapsedText}" />
+                        <Button Grid.Column="4"
+                                Classes="ghost"
+                                Content="{Binding [subagent.stop], Source={x:Static loc:Loc.Instance}}"
+                                Command="{Binding StopCommand}"
+                                IsVisible="{Binding CanStop}"
+                                ToolTip.Tip="{Binding [subagent.stopTooltip], Source={x:Static loc:Loc.Instance}}"
+                                AutomationProperties.AutomationId="inspector-stop-agent"
+                                AutomationProperties.Name="{Binding [subagent.stopName], Source={x:Static loc:Loc.Instance}}" />
+                      </Grid>
                     </Border>
-                    <TextBlock Grid.Column="2"
-                               Classes="caption"
-                               Margin="8,0,0,0"
-                               VerticalAlignment="Center"
-                               Text="{Binding CountText}" />
-                  </Grid>
-                </Border>
-              </DataTemplate>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
 
-              <!-- A running tool call: who runs it, for how long, a stop for just this call, and the live output tail. -->
-              <DataTemplate x:DataType="vm:LiveToolViewModel">
-                <Border Classes="inspector-row">
-                  <StackPanel Spacing="3">
-                    <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                      <Button Classes="link"
-                              Command="{Binding ToggleCommand}"
-                              AutomationProperties.AutomationId="inspector-tool-toggle"
-                              AutomationProperties.Name="{Binding ArgumentSummary}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                          <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
-                          <TextBlock Classes="mono" Text="{Binding Name}" />
-                        </StackPanel>
-                      </Button>
-                      <TextBlock Grid.Column="1"
-                                 Classes="caption"
-                                 Margin="8,0"
-                                 VerticalAlignment="Center"
-                                 TextTrimming="CharacterEllipsis"
-                                 Text="{Binding AgentLabel}" />
-                      <TextBlock Grid.Column="2"
-                                 Classes="mono"
-                                 VerticalAlignment="Center"
-                                 Margin="0,0,10,0"
-                                 Text="{Binding ElapsedText}" />
-                      <TextBlock Grid.Column="3"
-                                 Classes="caption"
-                                 VerticalAlignment="Center"
-                                 IsVisible="{Binding IsStopRequested}"
-                                 Text="{Binding [resources.stopping], Source={x:Static loc:Loc.Instance}}" />
-                      <Button Grid.Column="3"
-                              Classes="ghost"
-                              Content="{Binding [resources.stop], Source={x:Static loc:Loc.Instance}}"
-                              Command="{Binding StopCommand}"
-                              IsVisible="{Binding CanStop}"
-                              ToolTip.Tip="{Binding [resources.stop.tooltip], Source={x:Static loc:Loc.Instance}}"
-                              AutomationProperties.AutomationId="inspector-stop-tool"
-                              AutomationProperties.Name="{Binding [resources.stop.name], Source={x:Static loc:Loc.Instance}}" />
+            <!-- 2. MCP servers. -->
+            <StackPanel Spacing="6">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Classes="label" FontWeight="SemiBold" VerticalAlignment="Center" Text="{Binding McpTitle}" />
+                <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding McpNote}" />
+              </StackPanel>
+              <TextBlock Classes="caption" IsVisible="{Binding !HasMcp}" Text="{Binding McpEmpty}" />
+              <Border Classes="res-table" IsVisible="{Binding HasMcp}">
+                <StackPanel>
+                  <Border Classes="res-head">
+                    <Grid ColumnDefinitions="*,110,50,70,70,Auto">
+                      <TextBlock Classes="caption" Text="{Binding McpServerHeader}" />
+                      <TextBlock Grid.Column="1" Classes="caption" Text="{Binding McpStatusHeader}" />
+                      <TextBlock Grid.Column="2" Classes="caption res-num" Text="{Binding ColumnTools}" />
+                      <TextBlock Grid.Column="3" Classes="caption res-num" Text="{Binding ColumnChars}" />
+                      <TextBlock Grid.Column="4" Classes="caption res-num" Text="{Binding ColumnTokens}" />
+                      <Border Grid.Column="5" Width="150" />
                     </Grid>
-
-                    <!-- The call as the model wrote it; compacted to one line, the transcript's row has the whole JSON. -->
-                    <SelectableTextBlock Classes="mono caption"
-                                         MaxLines="1"
+                  </Border>
+                  <ItemsControl ItemsSource="{Binding McpServers}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ResourceMcpRowViewModel">
+                        <Border Classes="res-row">
+                          <Grid ColumnDefinitions="*,110,50,70,70,Auto">
+                            <TextBlock Classes="mono"
+                                       VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="{Binding Name}" />
+                            <StackPanel Grid.Column="1"
+                                        Orientation="Horizontal"
+                                        Spacing="6"
+                                        ToolTip.Tip="{Binding ErrorText}">
+                              <Ellipse Classes="res-dot" Classes.ready="{Binding IsReady}" Classes.failed="{Binding IsFailed}" />
+                              <TextBlock Classes="caption"
+                                         VerticalAlignment="Center"
                                          TextTrimming="CharacterEllipsis"
-                                         IsVisible="{Binding IsExpanded}"
-                                         Text="{Binding ArgumentSummary}" />
+                                         Text="{Binding StatusText}" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" Classes="res-num" Text="{Binding ToolsText}" />
+                            <TextBlock Grid.Column="3" Classes="res-num" Text="{Binding CharsText}" />
+                            <TextBlock Grid.Column="4" Classes="res-num" Text="{Binding TokensText}" />
+                            <StackPanel Grid.Column="5"
+                                        Width="150"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        Spacing="2">
+                              <Button Classes="ghost" Content="{Binding SignInText}" Command="{Binding SignInCommand}" IsVisible="{Binding CanSignIn}" />
+                              <Button Classes="ghost" Content="{Binding StartText}" Command="{Binding StartCommand}" IsVisible="{Binding CanStart}" />
+                              <Button Classes="ghost" Content="{Binding RestartText}" Command="{Binding RestartCommand}" IsVisible="{Binding CanStopOrRestart}" />
+                              <Button Classes="ghost" Content="{Binding StopText}" Command="{Binding StopCommand}" IsVisible="{Binding CanStopOrRestart}" />
+                            </StackPanel>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+            </StackPanel>
 
-                    <StackPanel Spacing="2" IsVisible="{Binding IsExpanded}">
-                      <TextBlock Classes="label" Text="{Binding [resources.tail], Source={x:Static loc:Loc.Instance}}" />
-                      <Border Classes="inspector-tail">
-                        <ScrollViewer MaxHeight="132"
-                                      VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Auto">
-                          <StackPanel>
-                            <SelectableTextBlock TextWrapping="NoWrap"
-                                                 IsVisible="{Binding HasTail}"
-                                                 Text="{Binding TailText}" />
-                            <TextBlock Classes="caption"
-                                       IsVisible="{Binding !HasTail}"
-                                       Text="{Binding [resources.tail.empty], Source={x:Static loc:Loc.Instance}}" />
-                          </StackPanel>
-                        </ScrollViewer>
-                      </Border>
-                    </StackPanel>
-                  </StackPanel>
+            <!-- 3. Tool definitions the model is sent, by category. -->
+            <StackPanel Spacing="6">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Classes="label" FontWeight="SemiBold" VerticalAlignment="Center" Text="{Binding ToolsTitle}" />
+                <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding ToolsNote}" />
+              </StackPanel>
+              <TextBlock Classes="caption" IsVisible="{Binding !HasTools}" Text="{Binding ToolsEmpty}" />
+              <Border Classes="res-table" IsVisible="{Binding HasTools}">
+                <StackPanel>
+                  <Border Classes="res-head">
+                    <Grid ColumnDefinitions="*,50,80,80">
+                      <TextBlock Classes="caption" Text="{Binding ToolsCategoryHeader}" />
+                      <TextBlock Grid.Column="1" Classes="caption res-num" Text="{Binding ColumnTools}" />
+                      <TextBlock Grid.Column="2" Classes="caption res-num" Text="{Binding ColumnChars}" />
+                      <TextBlock Grid.Column="3" Classes="caption res-num" Text="{Binding ColumnTokens}" />
+                    </Grid>
+                  </Border>
+                  <ItemsControl ItemsSource="{Binding Tools}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ResourceUsageLineViewModel">
+                        <Border Classes="res-row" Classes.res-total="{Binding IsTotal}">
+                          <Grid ColumnDefinitions="*,50,80,80">
+                            <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="{Binding Name}" />
+                            <TextBlock Grid.Column="1" Classes="res-num" Text="{Binding ToolsText}" />
+                            <TextBlock Grid.Column="2" Classes="res-num" Text="{Binding CharsText}" />
+                            <TextBlock Grid.Column="3" Classes="res-num" Text="{Binding TokensText}" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+
+            <!-- 4. Prompts in use, with the stale chip and the reload button docked right. -->
+            <StackPanel Spacing="6">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <TextBlock Classes="label" FontWeight="SemiBold" VerticalAlignment="Center" Text="{Binding PromptsTitle}" />
+                <Border Grid.Column="2" Classes="res-chip" Margin="0,0,8,0" IsVisible="{Binding PromptsAreStale}">
+                  <TextBlock Text="{Binding PromptsStaleText}" />
                 </Border>
-              </DataTemplate>
+                <Button Grid.Column="3"
+                        Classes="ghost"
+                        Content="{Binding PromptsReloadText}"
+                        Command="{Binding ReloadCommand}"
+                        ToolTip.Tip="{Binding ReloadTooltip}"
+                        AutomationProperties.AutomationId="inspector-reload-prompts" />
+              </Grid>
+              <TextBlock Classes="caption" IsVisible="{Binding !HasPrompts}" Text="{Binding PromptsEmpty}" />
+              <Border Classes="res-table" IsVisible="{Binding HasPrompts}">
+                <StackPanel>
+                  <Border Classes="res-head">
+                    <Grid ColumnDefinitions="*,80,80">
+                      <TextBlock Classes="caption" Text="{Binding PromptsSourceHeader}" />
+                      <TextBlock Grid.Column="1" Classes="caption res-num" Text="{Binding ColumnChars}" />
+                      <TextBlock Grid.Column="2" Classes="caption res-num" Text="{Binding ColumnTokens}" />
+                    </Grid>
+                  </Border>
+                  <ItemsControl ItemsSource="{Binding Prompts}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ResourceUsageLineViewModel">
+                        <Border Classes="res-row" Classes.res-total="{Binding IsTotal}">
+                          <Grid ColumnDefinitions="*,80,80">
+                            <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="{Binding Name}" />
+                            <TextBlock Grid.Column="1" Classes="res-num" Text="{Binding CharsText}" />
+                            <TextBlock Grid.Column="2" Classes="res-num" Text="{Binding TokensText}" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+            </StackPanel>
 
-              <!-- A live sub-agent: the same row rhythm, its own stop (which does cancel just that child). -->
-              <DataTemplate x:DataType="vm:SubAgentViewModel">
-                <Border Classes="inspector-row">
-                  <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                    <Ellipse Classes="status-dot"
-                             Classes.running="{Binding IsLive}"
-                             VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" Margin="8,0" Spacing="1">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Classes="mono" Text="{Binding Kind}" />
-                        <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding StatusText}" />
-                      </StackPanel>
-                      <TextBlock Classes="caption"
-                                 MaxLines="1"
-                                 TextTrimming="CharacterEllipsis"
-                                 Text="{Binding TaskSummary}" />
-                    </StackPanel>
-                    <TextBlock Grid.Column="2"
-                               Classes="mono"
-                               Margin="0,0,10,0"
-                               VerticalAlignment="Center"
-                               Text="{Binding ElapsedText}" />
-                    <Button Grid.Column="3"
-                            Classes="ghost"
-                            Content="{Binding [subagent.stop], Source={x:Static loc:Loc.Instance}}"
-                            Command="{Binding StopCommand}"
-                            IsVisible="{Binding CanStop}"
-                            ToolTip.Tip="{Binding [subagent.stopTooltip], Source={x:Static loc:Loc.Instance}}"
-                            AutomationProperties.AutomationId="inspector-stop-agent"
-                            AutomationProperties.Name="{Binding [subagent.stopName], Source={x:Static loc:Loc.Instance}}" />
-                  </Grid>
-                </Border>
-              </DataTemplate>
-            </ListBox.DataTemplates>
-          </ListBox>
-
-          <!-- Idle session: one line, centred, saying there is nothing to watch rather than an empty frame. -->
-          <StackPanel IsVisible="{Binding IsEmpty}"
-                      VerticalAlignment="Center"
-                      HorizontalAlignment="Center"
-                      MaxWidth="440"
-                      Spacing="6">
-            <TextBlock Classes="label"
-                       HorizontalAlignment="Center"
-                       TextAlignment="Center"
-                       TextWrapping="Wrap"
-                       Text="{Binding Empty}" />
-            <TextBlock Classes="caption"
-                       HorizontalAlignment="Center"
-                       TextAlignment="Center"
-                       TextWrapping="Wrap"
-                       Text="{Binding EmptyHint}" />
+            <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasUsage}" Text="{Binding EstimateNote}" />
           </StackPanel>
-
-          <!-- A window without an open session (the last tab closed while the panel was open). -->
-          <TextBlock Classes="caption"
-                     IsVisible="{Binding !HasSession}"
-                     VerticalAlignment="Center"
-                     HorizontalAlignment="Center"
-                     Text="{Binding NoSession}" />
-        </Grid>
+        </ScrollViewer>
       </Grid>
     </Border>
   </Grid>

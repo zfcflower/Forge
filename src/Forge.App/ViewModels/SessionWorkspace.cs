@@ -63,6 +63,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private readonly AppPreferences? appPreferences;
     private readonly ObservableCollection<SubAgentViewModel> subAgents = [];
     private readonly ConcurrentDictionary<string, SubAgentViewModel> subAgentById = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Ids of the children <see cref="LaunchChildAsync"/> started outside a turn (the CI chain's Scout, a prompt automation).
+    /// Written from the launching thread before the start event reaches the UI, read when the row is created.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> automationChildIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TokenUsage> agentUsage = new(StringComparer.Ordinal);
     private readonly ObservableCollection<SubAgentViewModel> finished = [];
     private readonly FinishedSubAgentsViewModel finishedMenu = new();
@@ -132,8 +138,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <see cref="SessionStatus.Active"/>: the transcript is replayed from the store and nothing can be sent.</param>
     /// <param name="preferences">The live preferences the composer filters hidden models with and the inspector reads its
     /// output-tail limit from; <see langword="null"/> (a standalone view) lists every model and uses the defaults.</param>
-    /// <param name="openInspector">Opens the window's resource inspector; the strip's resources menu carries the row, and
-    /// <see langword="null"/> (a standalone view) leaves that row out instead of offering a dead entry.</param>
+    /// <param name="openInspector">Opens the resource window for this session (the strip's resource button);
+    /// <see langword="null"/> (a standalone view) leaves the button disabled instead of offering a dead entry.</param>
     /// <param name="openSession">Brings this session's own tab to the front; the sub-agent breadcrumb's way back to its
     /// parent, and <see langword="null"/> hides that action.</param>
     public SessionWorkspaceViewModel(
@@ -187,7 +193,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Instruments = new SessionInstrumentsViewModel(
             session,
             instrumentSources ?? EmptySessionInstrumentSources.Instance,
-            ToolNames,
             () => Composer.Model,
             () => Composer.ProviderId,
             openInspector);
@@ -232,6 +237,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         OnPropertyChanged(nameof(PromptsStale));
         PromptsStaleChanged?.Invoke();
+        RunningResourcesChanged?.Invoke(this, EventArgs.Empty);
         if (PromptsStale)
         {
             // Said once per change: the flag only rises again after a reload (or a new host) cleared it.
@@ -297,7 +303,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     public ComposerViewModel Composer { get; }
 
-    /// <summary>The readout above the input: usage, the four counters, the project and the git markers.</summary>
+    /// <summary>The readout above the input: usage, the resource button, the project and the git markers.</summary>
     public SessionInstrumentsViewModel Instruments { get; }
 
     /// <summary>Names of the tools this session can call; empty until its first turn built the agent host.</summary>
@@ -515,6 +521,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             {
                 RefreshCanSend();
                 CancelCommand.NotifyCanExecuteChanged();
+                // The window's prompt reload button follows the turn: it is refused while one runs.
+                RunningResourcesChanged?.Invoke(this, EventArgs.Empty);
                 // Either turn boundary drops what this agent left behind: at the end because a cancelled call never reports a
                 // finish of its own, at the start so a snapshot parked for the previous turn cannot seed a row of this one. A
                 // live child's entries are left alone - it may be streaming outside the turn (see ClearTurnTools).
@@ -964,7 +972,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         {
             Draft = string.Empty;
             queuePaused = false;
-            Instruments.NoteDraft(typed);
             await CompactNowAsync(focus).ConfigureAwait(true);
             return;
         }
@@ -985,7 +992,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
 
         queuePaused = false;
-        Instruments.NoteDraft(typed);
         await RunTurnAsync(prompt).ConfigureAwait(true);
     }
 
@@ -1254,8 +1260,19 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>Starts a sub-agent under this session outside a turn (automations); its tab appears like a tool-spawned one.</summary>
     public Task<ChildAgentResult> LaunchChildAsync(string kind, string task, CancellationToken ct) =>
         runtime is { } live && !IsAutomationClosed
-            ? live.SpawnChildAsync(kind, task, OnAgentEvent, ct)
+            ? live.SpawnChildAsync(kind, task, OnAutomationChildEvent, ct)
             : Task.FromException<ChildAgentResult>(new InvalidOperationException(AutomationStrings.SessionUnavailableText));
+
+    /// <summary>Remembers which child an automation launched (its direct child of the session's agent), then handles the event as usual.</summary>
+    private void OnAutomationChildEvent(AgentEvent value)
+    {
+        if (value is AgentSubAgentStarted { AgentId: "root" } started)
+        {
+            automationChildIds[started.ChildId] = 0;
+        }
+
+        OnAgentEvent(value);
+    }
 
     private void Interject()
     {
@@ -1461,7 +1478,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Interlocked.Exchange(ref lastActivityTicks, turnStartedAt.UtcTicks);
         Interlocked.Exchange(ref runningTools, 0);
         Instruments.RefreshCounters();
-        Instruments.RefreshSources();
         Transcript.AddUserMessage(text, turnStartedAt, prompt.Attachments);
         var card = Transcript.BeginTurn(turnStartedAt);
         turnNumber = card.Round;
@@ -1799,7 +1815,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 FinishSubAgent(subFinished);
                 break;
             case AgentToolStarted started:
-                Instruments.NoteToolUsed(started.Call.Name);
                 // The row always appears; the live state only for a call that may still be running (see TrackTool: the session's
                 // own agent needs a turn, a live child does not). The session clock reads the tail, so nothing is dispatched.
                 if (Card(started.AgentId)?.AddTool(started.Call) is { } row && TrackTool(started.AgentId, started.Call) is { } activity)
@@ -2031,7 +2046,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             StartSubAgentStop,
             started.AgentId,
             Title,
-            openSession);
+            openSession)
+        {
+            IsAutomation = automationChildIds.ContainsKey(started.ChildId),
+        };
         subAgentById[started.ChildId] = agent;
         subAgents.Add(agent);
         DrainEarlyDeltas(agent);
@@ -2236,6 +2254,13 @@ internal sealed class SubAgentViewModel : NotifyingObject
 
     /// <summary>The agent that spawned this one; null for a child that was spawned by the root agent.</summary>
     public string? ParentAgentId { get; }
+
+    /// <summary>
+    /// True for a child an automation started outside any turn (the CI chain's Scout, a prompt automation); false for one the
+    /// session's own agent spawned. The resource window lists only the former, because the latter already have a tab and the
+    /// sub-agent strip.
+    /// </summary>
+    public bool IsAutomation { get; init; }
 
     /// <summary>The kind the store recorded; a stored child without one is named after the region, in the current language.</summary>
     public string Kind => kind.Length == 0 ? SessionStrings.SubAgentsTitle : kind;

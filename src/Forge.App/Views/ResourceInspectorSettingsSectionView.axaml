@@ -4,8 +4,8 @@
              xmlns:settings="using:Forge.App.Settings"
              x:Class="Forge.App.Views.ResourceInspectorSettingsSectionView"
              x:DataType="settings:ResourceInspectorSettingsViewModel">
-  <!-- The `inspector` section body: how much output the overlay keeps and how often it re-ticks. Both values are read on
-       the next refresh, so the fields need no apply step. -->
+  <!-- The `inspector` section body: how much output a running command's card keeps. The value is read on the next tick, so the
+       field needs no apply step. -->
   <StackPanel Spacing="6">
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
@@ -28,23 +28,5 @@
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
                Text="{Binding [resources.settings.tailLinesHint], Source={x:Static loc:Loc.Instance}}" />
-    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
-      <TextBlock Classes="label"
-                 VerticalAlignment="Center"
-                 Text="{Binding [resources.settings.refresh], Source={x:Static loc:Loc.Instance}}" />
-      <NumericUpDown Grid.Column="1"
-                     MinWidth="120"
-                     HorizontalAlignment="Left"
-                     Minimum="{Binding MinRefreshMilliseconds}"
-                     Maximum="{Binding MaxRefreshMilliseconds}"
-                     Increment="1"
-                     FormatString="0"
-                     Value="{Binding RefreshMilliseconds, Mode=TwoWay}"
-                     AutomationProperties.AutomationId="inspector-refresh"
-                     AutomationProperties.Name="{Binding [resources.settings.refresh], Source={x:Static loc:Loc.Instance}}" />
-    </Grid>
-    <TextBlock Classes="caption"
-               TextWrapping="Wrap"
-               Text="{Binding [resources.settings.refreshHint], Source={x:Static loc:Loc.Instance}}" />
   </StackPanel>
 </UserControl>

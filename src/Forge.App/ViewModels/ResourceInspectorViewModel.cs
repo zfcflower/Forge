@@ -1,202 +1,285 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using Avalonia.Threading;
+using Forge.App.Agents;
+using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Logging;
-using Forge.App.Preferences;
+using Forge.Mcp;
 using ZLogger;
 
 namespace Forge.App.ViewModels;
 
+/// <summary>Whether the prompt snapshot can be reloaded right now, and if not, why not.</summary>
+internal enum PromptReloadState
+{
+    /// <summary>The session has no host to reload (read-only view, closed).</summary>
+    Unavailable,
+
+    /// <summary>Nothing holds the host: the reload works.</summary>
+    Ready,
+
+    /// <summary>A turn is running; the reload is refused until it ends.</summary>
+    TurnRunning,
+
+    /// <summary>A child started outside a turn is running; the reload is refused until it ends.</summary>
+    AutomationRunning,
+}
+
 /// <summary>
-/// One open session as the resource inspector reads it (implemented by <see cref="SessionWorkspaceViewModel"/>). The panel
-/// only reads rows through it and listens for "the set changed"; it never writes into a session, and it forgets a session
-/// (and its listener) on the first refresh after the shell stopped listing it.
+/// The one session the resource window shows (implemented by <see cref="SessionWorkspaceViewModel"/>). The window only reads
+/// through it and listens for "something changed"; it never writes into the session.
 /// </summary>
 internal interface IResourceInspectorSource
 {
-    /// <summary>The session's title, shown on its group header.</summary>
-    string Title { get; }
+    /// <summary>UI thread: appends every live (queued or running) child an automation started, in the order they started.</summary>
+    void CollectAutomationAgents(List<SubAgentViewModel> into);
 
-    /// <summary>
-    /// UI thread: appends this session's live rows - a <see cref="SubAgentViewModel"/> per live child, a
-    /// <see cref="LiveToolViewModel"/> per running call of the root or any child - in any order. Nothing for a closed session.
-    /// </summary>
-    void CollectRunning(List<object> into);
+    /// <summary>UI thread: what the session's tools and prompt snapshot cost in context. Empty before the first turn.</summary>
+    ResourceUsage DescribeUsage();
 
-    /// <summary>UI thread: the rows <see cref="CollectRunning"/> would add changed, or the session is closing.</summary>
+    /// <summary>True while the prompt files changed on disk since the snapshot the host holds was taken.</summary>
+    bool PromptsStale { get; }
+
+    /// <summary>Whether the snapshot can be reloaded now.</summary>
+    PromptReloadState PromptReload { get; }
+
+    /// <summary>Opens the child's tab (the window's automation rows are links to it).</summary>
+    void OpenAgent(SubAgentViewModel agent);
+
+    /// <summary>UI thread: the automation set, the prompt snapshot or the reload state changed, or the session is closing.</summary>
     event EventHandler? RunningResourcesChanged;
 }
 
-/// <summary>
-/// The header row of one session's group in the inspector: its title, how many rows it lists and whether it is the session
-/// the window shows. Owned by the panel (one per open session that has something running), never by the session.
-/// </summary>
-internal sealed class ResourceInspectorGroupViewModel : NotifyingObject
+/// <summary>One line of a usage table: a name with its tool count and its size in context.</summary>
+internal sealed class ResourceUsageLineViewModel(string name, int tools, UsageSize size, bool isTotal = false)
 {
-    private string title;
-    private int count;
-    private bool isActive;
+    public string Name { get; } = name;
 
-    internal ResourceInspectorGroupViewModel(IResourceInspectorSource source)
+    public int Tools { get; } = tools;
+
+    public string ToolsText => TextFormat.Number(Tools);
+
+    public string CharsText => TextFormat.Number(size.Chars);
+
+    public string TokensText => "≈ " + TextFormat.Number(size.Tokens);
+
+    public bool IsTotal { get; } = isTotal;
+}
+
+/// <summary>One MCP server in the window's table: its run state, what its tools cost and the buttons that act on it.</summary>
+internal sealed class ResourceMcpRowViewModel : NotifyingObject
+{
+    private readonly McpServices mcp;
+    private McpServerState state;
+    private int tools;
+    private UsageSize size;
+
+    public ResourceMcpRowViewModel(McpServices mcp, McpServerState state, Action<Exception, string> onError)
     {
-        Source = source;
-        title = source.Title;
+        this.mcp = mcp;
+        this.state = state;
+        Name = state.Name;
+        RestartCommand = new AsyncRelayCommand(
+            ct => mcp.Manager.RestartAsync(Name, ct),
+            () => state.Enabled,
+            exception => onError(exception, Name));
+        StopCommand = new AsyncRelayCommand(
+            ct => mcp.Manager.StopAsync(Name, ct),
+            () => state.Enabled,
+            exception => onError(exception, Name));
+        StartCommand = new AsyncRelayCommand(
+            async ct => await mcp.Manager.StartAsync(Name, ct).ConfigureAwait(true),
+            () => state.Enabled,
+            exception => onError(exception, Name));
+        SignInCommand = new AsyncRelayCommand(
+            ct => mcp.SignInAsync(Name, ct),
+            null,
+            exception => onError(exception, Name));
     }
 
-    internal IResourceInspectorSource Source { get; }
+    public string Name { get; }
 
-    /// <summary>The refresh pass that last saw this session listed by the shell; an older value means it closed.</summary>
-    internal int Generation { get; set; }
+    public AsyncRelayCommand RestartCommand { get; }
 
-    public string Title => title;
+    public AsyncRelayCommand StopCommand { get; }
 
-    public int Count => count;
+    public AsyncRelayCommand StartCommand { get; }
 
-    /// <summary>"2 项进行中" for this session's rows.</summary>
-    public string CountText => ResourceInspectorStrings.Count(count);
+    public AsyncRelayCommand SignInCommand { get; }
 
-    /// <summary>True for the session the window shows; its group is listed first and tagged.</summary>
-    public bool IsActive => isActive;
+    public McpServerStatus Status => state.Status;
 
-    public string ActiveText => ResourceInspectorStrings.ActiveSession;
+    public bool IsReady => state.Status == McpServerStatus.Ready;
 
-    /// <summary>UI thread: re-reads the title and applies the pass's count and active flag, raising only what moved.</summary>
-    internal void Update(int rows, bool active)
+    public bool IsFailed => state.Status == McpServerStatus.Failed;
+
+    public bool IsStarting => state.Status == McpServerStatus.Starting;
+
+    public string StatusText => state.Enabled ? McpSettingsStrings.StatusOf(state) : ResourceInspectorStrings.McpDisabled;
+
+    /// <summary>The failure message as the tooltip of the status; null while the server is not failed.</summary>
+    public string? ErrorText => state.Status == McpServerStatus.Failed ? state.LastError : null;
+
+    public string ToolsText => TextFormat.Number(tools);
+
+    public string CharsText => TextFormat.Number(size.Chars);
+
+    public string TokensText => "≈ " + TextFormat.Number(size.Tokens);
+
+    /// <summary>Running or starting: the stop and reconnect buttons apply.</summary>
+    public bool CanStopOrRestart => state.Enabled && state.Status is McpServerStatus.Ready or McpServerStatus.Starting or McpServerStatus.Failed;
+
+    /// <summary>Enabled but not running: the start button applies.</summary>
+    public bool CanStart => state.Enabled && state.Status == McpServerStatus.Stopped;
+
+    public bool CanSignIn => state.NeedsSignIn && mcp.CanSignIn;
+
+    public bool IsDisabled => !state.Enabled;
+
+    public string RestartText => ResourceInspectorStrings.McpRestart;
+
+    public string StopText => ResourceInspectorStrings.McpStop;
+
+    public string StartText => ResourceInspectorStrings.McpStart;
+
+    public string SignInText => ResourceInspectorStrings.McpSignIn;
+
+    /// <summary>Applies the manager's current state and this server's usage; raises only what moved.</summary>
+    internal void Update(McpServerState current, int toolCount, UsageSize usage)
     {
-        var currentTitle = Source.Title;
-        if (!string.Equals(currentTitle, title, StringComparison.Ordinal))
+        var stateChanged = !Equals(state, current);
+        state = current;
+        if (stateChanged)
         {
-            title = currentTitle;
-            OnPropertyChanged(nameof(Title));
+            OnPropertyChanged(string.Empty);
+            RestartCommand.NotifyCanExecuteChanged();
+            StopCommand.NotifyCanExecuteChanged();
+            StartCommand.NotifyCanExecuteChanged();
         }
 
-        if (rows != count)
+        if (toolCount != tools || usage != size)
         {
-            count = rows;
-            OnPropertyChanged(nameof(Count));
-            OnPropertyChanged(nameof(CountText));
-        }
-
-        if (active != isActive)
-        {
-            isActive = active;
-            OnPropertyChanged(nameof(IsActive));
+            tools = toolCount;
+            size = usage;
+            OnPropertyChanged(nameof(ToolsText));
+            OnPropertyChanged(nameof(CharsText));
+            OnPropertyChanged(nameof(TokensText));
         }
     }
 
-    internal void RefreshText()
-    {
-        OnPropertyChanged(nameof(CountText));
-        OnPropertyChanged(nameof(ActiveText));
-    }
+    internal void RefreshText() => OnPropertyChanged(string.Empty);
 }
 
 /// <summary>
-/// The resource inspector (wave W8, 缺口 #13): everything the open sessions are running right now - their streaming tool
-/// calls and their sub-agents - in one list grouped by session (the active session first), with the elapsed time, the tail
-/// of the output and a stop button per row.
-/// <para>It is a <em>pull</em>: <see cref="Refresh"/> asks every open session for what runs and reconciles the rows. It runs
-/// on the panel's own timer (<c>AppPreferences.InspectorRefreshMilliseconds</c>) only while the overlay is open, and when a
-/// session reports that its set changed (<see cref="IResourceInspectorSource.RunningResourcesChanged"/>) - those requests are
-/// coalesced into one background-priority refresh, however many arrive in a burst. Progress itself is never dispatched: the
-/// session publishes each snapshot into its entry and this panel reads it on the next pull.</para>
-/// <para>Rows are never rebuilt: a row appears when something starts and goes away when it stops (or its session closes),
-/// so a binding, the scroll position and a collapsed row all survive every pull. The pull reuses its buffers, so a steady
-/// state allocates nothing beyond what the sessions' own enumerators need. Stops go through the row's own command, which
-/// belongs to the row's session: a sub-agent stops through <c>SubAgentControl</c>, a tool call through Core's single-call
-/// cancel (the turn goes on).</para>
+/// The resource window: for the one session whose composer button opened it, the automation agents that are running, the MCP
+/// servers (with their reconnect and stop), what the tool definitions cost and what the prompt snapshot costs.
+/// <para>It is event-driven, not polled: <see cref="Refresh"/> runs when the session says its automation set or prompt
+/// snapshot changed, when the MCP manager reports a state or tool change (posted to the UI thread, coalesced into one
+/// background-priority pass however many arrive in a burst) and when the language changes. Rows are reconciled in place, so a
+/// binding and the scroll position survive every pass. The window holds listeners only while it is open (see
+/// <see cref="Dispose"/>).</para>
 /// </summary>
 internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
 {
-    /// <summary>The default driver: a dispatcher timer at the UI's background priority. A static field, so the fallback costs no closure.</summary>
-    private static readonly Func<TimeSpan, Action, IDisposable> DefaultSchedule =
-        static (interval, tick) => new DispatcherTicker(interval, tick);
-
-    /// <summary>The default coalesced refresh: one background-priority post, below input and render.</summary>
     private static readonly Action<Action> DefaultPost =
         static action => Dispatcher.UIThread.Post(action, DispatcherPriority.Background);
 
-    private static readonly Comparison<object> RowOrder = CompareRows;
-
-    /// <summary>Fills the list with every open session, in the shell's order; asked once per pull.</summary>
-    private readonly Action<List<IResourceInspectorSource>> collectSessions;
-
-    /// <summary>The session the window shows (its group goes first); null when none.</summary>
-    private readonly Func<IResourceInspectorSource?> activeSession;
-    private readonly AppPreferences preferences;
+    private readonly IResourceInspectorSource source;
+    private readonly McpServices? mcp;
     private readonly Action? close;
-    private readonly Func<TimeSpan, Action, IDisposable> schedule;
+    private readonly Action? reloadPrompts;
     private readonly Action<Action> post;
-    private readonly ObservableCollection<object> items = [];
-
-    /// <summary>One header per open session, keyed by the session itself; each entry also owns the panel's listener on it.</summary>
-    private readonly Dictionary<IResourceInspectorSource, ResourceInspectorGroupViewModel> groups =
-        new(ReferenceEqualityComparer.Instance);
-
-    // Buffers reused by every pull, so a refresh at a steady state allocates nothing of its own.
-    private readonly List<IResourceInspectorSource> sources = [];
-    private readonly List<object> desired = [];
-    private readonly List<object> scratch = [];
-    private readonly List<IResourceInspectorSource> stale = [];
-    private readonly HashSet<object> desiredSet = new(ReferenceEqualityComparer.Instance);
-
+    private readonly List<SubAgentViewModel> agentBuffer = [];
+    private readonly ObservableCollection<SubAgentViewModel> agents = [];
+    private readonly ObservableCollection<ResourceMcpRowViewModel> mcpRows = [];
+    private readonly ObservableCollection<ResourceUsageLineViewModel> toolRows = [];
+    private readonly ObservableCollection<ResourceUsageLineViewModel> promptRows = [];
+    private readonly Dictionary<string, ResourceMcpRowViewModel> mcpByName = new(StringComparer.Ordinal);
     private readonly EventHandler onSourceChanged;
+    private readonly Action<McpServerState> onMcpState;
+    private readonly Action onMcpTools;
     private readonly Action runQueuedRefresh;
-
-    /// <summary>The thread the panel was built on (the UI thread); a language notification from another one is not ours.</summary>
     private readonly int uiThread = Environment.CurrentManagedThreadId;
 
-    private IDisposable? ticker;
-    private int generation;
-    private int total;
-    private bool hasSession;
+    private bool promptsStale;
+    private PromptReloadState reloadState;
     private int refreshQueued;
     private bool disposed;
 
-    /// <param name="collectSessions">Appends every open session, in the shell's order; asked once per pull.</param>
-    /// <param name="activeSession">The session the window shows; its group is listed first and tagged.</param>
-    /// <param name="preferences">The live preferences: the line limit is read on every pull, the refresh interval at every reschedule.</param>
+    /// <param name="source">The session the window shows.</param>
+    /// <param name="mcp">The app-wide MCP services; null when the app runs without any.</param>
     /// <param name="close">Closes the overlay (its close button, Escape or a click on the scrim).</param>
-    /// <param name="schedule">
-    /// How the periodic pull is driven. Defaults to a dispatcher timer at the UI's background priority; it can be supplied
-    /// and calls <see cref="Refresh"/> directly, so the panel is testable without a message loop.
-    /// </param>
+    /// <param name="reloadPrompts">Reloads the session's prompt snapshot (and tells the user how it went).</param>
     /// <param name="post">How a coalesced refresh is queued; defaults to one background-priority dispatcher post.</param>
     public ResourceInspectorViewModel(
-        Action<List<IResourceInspectorSource>> collectSessions,
-        Func<IResourceInspectorSource?> activeSession,
-        AppPreferences preferences,
+        IResourceInspectorSource source,
+        McpServices? mcp,
         Action? close = null,
-        Func<TimeSpan, Action, IDisposable>? schedule = null,
+        Action? reloadPrompts = null,
         Action<Action>? post = null)
     {
-        ArgumentNullException.ThrowIfNull(collectSessions);
-        ArgumentNullException.ThrowIfNull(activeSession);
-        ArgumentNullException.ThrowIfNull(preferences);
-        this.collectSessions = collectSessions;
-        this.activeSession = activeSession;
-        this.preferences = preferences;
+        ArgumentNullException.ThrowIfNull(source);
+        this.source = source;
+        this.mcp = mcp;
         this.close = close;
-        this.schedule = schedule ?? DefaultSchedule;
+        this.reloadPrompts = reloadPrompts;
         this.post = post ?? DefaultPost;
-        onSourceChanged = OnSourceChanged;
+        onSourceChanged = (_, _) => RequestRefresh();
+        onMcpState = _ => RequestRefresh();
+        onMcpTools = RequestRefresh;
         runQueuedRefresh = RunQueuedRefresh;
 
-        Items = new ReadOnlyObservableCollection<object>(items);
+        Agents = new ReadOnlyObservableCollection<SubAgentViewModel>(agents);
+        McpServers = new ReadOnlyObservableCollection<ResourceMcpRowViewModel>(mcpRows);
+        Tools = new ReadOnlyObservableCollection<ResourceUsageLineViewModel>(toolRows);
+        Prompts = new ReadOnlyObservableCollection<ResourceUsageLineViewModel>(promptRows);
         CloseCommand = new RelayCommand(() => this.close?.Invoke(), () => !disposed);
+        ReloadCommand = new RelayCommand(Reload, () => !disposed && reloadState == PromptReloadState.Ready);
+
+        source.RunningResourcesChanged += onSourceChanged;
+        if (mcp is not null)
+        {
+            mcp.Manager.StateChanged += onMcpState;
+            mcp.Manager.ToolsChanged += onMcpTools;
+        }
+
         Loc.Instance.LanguageChanged += OnLanguageChanged;
-        preferences.PropertyChanged += OnPreferencesChanged;
     }
 
-    /// <summary>
-    /// The rows, flat (the list stays virtualized): per session with something running, a
-    /// <see cref="ResourceInspectorGroupViewModel"/> header followed by its <see cref="SubAgentViewModel"/> and
-    /// <see cref="LiveToolViewModel"/> rows in the order they started. The active session's group comes first.
-    /// </summary>
-    public ReadOnlyObservableCollection<object> Items { get; }
+    public ReadOnlyObservableCollection<SubAgentViewModel> Agents { get; }
+
+    public ReadOnlyObservableCollection<ResourceMcpRowViewModel> McpServers { get; }
+
+    public ReadOnlyObservableCollection<ResourceUsageLineViewModel> Tools { get; }
+
+    public ReadOnlyObservableCollection<ResourceUsageLineViewModel> Prompts { get; }
 
     public RelayCommand CloseCommand { get; }
+
+    public RelayCommand ReloadCommand { get; }
+
+    public bool HasAgents => agents.Count > 0;
+
+    public bool HasMcp => mcpRows.Count > 0;
+
+    public bool HasTools => toolRows.Count > 0;
+
+    public bool HasPrompts => promptRows.Count > 0;
+
+    public bool HasUsage => HasTools || HasPrompts;
+
+    public bool PromptsAreStale => promptsStale;
+
+    /// <summary>Why the reload button is disabled; null when it works (or when there is nothing to reload).</summary>
+    public string? ReloadBlockedReason => reloadState switch
+    {
+        PromptReloadState.TurnRunning => ResourceInspectorStrings.PromptsTurnRunning,
+        PromptReloadState.AutomationRunning => ResourceInspectorStrings.PromptsAgentRunning,
+        _ => null,
+    };
+
+    /// <summary>The reload button's tooltip: the reason it is disabled, otherwise what it does.</summary>
+    public string ReloadTooltip => ReloadBlockedReason ?? ResourceInspectorStrings.PromptsReloadTooltip;
 
     public string Title => ResourceInspectorStrings.Title;
 
@@ -204,37 +287,50 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
 
     public string CloseTooltip => ResourceInspectorStrings.CloseTooltip;
 
-    public string Empty => ResourceInspectorStrings.Empty;
+    public string AgentsTitle => ResourceInspectorStrings.AgentsTitle;
 
-    public string EmptyHint => ResourceInspectorStrings.EmptyHint;
+    public string AgentsEmpty => ResourceInspectorStrings.AgentsEmpty;
 
-    public string NoSession => ResourceInspectorStrings.NoSession;
+    public string AgentsOpenTooltip => ResourceInspectorStrings.AgentsOpenTooltip;
 
-    /// <summary>False only while the window has no session open at all.</summary>
-    public bool HasSession => hasSession;
+    public string McpTitle => ResourceInspectorStrings.McpTitle;
 
-    /// <summary>Rows listed across every session, headers not counted.</summary>
-    public int RunningCount => total;
+    public string McpNote => ResourceInspectorStrings.McpNote;
 
-    public bool HasRunning => total > 0;
+    public string McpEmpty => ResourceInspectorStrings.McpEmpty;
 
-    /// <summary>"3 项进行中": the count beside the title, hidden while nothing runs.</summary>
-    public string CountText => ResourceInspectorStrings.Count(total);
+    public string McpServerHeader => ResourceInspectorStrings.McpServer;
 
-    /// <summary>Open, a session exists and nothing runs anywhere: the one line that says everything is idle.</summary>
-    public bool IsEmpty => hasSession && total == 0;
+    public string McpStatusHeader => ResourceInspectorStrings.McpStatus;
 
-    /// <summary>Starts the periodic pull and reads the rows once, so the panel is drawn populated on its first frame.</summary>
-    public void Start()
-    {
-        if (disposed)
-        {
-            return;
-        }
+    public string ToolsTitle => ResourceInspectorStrings.ToolsTitle;
 
-        Schedule();
-        Refresh();
-    }
+    public string ToolsNote => ResourceInspectorStrings.ToolsNote;
+
+    public string ToolsCategoryHeader => ResourceInspectorStrings.ToolsCategory;
+
+    public string ToolsEmpty => ResourceInspectorStrings.ToolsEmpty;
+
+    public string PromptsTitle => ResourceInspectorStrings.PromptsTitle;
+
+    public string PromptsSourceHeader => ResourceInspectorStrings.PromptsSource;
+
+    public string PromptsEmpty => ResourceInspectorStrings.PromptsEmpty;
+
+    public string PromptsStaleText => ResourceInspectorStrings.PromptsStale;
+
+    public string PromptsReloadText => ResourceInspectorStrings.PromptsReload;
+
+    public string ColumnTools => ResourceInspectorStrings.ColumnTools;
+
+    public string ColumnChars => ResourceInspectorStrings.ColumnChars;
+
+    public string ColumnTokens => ResourceInspectorStrings.ColumnTokens;
+
+    public string EstimateNote => ResourceInspectorStrings.EstimateNote;
+
+    /// <summary>Reads the session and the MCP manager once, so the window is drawn populated on its first frame.</summary>
+    public void Start() => Refresh();
 
     /// <summary>
     /// Queues one refresh; further requests before it runs are absorbed. Safe from any thread (the refresh itself runs where
@@ -250,11 +346,7 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         post(runQueuedRefresh);
     }
 
-    /// <summary>
-    /// Reads every open session's live work and reconciles the rows: a finished call or a closed session's rows go, a started
-    /// one is inserted at its start-time position inside its session's group. Also re-cuts every running call's tail at the
-    /// current line limit. UI thread only.
-    /// </summary>
+    /// <summary>Re-reads everything and reconciles the rows in place. UI thread only.</summary>
     internal void Refresh()
     {
         if (disposed)
@@ -262,81 +354,28 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        var pass = ++generation;
-        sources.Clear();
-        collectSessions(sources);
-        var active = activeSession();
-        var maxLines = preferences.InspectorLogTailLines;
+        RefreshAgents();
+        var usage = source.DescribeUsage();
+        RefreshMcp(usage);
+        RefreshTools(usage);
+        RefreshPrompts(usage);
 
-        // Listen to every open session (an idle one included: its first call must refresh the panel), forget closed ones.
-        foreach (var source in sources)
+        var stale = source.PromptsStale;
+        var reload = source.PromptReload;
+        var staleMoved = stale != promptsStale;
+        var reloadMoved = reload != reloadState;
+        promptsStale = stale;
+        reloadState = reload;
+        if (staleMoved)
         {
-            if (!groups.TryGetValue(source, out var group))
-            {
-                group = new ResourceInspectorGroupViewModel(source);
-                groups[source] = group;
-                source.RunningResourcesChanged += onSourceChanged;
-            }
-
-            group.Generation = pass;
+            OnPropertyChanged(nameof(PromptsAreStale));
         }
 
-        stale.Clear();
-        foreach (var pair in groups)
+        if (reloadMoved)
         {
-            if (pair.Value.Generation != pass)
-            {
-                stale.Add(pair.Key);
-            }
-        }
-
-        foreach (var source in stale)
-        {
-            source.RunningResourcesChanged -= onSourceChanged;
-            groups.Remove(source);
-        }
-
-        stale.Clear();
-
-        // The rows wanted now: the active session's group first, then the others in the shell's order.
-        desired.Clear();
-        var rows = 0;
-        if (active is not null && groups.TryGetValue(active, out var activeGroup))
-        {
-            rows += AppendGroup(activeGroup, isActive: true, maxLines);
-        }
-
-        foreach (var source in sources)
-        {
-            if (!ReferenceEquals(source, active))
-            {
-                rows += AppendGroup(groups[source], isActive: false, maxLines);
-            }
-        }
-
-        sources.Clear();
-        Reconcile();
-        desired.Clear();
-
-        var wasTotal = total;
-        var hadSession = hasSession;
-        total = rows;
-        hasSession = groups.Count > 0;
-        if (wasTotal != total)
-        {
-            OnPropertyChanged(nameof(RunningCount));
-            OnPropertyChanged(nameof(HasRunning));
-            OnPropertyChanged(nameof(CountText));
-        }
-
-        if (wasTotal != total || hadSession != hasSession)
-        {
-            OnPropertyChanged(nameof(IsEmpty));
-        }
-
-        if (hadSession != hasSession)
-        {
-            OnPropertyChanged(nameof(HasSession));
+            OnPropertyChanged(nameof(ReloadBlockedReason));
+            OnPropertyChanged(nameof(ReloadTooltip));
+            ReloadCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -348,164 +387,234 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         }
 
         disposed = true;
+        source.RunningResourcesChanged -= onSourceChanged;
+        if (mcp is not null)
+        {
+            mcp.Manager.StateChanged -= onMcpState;
+            mcp.Manager.ToolsChanged -= onMcpTools;
+        }
+
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
-        preferences.PropertyChanged -= OnPreferencesChanged;
-        ticker?.Dispose();
-        ticker = null;
-        foreach (var source in groups.Keys)
-        {
-            source.RunningResourcesChanged -= onSourceChanged;
-        }
-
-        groups.Clear();
-        items.Clear();
+        agents.Clear();
+        mcpRows.Clear();
+        mcpByName.Clear();
         CloseCommand.NotifyCanExecuteChanged();
+        ReloadCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>Adds one session's header and rows to <see cref="desired"/> when it runs anything; returns its row count.</summary>
-    private int AppendGroup(ResourceInspectorGroupViewModel group, bool isActive, int maxLines)
+    private void RefreshAgents()
     {
-        scratch.Clear();
-        group.Source.CollectRunning(scratch);
-        group.Update(scratch.Count, isActive);
-        if (scratch.Count == 0)
+        agentBuffer.Clear();
+        source.CollectAutomationAgents(agentBuffer);
+        var before = agents.Count;
+        Reconcile(agents, agentBuffer);
+        agentBuffer.Clear();
+        if ((before == 0) != (agents.Count == 0))
         {
-            return 0;
-        }
-
-        scratch.Sort(RowOrder);
-        desired.Add(group);
-        foreach (var row in scratch)
-        {
-            desired.Add(row);
-            if (row is LiveToolViewModel tool)
-            {
-                // Tail only: the elapsed readings are the session clock's (see LiveToolViewModel.Tick), so this panel's own
-                // interval never changes what a duration reads.
-                tool.RefreshTail(maxLines);
-            }
-        }
-
-        var count = scratch.Count;
-        scratch.Clear();
-        return count;
-    }
-
-    /// <summary>
-    /// Brings <see cref="items"/> to <see cref="desired"/> with the fewest collection changes: rows that left are removed,
-    /// rows that stayed keep their instance (and their container), new ones are inserted, a reordered group is moved.
-    /// </summary>
-    private void Reconcile()
-    {
-        desiredSet.Clear();
-        foreach (var row in desired)
-        {
-            desiredSet.Add(row);
-        }
-
-        for (var index = items.Count - 1; index >= 0; index--)
-        {
-            if (!desiredSet.Contains(items[index]))
-            {
-                items.RemoveAt(index);
-            }
-        }
-
-        desiredSet.Clear();
-        for (var index = 0; index < desired.Count; index++)
-        {
-            var row = desired[index];
-            if (index < items.Count && ReferenceEquals(items[index], row))
-            {
-                continue;
-            }
-
-            var at = IndexOf(row, index + 1);
-            if (at >= 0)
-            {
-                items.Move(at, index);
-            }
-            else
-            {
-                items.Insert(index, row);
-            }
+            OnPropertyChanged(nameof(HasAgents));
         }
     }
 
-    private int IndexOf(object row, int from)
+    private void RefreshMcp(ResourceUsage usage)
     {
-        for (var index = from; index < items.Count; index++)
+        var before = mcpRows.Count;
+        if (mcp is null)
         {
-            if (ReferenceEquals(items[index], row))
+            if (before > 0)
             {
-                return index;
+                mcpRows.Clear();
+                mcpByName.Clear();
+                OnPropertyChanged(nameof(HasMcp));
+            }
+
+            return;
+        }
+
+        var states = mcp.States;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < states.Count; index++)
+        {
+            var state = states[index];
+            seen.Add(state.Name);
+            var tools = 0;
+            var size = default(UsageSize);
+            for (var u = 0; u < usage.McpServers.Count; u++)
+            {
+                if (string.Equals(usage.McpServers[u].Server, state.Name, StringComparison.Ordinal))
+                {
+                    tools = usage.McpServers[u].Tools;
+                    size = usage.McpServers[u].Size;
+                    break;
+                }
+            }
+
+            if (!mcpByName.TryGetValue(state.Name, out var row))
+            {
+                row = new ResourceMcpRowViewModel(mcp, state, OnMcpError);
+                mcpByName[state.Name] = row;
+                mcpRows.Add(row);
+            }
+
+            row.Update(state, tools, size);
+        }
+
+        for (var index = mcpRows.Count - 1; index >= 0; index--)
+        {
+            if (!seen.Contains(mcpRows[index].Name))
+            {
+                mcpByName.Remove(mcpRows[index].Name);
+                mcpRows.RemoveAt(index);
             }
         }
 
-        return -1;
+        if ((before == 0) != (mcpRows.Count == 0))
+        {
+            OnPropertyChanged(nameof(HasMcp));
+        }
     }
 
-    /// <summary>
-    /// Start time first (a queued child reads <see cref="DateTimeOffset.MinValue"/>, so it sorts first), then children before
-    /// calls, then the ids - a total order, so equal start times never swap places between two pulls.
-    /// </summary>
-    private static int CompareRows(object left, object right)
+    private void RefreshTools(ResourceUsage usage)
     {
-        var byStart = StartOf(left).CompareTo(StartOf(right));
-        if (byStart != 0)
+        var lines = new List<ResourceUsageLineViewModel>(usage.Tools.Count + 1);
+        var total = default(UsageSize);
+        var count = 0;
+        foreach (var row in usage.Tools)
         {
-            return byStart;
+            lines.Add(new ResourceUsageLineViewModel(InstrumentsStrings.ToolsGroup(row.Group), row.Tools, row.Size));
+            total += row.Size;
+            count += row.Tools;
         }
 
-        var byKind = KindOf(left).CompareTo(KindOf(right));
-        if (byKind != 0)
+        if (lines.Count > 0)
         {
-            return byKind;
+            lines.Add(new ResourceUsageLineViewModel(ResourceInspectorStrings.Total, count, total, isTotal: true));
         }
 
-        return (left, right) switch
-        {
-            (SubAgentViewModel a, SubAgentViewModel b) => string.CompareOrdinal(a.AgentId, b.AgentId),
-            (LiveToolViewModel a, LiveToolViewModel b) => string.CompareOrdinal(a.AgentId, b.AgentId) is var byAgent and not 0
-                ? byAgent
-                : string.CompareOrdinal(a.CallId, b.CallId),
-            _ => 0,
-        };
+        ReplaceIfChanged(toolRows, lines, nameof(HasTools), nameof(HasUsage));
     }
 
-    private static int KindOf(object row) => row is SubAgentViewModel ? 0 : 1;
-
-    private static DateTimeOffset StartOf(object row) => row switch
+    private void RefreshPrompts(ResourceUsage usage)
     {
-        LiveToolViewModel tool => tool.StartedAt,
-        SubAgentViewModel agent => agent.StartedAt,
-        _ => DateTimeOffset.MaxValue,
-    };
+        var lines = new List<ResourceUsageLineViewModel>(usage.Prompts.Count + 1);
+        var total = default(UsageSize);
+        foreach (var row in usage.Prompts)
+        {
+            lines.Add(new ResourceUsageLineViewModel(ResourceInspectorStrings.PromptSource(row.Kind), 0, row.Size));
+            total += row.Size;
+        }
 
-    private void Schedule()
+        if (lines.Count > 0)
+        {
+            lines.Add(new ResourceUsageLineViewModel(ResourceInspectorStrings.Total, 0, total, isTotal: true));
+        }
+
+        ReplaceIfChanged(promptRows, lines, nameof(HasPrompts), nameof(HasUsage));
+    }
+
+    /// <summary>Swaps in the new lines only when text or numbers differ, so an idle pass changes nothing the view sees.</summary>
+    private void ReplaceIfChanged(
+        ObservableCollection<ResourceUsageLineViewModel> target,
+        List<ResourceUsageLineViewModel> lines,
+        string hasProperty,
+        string hasUsageProperty)
     {
-        ticker?.Dispose();
-        ticker = null;
-        if (disposed)
+        var same = target.Count == lines.Count;
+        for (var index = 0; same && index < lines.Count; index++)
+        {
+            same = target[index].Name == lines[index].Name
+                && target[index].ToolsText == lines[index].ToolsText
+                && target[index].CharsText == lines[index].CharsText
+                && target[index].TokensText == lines[index].TokensText;
+        }
+
+        if (same)
         {
             return;
         }
 
-        // The setter clamps, so the interval is always within the documented range even if the file was edited by hand.
-        var interval = TimeSpan.FromMilliseconds(preferences.InspectorRefreshMilliseconds);
-        ticker = schedule(interval, OnTick);
+        var hadAny = target.Count > 0;
+        target.Clear();
+        foreach (var line in lines)
+        {
+            target.Add(line);
+        }
+
+        if (hadAny != (target.Count > 0))
+        {
+            OnPropertyChanged(hasProperty);
+            OnPropertyChanged(hasUsageProperty);
+        }
     }
 
-    private void OnSourceChanged(object? sender, EventArgs e) => RequestRefresh();
+    /// <summary>Brings <paramref name="target"/> to <paramref name="desired"/> keeping instances that stayed.</summary>
+    private static void Reconcile<T>(ObservableCollection<T> target, List<T> desired)
+        where T : class
+    {
+        for (var index = target.Count - 1; index >= 0; index--)
+        {
+            if (!desired.Contains(target[index]))
+            {
+                target.RemoveAt(index);
+            }
+        }
+
+        for (var index = 0; index < desired.Count; index++)
+        {
+            if (index < target.Count && ReferenceEquals(target[index], desired[index]))
+            {
+                continue;
+            }
+
+            var at = -1;
+            for (var scan = index + 1; scan < target.Count; scan++)
+            {
+                if (ReferenceEquals(target[scan], desired[index]))
+                {
+                    at = scan;
+                    break;
+                }
+            }
+
+            if (at >= 0)
+            {
+                target.Move(at, index);
+            }
+            else
+            {
+                target.Insert(index, desired[index]);
+            }
+        }
+    }
+
+    private void Reload()
+    {
+        if (disposed || reloadState != PromptReloadState.Ready)
+        {
+            return;
+        }
+
+        reloadPrompts?.Invoke();
+        Refresh();
+    }
+
+    /// <summary>Opens the automation agent a row names in its own tab and closes the window (called by the row's name button).</summary>
+    public void OpenAgent(SubAgentViewModel? agent)
+    {
+        if (agent is null || disposed)
+        {
+            return;
+        }
+
+        source.OpenAgent(agent);
+        close?.Invoke();
+    }
+
+    private static void OnMcpError(Exception exception, string name) =>
+        AppLogs.Instruments.ZLogWarning($"resource window: MCP server '{name}' action failed: {exception.Message}");
 
     private void RunQueuedRefresh()
     {
         Volatile.Write(ref refreshQueued, 0);
-        OnTick();
-    }
-
-    private void OnTick()
-    {
         if (disposed)
         {
             return;
@@ -517,27 +626,8 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            // A timer callback that throws takes the dispatcher's loop with it; a bad row is not worth the window.
-            AppLogs.Instruments.ZLogWarning($"resource inspector refresh failed: {exception.Message}");
-        }
-    }
-
-    /// <summary>A slider or a typed number: a new interval reschedules, a new line limit applies to the next pull now.</summary>
-    private void OnPreferencesChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (disposed)
-        {
-            return;
-        }
-
-        switch (e.PropertyName)
-        {
-            case nameof(AppPreferences.InspectorRefreshMilliseconds):
-                Schedule();
-                break;
-            case nameof(AppPreferences.InspectorLogTailLines):
-                Refresh();
-                break;
+            // A posted callback that throws takes the dispatcher's loop with it; a bad row is not worth the window.
+            AppLogs.Instruments.ZLogWarning($"resource window refresh failed: {exception.Message}");
         }
     }
 
@@ -550,43 +640,20 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        OnPropertyChanged(nameof(Title));
-        OnPropertyChanged(nameof(CloseLabel));
-        OnPropertyChanged(nameof(CloseTooltip));
-        OnPropertyChanged(nameof(Empty));
-        OnPropertyChanged(nameof(EmptyHint));
-        OnPropertyChanged(nameof(NoSession));
-        OnPropertyChanged(nameof(CountText));
-        foreach (var row in items)
+        OnPropertyChanged(string.Empty);
+        foreach (var row in mcpRows)
         {
-            switch (row)
-            {
-                case LiveToolViewModel tool:
-                    tool.RefreshText();
-                    break;
-                case SubAgentViewModel agent:
-                    agent.RefreshText();
-                    break;
-                case ResourceInspectorGroupViewModel group:
-                    group.RefreshText();
-                    break;
-            }
-        }
-    }
-
-    /// <summary>The default driver: a background-priority dispatcher timer, stopped by disposing the handle.</summary>
-    private sealed class DispatcherTicker : IDisposable
-    {
-        private readonly DispatcherTimer timer;
-
-        public DispatcherTicker(TimeSpan interval, Action tick)
-        {
-            ArgumentNullException.ThrowIfNull(tick);
-            timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = interval };
-            timer.Tick += (_, _) => tick();
-            timer.Start();
+            row.RefreshText();
         }
 
-        public void Dispose() => timer.Stop();
+        foreach (var agent in agents)
+        {
+            agent.RefreshText();
+        }
+
+        // Names and totals are localized text baked into the lines, so they are rebuilt rather than re-read.
+        toolRows.Clear();
+        promptRows.Clear();
+        Refresh();
     }
 }

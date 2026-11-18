@@ -6,27 +6,12 @@ using Forge.App.ViewModels;
 namespace Forge.App.Localization;
 
 /// <summary>
-/// Texts of the composer's instrument strip, the project dropdown and the four read-only settings sections that the
-/// counters open. The numbers inside them are formatted by the view models (<see cref="TextFormat"/> only groups plain
+/// Texts of the composer's instrument strip, the project dropdown and the four read-only settings sections (approvals, skills,
+/// MCP, tools). The numbers inside them are formatted by the view models (<see cref="TextFormat"/> only groups plain
 /// counts); the sentence patterns live here, so a language switch re-derives every label.
 /// </summary>
 internal static class InstrumentsStrings
 {
-    public const string ApprovalsLabelKey = "session.strip.approvals";
-    public const string SkillsLabelKey = "session.strip.skills";
-    public const string McpLabelKey = "session.strip.mcp";
-    public const string ToolsLabelKey = "session.strip.tools";
-    public const string CountPairKey = "session.strip.count.pair";
-    public const string CountUnknownKey = "session.strip.count.unknown";
-    public const string MenuEntryKey = "session.strip.menuEntry";
-
-    public const string ApprovalsTooltipKey = "session.strip.approvals.tooltip";
-    public const string ApprovalsUnavailableKey = "session.strip.approvals.unavailable";
-    public const string SkillsTooltipKey = "session.strip.skills.tooltip";
-    public const string McpTooltipKey = "session.strip.mcp.tooltip";
-    public const string ToolsTooltipKey = "session.strip.tools.tooltip";
-    public const string ToolsTooltipUnknownKey = "session.strip.tools.tooltip.unknown";
-
     public const string UsageTokensKey = "session.strip.usage.tokens";
     public const string UsageWindowKey = "session.strip.usage.window";
     public const string UsageCacheReadKey = "session.strip.usage.cacheRead";
@@ -77,7 +62,6 @@ internal static class InstrumentsStrings
     public const string ProjectExplorerKey = "session.strip.project.explorer";
     public const string WorkspaceExplorerKey = "session.strip.workspace.explorer";
     public const string ResourcesKey = "session.strip.resources";
-    public const string ResourcesTooltipKey = "session.strip.resources.tooltip";
 
     public const string ApprovalsSectionTitleKey = "settings.approvals.title";
     public const string SkillsSectionTitleKey = "settings.skills.title";
@@ -109,39 +93,6 @@ internal static class InstrumentsStrings
 
     [ModuleInitializer]
     internal static void Initialize() => Register();
-
-    public static string ApprovalsLabel => Loc.Instance[ApprovalsLabelKey];
-
-    public static string SkillsLabel => Loc.Instance[SkillsLabelKey];
-
-    public static string McpLabel => Loc.Instance[McpLabelKey];
-
-    public static string ToolsLabel => Loc.Instance[ToolsLabelKey];
-
-    public static string CountPair(int used, int total) => Loc.Instance.FormatCounts(CountPairKey, used, total);
-
-    public static string CountUnknown(int used) =>
-        Loc.Instance.Format(CountUnknownKey, TextFormat.Number(used));
-
-    /// <summary>One overflow-menu row: the counter's own label and its pair, so the row reads as the button does.</summary>
-    public static string MenuEntry(string label, string count) => Loc.Instance.Format(MenuEntryKey, label, count);
-
-    public static string ApprovalsTooltip(int pending, int records) =>
-        Loc.Instance.FormatCounts(ApprovalsTooltipKey, pending, records);
-
-    public static string ApprovalsUnavailable => Loc.Instance[ApprovalsUnavailableKey];
-
-    public static string SkillsTooltip(int used, int discovered) =>
-        Loc.Instance.FormatCounts(SkillsTooltipKey, used, discovered);
-
-    public static string McpTooltip(int ready, int configured) =>
-        Loc.Instance.FormatCounts(McpTooltipKey, ready, configured);
-
-    public static string ToolsTooltip(int used, int available) =>
-        Loc.Instance.FormatCounts(ToolsTooltipKey, used, available);
-
-    public static string ToolsTooltipUnknown(int used) =>
-        Loc.Instance.Format(ToolsTooltipUnknownKey, TextFormat.Number(used));
 
     public static string UsageTokens(string input, string output) =>
         Loc.Instance.Format(UsageTokensKey, input, output);
@@ -283,8 +234,6 @@ internal static class InstrumentsStrings
 
     public static string Resources => Loc.Instance[ResourcesKey];
 
-    public static string ResourcesTooltip => Loc.Instance[ResourcesTooltipKey];
-
     /// <summary>The value of a section title key; <c>SettingsSection</c> wants the <c>...Key</c> constant, not this.</summary>
     public static string ApprovalsSectionTitle => Loc.Instance[ApprovalsSectionTitleKey];
 
@@ -341,33 +290,6 @@ internal static class InstrumentsStrings
 
     private static void Register()
     {
-        Loc.Register(ApprovalsLabelKey, "审批", "Approvals");
-        Loc.Register(SkillsLabelKey, "技能", "Skills");
-        Loc.Register(McpLabelKey, "MCP", "MCP");
-        Loc.Register(ToolsLabelKey, "工具", "Tools");
-        Loc.Register(CountPairKey, "{0}/{1}", "{0}/{1}");
-        Loc.Register(CountUnknownKey, "{0}/?", "{0}/?");
-        Loc.Register(MenuEntryKey, "{0}  {1}", "{0}  {1}");
-
-        Loc.Register(
-            ApprovalsTooltipKey,
-            "本会话待审 {0} 条，审批库共 {1} 条记录",
-            "{0} waiting in this session, {1} records in the approvals database");
-        Loc.Register(ApprovalsUnavailableKey, "审批库不可读", "The approvals database cannot be read");
-        Loc.Register(
-            SkillsTooltipKey,
-            "本会话用过 {0} 个技能，工作区与用户目录共发现 {1} 个",
-            "{0} skills used in this session, {1} discovered for this workspace and the user directory");
-        Loc.Register(McpTooltipKey, "{0} 台就绪 / {1} 台已配置", "{0} ready / {1} configured");
-        Loc.Register(
-            ToolsTooltipKey,
-            "本会话调用过 {0} 种工具，可用 {1} 种",
-            "{0} tools called in this session, {1} available");
-        Loc.Register(
-            ToolsTooltipUnknownKey,
-            "本会话调用过 {0} 种工具，可用数要等本会话跑完第一轮才知道",
-            "{0} tools called in this session; the available count appears after the first turn");
-
         Loc.Register(UsageTokensKey, "↑{0} ↓{1}", "↑{0} ↓{1}");
         // The tooltip is a readout, not prose: one capital per number (C context window, R cache read, W cache write,
         // RC cache-read ratio), so it reads the same in both interface languages.
@@ -435,10 +357,6 @@ internal static class InstrumentsStrings
         Loc.Register(ProjectExplorerKey, "在资源管理器中打开项目", "Reveal project in Explorer");
         Loc.Register(WorkspaceExplorerKey, "在资源管理器中打开工作区", "Reveal workspace in Explorer");
         Loc.Register(ResourcesKey, "资源", "Resources");
-        Loc.Register(
-            ResourcesTooltipKey,
-            "会话资源：审批、技能、MCP 与工具的计数，点开可分别查看",
-            "Session resources: approvals, skills, MCP and tools - open to see each");
 
         Loc.Register(ApprovalsSectionTitleKey, "审批", "Approvals");
         Loc.Register(SkillsSectionTitleKey, "技能", "Skills");

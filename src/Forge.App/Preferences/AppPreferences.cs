@@ -158,9 +158,6 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinInspectorLogTailLines = 20;
     public const int MaxInspectorLogTailLines = 1000;
     public const int DefaultInspectorLogTailLines = 200;
-    public const int MinInspectorRefreshMilliseconds = 250;
-    public const int MaxInspectorRefreshMilliseconds = 10000;
-    public const int DefaultInspectorRefreshMilliseconds = 1000;
     public const int MinChatMermaidTimeoutMilliseconds = 500;
     public const int MaxChatMermaidTimeoutMilliseconds = 30000;
     public const int DefaultChatMermaidTimeoutMilliseconds = 2000;
@@ -288,7 +285,6 @@ internal sealed class AppPreferences : ObservableObject
     private int mcpToolSearchLimit = DefaultMcpToolSearchLimit;
     private int mcpStderrTailLines = DefaultMcpStderrTailLines;
     private int inspectorLogTailLines = DefaultInspectorLogTailLines;
-    private int inspectorRefreshMilliseconds = DefaultInspectorRefreshMilliseconds;
     private int chatMermaidTimeoutMilliseconds = DefaultChatMermaidTimeoutMilliseconds;
     private int projectsCloneTimeoutSeconds = DefaultProjectsCloneTimeoutSeconds;
     private bool rateLimitEnabled = DefaultRateLimitEnabled;
@@ -664,13 +660,6 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref inspectorLogTailLines, Math.Clamp(value, MinInspectorLogTailLines, MaxInspectorLogTailLines));
     }
 
-    /// <summary>How often the resource inspector pulls its rows and elapsed times from the open sessions (wave W8). Clamped to [<see cref="MinInspectorRefreshMilliseconds"/>, <see cref="MaxInspectorRefreshMilliseconds"/>].</summary>
-    public int InspectorRefreshMilliseconds
-    {
-        get => inspectorRefreshMilliseconds;
-        set => Set(ref inspectorRefreshMilliseconds, Math.Clamp(value, MinInspectorRefreshMilliseconds, MaxInspectorRefreshMilliseconds));
-    }
-
     /// <summary>Longest one Mermaid diagram may take to render (wave W11). Clamped to [<see cref="MinChatMermaidTimeoutMilliseconds"/>, <see cref="MaxChatMermaidTimeoutMilliseconds"/>].</summary>
     public int ChatMermaidTimeoutMilliseconds
     {
@@ -995,9 +984,6 @@ internal sealed class AppPreferences : ObservableObject
         inspectorLogTailLines = section.InspectorLogTailLines is { } inspectorLogTailLinesLoaded
             ? Math.Clamp(inspectorLogTailLinesLoaded, MinInspectorLogTailLines, MaxInspectorLogTailLines)
             : DefaultInspectorLogTailLines;
-        inspectorRefreshMilliseconds = section.InspectorRefreshMilliseconds is { } inspectorRefreshMillisecondsLoaded
-            ? Math.Clamp(inspectorRefreshMillisecondsLoaded, MinInspectorRefreshMilliseconds, MaxInspectorRefreshMilliseconds)
-            : DefaultInspectorRefreshMilliseconds;
         chatMermaidTimeoutMilliseconds = section.ChatMermaidTimeoutMilliseconds is { } chatMermaidTimeoutMillisecondsLoaded
             ? Math.Clamp(chatMermaidTimeoutMillisecondsLoaded, MinChatMermaidTimeoutMilliseconds, MaxChatMermaidTimeoutMilliseconds)
             : DefaultChatMermaidTimeoutMilliseconds;
@@ -1108,7 +1094,6 @@ internal sealed class AppPreferences : ObservableObject
             McpToolSearchLimit = mcpToolSearchLimit,
             McpStderrTailLines = mcpStderrTailLines,
             InspectorLogTailLines = inspectorLogTailLines,
-            InspectorRefreshMilliseconds = inspectorRefreshMilliseconds,
             ChatMermaidTimeoutMilliseconds = chatMermaidTimeoutMilliseconds,
             ProjectsCloneTimeoutSeconds = projectsCloneTimeoutSeconds,
             RateLimitEnabled = rateLimitEnabled,
@@ -1550,9 +1535,6 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("inspectorLogTailLines")]
     public int? InspectorLogTailLines { get; set; }
-
-    [JsonPropertyName("inspectorRefreshMilliseconds")]
-    public int? InspectorRefreshMilliseconds { get; set; }
 
     [JsonPropertyName("chatMermaidTimeoutMilliseconds")]
     public int? ChatMermaidTimeoutMilliseconds { get; set; }

@@ -128,42 +128,38 @@
                              AutomationProperties.AutomationId="strip-ahead-behind" />
                 </StackPanel>
 
-                <!-- One button for the four counters: the strip stays short, and the four readings live in its menu.
-                     It sits first because it is the busiest thing in the strip; the sub-agent toggle follows it. -->
+                <!-- The resource button: a plain button that opens the resource window. A dot and the number of running
+                     automation agents appear beside it while any runs (green), or a bare red dot when an MCP server failed. -->
                 <Button x:Name="StripResources"
                         Classes="instrument-chip"
+                        Command="{Binding Instruments.OpenInspectorCommand}"
+                        IsEnabled="{Binding Instruments.CanOpenInspector}"
                         ToolTip.Tip="{Binding Instruments.ResourcesTooltip}"
                         AutomationProperties.AutomationId="strip-resources"
                         AutomationProperties.Name="{Binding Instruments.ResourcesLabel}">
                   <StackPanel Orientation="Horizontal" Spacing="5">
                     <wc:FluentIcon Data="{StaticResource IconLayers}" Width="14" Height="14" />
                     <TextBlock Text="{Binding Instruments.ResourcesLabel}" VerticalAlignment="Center" />
-                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="4"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding Instruments.ShowResourceDot}"
+                                AutomationProperties.AutomationId="strip-resources-dot">
+                      <Ellipse Width="7"
+                               Height="7"
+                               VerticalAlignment="Center"
+                               Fill="{DynamicResource StatusSuccessBrush}"
+                               IsVisible="{Binding !Instruments.HasResourceProblem}" />
+                      <Ellipse Width="7"
+                               Height="7"
+                               VerticalAlignment="Center"
+                               Fill="{DynamicResource StatusErrorBrush}"
+                               IsVisible="{Binding Instruments.HasResourceProblem}" />
+                      <TextBlock Text="{Binding Instruments.RunningResources}"
+                                 IsVisible="{Binding Instruments.HasRunningResources}"
+                                 VerticalAlignment="Center" />
+                    </StackPanel>
                   </StackPanel>
-                  <Button.Flyout>
-                    <MenuFlyout Placement="BottomEdgeAlignedLeft">
-                      <MenuItem Header="{Binding Instruments.ApprovalMenuText}"
-                                Command="{Binding Instruments.OpenApprovalsCommand}"
-                                AutomationProperties.AutomationId="strip-resources-approvals" />
-                      <MenuItem Header="{Binding Instruments.SkillMenuText}"
-                                Command="{Binding Instruments.OpenSkillsCommand}"
-                                AutomationProperties.AutomationId="strip-resources-skills" />
-                      <MenuItem Header="{Binding Instruments.McpMenuText}"
-                                Command="{Binding Instruments.OpenMcpCommand}"
-                                AutomationProperties.AutomationId="strip-resources-mcp" />
-                      <MenuItem Header="{Binding Instruments.ToolMenuText}"
-                                Command="{Binding Instruments.OpenToolsCommand}"
-                                AutomationProperties.AutomationId="strip-resources-tools" />
-                      <!-- The resource inspector: the running tool calls and sub-agents of every open session (the count beside it is
-                           this session's). Hidden when no window wired
-                           the overlay (a standalone view), so the row is never a dead entry. -->
-                      <MenuItem Header="{Binding Instruments.OpenInspectorMenuText}"
-                                Command="{Binding Instruments.OpenInspectorCommand}"
-                                IsVisible="{Binding Instruments.CanOpenInspector}"
-                                ToolTip.Tip="{Binding Instruments.OpenInspectorTooltip}"
-                                AutomationProperties.AutomationId="strip-resources-inspector" />
-                    </MenuFlyout>
-                  </Button.Flyout>
                 </Button>
 
                 <!-- The accent marks the open area, not the collapsed one: green on this strip elsewhere means "live", so an
