@@ -34,7 +34,9 @@ public sealed partial class ReviewStore
             updated_at TEXT NOT NULL,
             sent_at TEXT NULL,
             base_commit TEXT NULL,
-            anchor_json TEXT NULL
+            anchor_json TEXT NULL,
+            reply_verdict TEXT NULL,
+            reply_text TEXT NULL
         );
         CREATE INDEX IF NOT EXISTS ix_review_comments_scope ON review_comments (workspace_path, session_id, status);
         CREATE INDEX IF NOT EXISTS ix_review_comments_file ON review_comments (workspace_path, session_id, file_path);
@@ -428,43 +430,6 @@ public sealed partial class ReviewStore
         return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
     }
 
-    /// <summary>
-    /// Adds the two reply columns to a <c>review_comments</c> table created before they existed. The schema script cannot do
-    /// it (<c>CREATE TABLE IF NOT EXISTS</c> leaves an existing table alone), so the columns are looked up and added once;
-    /// a second process racing the same ALTER only loses with "duplicate column", which is the state wanted.
-    /// </summary>
-    private static async Task EnsureCommentReplyColumnsAsync(SqliteConnection connection, CancellationToken ct)
-    {
-        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using (var info = connection.CreateCommand())
-        {
-            info.CommandText = "PRAGMA table_info(review_comments)";
-            await using var reader = await info.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                existing.Add(reader.GetString(1));
-            }
-        }
-
-        foreach (var column in new[] { "reply_verdict", "reply_text" })
-        {
-            if (existing.Contains(column))
-            {
-                continue;
-            }
-
-            try
-            {
-                await using var alter = connection.CreateCommand();
-                alter.CommandText = "ALTER TABLE review_comments ADD COLUMN " + column + " TEXT NULL";
-                await alter.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-            catch (SqliteException exception) when (exception.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
-            {
-            }
-        }
-    }
-
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -504,7 +469,6 @@ public sealed partial class ReviewStore
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             command.CommandText = SchemaSql;
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            await EnsureCommentReplyColumnsAsync(connection, ct).ConfigureAwait(false);
             initialized = true;
         }
         finally

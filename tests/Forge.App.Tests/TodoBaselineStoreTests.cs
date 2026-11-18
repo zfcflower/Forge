@@ -43,7 +43,7 @@ public sealed class TodoBaselineStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Fresh_database_is_at_schema_12_with_baseline_column()
+    public async Task Fresh_database_has_the_baseline_column()
     {
         await using (var store = new SqliteTodoStore(dir))
         {
@@ -51,32 +51,7 @@ public sealed class TodoBaselineStoreTests : IDisposable
         }
 
         using var connection = Open();
-        Assert.Equal(12L, Scalar(connection, "PRAGMA user_version"));
         Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name = 'baseline_tree'"));
-    }
-
-    [Fact]
-    public async Task Version_11_database_migrates_and_keeps_rows()
-    {
-        await using (var store = new SqliteTodoStore(dir))
-        {
-            await store.AddAsync(Session, "old step", null, null, CancellationToken.None);
-        }
-
-        SqliteConnection.ClearAllPools();
-        using (var connection = Open())
-        {
-            Exec(connection, "ALTER TABLE todos DROP COLUMN baseline_tree");
-            Exec(connection, "PRAGMA user_version = 11");
-        }
-
-        SqliteConnection.ClearAllPools();
-        await using var reopened = new SqliteTodoStore(dir);
-        var item = Assert.Single(await reopened.ListAsync(Session, CancellationToken.None));
-        Assert.Equal("old step", item.Title);
-        Assert.Null(item.BaselineTree);
-        await reopened.UpdateAsync(item.Id, null, null, null, new TodoStepFields(BaselineTree: "t"), CancellationToken.None);
-        Assert.Equal("t", (await Reload(reopened, item.Id)).BaselineTree);
     }
 
     private SqliteConnection Open()

@@ -106,36 +106,4 @@ public sealed class ReviewCommentReplyTests : IDisposable
         Assert.Equal("push_back", copy.ReplyVerdict);
         Assert.Equal("keeps the contract", copy.ReplyText);
     }
-
-    [Fact]
-    public async Task A_database_created_before_the_reply_columns_is_upgraded_and_keeps_its_rows()
-    {
-        Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, ReviewStore.DatabaseFileName);
-        await using (var connection = new SqliteConnection("Data Source=" + path))
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                CREATE TABLE review_comments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_path TEXT NOT NULL, session_id TEXT NOT NULL,
-                    file_path TEXT NOT NULL, new_line_start INTEGER NOT NULL, new_line_end INTEGER NOT NULL,
-                    body TEXT NOT NULL, status TEXT NOT NULL, is_resolved INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sent_at TEXT NULL, base_commit TEXT NULL, anchor_json TEXT NULL);
-                INSERT INTO review_comments (workspace_path, session_id, file_path, new_line_start, new_line_end, body, status, created_at, updated_at)
-                VALUES ('D:/work/repo', 's1', 'a.cs', 1, 1, 'old', 'sent', '2026-01-01T00:00:00.0000000+00:00', '2026-01-01T00:00:00.0000000+00:00');
-                """;
-            await command.ExecuteNonQueryAsync();
-        }
-
-        SqliteConnection.ClearAllPools();
-        var reviews = new ReviewStore(dir);
-        var old = (await reviews.QueryAsync(new ReviewQuery { WorkspacePath = Workspace })).Single();
-        Assert.Equal("old", old.Body);
-        Assert.Equal(ReviewCommentStatus.Sent, old.Status);
-        Assert.Null(old.ReplyVerdict);
-
-        Assert.True(await reviews.SetReplyAsync(old.Id, "clarify", "which?", resolve: false));
-        Assert.Equal("which?", (await reviews.GetAsync(old.Id))!.ReplyText);
-    }
 }
