@@ -118,6 +118,18 @@ internal sealed class PromptSourceWatcher : IDisposable
     /// </summary>
     private void Sync()
     {
+        // Serialized: a rename raises two structural events, and a Sync that computed its wanted set earlier must not apply it
+        // after a later one already applied a newer set.
+        lock (syncGate)
+        {
+            SyncCore();
+        }
+    }
+
+    private readonly object syncGate = new();
+
+    private void SyncCore()
+    {
         var wanted = new Dictionary<string, (string Directory, bool Recursive, Target? Target)>(StringComparer.OrdinalIgnoreCase);
         foreach (var target in targets)
         {
