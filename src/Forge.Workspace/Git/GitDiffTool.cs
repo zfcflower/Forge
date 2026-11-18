@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
@@ -9,14 +10,20 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
     git,
     GitTools.DiffName,
     "Show the changes of this branch: git diff <base>...HEAD followed by the uncommitted working-tree diff, with " +
-    "untracked files included. base defaults to the repository's default branch. Narrow with paths, or pass " +
-    "stat_only for just the file list. A full read (no paths, stat_only false) records HEAD as self-reviewed, which " +
-    "PR creation requires.",
+    "untracked files included. base defaults to the repository's default branch. A read shows whole-file diffs up to " +
+    "about 24,000 characters and names every file it left out; read those with paths. Pass stat_only for just the file " +
+    "list. PR creation requires that every changed file was shown at the current HEAD (reads with paths count), " +
+    "starting from one read without paths.",
     """
     {"type":"object","properties":{"base":{"type":"string","description":"Commit or ref to compare against, e.g. origin/main; default the repository's default branch."},"paths":{"type":"array","items":{"type":"string"},"description":"Limit the diff to these paths."},"stat_only":{"type":"boolean","description":"Return per-file line counts instead of the diff text; default false."}},"additionalProperties":false}
     """,
     ToolSideEffect.ReadOnly)
 {
+    /// <summary>The most diff text one read shows; a single file larger than this is still shown whole when it comes first.</summary>
+    internal const int MaxChars = 24_000;
+
+    private const int MaxListed = 100;
+
     protected override async ValueTask<ToolResult> InvokeCoreAsync(
         JsonElement arguments,
         ToolContext context,
@@ -65,11 +72,18 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
         }
 
         string text;
+        DiffRead? read = null;
         try
         {
-            text = statOnly
-                ? await StatAsync(directory, range, paths, head, ct).ConfigureAwait(false)
-                : await TextAsync(directory, range, paths, head, ct).ConfigureAwait(false);
+            if (statOnly)
+            {
+                text = await StatAsync(directory, range, paths, head, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                read = await TextAsync(directory, range, paths, head, ct).ConfigureAwait(false);
+                text = read.Text;
+            }
         }
         catch (GitOutputTruncatedException)
         {
@@ -79,13 +93,17 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
                 IsError: true);
         }
 
-        if (usedDefaultBase && !statOnly && paths.Count == 0)
+        if (usedDefaultBase && read is not null && head is not null)
         {
             // Record the HEAD the diff was computed from, not a re-read one: a commit that landed while the diff was
             // being built is not part of what the agent just read.
-            if (head is not null)
+            if (paths.Count == 0)
             {
-                ledger.RecordReviewed(context.SessionId, directory, head);
+                ledger.RecordFullRead(context.SessionId, directory, head, read.All, read.Shown);
+            }
+            else
+            {
+                ledger.RecordShown(context.SessionId, directory, head, read.Shown);
             }
         }
 
@@ -96,63 +114,145 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
             : text);
     }
 
-    private async Task<string> TextAsync(
+    /// <summary>What one text read produced: the text, every changed file it found and those it showed in full.</summary>
+    private sealed record DiffRead(string Text, IReadOnlyList<string> All, IReadOnlyList<string> Shown);
+
+    private sealed class Unit(string path)
+    {
+        public string Path { get; } = path;
+
+        public List<(bool Committed, FileDiff File)> Pieces { get; } = [];
+    }
+
+    private async Task<DiffRead> TextAsync(
         string directory,
         string? range,
         IReadOnlyList<string> paths,
         string? head,
         CancellationToken ct)
     {
-        var text = new StringBuilder(8 * 1024);
-
-        if (range is not null)
-        {
-            AppendBlock(text, await Git.GetDiffTextAsync(
-                directory,
-                new GitDiffOptions { From = range, Paths = paths },
-                ct).ConfigureAwait(false));
-        }
-
-        AppendBlock(text, await Git.GetDiffTextAsync(
+        // The file lists are independent git calls, so they run side by side; untracked files come with the uncommitted one.
+        var committedTask = range is null
+            ? Task.FromResult<IReadOnlyList<FileDiff>>([])
+            : Git.GetDiffAsync(directory, new GitDiffOptions { From = range, Paths = paths }, ct);
+        var stagedTask = head is null
+            ? Git.GetDiffAsync(directory, new GitDiffOptions { Staged = true, Paths = paths }, ct)
+            : Task.FromResult<IReadOnlyList<FileDiff>>([]);
+        var uncommittedTask = Git.GetDiffAsync(
             directory,
-            new GitDiffOptions { From = head, Paths = paths },
-            ct).ConfigureAwait(false));
+            new GitDiffOptions { From = head, Paths = paths, IncludeUntracked = true },
+            ct);
+        await Task.WhenAll(committedTask, stagedTask, uncommittedTask).ConfigureAwait(false);
 
-        if (head is null)
+        // One unit per path: a file changed both in commits and in the worktree is shown (or left out) as a whole, so
+        // "shown" means every change of that file was shown.
+        var units = new List<Unit>();
+        var byPath = new Dictionary<string, Unit>(StringComparer.Ordinal);
+        void Add(bool committed, IReadOnlyList<FileDiff> files)
         {
-            // An unborn branch has nothing to compare HEAD with, so staged files only show in the cached diff.
-            AppendBlock(text, await Git.GetDiffTextAsync(
-                directory,
-                new GitDiffOptions { Staged = true, Paths = paths },
-                ct).ConfigureAwait(false));
-        }
-
-        var status = await Git.GetStatusAsync(directory, includeUntracked: true, ct).ConfigureAwait(false);
-        var untracked = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in status)
-        {
-            if (entry.Kind == GitStatusKind.Untracked)
-            {
-                untracked.Add(entry.Path);
-            }
-        }
-
-        if (untracked.Count > 0)
-        {
-            var files = await Git.GetDiffAsync(
-                directory,
-                new GitDiffOptions { From = head, Paths = paths, IncludeUntracked = true },
-                ct).ConfigureAwait(false);
             foreach (var file in files)
             {
-                if (untracked.Contains(file.Path))
+                if (!byPath.TryGetValue(file.Path, out var unit))
                 {
-                    AppendBlock(text, UnifiedDiffText.Render(file));
+                    unit = new Unit(file.Path);
+                    byPath[file.Path] = unit;
+                    units.Add(unit);
                 }
+
+                unit.Pieces.Add((committed, file));
             }
         }
 
-        return text.ToString();
+        Add(true, committedTask.Result);
+        Add(false, stagedTask.Result);
+        Add(false, uncommittedTask.Result);
+
+        var text = new StringBuilder(Math.Min(MaxChars, 8 * 1024));
+        var shown = new List<string>(units.Count);
+        var left = new List<Unit>();
+        foreach (var unit in units)
+        {
+            var block = RenderUnit(unit, range);
+            if (shown.Count > 0 && text.Length + block.Length > MaxChars)
+            {
+                left.Add(unit);
+                continue;
+            }
+
+            text.Append(block);
+            shown.Add(unit.Path);
+        }
+
+        if (left.Count > 0)
+        {
+            AppendLeftOut(text, shown.Count, units.Count, left);
+        }
+
+        var all = new List<string>(units.Count);
+        foreach (var unit in units)
+        {
+            all.Add(unit.Path);
+        }
+
+        return new DiffRead(text.ToString(), all, shown);
+    }
+
+    private static string RenderUnit(Unit unit, string? range)
+    {
+        var block = new StringBuilder(512);
+        foreach (var (committed, file) in unit.Pieces)
+        {
+            block.Append(committed ? "# committed, " + range : "# uncommitted").Append('\n').Append(UnifiedDiffText.Render(file));
+        }
+
+        return block.ToString();
+    }
+
+    private static void AppendLeftOut(StringBuilder text, int shownCount, int totalCount, List<Unit> left)
+    {
+        if (text.Length > 0 && text[^1] != '\n')
+        {
+            text.Append('\n');
+        }
+
+        text.Append("\n# ").Append(shownCount.ToString(CultureInfo.InvariantCulture)).Append(" of ")
+            .Append(totalCount.ToString(CultureInfo.InvariantCulture))
+            .Append(" files shown; this read is capped at about ").Append(MaxChars.ToString(CultureInfo.InvariantCulture))
+            .Append(" characters. Not shown yet (read them with git_diff and paths; a file is covered once its diff was shown):\n");
+        var listed = 0;
+        foreach (var unit in left)
+        {
+            if (listed == MaxListed)
+            {
+                text.Append("  ... and ").Append((left.Count - listed).ToString(CultureInfo.InvariantCulture))
+                    .Append(" more; use stat_only for the whole list.\n");
+                break;
+            }
+
+            var added = 0;
+            var removed = 0;
+            var binary = false;
+            foreach (var (_, file) in unit.Pieces)
+            {
+                added += file.AddedLineCount;
+                removed += file.RemovedLineCount;
+                binary |= file.IsBinary;
+            }
+
+            text.Append("  ").Append(unit.Path).Append(" | ");
+            if (binary)
+            {
+                text.Append("binary");
+            }
+            else
+            {
+                text.Append('+').Append(added.ToString(CultureInfo.InvariantCulture))
+                    .Append(" -").Append(removed.ToString(CultureInfo.InvariantCulture));
+            }
+
+            text.Append('\n');
+            listed++;
+        }
     }
 
     private async Task<string> StatAsync(

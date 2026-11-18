@@ -22,8 +22,8 @@ internal sealed class PrCreateTool(
     "Open a pull request for the current branch. Read pr_workflow with phase 'creating' first. Five gates are checked in " +
     "code, in order, and any failure refuses the call and says what to do: (1) the working tree is clean, untracked " +
     "files included; (2) after a fresh fetch, origin/<base> is an ancestor of HEAD, otherwise bring the branch up to " +
-    "date first (pr_sync); (3) the full git_diff (no paths, not stat_only) was read at this exact HEAD - code can " +
-    "only enforce that the diff was re-read, whether you actually cleaned up debug output, scratch files and unrelated " +
+    "date first (pr_sync); (3) the full git_diff (no paths, not stat_only) was read at this exact HEAD and every changed file was shown (a " +
+    "large diff is capped: read the files it names with paths) - code can only enforce that it was read, whether you actually cleaned up debug output, scratch files and unrelated " +
     "edits is your own judgement and nothing here checks it; (4) the body has a '## Testing' section that is not empty " +
     "and not a platitude such as 'tests pass', so say what you ran and what it showed (code cannot verify that it " +
     "happened - be honest); (5) every step of the session's plan (todo items with a group) is done - finish the " +
@@ -120,6 +120,22 @@ internal sealed class PrCreateTool(
 
         // Gate 3: the diff of exactly this HEAD was read; the push pin re-checks it right before the push.
         var reviewed = ledger.LastReviewed(context.SessionId, directory);
+        var unread = string.Equals(reviewed, head, StringComparison.Ordinal)
+            ? ledger.Unread(context.SessionId, directory, head)
+            : null;
+        if (unread is { Count: > 0 })
+        {
+            const int listLimit = 30;
+            var names = string.Join(", ", unread.Count > listLimit ? unread.Take(listLimit) : unread);
+            return PrLifecycleFailure.Refuse(
+                Tool,
+                "gate 3: self-review of the full diff",
+                $"{unread.Count} changed file(s) of this HEAD were not shown in full yet: {names}" +
+                (unread.Count > listLimit ? $", and {unread.Count - listLimit} more" : string.Empty) + ".",
+                "Call git_diff with paths set to those files (several reads are fine, each shows up to about 24,000 characters), " +
+                "clean up what they show and commit that, read the diff again after the last commit, then call pr_create again.");
+        }
+
         if (!string.Equals(reviewed, head, StringComparison.Ordinal))
         {
             return PrLifecycleFailure.Refuse(

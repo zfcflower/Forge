@@ -35,7 +35,8 @@ and says what to do next.
    means a step is not done.
 2. After a fresh fetch, `origin/<base>` is an ancestor of HEAD. A branch that is behind is refused: bring it up with
    `pr_sync` (phase `syncing`), then re-run the tests and read `git_diff` again, because HEAD moved.
-3. The full diff was read at this exact HEAD: `git_diff` with no `paths` and `stat_only` false. Clean up what it
+3. The full diff was read at this exact HEAD: `git_diff` with no `paths` and `stat_only` false, and every file it
+   lists was shown (a large diff is capped; read the files it names as not shown with `paths`). Clean up what it
    shows - debug output, commented-out code, scratch files, unrelated edits, local paths, secrets - and commit the
    cleanup. That moves HEAD, so read the diff again afterwards.
 4. The body's `## Testing` section is non-empty and not a platitude. Write what you ran and what it showed.

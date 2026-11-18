@@ -278,8 +278,14 @@ internal static class UnifiedDiffText
     {
         ArgumentNullException.ThrowIfNull(diff);
         var path = diff.Path;
+        var oldPath = diff.IsRenameOrCopy ? diff.OldPath ?? path : path;
         var text = new StringBuilder(256);
-        text.Append("diff --git a/").Append(path).Append(" b/").Append(path).Append('\n');
+        text.Append("diff --git a/").Append(oldPath).Append(" b/").Append(path).Append('\n');
+        if (diff.IsRenameOrCopy)
+        {
+            var verb = diff.Status == FileDiffStatus.Renamed ? "rename" : "copy";
+            text.Append(verb).Append(" from ").Append(oldPath).Append('\n').Append(verb).Append(" to ").Append(path).Append('\n');
+        }
 
         if (diff.Status == FileDiffStatus.Added)
         {
@@ -295,7 +301,12 @@ internal static class UnifiedDiffText
             return text.Append("Binary files a/").Append(path).Append(" and b/").Append(path).Append(" differ\n").ToString();
         }
 
-        text.Append("--- ").Append(diff.Status == FileDiffStatus.Added ? "/dev/null" : "a/" + path).Append('\n');
+        if (diff.Hunks.Count == 0)
+        {
+            return text.ToString();
+        }
+
+        text.Append("--- ").Append(diff.Status == FileDiffStatus.Added ? "/dev/null" : "a/" + oldPath).Append('\n');
         text.Append("+++ ").Append(diff.Status == FileDiffStatus.Deleted ? "/dev/null" : "b/" + path).Append('\n');
 
         foreach (var hunk in diff.Hunks)

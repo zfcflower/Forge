@@ -34,7 +34,7 @@ public static class PrWorkflowText
         ## What pr_create checks, in this order
         1. The working tree is clean, untracked files included.
         2. After a fresh fetch, origin/<base> is an ancestor of HEAD. If not, run pr_sync (phase "syncing"), re-run the tests, and read git_diff again.
-        3. The full git_diff was read at this exact HEAD. Code only enforces that the diff was re-read; whether the cleanup is actually good is your judgement, and nothing checks it.
+        3. The full git_diff was read at this exact HEAD and every changed file of it was shown (a large diff is capped; read the files it names with paths). Code only enforces that the diff was read; whether the cleanup is actually good is your judgement, and nothing checks it.
         4. The body has a non-empty "## Testing" section that is not a platitude ("tests pass", "tested", "n/a" and the like are refused). Code cannot tell whether you really ran anything; be honest.
 
         After the gates it reads the state once more (HEAD unchanged, still clean), refuses if a pull request for the branch already exists (and returns its URL), pushes with -u and a lease taken from a fresh ls-remote, then creates the pull request. The push names the reviewed HEAD itself: a commit that lands after the gates is refused as a gate-to-push race instead of being published, and you read git_diff again. It never merges.
