@@ -145,6 +145,45 @@ internal static partial class TranscriptScenarios
             return transcript;
         }
 
+        /// <summary>
+        /// Turns that differ the way real ones do: replies of one to eight paragraphs, one to eight tool calls, results of five to
+        /// sixty lines, thinking of two to twelve lines (fixed seed, so every run builds the same transcript).
+        /// </summary>
+        private static TranscriptViewModel BuildVaried(int turns)
+        {
+            var transcript = new TranscriptViewModel(false);
+            var random = new Random(20261118);
+            var at = DateTimeOffset.UtcNow;
+            for (var turn = 0; turn < turns; turn++)
+            {
+                transcript.AddUserMessage($"Turn {turn}: {string.Join(' ', Enumerable.Repeat("please look at the files and tell me what you find.", random.Next(1, 4)))}", at);
+                var card = transcript.BeginTurn(at, closePrevious: true);
+                if (random.Next(0, 3) > 0)
+                {
+                    card.AppendThinking(string.Join('\n', Enumerable.Range(0, random.Next(2, 13)).Select(line => $"thought {line}: weighing the next step against what the files said")));
+                }
+
+                var reply = new StringBuilder();
+                for (var paragraph = 0; paragraph < random.Next(1, 9); paragraph++)
+                {
+                    reply.Append("Paragraph ").Append(paragraph).Append(": the agent's reply with `inline code` and a **bold** word, long enough to wrap over a couple of lines in the column. ");
+                    reply.Append("The quick brown fox jumps over the lazy dog and keeps going for a while.\n\n");
+                }
+
+                card.AppendText(reply.ToString());
+                for (var tool = 0; tool < random.Next(1, 9); tool++)
+                {
+                    var call = new ToolCall($"t{turn}-{tool}", tool % 2 == 0 ? "read_file" : "bash", $"{{\"command\":\"dir src{tool}\"}}");
+                    card.AddTool(call);
+                    card.CompleteTool(call, new ToolResult(string.Join('\n', Enumerable.Range(0, random.Next(5, 61)).Select(line => $"line {line}: some tool output that is long enough to look like a real result"))));
+                }
+
+                card.Finish(TimeSpan.FromSeconds(3), null);
+            }
+
+            return transcript;
+        }
+
         private sealed class Probe(ListBox list, ScrollViewer scroller, TranscriptFollower follower, TranscriptViewModel transcript)
         {
             public ListBox List { get; } = list;

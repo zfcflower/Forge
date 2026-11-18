@@ -65,12 +65,12 @@ internal static partial class TranscriptScenarios
                 {
                     Warmup = 0,
                     Iterations = 1,
-                    Note = "TranscriptStackPanel can steer: _scrollToIndex and _scrollToElement exist in the pinned Avalonia",
+                    Note = "TranscriptStackPanel can steer and price: _scrollToIndex, _scrollToElement and _lastEstimatedElementSizeU exist in the pinned Avalonia",
                     Run = async _ =>
                     {
                         if (!await rig.CanSteerAsync().ConfigureAwait(false))
                         {
-                            throw new InvalidOperationException("VirtualizingStackPanel has no _scrollToIndex/_scrollToElement field any more: TranscriptStackPanel has fallen back to the stock panel; re-derive it for this Avalonia.");
+                            throw new InvalidOperationException("VirtualizingStackPanel lost _scrollToIndex, _scrollToElement or _lastEstimatedElementSizeU: TranscriptStackPanel has fallen back to the stock panel (or stock extent); re-derive it for this Avalonia.");
                         }
 
                         return new OpResult(Items: 1, Observation: "fields present");

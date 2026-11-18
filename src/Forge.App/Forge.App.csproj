@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Forge.Bench" />
+    <InternalsVisibleTo Include="Forge.App.Tests" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />

@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -31,6 +32,31 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
 {
     private static bool probed;
     private static bool available;
+    private static bool extentProbed;
+    private static bool extentAvailable;
+
+    /// <summary>The height a row last had when it was laid out, by row (weak: a removed row takes its entry with it).</summary>
+    private readonly ConditionalWeakTable<object, HeightBox> heights = new();
+
+    /// <summary>The sum and count of <see cref="heights"/> per row type, for rows nobody has seen yet.</summary>
+    private readonly Dictionary<Type, TypeHeights> byType = [];
+
+    private double lastWidth = double.NaN;
+    private double lastExtent = double.NaN;
+
+    /// <summary>What the rows below the realized ones are priced by changed since the last measure (a type seen for the first time, a row removed): that measure answered with the old figures.</summary>
+    private bool repriced;
+
+    private sealed class HeightBox(double height)
+    {
+        public double Height = height;
+    }
+
+    private sealed class TypeHeights
+    {
+        public double Sum;
+        public int Count;
+    }
 
     private Rect viewport;
 
@@ -76,10 +102,151 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_scrollToElement")]
     private static extern ref Control? ScrollToElement(VirtualizingStackPanel panel);
 
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_lastEstimatedElementSizeU")]
+    private static extern ref double LastEstimatedElementSize(VirtualizingStackPanel panel);
+
     /// <summary>How many arranges put row 0 back at the top of the content (diagnostics for the bench).</summary>
     internal static int Reconciled;
 
-    protected override Size MeasureOverride(Size availableSize) => MeasurePinned(availableSize);
+    protected override Size MeasureOverride(Size availableSize) => CorrectExtent(MeasurePinned(availableSize));
+
+    /// <summary>
+    /// The stock panel's extent is the end of the realized rows plus every row below them times one number, the average of the
+    /// rows it has realized right now. Rows run from one line to a screen, so that number swings with whatever kinds of rows are
+    /// on screen, and the scroll bar's thumb (its length and place both come from the extent) swings with it. Here the rows below
+    /// the realized range count with what is known about them: the height the row itself had when it was last laid out, and for a
+    /// row never seen the average of the rows of its type that were. The end of the realized rows is taken from what the stock
+    /// panel returned (it is the part of its figure that is not an estimate); nothing else about the panel's measure changes.
+    /// The cache is dropped when the width changes (text wraps again) and when the rows are reset.
+    /// </summary>
+    private Size CorrectExtent(Size size)
+    {
+        if (!ExtentAvailable(this) || Orientation != Avalonia.Layout.Orientation.Vertical || Items is not { Count: > 0 } items)
+        {
+            return size;
+        }
+
+        var last = LastRealizedIndex;
+        var remaining = items.Count - last - 1;
+        if (last < 0 || remaining <= 0 || byType.Count == 0 || size.Height == lastExtent ||
+            (ScrollToIndex(this) >= 0 && ScrollToElement(this) is not null))
+        {
+            // Nothing below to estimate, nothing known yet, or a measure the stock panel answered without realizing (waiting for a
+            // scroll to land: its figure is the one this method returned last, or is based on the scroll target).
+            return size;
+        }
+
+        var average = LastEstimatedElementSize(this);
+        var realizedEnd = size.Height - (remaining * average);
+        var below = 0d;
+        for (var i = last + 1; i < items.Count; i++)
+        {
+            below += KnownHeight(items[i], average);
+        }
+
+        lastExtent = realizedEnd + below;
+        return new Size(size.Width, lastExtent);
+    }
+
+    private double KnownHeight(object? item, double fallback)
+    {
+        if (item is null)
+        {
+            return fallback;
+        }
+
+        if (heights.TryGetValue(item, out var box))
+        {
+            return box.Height;
+        }
+
+        return byType.TryGetValue(item.GetType(), out var type) && type.Count > 0 ? type.Sum / type.Count : fallback;
+    }
+
+    private void Remember(object item, double height)
+    {
+        if (heights.TryGetValue(item, out var box))
+        {
+            Of(item).Sum += height - box.Height;
+            box.Height = height;
+            return;
+        }
+
+        heights.Add(item, new HeightBox(height));
+        var type = Of(item);
+        type.Sum += height;
+        type.Count++;
+    }
+
+    private TypeHeights Of(object item)
+    {
+        var key = item.GetType();
+        if (!byType.TryGetValue(key, out var type))
+        {
+            byType[key] = type = new TypeHeights();
+            repriced = true;
+        }
+
+        return type;
+    }
+
+    private void Forget(object? item)
+    {
+        if (item is not null && heights.TryGetValue(item, out var box))
+        {
+            var type = Of(item);
+            type.Sum -= box.Height;
+            type.Count--;
+            repriced = true;
+            heights.Remove(item);
+        }
+    }
+
+    private void ForgetAll()
+    {
+        heights.Clear();
+        byType.Clear();
+        lastExtent = double.NaN;
+    }
+
+    protected override void OnItemsChanged(IReadOnlyList<object?> items, NotifyCollectionChangedEventArgs e)
+    {
+        base.OnItemsChanged(items, e);
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            ForgetAll();
+        }
+        else if (e.OldItems is { } removed)
+        {
+            foreach (var item in removed)
+            {
+                Forget(item);
+            }
+        }
+    }
+
+    /// <summary>Records the height of every realized row (the end of an arrange, when the sizes are final).</summary>
+    private void Sample(Size finalSize)
+    {
+        if (!double.IsNaN(lastWidth) && Math.Abs(lastWidth - finalSize.Width) > 0.5)
+        {
+            ForgetAll();
+        }
+
+        lastWidth = finalSize.Width;
+        if (Items is not { } items)
+        {
+            return;
+        }
+
+        for (var i = FirstRealizedIndex; i >= 0 && i <= LastRealizedIndex && i < items.Count; i++)
+        {
+            if (items[i] is { } item && ContainerFromIndex(i) is { IsMeasureValid: true } container)
+            {
+                Remember(item, container.DesiredSize.Height);
+            }
+        }
+    }
 
     /// <summary>
     /// The stock panel fills the viewport backwards from its anchor row down to row 0 and stops there, whatever position
@@ -93,6 +260,18 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
     protected override Size ArrangeOverride(Size finalSize)
     {
         var size = base.ArrangeOverride(finalSize);
+        if (ExtentAvailable(this))
+        {
+            Sample(finalSize);
+            if (repriced)
+            {
+                // Once per change of the pricing (a new row type, a removed row, a cache drop): measure again so the extent counts the real
+                // height now instead of at the next scroll.
+                repriced = false;
+                InvalidateMeasure();
+            }
+        }
+
         if (FirstRealizedIndex == 0 && ContainerFromIndex(0) is { } first && Math.Abs(first.Bounds.Top) > 0.5)
         {
             var shift = first.Bounds.Top;
@@ -141,8 +320,29 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
         }
     }
 
-    /// <summary>Whether the pinned Avalonia still has the two private fields the panel steers by (the bench fails when it has not).</summary>
-    internal static bool CanSteer() => Available(new TranscriptStackPanel());
+    /// <summary>Whether the pinned Avalonia still has the three private fields the panel steers and prices by (the bench fails when it has not).</summary>
+    internal static bool CanSteer() => Available(new TranscriptStackPanel()) && ExtentAvailable(new TranscriptStackPanel());
+
+    private static bool ExtentAvailable(VirtualizingStackPanel panel)
+    {
+        if (!extentProbed)
+        {
+            extentProbed = true;
+            try
+            {
+                _ = LastEstimatedElementSize(panel);
+                _ = ScrollToIndex(panel);
+                _ = ScrollToElement(panel);
+                extentAvailable = true;
+            }
+            catch (Exception exception) when (exception is MissingFieldException or FieldAccessException or BadImageFormatException or TypeLoadException)
+            {
+                extentAvailable = false;
+            }
+        }
+
+        return extentAvailable;
+    }
 
     private static bool Available(VirtualizingStackPanel panel)
     {

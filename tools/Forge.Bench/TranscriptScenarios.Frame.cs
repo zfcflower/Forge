@@ -18,7 +18,7 @@ namespace Forge.Bench;
 /// </summary>
 internal static partial class TranscriptScenarios
 {
-    private static readonly string[] FrameCases = ["wheel", "thumb", "thumb-stock", "toggle", "toggle-text", "extent", "thumb-gap", "thumb-gap-stock", "thumb-gap-long", "thumb-gap-long-stock", "rowcost", "rowcost-composer", "popup-styles", "scoped-sheets", "gutter", "thumb-unpooled", "thumb-follow", "thumb-follow-stock", "thumb-follow-long", "thumb-follow-long-stock", "pool-pixels", "reuse", "reuse-unpooled", "rebind", "attach", "attach-plain"];
+    private static readonly string[] FrameCases = ["wheel", "thumb", "thumb-stock", "toggle", "toggle-text", "extent", "extent-varied", "extent-varied-stock","thumb-gap", "thumb-gap-stock", "thumb-gap-long", "thumb-gap-long-stock", "rowcost", "rowcost-composer", "popup-styles", "scoped-sheets", "gutter", "thumb-unpooled", "thumb-follow", "thumb-follow-stock", "thumb-follow-long", "thumb-follow-long-stock", "pool-pixels", "reuse", "reuse-unpooled", "rebind", "attach", "attach-plain"];
 
     private static IEnumerable<BenchScenario> FrameScenarios() => FrameCases.Select(FrameCase);
 
@@ -95,7 +95,7 @@ internal static partial class TranscriptScenarios
                 }
 
                 Unpooled = name.EndsWith("-unpooled");
-                var probe = await MountAsync(BuildRich(name.Contains("long") ? 200 : 40, false), pinned: !name.EndsWith("-stock")).ConfigureAwait(true);
+                var probe = await MountAsync(name.StartsWith("extent-varied", StringComparison.Ordinal) ? BuildVaried(40) : BuildRich(name.Contains("long") ? 200 : 40, false), pinned: !name.EndsWith("-stock")).ConfigureAwait(true);
                 try
                 {
                     probe.Follower.StopFollowing();
@@ -177,7 +177,9 @@ internal static partial class TranscriptScenarios
                         }
 
                         case "extent":
-                            return await ExtentAsync(probe).ConfigureAwait(true);
+                        case "extent-varied":
+                        case "extent-varied-stock":
+                            return await ExtentAsync(probe, guard: name == "extent-varied").ConfigureAwait(true);
 
                         case "thumb-follow":
                         case "thumb-follow-long":
@@ -277,6 +279,8 @@ internal static partial class TranscriptScenarios
                     }
 
                     var list = new List<Func<int, int, Avalonia.Media.Color>>();
+                    // The jumps can reach the end of an accurate extent, which resumes following; the rows are placed by hand below.
+                    probe.Follower.StopFollowing();
                     size = new PixelSize((int)probe.List.Bounds.Width, (int)probe.List.Bounds.Height);
                     foreach (var row in samples)
                     {
@@ -1014,7 +1018,7 @@ internal static partial class TranscriptScenarios
         /// How the extent (and so the scroll bar's thumb) moves while the user reads from the top to the bottom: the panel
         /// estimates the rows it has not built by the average of the ones it has, so the extent changes as real heights come in.
         /// </summary>
-        private async Task<string> ExtentAsync(Probe probe)
+        private async Task<string> ExtentAsync(Probe probe, bool guard)
         {
             var scroller = probe.Scroller;
             scroller.Offset = default;
@@ -1034,6 +1038,25 @@ internal static partial class TranscriptScenarios
             for (var i = 1; i < trace.Count; i++)
             {
                 jump = Math.Max(jump, Math.Abs(trace[i] - trace[i - 1]));
+            }
+
+            if (guard)
+            {
+                // Rows of different kinds have different heights, and the panel must count the rows it has not built by what it
+                // knows of them (their own height, or their type's): the extent may not swing with the kinds on screen. The first
+                // steps are left out: the first mount in a process is still settling (the stock panel is as far off there).
+                const int Settle = 3;
+                var worst = trace.Skip(Settle).Max(t => Math.Abs(t - final)) / final;
+                var step = 0d;
+                for (var i = Settle + 1; i < trace.Count; i++)
+                {
+                    step = Math.Max(step, Math.Abs(trace[i] - trace[i - 1]) / final);
+                }
+
+                if (worst > 0.08 || step > 0.05)
+                {
+                    throw new InvalidOperationException($"extent: the extent was up to {100 * worst:F1}% off the final one and changed by up to {100 * step:F1}% in a step (limits 8% and 5%)");
+                }
             }
 
             // Thumb length is viewport / extent of the track: report it as a share of the track at the start, at the worst, at the end.
