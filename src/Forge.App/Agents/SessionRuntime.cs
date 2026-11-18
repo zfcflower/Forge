@@ -294,6 +294,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
     /// <summary>A hot reload was asked for: the next turn builds a fresh host (new snapshot) and resumes the root from the store.</summary>
     private bool reloadPending;
+
+    /// <summary>Children started outside a turn (<see cref="SpawnChildAsync"/>) that are still running; they hold the host like a turn does.</summary>
+    private int outsideChildren;
     private CompactionSettings? appliedCompaction;
     // Built eagerly / published once: the turn thread (RefreshMcpTools) and a tool thread (the search callback) both reach them,
     // and a second exposure instance created by a race would silently drop the pins the other one holds.
@@ -453,14 +456,30 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         ArgumentException.ThrowIfNullOrWhiteSpace(task);
         ArgumentNullException.ThrowIfNull(sink);
 
-        var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
-        var forward = new ForwardingSink(value =>
+        // Counted before the host is resolved, so a reload can never swap the host (and dispose its approval handlers) in between.
+        lock (gate)
         {
-            TrackSubAgent(value);
-            sink(value);
-        });
-        return await Task.Run(() => agentHost.SpawnChildAsync(agent, kind, task, forward, ct), CancellationToken.None)
-            .ConfigureAwait(false);
+            outsideChildren++;
+        }
+
+        try
+        {
+            var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
+            var forward = new ForwardingSink(value =>
+            {
+                TrackSubAgent(value);
+                sink(value);
+            });
+            return await Task.Run(() => agentHost.SpawnChildAsync(agent, kind, task, forward, ct), CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (gate)
+            {
+                outsideChildren--;
+            }
+        }
     }
 
     private sealed class ForwardingSink(Action<AgentEvent> forward) : IAgentEventSink
@@ -1231,9 +1250,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         lock (gate)
         {
-            // A running turn keeps its host (its approval and question handlers live there); the stale flag stays so the
+            // A running turn or child keeps its host (its approval and question handlers live there); the stale flag stays so the
             // reload can be applied once the turn has ended.
-            if (disposed || host is null || activeRoot is not null)
+            if (disposed || host is null || activeRoot is not null || outsideChildren > 0)
             {
                 return false;
             }

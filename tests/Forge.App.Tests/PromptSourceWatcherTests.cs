@@ -77,4 +77,28 @@ public sealed class PromptSourceWatcherTests : IDisposable
         await Task.Delay(300);
         Assert.Equal(1, Volatile.Read(ref count));
     }
+
+    [Fact]
+    public async Task Dispose_does_not_wait_for_a_handler_that_is_still_running()
+    {
+        var agents = Path.Combine(dir, "ws3", ".forge", "agents");
+        Directory.CreateDirectory(agents);
+        var watcher = new PromptSourceWatcher(null, Path.Combine(dir, "ws3"));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new ManualResetEventSlim();
+        watcher.Changed += () =>
+        {
+            entered.TrySetResult();
+            release.Wait(TimeSpan.FromSeconds(20));
+        };
+        watcher.Arm();
+        await File.WriteAllTextAsync(Path.Combine(agents, "a.md"), "x");
+        Assert.True(await SignalledAsync(entered.Task));
+
+        // The session disposes the old watcher while holding its own lock, and its handler takes that same lock.
+        var disposing = Task.Run(watcher.Dispose);
+        var finished = await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromSeconds(10))) == disposing;
+        release.Set();
+        Assert.True(finished);
+    }
 }
