@@ -2143,36 +2143,6 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         + "session-"
         + DateTimeOffset.Now.ToString("MMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
 
-    /// <summary>
-    /// Starts a session where <paramref name="like"/> lives: a general session stays a general one, a worktree session gets a
-    /// sibling in the same worktree and branch, and a session without a worktree falls back to the project's own new-worktree
-    /// flow. Used by the prompt reload selector, which offers "new session" as the alternative to a hot reload.
-    /// </summary>
-    public async Task NewSessionLikeAsync(SessionInfo like, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(like);
-        var all = await BackgroundRead.RunAsync(projects.ListAsync, ct).ConfigureAwait(true);
-        var project = all.FirstOrDefault(p => string.Equals(p.Id, like.ProjectId, StringComparison.Ordinal));
-        if (project is null)
-        {
-            SetStatus(LocText.Literal(ProjectStrings.GeneralWorkspaceMissing));
-            return;
-        }
-
-        if (project.Kind == ProjectKind.General)
-        {
-            await CreateGeneralSessionAsync(ct).ConfigureAwait(true);
-        }
-        else if (!string.IsNullOrEmpty(like.WorktreePath))
-        {
-            await CreateSessionInWorktreeAsync(project, like.WorktreePath, like.Branch, ct).ConfigureAwait(true);
-        }
-        else
-        {
-            await CreateWorktreeSessionAsync(project, ct).ConfigureAwait(true);
-        }
-    }
-
     private Task CreateSessionInWorktreeAsync(ProjectInfo project, string worktreePath, string? branch, CancellationToken ct) =>
         CreateAsync(
             token => BackgroundRead.RunAsync(

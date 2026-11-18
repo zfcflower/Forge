@@ -32,12 +32,8 @@ internal static class SessionStrings
     public const string PromptsChangedTitleKey = "session.prompts.changedTitle";
     public const string PromptsChangedBodyKey = "session.prompts.changedBody";
     public const string PromptsReloadTipKey = "session.prompts.reloadTip";
-    public const string PromptsReloadHeaderKey = "session.prompts.reloadHeader";
-    public const string PromptsHotReloadKey = "session.prompts.hotReload";
-    public const string PromptsHotReloadHintKey = "session.prompts.hotReloadHint";
-    public const string PromptsNewSessionKey = "session.prompts.newSession";
-    public const string PromptsNewSessionHintKey = "session.prompts.newSessionHint";
     public const string PromptsReloadedKey = "session.prompts.reloaded";
+    public const string PromptsReloadedTitleKey = "session.prompts.reloadedTitle";
     public const string ReadFailedKey = "session.readFailed";
     public const string ProviderMissingKey = "session.providerMissing";
 
@@ -189,9 +185,7 @@ internal static class SessionStrings
 
     public static LocText PromptsReloaded => new(PromptsReloadedKey);
 
-    public static LocText PromptsHotReloadTitle => new(PromptsHotReloadKey);
-
-    public static LocText PromptsNewSessionTitle => new(PromptsNewSessionKey);
+    public static LocText PromptsReloadedTitle => new(PromptsReloadedTitleKey);
 
     /// <summary>The notice shown when the stored history cannot be read.</summary>
     public static LocText ReadFailed(string message) => new(ReadFailedKey, message);
@@ -475,7 +469,7 @@ internal static class SessionStrings
         Loc.Register(ComposerSearchModelsKey, "搜索模型", "Search models");
         Loc.Register(ComposerNoModelsKey, "没有匹配的模型", "No matching models");
         Loc.Register(ComposerPinKey, "固定到顶部", "Pin to top");
-        Loc.Register(ComposerEffortKey, "力度", "Effort");
+        Loc.Register(ComposerEffortKey, "推理", "Reasoning");
         Loc.Register(ComposerEffortOffKey, "关闭", "Off");
         Loc.Register(ComposerEffortMinimalKey, "极低", "Minimal");
         Loc.Register(ComposerEffortLowKey, "低", "Low");
@@ -483,7 +477,7 @@ internal static class SessionStrings
         Loc.Register(ComposerEffortHighKey, "高", "High");
         Loc.Register(ComposerEffortXHighKey, "超高", "Extra high");
         Loc.Register(ComposerEffortMaxKey, "最高", "Max");
-        Loc.Register(ComposerSaveDefaultsKey, "新会话的默认值", "Defaults for new sessions");
+        Loc.Register(ComposerSaveDefaultsKey, "设为默认", "Set default");
         Loc.Register(ComposerDefaultsSavedKey, "已保存为新会话的默认值", "Saved as defaults for new sessions");
         Loc.Register(ComposerRefreshKey, "刷新", "Refresh");
         Loc.Register(ComposerModelsFetchedKey, "已加载 {0} 个模型", "Loaded {0} models");
@@ -514,21 +508,14 @@ internal static class SessionStrings
         Loc.Register(PromptsChangedTitleKey, "提示词文件已更改", "Prompt files changed");
         Loc.Register(
             PromptsChangedBodyKey,
-            "会话「{0}」使用的提示词有改动，但仍在用旧快照。点标题栏的“重载提示词”按钮，选择热重载或新开会话；热重载会让该会话的提示缓存失效一次。",
-            "Prompts used by \"{0}\" changed, but the session still runs on the old snapshot. Use the reload-prompts button in the title bar to hot-reload or start a new session; a hot reload invalidates this session's prompt cache once.");
-        Loc.Register(PromptsReloadTipKey, "重载提示词", "Reload prompts");
-        Loc.Register(PromptsReloadHeaderKey, "重新读取模板、Agent、技能和 AGENTS.md", "Re-read templates, agents, skills and AGENTS.md");
-        Loc.Register(PromptsHotReloadKey, "热重载", "Hot reload");
+            "会话「{0}」使用的提示词有改动，但仍在用旧快照。可点标题栏的“重载提示词”按钮刷新，代价是该会话的提示缓存失效一次、下一轮按未缓存计费；也可以手动新开会话。",
+            "Prompts used by \"{0}\" changed, but the session still runs on the old snapshot. The reload-prompts button in the title bar refreshes it, at the cost of losing this session's prompt cache once (the next turn is billed uncached); you can also open a new session by hand.");
+        Loc.Register(PromptsReloadTipKey, "重载提示词（提示缓存会失效一次）", "Reload prompts (the prompt cache is lost once)");
+        Loc.Register(PromptsReloadedTitleKey, "提示词已刷新", "Prompts reloaded");
         Loc.Register(
-            PromptsHotReloadHintKey,
-            "保留当前对话，下一条消息起使用新提示词；缓存失效一次，下一轮按未缓存计费。",
-            "Keep this conversation; the next message uses the new prompts. The prompt cache is lost once, so the next turn is billed uncached.");
-        Loc.Register(PromptsNewSessionKey, "新开会话", "New session");
-        Loc.Register(
-            PromptsNewSessionHintKey,
-            "在同一位置开一个新会话，使用新提示词；当前会话保持不变，缓存不受影响。",
-            "Start a new session in the same place with the new prompts; this session stays as it is and its cache is untouched.");
-        Loc.Register(PromptsReloadedKey, "提示词将在下一条消息起重新加载", "Prompts will reload from the next message");
+            PromptsReloadedKey,
+            "下一条消息起使用新提示词，提示缓存已失效一次。为避免长会话反复浪费成本，建议手动新开会话。",
+            "The next message uses the new prompts and the prompt cache was lost once. To avoid wasting cost on a long session, consider opening a new session by hand.");
         Loc.Register(ReadFailedKey, "读取会话失败：{0}", "Could not read the session: {0}");
         Loc.Register(ProviderMissingKey, "尚未配置模型提供商：{0}", "No model provider is configured: {0}");
         Loc.Register(BreadcrumbBackToParentKey, "返回父会话 {0}", "Back to {0}");

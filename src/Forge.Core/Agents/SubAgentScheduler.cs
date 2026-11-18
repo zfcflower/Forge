@@ -107,7 +107,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
         + "Ask the user (ask_user) which role it should have, then add a `tools:` line to the frontmatter of its agent file "
         + "(`<workspace>/.forge/agents/<name>.md` you can edit; a file under `~/.forge/agents/` is outside the workspace, so give the user "
         + "the exact line to add). Suggested lists: read-only scout or planner: read, grep, find, ls; implementer: read, grep, find, ls, edit, write, bash; "
-        + "reviewer: read, grep, find, ls, git_diff. Agent files are read when a session starts, so the change applies from the next session, or from the next message once the user presses the reload-prompts button in the title bar and picks hot reload. "
+        + "reviewer: read, grep, find, ls, git_diff. Agent files are read when a session starts, so the change applies from the next session, or from the next message once the user presses the reload-prompts button in the title bar. "
         + "For this task use a built-in kind: Scout, Plan, Worker or Reviewer.";
 
     private SubAgentControlResult Missing(string agentId)

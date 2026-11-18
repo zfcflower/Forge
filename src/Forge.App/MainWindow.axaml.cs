@@ -31,9 +31,6 @@ public partial class MainWindow : Window
         ApplyWindowStateChrome();
     }
 
-    /// <summary>A choice in the reload-prompts flyout was made: close the flyout (the command already ran).</summary>
-    private void OnPromptReloadPicked(object? sender, RoutedEventArgs e) => PromptReloadButton.Flyout?.Hide();
-
     /// <summary>The maximize button shows what it will do: maximize while normal, restore while maximized.</summary>
     protected override void OnPropertyChanged(Avalonia.AvaloniaPropertyChangedEventArgs change)
     {
