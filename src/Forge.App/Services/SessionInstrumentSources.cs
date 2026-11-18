@@ -116,30 +116,60 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
     {
         add
         {
-            if (changed is null && composition.Mcp is { } mcp)
+            lock (changedGate)
             {
-                mcp.Manager.StateChanged += OnState;
-                mcp.Manager.ToolsChanged += OnTools;
-            }
+                if (changed is null && composition.Mcp is { } mcp)
+                {
+                    mcp.Manager.StateChanged += OnState;
+                    mcp.Manager.ToolsChanged += OnTools;
+                }
 
-            changed += value;
+                changed += value;
+            }
         }
         remove
         {
-            changed -= value;
-            if (changed is null && composition.Mcp is { } mcp)
+            lock (changedGate)
             {
-                mcp.Manager.StateChanged -= OnState;
-                mcp.Manager.ToolsChanged -= OnTools;
+                changed -= value;
+                if (changed is null && composition.Mcp is { } mcp)
+                {
+                    mcp.Manager.StateChanged -= OnState;
+                    mcp.Manager.ToolsChanged -= OnTools;
+                }
             }
         }
     }
 
+    private readonly object changedGate = new();
     private Action? changed;
+    private int flushQueued;
 
-    private void OnState(Forge.Mcp.McpServerState state) => changed?.Invoke();
+    // Every open session's strip listens, and a flapping server raises a burst: one UI-thread pass fans the burst out to all
+    // strips instead of one post per strip per event.
+    private void OnState(Forge.Mcp.McpServerState state) => QueueFlush();
 
-    private void OnTools() => changed?.Invoke();
+    private void OnTools() => QueueFlush();
+
+    private void QueueFlush()
+    {
+        if (Interlocked.Exchange(ref flushQueued, 1) == 0)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(Flush, Avalonia.Threading.DispatcherPriority.Background);
+        }
+    }
+
+    private void Flush()
+    {
+        Volatile.Write(ref flushQueued, 0);
+        Action? listeners;
+        lock (changedGate)
+        {
+            listeners = changed;
+        }
+
+        listeners?.Invoke();
+    }
 
     public ModelMetadata ModelMetadata(string modelId, string? providerId = null) =>
         composition.Providers.Catalog.MetadataFor(modelId, providerId);
@@ -272,10 +302,6 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
     }
 
     public void OpenInExplorer(string path)
-    {
-    }
-
-    public void OpenSettingsSection(string sectionId)
     {
     }
 

@@ -2969,8 +2969,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Settings.IsOpen = false;
     }
 
-    /// <summary>Cards come and go on their own schedule, so the active strip re-reads its approval count on every change.</summary>
-
     /// <summary>Gives one session's strip the project it belongs to, from the cache the registry read fills.</summary>
     private void ApplyProject(SessionWorkspaceViewModel session)
     {

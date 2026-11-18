@@ -286,20 +286,6 @@ internal sealed class McpServices : IAsyncDisposable
             "mcp:" + state.Name);
     }
 
-    public int ReadyCount()
-    {
-        var ready = 0;
-        foreach (var state in manager.States)
-        {
-            if (state.IsReady)
-            {
-                ready++;
-            }
-        }
-
-        return ready;
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (disposed)

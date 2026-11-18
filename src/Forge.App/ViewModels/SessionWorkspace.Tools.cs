@@ -41,7 +41,7 @@ internal sealed partial class SessionWorkspaceViewModel : IResourceInspectorSour
         for (var index = 0; index < subAgents.Count; index++)
         {
             var agent = subAgents[index];
-            if (agent.IsAutomation && agent.IsLive)
+            if (agent.IsLiveAutomation)
             {
                 into.Add(agent);
             }
@@ -53,15 +53,19 @@ internal sealed partial class SessionWorkspaceViewModel : IResourceInspectorSour
 
     bool IResourceInspectorSource.PromptsStale => PromptsStale;
 
-    /// <summary>Whether the reload button works: a running turn or an automation child keeps the host, so it waits.</summary>
+    /// <summary>
+    /// Whether the reload button works: nothing to reload before the first turn built a host, and a running turn or an
+    /// automation child keeps the host, so it waits. The runtime's own refusal condition is the last word, which also covers a
+    /// child that is already launched but whose row has not reached the UI yet.
+    /// </summary>
     PromptReloadState IResourceInspectorSource.PromptReload =>
-        !CanReloadPrompts
+        !CanReloadPrompts || runtime is not { HasHost: true } live
             ? PromptReloadState.Unavailable
             : IsRunning
                 ? PromptReloadState.TurnRunning
-                : subAgents.Any(agent => agent.IsAutomation && agent.IsLive)
-                    ? PromptReloadState.AutomationRunning
-                    : PromptReloadState.Ready;
+                : live.CanHotReload
+                    ? PromptReloadState.Ready
+                    : PromptReloadState.AutomationRunning;
 
     void IResourceInspectorSource.OpenAgent(SubAgentViewModel agent) => subAgentOpened?.Invoke(agent);
 
@@ -93,8 +97,7 @@ internal sealed partial class SessionWorkspaceViewModel : IResourceInspectorSour
 
     /// <summary>
     /// The tool calls running right now. A <see cref="ConcurrentDictionary{TKey,TValue}.Values"/>
-    /// read copies, and the inspector reads it on its own tick (at most once per 250 ms, by default once a second), so the
-    /// copy is the cheap way to keep the producer thread free of the collection it would otherwise have to lock.
+    /// read copies, which keeps the producer thread free of the collection it would otherwise have to lock.
     /// </summary>
     internal ICollection<LiveToolViewModel> RunningTools => liveTools.Values;
 
@@ -275,7 +278,7 @@ internal sealed partial class SessionWorkspaceViewModel : IResourceInspectorSour
         var running = 0;
         for (var index = 0; index < subAgents.Count; index++)
         {
-            if (subAgents[index] is { IsAutomation: true, IsLive: true })
+            if (subAgents[index].IsLiveAutomation)
             {
                 running++;
             }

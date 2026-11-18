@@ -2048,7 +2048,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             Title,
             openSession)
         {
-            IsAutomation = automationChildIds.ContainsKey(started.ChildId),
+            IsAutomation = automationChildIds.TryRemove(started.ChildId, out _),
         };
         subAgentById[started.ChildId] = agent;
         subAgents.Add(agent);
@@ -2261,6 +2261,9 @@ internal sealed class SubAgentViewModel : NotifyingObject
     /// sub-agent strip.
     /// </summary>
     public bool IsAutomation { get; init; }
+
+    /// <summary>An automation child that is queued or running: the rows the resource window lists and that hold back a prompt reload.</summary>
+    internal bool IsLiveAutomation => IsAutomation && IsLive;
 
     /// <summary>The kind the store recorded; a stored child without one is named after the region, in the current language.</summary>
     public string Kind => kind.Length == 0 ? SessionStrings.SubAgentsTitle : kind;

@@ -204,6 +204,11 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
     private bool promptsStale;
     private PromptReloadState reloadState;
     private int refreshQueued;
+
+    // The usage snapshot costs a pass over every tool definition; a server flapping between states does not change it, so only
+    // the session's own events and a tool-list change mark it dirty.
+    private int usageDirty = 1;
+    private ResourceUsage usageSnapshot = ResourceUsage.Empty;
     private bool disposed;
 
     /// <param name="source">The session the window shows.</param>
@@ -224,9 +229,9 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         this.close = close;
         this.reloadPrompts = reloadPrompts;
         this.post = post ?? DefaultPost;
-        onSourceChanged = (_, _) => RequestRefresh();
-        onMcpState = _ => RequestRefresh();
-        onMcpTools = RequestRefresh;
+        onSourceChanged = (_, _) => RequestRefresh(usageChanged: true);
+        onMcpState = _ => RequestRefresh(usageChanged: false);
+        onMcpTools = () => RequestRefresh(usageChanged: true);
         runQueuedRefresh = RunQueuedRefresh;
 
         Agents = new ReadOnlyObservableCollection<SubAgentViewModel>(agents);
@@ -336,8 +341,13 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
     /// Queues one refresh; further requests before it runs are absorbed. Safe from any thread (the refresh itself runs where
     /// <c>post</c> puts it, the UI thread by default).
     /// </summary>
-    internal void RequestRefresh()
+    internal void RequestRefresh(bool usageChanged = true)
     {
+        if (usageChanged)
+        {
+            Volatile.Write(ref usageDirty, 1);
+        }
+
         if (disposed || Interlocked.Exchange(ref refreshQueued, 1) == 1)
         {
             return;
@@ -355,7 +365,12 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         }
 
         RefreshAgents();
-        var usage = source.DescribeUsage();
+        if (Interlocked.Exchange(ref usageDirty, 0) == 1)
+        {
+            usageSnapshot = source.DescribeUsage();
+        }
+
+        var usage = usageSnapshot;
         RefreshMcp(usage);
         RefreshTools(usage);
         RefreshPrompts(usage);
@@ -452,7 +467,12 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
             {
                 row = new ResourceMcpRowViewModel(mcp, state, OnMcpError);
                 mcpByName[state.Name] = row;
-                mcpRows.Add(row);
+                mcpRows.Insert(Math.Min(index, mcpRows.Count), row);
+            }
+            else if (index < mcpRows.Count && !ReferenceEquals(mcpRows[index], row))
+            {
+                // The manager's order is the table's order, also after a server was removed and added again.
+                mcpRows.Move(mcpRows.IndexOf(row), index);
             }
 
             row.Update(state, tools, size);
@@ -594,6 +614,7 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         }
 
         reloadPrompts?.Invoke();
+        Volatile.Write(ref usageDirty, 1);
         Refresh();
     }
 

@@ -1269,6 +1269,30 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         return true;
     }
 
+    /// <summary>True once the first turn built a host (before that there is nothing to reload).</summary>
+    internal bool HasHost
+    {
+        get
+        {
+            lock (gate)
+            {
+                return !disposed && host is not null;
+            }
+        }
+    }
+
+    /// <summary>False while a turn or an outside-turn child holds the host; the same condition <see cref="HotReloadPrompts"/> refuses on.</summary>
+    internal bool CanHotReload
+    {
+        get
+        {
+            lock (gate)
+            {
+                return !disposed && host is not null && activeRoot is null && outsideChildren == 0;
+            }
+        }
+    }
+
     private void StartPromptWatch()
     {
         var previous = promptWatcher;
