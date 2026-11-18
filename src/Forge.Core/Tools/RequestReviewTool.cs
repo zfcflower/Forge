@@ -227,7 +227,8 @@ public sealed class RequestReviewTool : ITool
         if (arguments.StepId is not null && ledger is not null)
         {
             // Stored rounds are loaded first so the count keeps growing across a restart instead of starting over.
-            await ledger.EnsureLoadedAsync(context.SessionId, ct).ConfigureAwait(false);
+            // Not cancellable: the reviewer already finished, and a stopped turn must not make its verdict disappear.
+            await ledger.EnsureLoadedAsync(context.SessionId, CancellationToken.None).ConfigureAwait(false);
             ledger.Record(context.SessionId, arguments.StepId, verdict, changeSet.HeadCommit, tree);
         }
         var builder = new StringBuilder(384 + Math.Min(outcome.Text.Length, RequestReviewVerdict.MaxReviewChars));

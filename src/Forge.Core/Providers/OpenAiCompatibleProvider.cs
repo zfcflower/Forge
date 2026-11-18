@@ -59,8 +59,7 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     /// fail the turn. Both families count — the body fields and the cache headers a strict gateway can refuse just the same.
     /// </summary>
     protected override bool CanDegrade(ProviderException failure) =>
-        !downgraded
-        && failure.StatusCode == 400
+        failure.StatusCode == 400
         && (failure.Message.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
             || failure.Message.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase)
             || failure.Message.Contains("x-grok-conv-id", StringComparison.OrdinalIgnoreCase)

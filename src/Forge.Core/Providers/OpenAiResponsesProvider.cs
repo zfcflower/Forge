@@ -52,8 +52,7 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
     /// implements the core fields): the answer is to send less, not to fail the turn.
     /// </summary>
     protected override bool CanDegrade(ProviderException failure) =>
-        !downgraded
-        && failure.StatusCode == 400
+        failure.StatusCode == 400
         && (failure.Message.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
             || failure.Message.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase));
 

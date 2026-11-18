@@ -298,6 +298,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// <summary>A hot reload was asked for: the next turn builds a fresh host (new snapshot) and resumes the root from the store.</summary>
     private bool reloadPending;
 
+    /// <summary>The rebuild a reload asked for has read the sources and armed its watcher: an edit from here on is real, even while the root agent is still being resumed.</summary>
+    private bool reloadBuilt;
+
     /// <summary>Children started outside a turn (<see cref="SpawnChildAsync"/>) that are still running; they hold the host like a turn does.</summary>
     private int outsideChildren;
     private CompactionSettings? appliedCompaction;
@@ -726,6 +729,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             // A changed root definition reuses the host (its tools, approval handler and router registration) and only
             // rebuilds the root agent from the store.
             built = host is not null && !reloadPending ? host : Build();
+            reloadBuilt = reloadPending;
             definition = rootDefinition;
         }
 
@@ -734,6 +738,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         {
             host = built;
             reloadPending = false;
+            reloadBuilt = false;
             root = agent;
             ApplyDisabledTools(host);
             ApplySubAgentLimits(host);
@@ -1174,8 +1179,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         chatRendering = ChatRenderingPrompt.Build();
         specToolsOn = orchestration.Length > 0 || WorkspaceHasSpecs(Session.WorkspacePath);
         gitToolsOn = !IsGeneralSession();
-        pullRequestToolsOn = gitToolsOn && ProbeRemote();
+        // Cleared before the probe: a pairing that finishes while it runs sets the flag again and is re-decided at the next boundary.
         remoteAdded = false;
+        pullRequestToolsOn = gitToolsOn && ProbeRemote();
         var compaction = services.CurrentCompaction();
         var toolSegments = BuildTools();
         var built = new AgentHost(
@@ -1262,6 +1268,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             }
 
             reloadPending = true;
+            reloadBuilt = false;
             promptsStale = false;
         }
 
@@ -1312,7 +1319,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         lock (gate)
         {
-            if (disposed || reloadPending || promptsStale)
+            if (disposed || (reloadPending && !reloadBuilt) || promptsStale)
             {
                 return;
             }
