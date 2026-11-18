@@ -10,6 +10,8 @@ namespace Forge.App.Settings;
 /// spawn tree may run at once, and whether a session may spawn sub-agents at all. It edits <see cref="AppPreferences"/>
 /// directly, and <c>SessionRuntime</c> reads both values before every turn, so a change reaches a running session without a
 /// restart; the range shown by the field is the range the preference setter clamps to, so the two cannot disagree.
+/// <para>The page is merged: it also holds the review settings (the <c>request_review</c> tool, the step gate and the
+/// auto-fix loop) and the conversation display settings (<see cref="Chat"/>, formerly the separate <c>chat</c> section).</para>
 /// </summary>
 internal sealed class AgentsSettingsSectionViewModel : ObservableObject
 {
@@ -19,6 +21,60 @@ internal sealed class AgentsSettingsSectionViewModel : ObservableObject
     {
         ArgumentNullException.ThrowIfNull(preferences);
         this.preferences = preferences;
+        Chat = new ChatSettingsSectionViewModel(preferences);
+    }
+
+    /// <summary>The conversation display settings (tool images, Mermaid) shown as the last block of the page.</summary>
+    public ChatSettingsSectionViewModel Chat { get; }
+
+    /// <summary>Smallest auto-fix round cap the field offers.</summary>
+    public int MinReviewRounds => AppPreferences.MinReviewAutoFixMaxRounds;
+
+    /// <summary>Largest auto-fix round cap the field offers.</summary>
+    public int MaxReviewRounds => AppPreferences.MaxReviewAutoFixMaxRounds;
+
+    /// <summary>Whether the <c>request_review</c> tool exists for agents; read when a session's agent is built (new sessions).</summary>
+    public bool ReviewToolEnabled
+    {
+        get => preferences.ReviewToolEnabled;
+        set
+        {
+            preferences.ReviewToolEnabled = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Whether a step may only be completed after an approving review; read at every completion attempt.</summary>
+    public bool StepReviewRequired
+    {
+        get => preferences.StepReviewRequired;
+        set
+        {
+            preferences.StepReviewRequired = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Whether the agent fixes review findings on its own; off means it reports them and waits.</summary>
+    public bool ReviewAutoFix
+    {
+        get => preferences.ReviewAutoFix;
+        set
+        {
+            preferences.ReviewAutoFix = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>How many automatic fix-and-re-review rounds one step gets before the agent must ask the user.</summary>
+    public int ReviewAutoFixMaxRounds
+    {
+        get => preferences.ReviewAutoFixMaxRounds;
+        set
+        {
+            preferences.ReviewAutoFixMaxRounds = value;
+            OnPropertyChanged();
+        }
     }
 
     /// <summary>Smallest cap the field offers; zero permits would never admit the root agent.</summary>

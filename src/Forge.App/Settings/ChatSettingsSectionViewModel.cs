@@ -6,7 +6,7 @@ using Forge.App.ViewModels;
 namespace Forge.App.Settings;
 
 /// <summary>
-/// The <c>chat</c> settings section (<see cref="SettingsSectionIds.Chat"/>): how large a tool result's images render in
+/// The chat settings block of the merged <c>agents</c> page (<see cref="SettingsSectionIds.Agents"/>): how large a tool result's images render in
 /// the transcript, whether those images reach the model, and which Mermaid diagram types are drawn (wave W11). Edits
 /// <see cref="AppPreferences"/> directly, so the next row completion, request or diagram render reads the new values and the
 /// preferences store persists them on its debounce.

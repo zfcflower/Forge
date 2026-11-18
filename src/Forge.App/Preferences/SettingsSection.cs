@@ -142,9 +142,6 @@ internal static class SettingsSectionIds
     /// <summary>Palette sources and limits (wave W3).</summary>
     public const string Palette = "palette";
 
-    /// <summary>Chat display: tool images, Markdown, diagrams (waves W4, W4b, W11).</summary>
-    public const string Chat = "chat";
-
     /// <summary>File viewers: CSV, notebooks, images (wave W4).</summary>
     public const string Files = "files";
 
@@ -198,7 +195,6 @@ internal static class SettingsSectionIds
     public const int RateLimitOrder = 115;
 
     public const int AgentsOrder = 120;
-    public const int ChatOrder = 320;
     public const int FilesOrder = 360;
     public const int PaletteOrder = 380;
     public const int ProjectsOrder = 510;

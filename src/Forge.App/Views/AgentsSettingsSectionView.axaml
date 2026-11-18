@@ -1,13 +1,15 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:loc="using:Forge.App.Localization"
-             xmlns:settings="using:Forge.App.Settings"
+             xmlns:set="using:Forge.App.Settings"
              x:Class="Forge.App.Views.AgentsSettingsSectionView"
-             x:DataType="settings:AgentsSettingsSectionViewModel">
-  <!-- The `agents` section body: the cap on how many agents of one spawn tree run at once, and whether a session may spawn
-       sub-agents at all. Both values are live preferences, so the labels are the only text here. -->
+             x:DataType="set:AgentsSettingsSectionViewModel">
+  <!-- The merged `agents` page: sub-agent cap, the review settings, then the conversation (chat) display settings. Every
+       value is a live preference; each block carries a caption saying what the setting changes. -->
   <StackPanel Spacing="6">
-    <Grid ColumnDefinitions="180,*" Margin="0,3">
+
+    <TextBlock Classes="label" FontWeight="SemiBold" Text="{Binding [agents.groupAgents], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="200,*" Margin="0,3">
       <TextBlock Classes="label"
                  VerticalAlignment="Center"
                  Text="{Binding [agents.maxParallel], Source={x:Static loc:Loc.Instance}}" />
@@ -25,5 +27,121 @@
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
                Text="{Binding [agents.maxParallelHint], Source={x:Static loc:Loc.Instance}}" />
-  </StackPanel>
+
+    <TextBlock Classes="label" FontWeight="SemiBold" Margin="0,18,0,0" Text="{Binding [agents.groupReview], Source={x:Static loc:Loc.Instance}}" />
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [agents.review.intro], Source={x:Static loc:Loc.Instance}}" />
+
+    <Grid ColumnDefinitions="200,*" Margin="0,9,0,0">
+      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding [agents.review.tool], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox Grid.Column="1"
+                IsChecked="{Binding ReviewToolEnabled, Mode=TwoWay}"
+                AutomationProperties.AutomationId="agents-review-tool"
+                AutomationProperties.Name="{Binding [agents.review.tool], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding [agents.review.toolHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <Grid ColumnDefinitions="200,*" Margin="0,9,0,0">
+      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding [agents.review.stepRequired], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox Grid.Column="1"
+                IsChecked="{Binding StepReviewRequired, Mode=TwoWay}"
+                AutomationProperties.AutomationId="agents-step-review-required"
+                AutomationProperties.Name="{Binding [agents.review.stepRequired], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding [agents.review.stepRequiredHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <Grid ColumnDefinitions="200,*" Margin="0,9,0,0">
+      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding [agents.review.autoFix], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox Grid.Column="1"
+                IsChecked="{Binding ReviewAutoFix, Mode=TwoWay}"
+                AutomationProperties.AutomationId="agents-review-auto-fix"
+                AutomationProperties.Name="{Binding [agents.review.autoFix], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding [agents.review.autoFixHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <Grid ColumnDefinitions="200,*" Margin="0,9,0,0">
+      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding [agents.review.maxRounds], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinReviewRounds}"
+                     Maximum="{Binding MaxReviewRounds}"
+                     Increment="1"
+                     FormatString="0"
+                     IsEnabled="{Binding ReviewAutoFix}"
+                     Value="{Binding ReviewAutoFixMaxRounds, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="agents-review-max-rounds"
+                     AutomationProperties.Name="{Binding [agents.review.maxRounds], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding [agents.review.maxRoundsHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <TextBlock Classes="label" FontWeight="SemiBold" Margin="0,18,0,0" Text="{Binding [agents.groupChat], Source={x:Static loc:Loc.Instance}}" />
+    <!-- Thumbnail edge of tool-result images: the decode bound, never a re-encode of the stored image. -->
+    <Grid ColumnDefinitions="200,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [chat.settings.thumbnailEdge], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{x:Static set:ChatSettingsSectionViewModel.MinThumbnailEdgeDecimal}"
+                     Maximum="{x:Static set:ChatSettingsSectionViewModel.MaxThumbnailEdgeDecimal}"
+                     Increment="16"
+                     FormatString="0"
+                     Value="{Binding Chat.ThumbnailEdge, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="chat-thumbnail-edge"
+                     AutomationProperties.Name="{Binding [chat.settings.thumbnailEdge], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+
+    <!-- Whether the tool result's images reach the model; the transcript always shows them. -->
+    <Grid ColumnDefinitions="200,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [chat.settings.sendToolImages], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox Grid.Column="1"
+                IsChecked="{Binding Chat.SendToolImagesToModel, Mode=TwoWay}"
+                AutomationProperties.AutomationId="chat-send-tool-images"
+                AutomationProperties.Name="{Binding [chat.settings.sendToolImages], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+
+    <!-- Which Mermaid diagram types are drawn (wave W11); the accepted tokens are a constant, so they bind statically. -->
+    <Grid ColumnDefinitions="200,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [chat.settings.mermaidTypes], Source={x:Static loc:Loc.Instance}}" />
+      <StackPanel Grid.Column="1" Spacing="3">
+        <TextBox Text="{Binding Chat.MermaidTypes, Mode=TwoWay}"
+                 AutomationProperties.AutomationId="chat-mermaid-types"
+                 AutomationProperties.Name="{Binding [chat.settings.mermaidTypes], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [chat.settings.mermaidTypesHint], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{x:Static set:ChatSettingsSectionViewModel.KnownMermaidTypes}" />
+      </StackPanel>
+    </Grid>
+
+    <!-- Wall-clock bound of one diagram render; the preference clamps it to the same bounds as this control. -->
+    <Grid ColumnDefinitions="200,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [chat.settings.mermaidTimeout], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{x:Static set:ChatSettingsSectionViewModel.MinMermaidTimeoutDecimal}"
+                     Maximum="{x:Static set:ChatSettingsSectionViewModel.MaxMermaidTimeoutDecimal}"
+                     Increment="100"
+                     FormatString="0"
+                     Value="{Binding Chat.MermaidTimeoutMilliseconds, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="chat-mermaid-timeout"
+                     AutomationProperties.Name="{Binding [chat.settings.mermaidTimeout], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [chat.settings.hint], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
 </UserControl>

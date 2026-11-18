@@ -97,7 +97,7 @@
 - 思考行：`AgentThinkingDelta` 实时渲染成折叠的思考行、流式追加；思考不落库，重放没有思考行。
 - **Markdown 增量渲染**：标题、段落、列表与任务项、引用、表格、分隔线、链接、围栏代码块；用户消息按纯文本（不解析 Markdown）。渲染分“已定稿块前缀 + 未定稿区”：定稿边界是围栏代码块之外的最后空行，前缀只追加、永不重排；未定稿区每帧整体重解析，末尾同段/同标题只换 Inlines，同围栏只换 Text，列表与表格就地生长；超过 4096 字的单段落按行收口；`Complete()` 再对全文解析一次并逐块比对，不一致才整篇替换——最终渲染恒等于“对全文做一次块解析”。
 - 代码块：顶部语言标签 + 复制按钮，正文等宽、可横向滚动；`Update(text, info)` 就地换文本，流式不重建控件。每段回答文本各有复制按钮（整条纯文本 = 追加过的原文）。
-- Mermaid：` ```mermaid ` 代码块在聊天、diff 预览与计划面板本地渲染成图——Mermaider 解析 + 布局 + SVG → 颜色预处理（算 `color-mix`）→ Svg.Skia 解析成 `SKPicture` → 渲染线程矢量回放（不栅格化、不编码 PNG、DPI 自动清晰）。后台线程、限 2 并发、超时默认 2000 ms（500–30000）、缓存 24 条（源码 + 调色板 + 白名单为键，失败不缓存）；不联网：mermaider 元素/属性白名单消毒 + 拒绝任何非 `#` 开头的 `href`/`url(...)`/`@import`；流式未闭合围栏只显示源码，定稿才渲染；图类型白名单是 `chat` 分区的逗号列表（默认 flowchart/sequence/state/class/er，另有 pie/quadrant/timeline/gitGraph/mindmap/gantt/journey/c4/requirement/kanban/radar/treemap/venn/sankey/xychart/packet/architecture/block/treeview）。失败保留源码并显示渲染器原文（带行号时写“第 N 行”）、重试按钮与“让模型修正”（固定英文消息，交给块所属会话，忙则进草稿；后台标签页的块绝不把消息发进别的会话）。
+- Mermaid：` ```mermaid ` 代码块在聊天、diff 预览与计划面板本地渲染成图——Mermaider 解析 + 布局 + SVG → 颜色预处理（算 `color-mix`）→ Svg.Skia 解析成 `SKPicture` → 渲染线程矢量回放（不栅格化、不编码 PNG、DPI 自动清晰）。后台线程、限 2 并发、超时默认 2000 ms（500–30000）、缓存 24 条（源码 + 调色板 + 白名单为键，失败不缓存）；不联网：mermaider 元素/属性白名单消毒 + 拒绝任何非 `#` 开头的 `href`/`url(...)`/`@import`；流式未闭合围栏只显示源码，定稿才渲染；图类型白名单是 `agents` 合并页对话块的逗号列表（默认 flowchart/sequence/state/class/er，另有 pie/quadrant/timeline/gitGraph/mindmap/gantt/journey/c4/requirement/kanban/radar/treemap/venn/sankey/xychart/packet/architecture/block/treeview）。失败保留源码并显示渲染器原文（带行号时写“第 N 行”）、重试按钮与“让模型修正”（固定英文消息，交给块所属会话，忙则进草稿；后台标签页的块绝不把消息发进别的会话）。
 - 主题跟随：调色板取自界面表面/正文/强调/次要/边框令牌；主题变化与新挂回可视树时按新调色板重渲染（相同则不重渲）。
 
 ## 7.8 会话输入框（composer）
@@ -149,14 +149,13 @@
 |---|---|---|
 | `provider` 100 | AGENT | 提供商、密钥、模型目录、默认上下文窗口、缓存寿命、模型可见性（模型窗口首列）、内置 Agent 默认、压缩设置 |
 | `rate-limit` 115 | AGENT | 本地限速开关、请求/令牌预算、自动化间隔、每提供商覆盖 |
-| `agents` 120 | AGENT | 子 Agent 并发上限（1–16） |
+| `agents` 120 | AGENT | 合并页“对话与子 Agent”：子 Agent 并发上限（1–16）；评审四项（提供评审工具、完成步骤必须评审通过、评审意见自动修复、自动修复轮数上限 1–10），每项带作用说明；对话块（工具图片缩略图长边、是否把工具结果图片发给模型、Mermaid 图类型与渲染超时） |
 | `prompts` 130 | AGENT | 命令/Agent/内置提示词的编辑、复制、追加、还原 |
 | `web` 140 | AGENT | 搜索后端（brave/tavily/searxng/无）、SearXNG 地址、允许私网 |
 | `automations` 150 | AGENT | 自动化定义与运行历史 |
 | `appearance` 200 | 界面 | 界面/代码字体与字号、减少动画 |
 | `keymap` 210 | 界面 | 21 个可重绑动作、冲突检测、恢复默认 |
 | `language` 300 | 界面 | 跟随系统 / 中文 / English |
-| `chat` 320 | 界面 | 工具图片缩略图长边、是否把工具结果图片发给模型 |
 | `editor` 350 | 界面 | 编辑器显示开关、缩进、主题等默认值 |
 | `files` 360 | 界面 | CSV 预览行数、`.ipynb` 输出段上限、图片预览上限 |
 | `palette` 380 | 界面 | 每个来源结果上限、排除目录 |

@@ -66,7 +66,34 @@ internal static class AgentSettingsStrings
     [ModuleInitializer]
     internal static void Register()
     {
-        Loc.Register(AgentsSectionTitleKey, "子 Agent 运行", "Sub-agent runtime");
+        Loc.Register(AgentsSectionTitleKey, "对话与子 Agent", "Chat & sub-agents");
+        Loc.Register("agents.groupAgents", "子 Agent 运行", "Sub-agent runtime");
+        Loc.Register("agents.groupReview", "评审", "Review");
+        Loc.Register("agents.groupChat", "对话", "Chat");
+        Loc.Register(
+            "agents.review.intro",
+            "评审是让一个独立的评审会话检查 Agent 做完的改动。下面四项互相独立；pr_create 的闸门（评审通过、验证非空）是固定的，不受这些开关影响。",
+            "A review has an independent reviewer session check what the agent changed. The four settings below are independent; the pr_create gates (approved review, non-empty verification) are fixed and not affected by them.");
+        Loc.Register("agents.review.tool", "提供评审工具", "Offer the review tool");
+        Loc.Register(
+            "agents.review.toolHint",
+            "开：Agent 拿到 request_review 工具，可自行发起评审。关：不提供该工具，步骤闸门也随之失效（没有评审就无从要求）。改后对新建会话生效，已开的会话保持原样。",
+            "On: agents get the request_review tool and can start a review themselves. Off: the tool is not offered and the step gate stops applying (nothing to require without it). Applies to new sessions; open sessions keep their tools.");
+        Loc.Register("agents.review.stepRequired", "完成步骤必须先评审通过", "Require an approved review to finish a step");
+        Loc.Register(
+            "agents.review.stepRequiredHint",
+            "开：把有代码改动的 todo 步骤标为完成前，必须有针对当前改动的通过评审，且 verification 不能是“未验证”。关：Agent 可以不经评审直接完成步骤。每次尝试完成时读取，立即生效。",
+            "On: a todo step with code changes cannot be completed without an approving review of those changes and a verification that is not \"not verified\". Off: the agent may complete steps without review. Read on every completion attempt, so it applies at once.");
+        Loc.Register("agents.review.autoFix", "评审意见自动修复", "Fix review findings automatically");
+        Loc.Register(
+            "agents.review.autoFixHint",
+            "开：评审提出问题后，Agent 一次性修完所有问题并重新评审，直到通过或达到轮数上限。关：Agent 只向你汇报评审意见并等待你的指示，不自行修改。立即生效。",
+            "On: after a review finds problems the agent fixes them all in one pass and re-reviews, until it approves or the round limit is reached. Off: the agent only reports the findings to you and waits, changing nothing on its own. Applies at once.");
+        Loc.Register("agents.review.maxRounds", "自动修复轮数上限", "Auto-fix round limit");
+        Loc.Register(
+            "agents.review.maxRoundsHint",
+            "同一步骤“修复 → 重新评审”最多自动进行几轮（1–10）。达到上限后 Agent 必须向你说明情况并询问怎么办，不再继续循环。仅在开启自动修复时有效。",
+            "How many fix-and-re-review rounds one step may run automatically (1–10). At the limit the agent must explain the situation and ask you how to proceed instead of looping on. Only used while auto-fix is on.");
         Loc.Register(AgentsMaxParallelKey, "同时运行的 Agent 上限", "Agents running at once");
         Loc.Register(
             AgentsMaxParallelHintKey,
