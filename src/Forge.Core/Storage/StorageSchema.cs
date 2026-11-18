@@ -123,6 +123,24 @@ internal static class StorageSchema
             ended_at      TEXT NULL,
             PRIMARY KEY (session_id, turn)
         ) WITHOUT ROWID;
+
+        CREATE TABLE IF NOT EXISTS turn_metrics (
+            session_id            TEXT NOT NULL,
+            turn                  INTEGER NOT NULL,
+            started_at            TEXT NOT NULL,
+            ended_at              TEXT NOT NULL,
+            provider              TEXT NULL,
+            model                 TEXT NULL,
+            status                TEXT NOT NULL,
+            error                 TEXT NULL,
+            input_tokens          INTEGER NULL,
+            output_tokens         INTEGER NULL,
+            cache_read_tokens     INTEGER NULL,
+            cache_write_tokens    INTEGER NULL,
+            cache_write_1h_tokens INTEGER NULL,
+            tool_calls            INTEGER NULL,
+            PRIMARY KEY (session_id, turn)
+        ) WITHOUT ROWID;
         """;
 
     private const string V2SchemaSql = """
@@ -171,6 +189,7 @@ internal static class StorageSchema
         ("todos", ["id"], ["updated_at"]),
         ("ui_state", ["key"], ["updated_at"]),
         ("turn_checkpoints", ["session_id", "turn"], ["started_at", "ended_at"]),
+        ("turn_metrics", ["session_id", "turn"], ["started_at", "ended_at"]),
         ("plan_summaries", ["session_id"], ["updated_at"]),
         ("plan_summary_revisions", ["id"], ["replaced_at"]),
         ("todo_groups", ["id"], ["updated_at"]),

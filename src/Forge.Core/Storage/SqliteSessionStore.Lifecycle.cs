@@ -821,7 +821,7 @@ public sealed partial class SqliteSessionStore
                 }
             }
 
-            foreach (var table in new[] { "summaries", "todos", "todo_groups", "plan_summaries", "plan_summary_revisions", "turn_checkpoints" })
+            foreach (var table in new[] { "summaries", "todos", "todo_groups", "plan_summaries", "plan_summary_revisions", "turn_checkpoints", "turn_metrics" })
             {
                 await DeleteSessionRowsAsync(connection, transaction, table, json).ConfigureAwait(false);
             }
