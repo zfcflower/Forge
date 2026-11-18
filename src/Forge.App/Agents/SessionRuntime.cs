@@ -274,6 +274,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// <summary>What the chat can draw (diagrams, images, file links), told to the root; a snapshot per host like <see cref="orchestration"/>.</summary>
     private string chatRendering = string.Empty;
 
+    /// <summary>The prompt layers of the host being built, kept so the resource window can size them.</summary>
+    private PromptLayers? builtLayers;
+
     /// <summary>The model a default root runs on, kept so the decorated root definition is the same agent as the undecorated one.</summary>
     private ModelSettings rootModel;
 
@@ -1159,6 +1162,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         var mainModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model;
         var subAgents = CurrentSubAgentLimits();
         var layers = LayerSources.Resolve(systemSlot, AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
+        Volatile.Write(ref builtLayers, layers);
 
         // One orchestration snapshot per host, like the templates above: the skill index and the routing rule are bytes
         // in the root's cached prefix, so they must not move under a running turn. The product's own skills are the
@@ -1391,6 +1395,28 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
 
         return descriptors;
+    }
+
+    /// <summary>
+    /// What this session's tools, MCP servers and prompt sources cost in context, read from the host that was built (the same
+    /// snapshot the model is sent); empty until the first turn built the host. The size is the definition text, not a call count.
+    /// </summary>
+    internal ResourceUsage DescribeUsage()
+    {
+        AgentHost? current;
+        lock (gate)
+        {
+            current = disposed ? null : builtHost;
+        }
+
+        if (current is null)
+        {
+            return ResourceUsage.Empty;
+        }
+
+        var (builtIns, external) = current.AllTools;
+        var (groups, servers) = ResourceUsageBuilder.Tools(DescribeTools(), [.. builtIns, .. external]);
+        return new ResourceUsage(groups, servers, ResourceUsageBuilder.Prompts(Volatile.Read(ref builtLayers), orchestration, chatRendering));
     }
 
     private void DescribeExternal(List<ToolDescriptor> into)
