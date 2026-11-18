@@ -122,4 +122,7 @@ public sealed record GitNetworkOptions
 {
     /// <summary>Overrides <see cref="GitCli.NetworkTimeout"/>.</summary>
     public TimeSpan? Timeout { get; init; }
+
+    /// <summary>When set, git's own transport allowlist (<c>GIT_ALLOW_PROTOCOL</c>) for this one command.</summary>
+    public string? AllowedProtocols { get; init; }
 }

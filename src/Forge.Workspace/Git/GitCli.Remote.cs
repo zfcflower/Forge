@@ -846,6 +846,11 @@ public sealed partial class GitCli
         CancellationToken ct)
     {
         var environment = await BuildNetworkEnvironmentAsync(workingDirectory, ct).ConfigureAwait(false);
+        if (options?.AllowedProtocols is { Length: > 0 } allowed)
+        {
+            environment["GIT_ALLOW_PROTOCOL"] = allowed;
+        }
+
         var runOptions = new GitRunOptions { Timeout = options?.Timeout ?? NetworkTimeout };
         return await RunCoreAsync(workingDirectory, arguments, runOptions, environment, ct).ConfigureAwait(false);
     }

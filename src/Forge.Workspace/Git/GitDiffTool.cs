@@ -22,6 +22,14 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
     /// <summary>The most diff text one read shows; a single file larger than this is still shown whole when it comes first.</summary>
     internal const int MaxChars = 24_000;
 
+    /// <summary>
+    /// A file whose diff is longer than this is moved out of the tool result into an artifact by the agent loop (its default
+    /// <c>ArtifactThresholdChars</c>), so the model sees only a preview and the gate cannot tell what it read afterwards. Such
+    /// a file is still shown first, but it is neither counted as covered nor required: it is named in the output so the model
+    /// reads the whole artifact, and the gate does not wait for a coverage it can never observe.
+    /// </summary>
+    internal const int SpillChars = 32_000;
+
     private const int MaxListed = 100;
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(
@@ -201,10 +209,22 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
 
         var text = new StringBuilder(used + footer.Length);
         var shown = new List<string>(fit);
+        string? oversized = null;
         for (var i = 0; i < fit; i++)
         {
+            if (blocks[i].Length > SpillChars)
+            {
+                oversized = units[i].Path;
+                text.Append("# ").Append(oversized).Append(": this diff is longer than ")
+                    .Append(SpillChars.ToString(CultureInfo.InvariantCulture))
+                    .Append(" characters, so it may arrive as a preview with an artifact id; read the whole artifact with read_artifact. It is not tracked as covered by the pull-request gate.\n");
+            }
+            else
+            {
+                shown.Add(units[i].Path);
+            }
+
             text.Append(blocks[i]);
-            shown.Add(units[i].Path);
         }
 
         text.Append(footer);
@@ -212,7 +232,10 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
         var all = new List<string>(units.Count);
         foreach (var unit in units)
         {
-            all.Add(unit.Path);
+            if (!string.Equals(unit.Path, oversized, StringComparison.Ordinal))
+            {
+                all.Add(unit.Path);
+            }
         }
 
         return new DiffRead(text.ToString(), all, shown);

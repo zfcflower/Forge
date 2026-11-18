@@ -109,4 +109,48 @@ public sealed class ResponsesCacheFieldsTests : IDisposable
 
         Assert.Single(handler.Bodies);
     }
+
+    private sealed class Gate(int parties) : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int count;
+        private int attempts;
+
+        public int Resends => Volatile.Read(ref attempts) - parties;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            Interlocked.Increment(ref attempts);
+            if (!body.Contains("prompt_cache", StringComparison.Ordinal))
+            {
+                return Ok();
+            }
+
+            // Both requests are in flight with the fields before either one hears the refusal.
+            if (Interlocked.Increment(ref count) == parties)
+            {
+                arrived.SetResult();
+            }
+
+            await arrived.Task.WaitAsync(cancellationToken);
+            return Refuse("prompt_cache_key");
+        }
+    }
+
+    [Fact]
+    public async Task Two_requests_in_flight_when_the_gateway_refuses_each_get_their_own_resend()
+    {
+        var gate = new Gate(2);
+        var provider = new OpenAiResponsesProvider(
+            new ProviderConfig(id, "openai-responses", "https://gateway.example/v1", "k"),
+            new HttpClient(gate),
+            options: new ProviderOptions { SendPromptCacheKey = true, SendPromptCacheRetention = true });
+
+        var first = Drain(provider, Request());
+        var second = Drain(provider, Request());
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(2, gate.Resends);
+    }
 }

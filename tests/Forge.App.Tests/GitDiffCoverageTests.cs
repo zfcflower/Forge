@@ -132,6 +132,8 @@ public sealed class GitDiffCoverageTests : IDisposable
 
         Assert.True(text.Length > MaxChars);
         Assert.Contains("line 1999 of big.txt", text);
+        // Longer than the spill threshold: the model may only get a preview, so the gate neither counts it covered nor waits for it.
+        Assert.Contains("read_artifact", text);
         Assert.Empty(ledger.Unread(Session, repo, Head())!);
     }
 

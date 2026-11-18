@@ -23,6 +23,13 @@ internal sealed class RemotePairing
         "^[A-Za-z0-9+.-]+::",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    // "scheme://user:secret@host/...": the secret would be stored in .git/config and echoed by every later "git remote -v".
+    private static readonly System.Text.RegularExpressions.Regex UrlWithPassword = new(
+        "^[A-Za-z][A-Za-z0-9+.-]*://[^/@?#]*:[^/@?#]*@",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly GitNetworkOptions ProbeOptions = new() { AllowedProtocols = GitCli.AllowedCloneProtocols };
+
     private readonly GitCli git;
     private readonly ConfiguredGh gh;
 
@@ -49,8 +56,16 @@ internal sealed class RemotePairing
             return new GitRemoteResult(GitRemoteFailureKind.Other, "Remote-helper URLs (helper::address) are not accepted.", string.Empty);
         }
 
+        if (UrlWithPassword.IsMatch(url))
+        {
+            return new GitRemoteResult(
+                GitRemoteFailureKind.Other,
+                "A URL with an embedded password or token is not accepted: it would be stored in the repository config in plain text. Use the plain URL and a git credential helper (or ssh) instead.",
+                string.Empty);
+        }
+
         // A URL works wherever a remote name does; the ref is only a probe, an absent one is still "reachable".
-        var probe = await git.LsRemoteAsync(workingDirectory, url, "main", options: null, ct).ConfigureAwait(false);
+        var probe = await git.LsRemoteAsync(workingDirectory, url, "main", ProbeOptions, ct).ConfigureAwait(false);
         if (!probe.Result.Success)
         {
             return Redacted(probe.Result);
