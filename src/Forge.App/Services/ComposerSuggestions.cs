@@ -22,7 +22,7 @@ internal readonly record struct ComposerToken(ComposerTokenKind Kind, int Start,
 /// One entry of a slash picker: a command or a skill. <see cref="Path"/> is the skill's <c>SKILL.md</c> (empty for a
 /// command), so the settings page can say where a skill came from without discovering it a second time.
 /// </summary>
-internal sealed record SlashEntry(string Name, string Description, bool IsSkill, string Path = "", SkillScope Scope = SkillScope.None);
+internal sealed record SlashEntry(string Name, string Description, bool IsSkill, string Path = "", SkillScope Scope = SkillScope.None, bool IsWorkflow = false);
 
 /// <summary>
 /// The folder a discovered skill came from, as the settings page badges it. <see cref="BuiltIn"/>, <see cref="Global"/> and
@@ -295,12 +295,42 @@ internal static class SkillCatalog
                 name = string.IsNullOrWhiteSpace(name) ? Path.GetFileName(folder) : name;
                 if (names.Add(name))
                 {
-                    found.Add(new SlashEntry(name, description ?? string.Empty, IsSkill: true, file, scope));
+                    found.Add(new SlashEntry(name, description ?? string.Empty, IsSkill: true, file, scope, IsWorkflow: HasWorkflowFlag(text)));
                 }
             }
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// Whether the leading <c>---</c> block carries <c>workflow: true</c>: the skill is a workflow the composer's
+    /// orchestration picker may offer, wherever the skill lives. Absent or any other value means it is not.
+    /// </summary>
+    internal static bool HasWorkflowFlag(string text)
+    {
+        var lines = (text ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        if (lines.Length == 0 || lines[0].Trim() != "---")
+        {
+            return false;
+        }
+
+        for (var i = 1; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (line.Trim() == "---")
+            {
+                break;
+            }
+
+            var colon = line.Length > 0 && !char.IsWhiteSpace(line[0]) ? line.IndexOf(':', StringComparison.Ordinal) : -1;
+            if (colon > 0 && string.Equals(line[..colon].Trim(), "workflow", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Equals(Unquote(line[(colon + 1)..].Trim()), "true", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The <c>name</c> and <c>description</c> of a leading <c>---</c> block; folded (<c>&gt;</c>, <c>|</c>) values are joined.</summary>

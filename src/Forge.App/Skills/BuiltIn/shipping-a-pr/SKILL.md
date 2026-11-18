@@ -1,5 +1,6 @@
 ---
 name: shipping-a-pr
+workflow: true
 description: >-
   Use when finished work has to become a pull request, or when an existing pull request needs tending: creating it,
   bringing it up to date with its base, driving CI failures and review comments back into the code, or editing the

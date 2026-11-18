@@ -1,5 +1,6 @@
 ---
 name: brainstorming
+workflow: true
 description: >-
   Use after choosing-a-workflow routes a product behavior change here: a feature, a behavior change or a bug,
   however small. It interviews in rounds (product first, then design), records the answers in a temporary task

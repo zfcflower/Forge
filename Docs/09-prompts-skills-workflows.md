@@ -43,7 +43,7 @@
 
 ## 9.5 技能（Skills）
 
-- 目录形态：`SKILL.md`（frontmatter `name`/`description`）+ 可选的 `scripts/` 等；语义是“模型按描述自取”，与用户触发的命令不同。
+- 目录形态：`SKILL.md`（frontmatter `name`/`description`，可选 `workflow: true`，见 9.6）+ 可选的 `scripts/` 等；语义是“模型按描述自取”，与用户触发的命令不同。
 - **四层发现，先到先得**：
   1. 工作区 `.github/skills`（徽标 `内置`）
   2. 工作区 `.forge/skills`（`项目`）
@@ -62,6 +62,15 @@
 - 用户选定的 Agent 种类若带显式工具白名单且不含 `skill`，不注入；索引与路由是每次建宿主的快照。
 - 开关 `preferences.orchestrationEnabled`（默认开）：关掉即不注入；四份内置技能是模型输入，英文、不本地化。
 - 编排的约束力是混合的：路由、头脑风暴、计划都是**提示引导**（Agent 可以不遵守）；两个节点由代码强制——改了代码的 TODO 步骤标 done 要过步骤完成门禁（02.7），`pr_create` 要求本会话计划的分组步骤全部 done（04.7）。步骤门禁与自动修复的开关见 02.7（`reviewToolEnabled`/`stepReviewRequired`/`reviewAutoFix`）；`pr_create` 的闸门不可关。
+
+### 自定义编排
+
+要加一套自己的工作流（例如“紧急修复”：不访谈、直接定位、派 Worker 改、Reviewer 审、再提 PR），路径如下：
+
+1. **写工作流技能**：放进 `.forge/skills/<name>/SKILL.md`（项目）或 `~/.forge/skills/<name>/SKILL.md`（全局），frontmatter 写 `workflow: true`。带这个标记的技能（产品内置的 `brainstorming`、`shipping-a-pr` 也带）会出现在输入区“编排”选择器里，可为下一条消息单独选用；选中后该消息头部带指令“跳过路由，用 `skill` 工具读它并照做”。没有标记的技能照常进技能索引，只是不进选择器；路由技能和 `todos` 不是工作流，不要标。
+2. **让自动路由认识它**：路由规则写在 `choosing-a-workflow` 里，目前没有登记表；要让 Auto 模式也选它，需用同名技能整体覆盖 `choosing-a-workflow`（在决策表里加一行）。只靠选择器手选则不用覆盖。
+3. **谁执行**：工作流正文自己写。主会话默认自己执行；要委派，在正文里写“用 `spawn_agent` 派 Worker 做某步、`request_review` 让 Reviewer 评”。子 Agent 能用哪些工具由它的 Agent 文件（`tools` 白名单）决定，技能里不能声明；子 Agent 不会收到编排，也不会再去路由。Reviewer 同名 Agent 文件可覆盖其提示词与白名单。
+4. **门禁**：步骤完成门禁（改了代码的步骤标 done 要过 `request_review`）与 `pr_create` 的闸门是代码强制的，工作流技能不能新增或放宽；步骤门禁按 02.7 的三个设置分别开关，`pr_create` 闸门不可关。
 
 ## 9.7 两种“工作流”形态
 

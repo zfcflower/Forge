@@ -506,12 +506,12 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     {
         var found = await Task.Run(LoadSkills).ConfigureAwait(true);
         var workflows = new List<ComposerOrchestrationOption>();
-        // Only the workflows FORGE ships: the router decides among them, and todos is the plan panel's rule, not a workflow.
+        // Every skill that declares `workflow: true` (FORGE's own and the user's or workspace's); the router and the
+        // plan panel's todos rule do not, and a router a user copied over does not become a pick.
         foreach (var skill in found)
         {
-            if (skill.IsSkill && skill.Scope == SkillScope.Product &&
-                !string.Equals(skill.Name, OrchestrationPrompt.RouterSkillName, StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(skill.Name, "todos", StringComparison.OrdinalIgnoreCase))
+            if (skill.IsSkill && skill.IsWorkflow &&
+                !string.Equals(skill.Name, OrchestrationPrompt.RouterSkillName, StringComparison.OrdinalIgnoreCase))
             {
                 workflows.Add(new ComposerOrchestrationOption(OrchestrationChoice.ForWorkflow(skill.Name), skill.Description));
             }
