@@ -260,9 +260,10 @@ public sealed class StepGate
                 return StepGateDecision.Allow;
         }
 
-        if (step.BaselineTree is { } baseline && change.Tree is { } current && string.Equals(baseline, current, StringComparison.Ordinal))
+        if (change.State == StepChangeState.Clean && step.BaselineTree is { } baseline && change.Tree is { } current && string.Equals(baseline, current, StringComparison.Ordinal))
         {
-            // The worktree is exactly what it was when the step started: nothing of this step is left to judge.
+            // Clean and exactly what it was when the step started: nothing of this step is left to judge. A Dirty worktree never
+            // takes this shortcut: edits made before the step started are in the baseline, and the step's commit would take them in.
             return StepGateDecision.Allow;
         }
 

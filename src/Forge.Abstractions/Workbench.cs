@@ -131,7 +131,7 @@ public interface ITodoStore
     /// <para>The default body serves stores that predate step fields (alternate implementations): without step values it is the plain
     /// update, with them it throws <see cref="NotSupportedException"/>. <c>SqliteTodoStore</c> overrides every new member.</para>
     Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, TodoStepFields? step, CancellationToken ct) =>
-        step is null || (step.CommitSubject is null && step.Summary is null && step.Verification is null)
+        step is null || (step.CommitSubject is null && step.Summary is null && step.Verification is null && step.BaselineTree is null)
             ? UpdateAsync(id, title, status, note, ct)
             : throw new NotSupportedException("This todo store does not keep step fields.");
 

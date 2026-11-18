@@ -159,6 +159,13 @@ public sealed class RequestReviewTool : ITool
             Paths = arguments.Paths,
         };
 
+        // The fingerprint covers the whole worktree and is taken before the change set is read, so an edit landing in between is
+        // never inside the fingerprint without being in the diff. A review narrowed with paths saw only part of the worktree,
+        // so it carries no fingerprint and the step gate never accepts it.
+        var tree = arguments.StepId is not null && arguments.Paths.Count == 0
+            ? await TakeTreeAsync(context, ct).ConfigureAwait(false)
+            : null;
+
         var result = await changeSets.BuildAsync(request, ct).ConfigureAwait(false);
         if (result.ChangeSet is not { } changeSet)
         {
@@ -171,9 +178,6 @@ public sealed class RequestReviewTool : ITool
         {
             return new ToolResult($"Nothing to review: {DescribeEmpty(changeSet, request.Commit is not null)}. No reviewer was started.");
         }
-
-        // The fingerprint is taken before the reviewer starts, so the verdict is bound to what the reviewer is shown.
-        var tree = arguments.StepId is not null ? await TakeTreeAsync(context, ct).ConfigureAwait(false) : null;
 
         var package = ReviewPackageText.Render(brief, changeSet, limits?.Invoke());
         SubAgentOutcome outcome;
@@ -257,14 +261,6 @@ public sealed class RequestReviewTool : ITool
         return new ToolResult(builder.ToString());
     }
 
-    /// <summary>
-    /// Records what the review ended with, so the verdict outlives the turn (wave W17b). Best effort by contract: a store
-    /// that fails leaves the tool result exactly as it is, because a review that ran must reach the caller even when the
-    /// row cannot be written - and a review that did not run (bad arguments, an unreadable change set, an empty one) is not
-    /// recorded at all: no row is better than a row that reads like a review.
-    /// <para>The write ignores the caller's cancellation: the review is already over, and cancelling the turn a moment later
-    /// must not be the reason a verdict disappears from the history.</para>
-    /// </summary>
     /// <summary>The worktree fingerprint the step verdict is bound to; null when there is no probe or it cannot tell. Only cancellation throws.</summary>
     private async Task<string?> TakeTreeAsync(ToolContext context, CancellationToken ct)
     {
@@ -288,6 +284,14 @@ public sealed class RequestReviewTool : ITool
         }
     }
 
+    /// <summary>
+    /// Records what the review ended with, so the verdict outlives the turn (wave W17b). Best effort by contract: a store
+    /// that fails leaves the tool result exactly as it is, because a review that ran must reach the caller even when the
+    /// row cannot be written - and a review that did not run (bad arguments, an unreadable change set, an empty one) is not
+    /// recorded at all: no row is better than a row that reads like a review.
+    /// <para>The write ignores the caller's cancellation: the review is already over, and cancelling the turn a moment later
+    /// must not be the reason a verdict disappears from the history.</para>
+    /// </summary>
     private async ValueTask RecordAsync(
         ToolContext context,
         TodoItem? step,

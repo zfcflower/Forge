@@ -92,7 +92,18 @@ internal sealed class GitStepChangeProbe : IStepChangeProbe
             var changes = await git.GetStatusAsync(directory, includeUntracked: true, ct).ConfigureAwait(false);
 
             // The content fingerprint of the whole worktree (a temporary index: the user's index, HEAD and refs stay untouched).
-            var tree = await git.SnapshotTreeAsync(directory, ct).ConfigureAwait(false);
+            // A snapshot that fails (a locked or over-long untracked file) leaves the fingerprint out instead of making the whole
+            // answer Unknown: a step that needs no fingerprint (nothing changed) must not get stuck on it, and a verdict without
+            // one is simply never accepted by the gate.
+            string? tree = null;
+            try
+            {
+                tree = await git.SnapshotTreeAsync(directory, ct).ConfigureAwait(false);
+            }
+            catch (Exception snapshotFailure) when (IsExpected(snapshotFailure))
+            {
+            }
+
             return changes.Count == 0
                 ? new StepChangeProbe(StepChangeState.Clean, Tree: tree)
                 : new StepChangeProbe(
