@@ -11,30 +11,9 @@
   <ContentControl Content="{Binding QuestionBody}" IsVisible="{Binding IsQuestionCard}">
     <ContentControl.ContentTemplate>
       <DataTemplate x:DataType="vm:ToolRowViewModel">
-      <Border Classes="turn-card" Padding="10" Margin="0,2">
-        <StackPanel Spacing="6">
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="label" Text="{Binding [questions.card.title], Source={x:Static loc:Loc.Instance}}" />
-            <TextBlock Grid.Column="1" Classes="caption" Text="{Binding QuestionStatusText}" />
-          </Grid>
-          <ItemsControl ItemsSource="{Binding QuestionItems}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:QuestionCardItem">
-                <StackPanel Spacing="2" Margin="0,4,0,0">
-                  <Border Classes="notice" HorizontalAlignment="Left" Padding="6,1">
-                    <TextBlock Classes="caption" Text="{Binding Header}" />
-                  </Border>
-                  <TextBlock Text="{Binding Prompt}" TextWrapping="Wrap" />
-                  <SelectableTextBlock Text="{Binding Answer}"
-                                       TextWrapping="Wrap"
-                                       FontWeight="SemiBold"
-                                       IsVisible="{Binding HasAnswer}" />
-                </StackPanel>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </StackPanel>
-      </Border>
+        <Border Classes="turn-card" Padding="10" Margin="0,2">
+          <views:QuestionCardView />
+        </Border>
       </DataTemplate>
     </ContentControl.ContentTemplate>
   </ContentControl>

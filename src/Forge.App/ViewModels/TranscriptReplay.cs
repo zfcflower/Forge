@@ -69,17 +69,22 @@ internal static class TranscriptReplay
                 break;
             case MessageRole.Assistant:
                 var card = transcript.Current ?? transcript.BeginTurn(at);
-                var content = TextOf(message);
-                if (content.Length > 0)
-                {
-                    card.AppendText(content);
-                }
 
+                // The content is replayed in its stored order: a provider records the reasoning of a request before the answer
+                // of that request, and a reopened session must show the thinking rows the live one showed.
                 foreach (var block in message.Content)
                 {
-                    if (block is ToolCallBlock call)
+                    switch (block)
                     {
-                        card.AddTool(new ToolCall(call.Id, call.Name, call.ArgumentsJson));
+                        case TextBlock piece when piece.Text.Length > 0:
+                            card.AppendText(piece.Text);
+                            break;
+                        case ThinkingBlock thinking when thinking.Text.Length > 0:
+                            card.AppendThinking(thinking.Text);
+                            break;
+                        case ToolCallBlock call:
+                            card.AddTool(new ToolCall(call.Id, call.Name, call.ArgumentsJson));
+                            break;
                     }
                 }
 

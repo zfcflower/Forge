@@ -98,7 +98,17 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     /// The card's one body line: what went in, or — for a call that carries no input — what came out. The status is never
     /// this line: the card's own status icon already says it.
     /// </summary>
-    public string CardBody => HasInput ? Headline : OutputLine;
+    public string CardBody => IsQuestionCard ? QuestionSummary : HasInput ? Headline : OutputLine;
+
+    /// <summary>The question itself for an <c>ask_user</c> card, in place of the arguments JSON nobody answers.</summary>
+    private string QuestionSummary
+    {
+        get
+        {
+            var items = QuestionItems;
+            return items.Count > 0 && items[0].Prompt.Length > 0 ? items[0].Prompt : Name;
+        }
+    }
 
     /// <summary>True once the call returned without failing; the card's check.</summary>
     public bool IsSucceeded => HasResult && !IsError;

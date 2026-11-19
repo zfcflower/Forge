@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             x:Class="Forge.App.Views.QuestionCardView"
+             x:DataType="vm:ToolRowViewModel">
+  <!-- An ask_user call, as the user saw it: the questions, every option the model offered (the picked one marked), and the
+       answer. It replaces the plain tool body, whose raw JSON is for the model, not for the person answering. -->
+  <StackPanel Spacing="6">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Classes="label" Text="{Binding [questions.card.title], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Grid.Column="1" Classes="caption" Text="{Binding QuestionStatusText}" />
+    </Grid>
+    <ItemsControl ItemsSource="{Binding QuestionItems}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:QuestionCardItem">
+          <StackPanel Spacing="4" Margin="0,2,0,0">
+            <Border Classes="notice" HorizontalAlignment="Left" Padding="6,1">
+              <TextBlock Classes="caption" Text="{Binding Header}" />
+            </Border>
+            <TextBlock Text="{Binding Prompt}" TextWrapping="Wrap" />
+            <ItemsControl ItemsSource="{Binding Options}" IsVisible="{Binding HasOptions}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:QuestionOptionItem">
+                  <Border Classes="question-option" Classes.chosen="{Binding IsChosen}" Margin="0,2,0,0">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <wc:FluentIcon Data="{StaticResource IconCheck}"
+                                     Width="12"
+                                     Height="12"
+                                     Margin="0,1,6,0"
+                                     VerticalAlignment="Top"
+                                     IsVisible="{Binding IsChosen}"
+                                     Foreground="{DynamicResource BrandActionBrush}" />
+                      <StackPanel Grid.Column="1" Spacing="1">
+                        <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+                        <TextBlock Classes="caption"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding Description}"
+                                   IsVisible="{Binding HasDescription}" />
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <SelectableTextBlock Text="{Binding Answer}"
+                                 TextWrapping="Wrap"
+                                 FontWeight="SemiBold"
+                                 IsVisible="{Binding HasAnswer}" />
+          </StackPanel>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

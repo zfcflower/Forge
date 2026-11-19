@@ -3,10 +3,18 @@ using Forge.App.Localization;
 
 namespace Forge.App.ViewModels;
 
-/// <summary>One question of an <c>ask_user</c> call as the transcript shows it: header, prompt and the user's answer.</summary>
-internal sealed record QuestionCardItem(string Header, string Prompt, string Answer)
+/// <summary>One option of an <c>ask_user</c> question: what it says and whether the user picked it.</summary>
+internal sealed record QuestionOptionItem(string Label, string Description, bool IsChosen)
+{
+    public bool HasDescription => Description.Length > 0;
+}
+
+/// <summary>One question of an <c>ask_user</c> call as the transcript shows it: header, prompt, the options and the answer.</summary>
+internal sealed record QuestionCardItem(string Header, string Prompt, string Answer, IReadOnlyList<QuestionOptionItem> Options)
 {
     public bool HasAnswer => Answer.Length > 0;
+
+    public bool HasOptions => Options.Count > 0;
 }
 
 // The Q&A card of an ask_user call. It is stateless: everything comes from the call's arguments and result text, so it looks
@@ -70,6 +78,7 @@ internal sealed partial class ToolRowViewModel
         OnPropertyChanged(nameof(QuestionBody));
         OnPropertyChanged(nameof(QuestionItems));
         OnPropertyChanged(nameof(QuestionStatusText));
+        OnPropertyChanged(nameof(CardBody));
     }
 
     /// <summary>Turns the model-facing wording of one answer into the user's language.</summary>
@@ -145,7 +154,7 @@ internal sealed partial class ToolRowViewModel
                     }
                 }
 
-                items.Add(new QuestionCardItem(header, prompt, answer));
+                items.Add(new QuestionCardItem(header, prompt, answer, OptionsOf(element, answer)));
             }
         }
         catch (JsonException)
@@ -154,5 +163,33 @@ internal sealed partial class ToolRowViewModel
         }
 
         return items;
+    }
+
+    /// <summary>
+    /// The options the call offered, each marked with whether the answer picked it. The model-facing answer lists the chosen
+    /// labels separated by "; " (free text rides along as "other: …"), so a segment that equals a label is a pick.
+    /// </summary>
+    private static IReadOnlyList<QuestionOptionItem> OptionsOf(JsonElement question, string answer)
+    {
+        if (!question.TryGetProperty("options", out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var chosen = answer.Split("; ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var options = new List<QuestionOptionItem>(array.GetArrayLength());
+        foreach (var element in array.EnumerateArray())
+        {
+            var label = element.TryGetProperty("label", out var l) && l.ValueKind == JsonValueKind.String ? l.GetString() ?? string.Empty : string.Empty;
+            if (label.Length == 0)
+            {
+                continue;
+            }
+
+            var description = element.TryGetProperty("description", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() ?? string.Empty : string.Empty;
+            options.Add(new QuestionOptionItem(label, description, Array.IndexOf(chosen, label) >= 0));
+        }
+
+        return options;
     }
 }

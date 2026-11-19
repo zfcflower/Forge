@@ -336,7 +336,9 @@ internal sealed class TranscriptFollower
             }
         }
 
-        if (stickyIndex >= 0 && list.ItemsSource is IList all && all[stickyIndex] is UserMessageViewModel message)
+        if (stickyIndex >= 0 && list.ItemsSource is IList all
+            && all[stickyIndex] is TranscriptRoundViewModel { Rows.Count: > 0 } stickyRound
+            && stickyRound.Rows[0] is UserMessageViewModel message)
         {
             stickyText.Text = message.Text;
             sticky.IsVisible = true;

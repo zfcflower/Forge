@@ -184,11 +184,22 @@ internal sealed class NoticeViewModel(LocText text, bool isError = false, Timeli
 internal sealed class TurnToolGroupViewModel : TurnBlockViewModel
 {
     private readonly ObservableCollection<ToolRowViewModel> tools = [];
+    private readonly ObservableCollection<object> items = [];
     private ToolRowViewModel? open;
 
-    public TurnToolGroupViewModel() => Tools = new ReadOnlyObservableCollection<ToolRowViewModel>(tools);
+    public TurnToolGroupViewModel()
+    {
+        Tools = new ReadOnlyObservableCollection<ToolRowViewModel>(tools);
+        Items = new ReadOnlyObservableCollection<object>(items);
+    }
 
     public ReadOnlyObservableCollection<ToolRowViewModel> Tools { get; }
+
+    /// <summary>
+    /// What the grid draws, in order: the cards, and — right after the row that holds it — the open call's body. One flat
+    /// sequence with one item host: the panel below gives the body the full width, so no second list is nested in the grid.
+    /// </summary>
+    public ReadOnlyObservableCollection<object> Items { get; }
 
     /// <summary>The one call whose body is open, or null; the grid always shows every card.</summary>
     public ToolRowViewModel? Open => open;
@@ -233,6 +244,31 @@ internal sealed class TurnToolGroupViewModel : TurnBlockViewModel
     {
         tool.PropertyChanged += OnToolChanged;
         tools.Add(tool);
+        Rebuild();
+    }
+
+    /// <summary>Rebuilds the flat item sequence after the run grows or a card opens or closes.</summary>
+    private void Rebuild()
+    {
+        items.Clear();
+        for (var i = 0; i < tools.Count; i += 4)
+        {
+            var end = Math.Min(i + 4, tools.Count);
+            ToolRowViewModel? openInRow = null;
+            for (var j = i; j < end; j++)
+            {
+                items.Add(tools[j]);
+                if (tools[j].IsExpanded)
+                {
+                    openInRow = tools[j];
+                }
+            }
+
+            if (openInRow is not null)
+            {
+                items.Add(new ToolOpenViewModel(openInRow));
+            }
+        }
     }
 
     private void OnToolStateChanged()
@@ -273,7 +309,14 @@ internal sealed class TurnToolGroupViewModel : TurnBlockViewModel
 
         OnPropertyChanged(nameof(Open));
         OnPropertyChanged(nameof(HasOpen));
+        Rebuild();
     }
+}
+
+/// <summary>The open call's body inside a tool card grid: it takes the whole width under the row it was clicked in.</summary>
+internal sealed class ToolOpenViewModel(ToolRowViewModel tool)
+{
+    public ToolRowViewModel Tool { get; } = tool;
 }
 
 /// <summary>Base of the blocks inside a turn card: reply text, tool rows and notes, in arrival order.</summary>
@@ -1122,10 +1165,10 @@ internal sealed class TranscriptViewModel : ObservableObject
         var host = new TranscriptRoundViewModel();
         host.RowList.Add(message);
         rounds.Add(host);
-        if (!CollapseOlderTurns)
-        {
-            pendingRound = host;
-        }
+
+        // A user message opens the round its turn joins, in both transcript shapes: a sub-agent round then holds the task row
+        // and the turn below it, so the axis between them is continuous instead of being cut between two rounds.
+        pendingRound = host;
 
         OnPropertyChanged(nameof(IsEmpty));
     }
@@ -1172,7 +1215,7 @@ internal sealed class TranscriptViewModel : ObservableObject
 
         current = card;
         card.Owner = this;
-        var claimed = !CollapseOlderTurns && pendingRound is { } pending;
+        var claimed = pendingRound is { };
         var host = claimed ? pendingRound! : new TranscriptRoundViewModel();
         pendingRound = null;
         host.Card = card;

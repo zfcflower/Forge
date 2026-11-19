@@ -235,6 +235,20 @@
     <Setter Property="Padding" Value="8,6" />
   </Style>
 
+  <!-- One option of an ask_user question: an inset row, marked when the user picked it. -->
+  <Style Selector="Border.question-option">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+    <Setter Property="Padding" Value="6,4" />
+  </Style>
+
+  <Style Selector="Border.question-option.chosen">
+    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
+  </Style>
+
   <Style Selector="Border.notice">
     <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
