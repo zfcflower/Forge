@@ -123,6 +123,28 @@ public sealed class TranscriptRoundsTests
     }
 
     [Fact]
+    public void A_running_turn_shows_the_working_row_only_while_nothing_is_in_flight()
+    {
+        var transcript = MainTranscript();
+        transcript.AddUserMessage("go", At);
+        var card = transcript.BeginTurn(At);
+
+        // The turn started and nothing else arrived yet: the row is there.
+        Assert.Contains(transcript.FlatRows(), row => row is TurnWorkingViewModel);
+
+        // Reasoning that just arrived speaks for the turn: the row leaves.
+        card.AppendThinking("thinking about it");
+        Assert.DoesNotContain(transcript.FlatRows(), row => row is TurnWorkingViewModel);
+
+        card.AppendText("answer");
+        Assert.DoesNotContain(transcript.FlatRows(), row => row is TurnWorkingViewModel);
+
+        // The turn ends: nothing is left to announce.
+        transcript.EndTurn(TimeSpan.FromSeconds(2), null);
+        Assert.DoesNotContain(transcript.FlatRows(), row => row is TurnWorkingViewModel);
+    }
+
+    [Fact]
     public void A_typed_answer_gets_an_option_card_of_its_own()
     {
         var row = new ToolRowViewModel(

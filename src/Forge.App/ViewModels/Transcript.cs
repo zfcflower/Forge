@@ -442,18 +442,20 @@ internal sealed class TurnThinkingViewModel : TurnBlockViewModel
 
     private static string Collapse(string raw)
     {
-        if (raw.IndexOf("\n\n\n", StringComparison.Ordinal) < 0)
+        if (raw.IndexOf("\n\n", StringComparison.Ordinal) < 0)
         {
             return raw;
         }
 
+        // One line break between paragraphs: the text block's own line height (1.6x the font size) is the spacing, so a
+        // literal blank line would double it and read as a hole in the block.
         var builder = new StringBuilder(raw.Length);
         var newlines = 0;
         foreach (var character in raw)
         {
             if (character == '\n')
             {
-                if (++newlines <= 2)
+                if (++newlines <= 1)
                 {
                     builder.Append(character);
                 }
@@ -559,6 +561,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     private TurnToolGroupViewModel? openToolGroup;
     private TurnFootnoteViewModel? footnoteRow;
     private TurnDividerViewModel? dividerRow;
+    private TurnWorkingViewModel? workingRow;
     private LocText footnote;
     private TimeSpan? lastElapsed;
     private bool isExpanded = true;
@@ -644,6 +647,23 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 
     /// <summary>The row after the card's blocks that shows the footnote; created on first use.</summary>
     internal TurnFootnoteViewModel FootnoteRow => footnoteRow ??= new TurnFootnoteViewModel(this);
+
+    /// <summary>The "what happens next" row of a running turn; created on first use.</summary>
+    internal TurnWorkingViewModel WorkingRow => workingRow ??= new TurnWorkingViewModel(this);
+
+    /// <summary>
+    /// Whether the turn is running but has nothing in flight to show. The working row speaks then: it is the difference
+    /// between "the agent is thinking" and "the case is closed", which an empty transcript would otherwise leave to the clock.
+    /// </summary>
+    public bool IsWorking => isRunning && !IsProducing;
+
+    /// <summary>Something is streaming or a tool is running: the turn's own content already says what it is doing.</summary>
+    private bool IsProducing =>
+        openText is { IsStreaming: true }
+        || openThinking is { IsStreaming: true }
+        || blocks.OfType<TurnToolGroupViewModel>().Any(group => group.IsRunning);
+
+    private void NotifyWorking() => Owner?.WorkingChanged(this);
 
     /// <summary>The user message that opened this turn, set by the transcript when the turn begins.</summary>
     internal UserMessageViewModel? UserMessage { get; set; }
@@ -795,6 +815,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         }
 
         openText.Append(chunk);
+        NotifyWorking();
     }
 
     /// <summary>
@@ -813,6 +834,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         }
 
         openThinking.Append(chunk);
+        NotifyWorking();
     }
 
     /// <summary>Adds a running tool call's row and hands it back: the session attaches the live state (wave W8).</summary>
@@ -833,6 +855,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         }
 
         openToolGroup.Add(row);
+        NotifyWorking();
         return row;
     }
 
@@ -841,6 +864,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         if (toolRows.Remove(call.Id, out var row))
         {
             row.Complete(result);
+            NotifyWorking();
             return;
         }
 
@@ -869,6 +893,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     {
         openText?.Complete();
         openText = null;
+        NotifyWorking();
     }
 
     /// <summary>Closes the open reasoning stretch once the answer starts, or once another block takes over.</summary>
@@ -876,6 +901,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     {
         openThinking?.Complete();
         openThinking = null;
+        NotifyWorking();
     }
 
     public void AddUsage(TokenUsage usage, StopReason stopReason)
@@ -912,6 +938,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         OnPropertyChanged(nameof(HasFootnote));
         Owner?.FootnoteChanged(this);
         Owner?.DividerChanged(this);
+        NotifyWorking();
         foreach (var row in toolRows.Values)
         {
             if (row.Status == "…")
@@ -950,6 +977,20 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 }
 
 /// <summary>The closing row of a turn that failed or was stopped: its footnote, as a row of its own in the flat transcript.</summary>
+/// <summary>
+/// The transient row of a running turn that has nothing else to show: what the agent is about to do. It lives while
+/// <see cref="TurnCardViewModel.IsWorking"/> is true, and leaves the transcript the moment output, reasoning or a tool call
+/// takes over, or the turn ends.
+/// </summary>
+internal sealed class TurnWorkingViewModel(TurnCardViewModel card) : TranscriptItemViewModel
+{
+    public TurnCardViewModel Card { get; } = card;
+
+    public string Text => SessionStrings.TurnWorking;
+
+    public override void RefreshText() => OnPropertyChanged(nameof(Text));
+}
+
 internal sealed class TurnFootnoteViewModel(TurnCardViewModel card) : TranscriptItemViewModel
 {
     public TurnCardViewModel Card { get; } = card;
@@ -1271,6 +1312,9 @@ internal sealed class TranscriptViewModel : ObservableObject
 
         items.Add(card);
         OnPropertyChanged(nameof(IsEmpty));
+
+        // A fresh turn has nothing in flight yet: its working row says so from the first frame.
+        WorkingChanged(card);
         return card;
     }
 
@@ -1317,6 +1361,32 @@ internal sealed class TranscriptViewModel : ObservableObject
             {
                 rows.RemoveAt(header + 1);
             }
+        }
+    }
+
+    /// <summary>
+    /// A card started or stopped waiting: the "what happens next" row is the last row of the turn's blocks while nothing is in
+    /// flight, and leaves as soon as something is (or the turn ends).
+    /// </summary>
+    internal void WorkingChanged(TurnCardViewModel card)
+    {
+        if (card.Host?.RowList is not { } rows)
+        {
+            return;
+        }
+
+        var row = card.WorkingRow;
+        var at = IndexOf(rows, row);
+        if (card.IsWorking)
+        {
+            if (at < 0 && EndOfBlocks(card) is var insert && insert >= 0)
+            {
+                rows.Insert(insert, row);
+            }
+        }
+        else if (at >= 0)
+        {
+            rows.RemoveAt(at);
         }
     }
 

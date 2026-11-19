@@ -99,6 +99,7 @@ internal static class SessionStrings
     // ---------------------------------------------------------------- turn card and the notices around it
     public const string TurnHeaderKey = "turn.header";
     public const string TurnRunningKey = "turn.running";
+    public const string TurnWorkingKey = "turn.working";
     public const string TurnTokenSummaryKey = "turn.tokenSummary";
     public const string TurnCollapseKey = "turn.collapse";
     public const string ToolArgumentsKey = "turn.toolArguments";
@@ -362,6 +363,9 @@ internal static class SessionStrings
             running ? TurnRunning : elapsed is { } value ? TextFormat.Elapsed(value) : TextFormat.None,
             TextFormat.Number(inputTokens),
             TextFormat.Number(outputTokens));
+
+    /// <summary>The row a busy turn shows while nothing has arrived yet: what it is doing right now.</summary>
+    public static string TurnWorking => Loc.Instance[TurnWorkingKey];
 
     public static string TurnRunning => Loc.Instance[TurnRunningKey];
 
@@ -647,6 +651,7 @@ internal static class SessionStrings
         // turn card and its notices
         Loc.Register(TurnHeaderKey, "第 {0} 轮 · {1} · {2} · 输入 {3} · 输出 {4}", "Turn {0} · {1} · {2} · in {3} · out {4}");
         Loc.Register(TurnRunningKey, "运行中…", "Running…");
+        Loc.Register(TurnWorkingKey, "正在处理下一步…", "Working on the next step…");
         Loc.Register(TurnTokenSummaryKey, "输入 {0} · 输出 {1}", "in {0} · out {1}");
         Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");
         Loc.Register(ToolArgumentsKey, "参数", "Arguments");
