@@ -34,6 +34,25 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 - 生命周期 Started(父发出)→ 仅在确实等名额时 Queued → Running → 每个 run 恰一次 Finished(在调度器 `finally` 中,含异常与父取消;父取消记为 Stopped "parent cancelled")。用量为本 run 增量,耗时从 spawn 起算(含排队)。
 - `runs` 只保存运行中的 run,结束即移除并释放其 CTS 与父令牌注册;已结束 id 记入紧凑集合以继续返回 `AlreadyFinished`;`instances` 保留以支持按 id 续跑。
 
+**Agent 会话(用户驱动的子会话;已定、未实现,设计记录 2026-11-19)。** 用户在活动根会话下手动增加的子会话:存储形态与模型派生的子 Agent 相同(`parent_session_id` = 根、继承根的项目与 worktree、深度 1),区别只在**由谁驱动**。不变量:
+- 不参与占用索引(`ux_sessions_occupancy` 只约束 `parent_session_id IS NULL`,不改索引);一个工作区仍只有一个活动根会话。
+- 实例跑在**根会话的 `AgentHost`** 里,共用工具面、审批处理、取消表、树内并发名额与限速;每条用户消息是一轮,占一个树内名额,名额满时排队。深度 1,可再派生一层(深度 2 的 Agent 由 `ToolRegistry.Select` 剔除派生与控制工具)。
+- 宿主入口**多数已存在**:`RunAsync(instance, message)` 就是对已有实例跑一轮;`ResumeRootAsync(sessionId, workingDirectory, ct, definition)` 本来就是从子会话存储重建实例(复用 `SessionHistory.LoadAsync`),对子会话同样成立;App 侧不需模型回合的驱动已有 `SpawnChildAsync`(自动化在用,内部经 `SubAgentScheduler.SpawnAsync` 建子会话行并写 `parent_session_id`/`agent_kind`/`task`)。真正新增的只有**用户所有权**:按所有者区分登记,用户所有的实例不进模型可见名单、控制工具按未知 id 处理(见下条)。插话、转向、停止复用 `SubAgentControl`。
+- **与模型派生子 Agent 隔离**:调度器登记表按所有者区分,用户所有的实例不进模型可见名单,id 用独立命名空间;`spawn_agent` 按 id 续跑与 `subagent_steer`/`subagent_followup`/`subagent_stop` 对它一律按未知 id 处理。模型与它的唯一通道是下文的授权通信。
+- 可选 Agent 种类:除主 Agent 外的内置 Agent 与带 `tools` 白名单的用户 Agent;白名单含 `git_branch`/`git_sync`/任一 `pr_*` 的不可选(只有根会话改 git)。初始上下文空白。
+- 存储:`sessions` 新增 `child_driver TEXT NULL`(NULL = 模型派生,`'user'` = Agent 会话),直接写进建表脚本、**不做迁移**(产品未发布,旧库删库重建)。检查点与每轮指标按**子会话 id** 写,轮次独立从 1 编号;根与 Agent 会话回合时间重叠时双方的轮次 diff 互含(整树快照),是已知限制。
+- 回合前校验与根一致(根仍 `Active`、无合并冲突、无工作区操作中);根的忙判定包含 Agent 会话的回合、排队消息与未送达插话。**在根标签按停止时连带停**:根回合、它名下正在跑的回合与已投递未开跑的消息一并取消(子会话标签自己的停止只停它自己)。根被接手、归档后 Agent 会话随之只读,不迁移、不复制;软删/彻底删除沿用子会话级联。
+- 用量按**实例**:Agent 会话每一轮的指标直接取该轮 `AgentSubAgentFinished` 上的 `Usage`/`Elapsed`(事件本就带每 run 的用量增量),不要复用只读根实例的 `ReadRootCounters`——否则会把根的 token 再记一遍。若要 UI 在一轮之外显示实时读数,再补按实例的访问器;**轮次指标不需要它**。
+- 计划与步骤:`todo` 按会话 id,Agent 会话自然有独立清单;其步骤标完成不提交、门禁 `NotApplicable`(现有“有父会话即子 Agent”规则),改动由根会话的下一次步骤提交带走并由根的门禁把关;不参与 `pr_create` 的步骤闸门。
+
+**授权通信(`message_session`;已定、未实现)。** 根会话与其 Agent 会话之间唯一的通道,门禁是**用户亲手点名**:只有从输入框 `@` 弹层“会话”组选中的结构化提及才算授权(手打 `@名字` 文本与模型输出都不算),据此写入“发起会话 → 目标会话”这一对授权。授权**保留到目标会话结束**:目标归档/关闭、根离开 `Active` 或用户撤销时失效;只存在内存里,重启即清空;输入区有可撤销的授权标记。`message_session(target, message)` 是**纯异步投递**:经邮箱投递(对方忙则排队,立刻返回“已投递 #n”/“已排队 #n”并明说“未完成,你现在没有结果”),对方跑一轮;**不自动起轮**——否则 A 投递、B 回复、A 自动起轮再投递会形成无人看管的自动循环。投递立刻返回、不借名额;工具常驻工具集(缓存稳定),无授权时返回错误结果;目标只读时直接报错。
+
+**回程回执(定稿)。** 对方一轮结束——完成、失败、被停止或取消都算——向发起方写一条结构化回执:头行 `[会话回复 #n · 来自 <对方> · 状态:完成|失败(原因)|已停止(原因) · 任务:<发送时截取的短标签>]`;第二行 `改动: N 个文件 (+a/−b)`(取该轮检查点);第三行 `报告:` 对方最终回复原文,**上限 4000 字符 / 250 行**,超出转 artifact 并附 `完整报告: <id>`(复用 `read_artifact`)。**不带工具调用清单**(要细节时发起方再投递一次问,或用户点开子会话)。状态是必填:失败/停止也发回执,否则发起方只能把“没有消息”当成功。送达时机:发起方正在跑回合时于**工具批次边界**送达(同一轮可见);空闲时作为一条**未读**消息落进转录,不自动起轮。
+
+**点名只约束“谁先开话头”**:子会话要主动发起,须在子会话里也点名过根;回程**永远自动**(投递即附带一次回程许可),不需要二次点名,但回程不是“再问回去”的通道。深度 2 不继承授权。投递本身不弹审批卡,对方回合内的工具调用照常审批。可通信对象只有根 ↔ 它的 Agent 会话。
+
+**`write` 覆盖检查的读取记录(已定、未实现)。** 每个 `AgentInstance` 持有一份内存读取记录(`路径 → (长度, LastWriteTimeUtc)`,路径按 `WorkspacePath.Normalize` 归一,线程安全),`AgentLoop` 构造 `ToolContext` 时经新属性 `ToolContext.FileVersions`(`Forge.Abstractions` 的 `IFileVersionLedger`;null 时工具不检查,如脚本、插件桥)交给工具;规则见 forge-io「`write` 覆盖检查」。按实例而非会话 id:记录的是“这个 Agent 看到过哪个版本”,同名 Agent 重建后看到的历史可能已被压缩,不能沿用。记录不落盘,实例重建(重启、切换 Agent/模型)即清空。**不设上限、不淘汰**:只增的代价是内存按“读过多少文件”线性增长,而淘汰会让读过的文件突然要求重读;量级由 `tools/Forge.Bench` 实测给出。
+
 **会话目录与恢复。** 会话元数据(项目、worktree、分支、父会话、Agent 种类、任务、归档状态、最后活动)是 `sessions` 表的列,`ISessionCatalog` 与 `ISessionStore` 由同一 `SqliteSessionStore` 实现。能力只经 `SessionCatalogs.From` 读取:`LoggingSessionStore` 总实现该接口,须读 `SupportsCatalog`,内层非目录时按无目录处理。子会话带 `ParentSessionId`/`AgentKind`/`Task` 并继承父会话的 worktree 与项目;每回合持久化后 `TouchAsync`,失败不影响循环。`ResumeRootAsync` 用与压缩器相同规则重建上下文(摘要视图 + 未摘要尾部),丢弃孤立首个工具结果与末尾无结果的工具回合。一个 `AgentHost` 对应一个主会话;`AgentScope` 为 AsyncLocal,名额池与 id 计数在实例内,多主会话可并发。
 
 **`todo` 工具。** 按参数决定副作用(list 与 plan_summary_get 只读,其余写入),审批策略与只读并发分批看到单次调用的真实副作用;update/remove/promote 先确认条目属于 `ToolContext.SessionId`。清单按**分组**组织:add 带 `group`(按标题找,没有就新建)把条目收进该组的步骤,不带 `group` 则进会话的**待排散项队列**;`promote` 把一条散项升成以它命名的新分组(条目移出队列、分组继承它的 id 与标题),agent 接手用户排队的任务时用它,`after_id` 只在同一层内插入。同一时刻只有一步 in_progress(存储层保证,写成 in_progress 会把会话里别的 in_progress 退回 pending);`paused` 表示在等外部输入或依赖,永不触发步骤提交。update 接受 `commit_subject`/`summary`/`verification`;**状态变为 done 先过步骤完成门禁**(见下),通过后才经 `AgentHostOptions.StepCommitter`(`IStepCommitter`,契约在 `Forge.Abstractions`,由 App 实现,见 forge-app)提交这一步,结果(短 sha 或失败原因)写进工具结果,提交失败不回滚 done 状态。list 按分组输出(每组标题 + `done/total` 进度、组内步骤带 id/状态/note 摘要),散项列在末尾,agent 据此决定 promote 谁。`plan_summary` 操作读写会话级计划摘要(`plan_summaries` 表),供 PR 正文渲染。

@@ -8,6 +8,7 @@
 - 状态三值：`Active`（可跑回合）、`Archived`（只读，可“继续”）、`Deleted`（软删除，可恢复或彻底删除）。
 - **一个工作区同一时刻只有一个活动根会话**，由部分唯一索引 `ux_sessions_occupancy`（`status='Active' AND parent_session_id IS NULL`）强制；占用键由存储层计算（规范化路径，Windows 大写）。冲突映射为 `WorktreeOccupiedException(HolderSessionId)`，界面进入占用对话框，而不是通用错误。
 - 子会话带 `ParentSessionId` / `AgentKind` / `Task`，继承父会话的项目与 worktree；子会话不参与占用唯一索引。
+- **Agent 会话（已定、未实现，运行时见 02 §2.3）**：用户在一个活动根会话下手动增加的**用户驱动**子会话，共用根会话的目录（`parent_session_id` = 根、深度 1、初始上下文空白），不参与占用索引。它从属于根：根的忙判定包含它、根离开 `Active` 时它随之只读、软删与彻底删除级联；**只有根会话能改 git 状态**（可选的 Agent 种类不得持有 git 写与 PR 工具）。根与它之间唯一的通道是用户点名的 `message_session`。入口是 worktree 行“+”的第二项，常规对话不提供。
 - 常规工作区 `General` 是单例项目（部分唯一索引保证），默认目录为 `文档/Forge/General`，可用 `FORGE_GENERAL_WORKSPACE` 覆盖。
 
 ## 1.2 三种会话环境
@@ -38,6 +39,7 @@
 - 执行顺序：读状态 → 需要时 `handover: <旧标题>` 提交（同一把路径门与护栏，不看逐步提交偏好）→ 构建上下文（完整继承写 `InheritsFrom`/`InheritsUpToSeq` + 一条继承说明；摘要经 `HandoverSummary` 专用提示词生成一条用户消息）→ `HandoverAsync` 单事务换手（`BEGIN IMMEDIATE`，失败整体回滚）→ 新会话复制评审标记（失败只提示）。
 - 成功：旧标签转只读、释放 runtime；新会话打开、树刷新。
 - 失败：提交已落地时错误里写出提交 sha；摘要失败或取消不回滚已落地的提交；重试时工作树已干净。
+- **Agent 会话（已定、未实现）**：忙判定同样包含它名下的 Agent 会话（回合、排队消息、未送达插话）；成功后旧根只读、它的 Agent 会话随之只读，新根下**没有** Agent 会话——不迁移、不复制。
 
 ## 1.5 并行分叉（Fork）
 
@@ -49,6 +51,7 @@
 - “先提交”以 `handover: <源标题>` 走交接提交路径，起点是提交后的实时 HEAD；上下文先于 worktree 建好（摘要失败不建任何东西），再以新分支在起点建 worktree（带源的稀疏配置），最后建会话行（`fork_of_branch`、`fork_base_sha`、`lineage_root_id` 承自源，从不写 `parent_session_id`）并写首条消息。
 - 完整继承是引用继承 + `InheritanceNote.BuildFork` 说明（源分支、分叉分支、起点 sha、可能的先提交 sha）；todos、计划、评审标记都不复制。
 - 任一步失败写明原因并收回本次所建（会话行软删后清除，再收回 worktree 与未移动的分支）；已落地的提交保留并写出 sha。
+- **不复制 Agent 会话**：分叉只复制根会话（已定、未实现）；子会话留在原根下随之只读。
 
 ## 1.6 合并回与同步
 
@@ -81,7 +84,7 @@
 
 ### 彻底删除
 
-确认后 `PurgeAsync`：被 `inherits_from_session_id` 指向时拒绝并列出继承者；成功后删 `artifacts` 表行与 `<UserData>/artifacts/<id>` 目录，再删评审标记、评论与结论；都只按会话 id 删、可重复执行。清理前把会话 id 记进 `<UserData>/purge-pending.txt`，失败或崩溃后下次启动重试；退出时只接受合法 id，避免一行永远失败。“全部彻底删除”按轮重试直到无进展。
+确认后 `PurgeAsync`：被 `inherits_from_session_id` 指向时拒绝并列出继承者；成功后删 `artifacts` 表行与 `<UserData>/artifacts/<id>` 目录，再删评审标记、评论与结论；都只按会话 id 删、可重复执行。清理前把会话 id 记进 `<UserData>/purge-pending.txt`，失败或崩溃后下次启动重试；退出时只接受合法 id，避免一行永远失败。“全部彻底删除”按轮重试直到无进展。**Agent 会话（已定、未实现）随根一并删除**：软删与彻底删除都沿用子会话的级联，不单独提供入口。
 
 ### 关闭项目
 
@@ -95,7 +98,8 @@
 - 归档会话收进各 worktree 的“历史 (n)”。
 - worktree 行标记：〔稀疏〕、〔目录缺失〕、〔已回收〕、〔git 标记为可清理〕、〔git 未登记〕、〔git 状态未知〕；标记决定哪些动作被禁用（原因写在 tooltip）。
 - 已删除根会话：目录在时标〔已移除〕，不在时〔目录已回收〕，只能只读打开、恢复或彻底删除。
-- 行尾“+”分两种：项目行是分支加号（新建 worktree 分支），常规对话/worktree 行是纯加号（新建会话）。
+- 行尾“+”分两种：项目行是分支加号（新建 worktree 分支），常规对话/worktree 行是纯加号（新建会话）；**Agent 会话（已定、未实现）把 worktree 行（含仓库根检出行）的纯加号改为两项菜单**：“新建会话” / “新增 Agent 会话”，后者挂到该 worktree 的活动根会话，没有活动根会话、合并冲突、工作区操作中时置灰并写入 tooltip。一个根名下的 Agent 会话数量不设上限（能跑几个由树内并发名额排队决定）。
+- **Agent 会话行（已定、未实现）**：挂在根会话行下、与子 Agent 行同层，带区分标记；名字默认 `<Agent 种类> <序号>`，标签与 `@` 弹层里可双击改名；点行在主组打开或切到它的标签，根会话进“历史”时随之。
 - 行内点击即执行该行动作（会话行打开、有子项的行展开、worktree 行新建会话、子 Agent 行打开其标签）；点行内按钮只执行按钮。
 - 刷新时后台读一次 HEAD（最多 4 并发）、合并/变基进行中、稀疏配置与 `git worktree list --porcelain`，读数缓存 15 秒；打开菜单不跑 git、不读库。
 
@@ -104,5 +108,6 @@
 - 每个主轮次开始/结束（含失败、取消）用 `SnapshotTreeAsync` 取树哈希写 `turn_checkpoints`（仅 git 会话）；轮次号从 `MAX(turn_checkpoints, turn_metrics)+1` 续接——`turn_metrics` 两种会话每轮一行（含失败轮，见 Docs/12 §12.2），General（非 git）会话重开窗口不再从 1 重新数。
 - 树哈希实现把真实索引复制到临时文件后 `add --all` + `write-tree`，不改用户索引/HEAD/分支/stash。
 - “已改动”面板按轮次列出差异时用的就是这些树。
+- **Agent 会话（已定、未实现）**按**自己的会话 id** 记检查点与指标，轮次从 1 独立编号，其“已改动”面板按自己的轮次显示 diff；每轮指标只读**自己实例**的累计计数（不重复记根的 token）。已知限制：检查点是整棵树的快照，根与子会话回合**时间重叠**时双方这一轮的 diff 互含对方的改动（本期不做按工具调用归属过滤）。
 
 相关文档：[02-agent-runtime.md](02-agent-runtime.md)（回合与运行）、[04-git-diff-pr.md](04-git-diff-pr.md)（Git 原语与 diff）、[12-storage-and-data.md](12-storage-and-data.md)（会话表与占用索引）。
