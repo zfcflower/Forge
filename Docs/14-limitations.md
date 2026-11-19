@@ -12,7 +12,7 @@
 | JIT 组件随发布分发 | **未接线** | AOT `publish` 产物不含 `Forge.ExtensionHost`/`PluginWorker`/`ScriptExecutor`；它们只在 `FORGE_JIT_DIR` 或仓内构建布局里被找到，更新包也只装 AOT 目录——按现状发出去，宿主起不来（`diag.jitHostMissing`），终端/插件/codemode 全部不可用（见 13.7） |
 | 运行时探测 | **未实现** | 没有 .NET 版本检查；缺 `dotnet` 只表现为 `diag.hostStartFailed` 的启动失败文本，不是“缺运行时”的明确错误（`architecture.md` 原先那句“启动时检测并给出明确错误”已按现状改正） |
 | 三平台 AOT `publish` 矩阵 | **未接线** | 只有 Windows AOT publish 冒烟；macOS/Linux publish 从未跑过 |
-| 测试项目与 CI 运行时覆盖 | **未接线** | 当前仓库没有测试项目（`tests/` 已移除）；CI 的 `dotnet test` 没有测试可跑，三 OS 矩阵实际只验证构建，POSIX/PTY/macOS 路径在新测试接线前不产生运行时覆盖 |
+| 测试项目与 CI 运行时覆盖 | **部分接线** | `tests/Forge.App.Tests`（255 例，见 `Docs/13-operations-and-tooling.md` §13.5）在 CI 三 OS 矩阵里真跑：存储 schema/purge、git 探针与 diff 账本、bash 门禁、三个流式适配器、转录 VM 与 headless 面板均有运行时覆盖；POSIX 进程归属、PTY/终端、`ExtensionHost` 拉起、MCP 传输、AOT 产物行为与提示词来源的信号侧仍无测试宿主 |
 | macOS 从 Dock 启动的语言检测 | 已知会落到英文 | 无 `LANG` 时的退路 |
 
 ## 14.2 明确未实现的产品功能

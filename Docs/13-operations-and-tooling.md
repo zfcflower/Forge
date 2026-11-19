@@ -38,10 +38,12 @@
 
 ## 13.5 CI 与构建矩阵
 
-- `.github/workflows/ci.yml` 的 `test` 作业：三平台（ubuntu / windows / macos）× `dotnet build Forge.slnx -v m` + `dotnet test Forge.slnx --no-build`（`TreatWarningsAsErrors` 打开，单个警告即失败）。**当前仓库没有测试项目**（`tests/` 与 Debug-only 调试接缝已移除），所以 `dotnet test` 没有测试可跑，矩阵实际只验证三平台构建；POSIX 进程归属、PTY、shell 路径与 macOS 分支在三平台测试接线前不产生运行时覆盖（`architecture.md` 已记录这一点）。
+- `.github/workflows/ci.yml` 的 `test` 作业：三平台（ubuntu / windows / macos）× `dotnet build Forge.slnx -v m` + `dotnet test Forge.slnx --no-build`（`TreatWarningsAsErrors` 打开，单个警告即失败）。测试项目是 `tests/Forge.App.Tests`（xunit 2 + Avalonia.Headless 12.1.6 + Microsoft.NET.Test.Sdk 18，`Forge.App` 对它开了 `InternalsVisibleTo`）：165 个用例成员（`[Fact]`/`[Theory]`）展开成 255 例，本机（win-x64、Debug）一次全量约 6 s 全绿。
+- 已有运行时覆盖（三 OS 矩阵里真跑，不是只构建）：`forge.db` 的 schema 与时间戳守卫、按会话 purge、`turn_metrics` 读写与缺表回退（各自拿临时 SQLite 文件）；git 变更探针、diff 覆盖率账本、remote 配置解析（临时真实仓库，真跑 `git`）；`bash` 命令门禁与执行队列（进程替身，不起真实 shell）；三个流式适配器的首字节到流末计时、取消与缓存字段降级（假 SSE 传输）；转录视图模型、轮次分隔线与回放种子；headless 下 `TranscriptStackPanel` 的 Extent、`ScrollIntoView` 与宽度变化。
+- **仍未产生运行时覆盖**：POSIX 进程归属、PTY 与终端、`ExtensionHost`/`PluginWorker` 的拉起、MCP 传输、编辑器，以及 AOT 产物里的行为；还有提示词来源变更的**信号侧**（真实 `FileSystemWatcher` 只测了路径筛选 `Relevant`，因为拉一下信号就要靠操作系统通知的时延）。这些没有测试宿主，靠人工冒烟与 AOT 发布冒烟兜底。
 - `publish-aot` 作业：Windows 上 `dotnet publish src/Forge.App -c Release`，断言产物存在且体积 >10 MB（AOT 分析器警告即错误）。
 - **三平台 AOT `publish` 矩阵未接线**（macOS/Linux publish 从未在任何地方跑过），保持为显式后续项而不是永久红。
-- 测试纪律（恢复测试项目时适用）：只保护重要行为；不测自动属性、简单 DTO 映射、纯转发层与第三方框架自身行为；异步测试用 `async Task`；不削弱断言迁就实现。当前代码**不提供**测试注入接缝：没有 `InternalsVisibleTo`、没有 `FORGE_HOST_TEST_*` 环境变量，`ApprovalStoreOptions` 只有 `BusyTimeout` 与 `ImportLegacyJson` 两个产品开关，Debug 与 Release 行为一致。
+- 测试纪律见 `AGENTS.md` §4 的入仓门槛，本文件不重复维护。当前代码**只提供一处测试接缝**：`Forge.App` 对 `Forge.App.Tests` 的 `InternalsVisibleTo`；没有 `FORGE_HOST_TEST_*` 环境变量，`ApprovalStoreOptions` 只有 `BusyTimeout` 与 `ImportLegacyJson` 两个产品开关，Debug 与 Release 行为一致。
 
 ## 13.6 基准
 
