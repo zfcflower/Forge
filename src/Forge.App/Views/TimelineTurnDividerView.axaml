@@ -9,10 +9,13 @@
        name, and a metrics line that loses its tail reads as missing data. The tooltip carries the full breakdown. -->
   <Grid ColumnDefinitions="Auto,*" ToolTip.Tip="{Binding Tooltip}">
     <views:TimelineGutter Kind="RoundEnd" IsFailing="{Binding HasFailed}" />
+    <!-- Sits on the node's baseline (the node's box ends 20 px below the row's top, this line's baseline ≈13 px into a 12px
+         line) and wears the node's colour: success for a round that finished, danger for one that did not. -->
     <TextBlock Grid.Column="1"
-               Classes="caption"
-               Margin="0,2,8,8"
-               VerticalAlignment="Center"
+               Classes="round-end-line"
+               Classes.failed="{Binding HasFailed}"
+               Margin="0,6,8,8"
+               VerticalAlignment="Top"
                TextWrapping="Wrap"
                Text="{Binding Line}"
                AutomationProperties.AutomationId="turn-divider" />

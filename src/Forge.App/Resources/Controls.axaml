@@ -36,6 +36,17 @@
     <Setter Property="Focusable" Value="False" />
   </Style>
 
+  <!-- The round-end metrics line: one step up from the caption it grew out of, coloured like the node it sits on. -->
+  <Style Selector="TextBlock.round-end-line">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <Style Selector="TextBlock.round-end-line.failed">
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+
   <!-- The opened reasoning: one quiet inset block instead of loose text, so it reads as an aside beside the answer. -->
   <Style Selector="Border.thinking-block">
     <Setter Property="Background" Value="#F8F8FA" />
