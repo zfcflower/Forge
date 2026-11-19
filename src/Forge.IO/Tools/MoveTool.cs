@@ -19,7 +19,8 @@ public sealed class MoveTool() : ToolBase("move", Description, Schema, ToolSideE
     private const string Description =
         "Move or rename files and directories inside the workspace (mv). 'from' takes paths, glob patterns or an array; a single plain path " +
         "goes to the exact path 'to', anything else goes into the directory 'to/'. Existing destinations are errors unless overwrite; " +
-        "an existing directory is never replaced.";
+        "an existing directory is never replaced. " +
+        "A pattern skips dot-names unless its segment starts with a dot, and matching nothing is an error.";
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
     {

@@ -58,7 +58,8 @@ public sealed class BashTool : ToolBase
         : base(
             "bash",
             "Run a command line in the workspace and return its exit code, duration and output. For what the built-in tools do not cover: " +
-            "building, testing, running programs, package managers, and git and 'gh pr/run/workflow/api' (only if you hold the git_* / pr_* tools). " +
+            "building, testing, running programs, package managers; git subcommands no git_* tool covers, and 'gh pr/run/workflow/api' " +
+            "(each only if you hold git_* / pr_* tools); network only to localhost. " +
             "Piping a command's output through grep, head or tail is fine. Commands that are not trivially cheap run one at a time per workspace; " +
             "that wait does not count against timeout_seconds.",
             Schema,

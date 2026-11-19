@@ -17,7 +17,8 @@ public sealed class DeleteTool() : ToolBase("delete", Description, Schema, ToolS
     private const string Description =
         "Delete files and directories inside the workspace (rm -r). 'path' takes paths, glob patterns or an array. A non-empty directory " +
         "needs recursive. A symbolic link is removed without touching its target. The workspace root and .git cannot be deleted. " +
-        "Deleted files are not recoverable.";
+        "Deleted files are not recoverable. " +
+        "A pattern skips dot-names unless its segment starts with a dot, and matching nothing is an error.";
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
     {

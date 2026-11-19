@@ -226,7 +226,7 @@ internal static class BashPolicy
 
     private static string Refuse(string what, string owner) =>
         $"bash does not run '{what}': that is the '{owner}' tool's job. Use the {owner} tool; bash is for what no other tool does " +
-        "(building, testing, running programs, package managers, copying, moving and deleting files).";
+        "(building, testing, running programs, package managers).";
 
     private static string? CheckGit(IReadOnlyList<string> arguments, IToolRegistry? tools)
     {

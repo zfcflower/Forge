@@ -19,7 +19,8 @@ public sealed class CopyTool() : ToolBase("copy", Description, Schema, ToolSideE
     private const string Description =
         "Copy files and directories inside the workspace (cp -r). 'from' takes paths, glob patterns or an array; a single plain path goes to " +
         "the exact path 'to', anything else goes into the directory 'to/'. Existing destinations are errors unless overwrite. " +
-        "Symbolic links and .git inside a copied directory are skipped and counted.";
+        "Symbolic links and .git inside a copied directory are skipped and counted. " +
+        "A pattern skips dot-names unless its segment starts with a dot, and matching nothing is an error.";
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
     {
