@@ -213,7 +213,7 @@ public sealed class TurnDividerTests
         Assert.Equal("m (p)", card.DividerModelText);
         Assert.Contains("—", dividerBefore.Line);
         Assert.DoesNotContain("tok/s", dividerBefore.Line);
-        Assert.Contains("boom", dividerBefore.Tooltip);
+        Assert.Contains("boom", dividerBefore.Line + dividerBefore.Extra);
     }
 
     [Fact]
@@ -316,7 +316,7 @@ public sealed class TurnDividerTests
 
         var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.EndsWith("claude-sonnet-4-5", divider.Line, StringComparison.Ordinal);
-        Assert.Contains("claude-sonnet-4-5", divider.Tooltip, StringComparison.Ordinal);
+        Assert.Contains("claude-sonnet-4-5", divider.Line, StringComparison.Ordinal);
 
         // A turn nobody stamped (a replay whose metrics row had no model) omits the segment entirely.
         card.NoteModel(null, null);

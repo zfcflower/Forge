@@ -789,12 +789,30 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         dividerRow?.RefreshText();
     }
 
-    /// <summary>The divider tooltip, resolved when shown: the cost comes from the transcript's resolver, if it has one.</summary>
-    internal string BuildDividerTooltip()
+    /// <summary>
+    /// The numbers the round's line leaves out — the cache columns, the hit rate and the cost — as one sentence under it. It
+    /// used to live in a hover tooltip; a hover is not discoverable on a transcript read with a trackpad, so it is printed.
+    /// </summary>
+    internal string BuildDividerExtra()
     {
         var usage = ReportedUsage;
         var cost = usage is { } reported ? Owner?.ResolveCost?.Invoke(reported, providerName, modelName) : null;
-        return TurnDividerText.Tooltip(EndStatus, ErrorSummary, lastElapsed, StreamElapsed, ToolCount, usage, DividerModelText, cost);
+        var statusText = SessionStrings.TurnStatusText(EndStatus);
+        var status = SessionStrings.DividerTipStatus(
+            string.IsNullOrEmpty(ErrorSummary) ? statusText : statusText + " · " + ErrorSummary);
+        var tokens = SessionStrings.DividerTipTokens(
+            TextFormat.Number(usage?.InputTokens),
+            TextFormat.Number(usage?.OutputTokens),
+            TextFormat.Number(usage?.CacheReadTokens),
+            TextFormat.Number(usage?.CacheWriteTokens),
+            TextFormat.Number(usage?.CacheWrite1hTokens));
+        var meta = SessionStrings.DividerTipMeta(
+            usage is { } measured
+                ? (SessionUsageMath.CacheHitRatio(measured) * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%"
+                : TextFormat.None,
+            string.IsNullOrEmpty(cost) ? TextFormat.None : cost,
+            TextFormat.None);
+        return string.Join(" · ", status, tokens, meta);
     }
 
     private void AddBlock(TurnBlockViewModel block)
@@ -1022,14 +1040,17 @@ internal sealed class TurnDividerViewModel(TurnCardViewModel card) : TranscriptI
     /// <summary>True for a turn that did not complete: the gutter node wears the failing state.</summary>
     public bool HasFailed => Card.EndStatus != TurnEndStatus.Completed;
 
-    /// <summary>Everything the line leaves out: the caches, the hit rate, the cost, the model and the outcome.</summary>
-    public string Tooltip => Card.BuildDividerTooltip();
+    /// <summary>Everything the line leaves out, printed under it with a wavy underline instead of a hover tooltip.</summary>
+    public string Extra => Card.BuildDividerExtra();
+
+    public bool HasExtra => Extra.Length > 0;
 
     public override void RefreshText()
     {
         OnPropertyChanged(nameof(Line));
         OnPropertyChanged(nameof(HasFailed));
-        OnPropertyChanged(nameof(Tooltip));
+        OnPropertyChanged(nameof(Extra));
+        OnPropertyChanged(nameof(HasExtra));
     }
 }
 
@@ -1098,47 +1119,6 @@ internal static class TurnDividerText
         return model is { Length: > 0 } name ? core + " · " + name : core;
     }
 
-    /// <summary>
-    /// The hover text: status and error, elapsed time and rate, all five token columns, the hit rate, the cost and the
-    /// model. Every unknown reads "—"; the rate note (the denominator is the model's streaming time) rides along when a
-    /// rate shows.
-    /// </summary>
-    public static string Tooltip(
-        TurnEndStatus status,
-        string? error,
-        TimeSpan? elapsed,
-        TimeSpan streamElapsed,
-        int toolCalls,
-        TokenUsage? usage,
-        string modelText,
-        string? costText)
-    {
-        var statusText = SessionStrings.TurnStatusText(status);
-        var statusLine = SessionStrings.DividerTipStatus(
-            string.IsNullOrEmpty(error) ? statusText : statusText + " · " + error);
-        var rate = usage is { } known && status == TurnEndStatus.Completed
-            ? OutputRate(known.OutputTokens, streamElapsed)
-            : null;
-        var timeLine = SessionStrings.DividerTipTime(
-            elapsed is { } wall ? TextFormat.Elapsed(wall) : TextFormat.None,
-            toolCalls,
-            rate is { } perSecond ? FormatRate(perSecond) : TextFormat.None);
-        var tokensLine = SessionStrings.DividerTipTokens(
-            TextFormat.Number(usage?.InputTokens),
-            TextFormat.Number(usage?.OutputTokens),
-            TextFormat.Number(usage?.CacheReadTokens),
-            TextFormat.Number(usage?.CacheWriteTokens),
-            TextFormat.Number(usage?.CacheWrite1hTokens));
-        var metaLine = SessionStrings.DividerTipMeta(
-            usage is { } measured
-                ? (SessionUsageMath.CacheHitRatio(measured) * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%"
-                : TextFormat.None,
-            string.IsNullOrEmpty(costText) ? TextFormat.None : costText,
-            string.IsNullOrEmpty(modelText) ? TextFormat.None : modelText);
-        return rate is null
-            ? string.Join("\n", statusLine, timeLine, tokensLine, metaLine)
-            : string.Join("\n", statusLine, timeLine, tokensLine, metaLine, SessionStrings.DividerRateNote);
-    }
 }
 
 /// <summary>

@@ -7,17 +7,29 @@
   <!-- The round-end row: the axis stops on this round's closing node (a check when the round finished cleanly, the failure
        icon when it did not) and the round's numbers ride beside it. The line wraps instead of trimming: its tail is the model
        name, and a metrics line that loses its tail reads as missing data. The tooltip carries the full breakdown. -->
-  <Grid ColumnDefinitions="Auto,*" ToolTip.Tip="{Binding Tooltip}">
+  <Grid ColumnDefinitions="Auto,*">
     <views:TimelineGutter Kind="RoundEnd" IsFailing="{Binding HasFailed}" />
-    <!-- Sits on the node's baseline (the node's box ends 20 px below the row's top, this line's baseline ≈13 px into a 12px
-         line) and wears the node's colour: success for a round that finished, danger for one that did not. -->
-    <TextBlock Grid.Column="1"
-               Classes="round-end-line"
-               Classes.failed="{Binding HasFailed}"
-               Margin="0,6,8,8"
-               VerticalAlignment="Top"
-               TextWrapping="Wrap"
-               Text="{Binding Line}"
-               AutomationProperties.AutomationId="turn-divider" />
+    <StackPanel Grid.Column="1" Margin="0,5,8,8" Spacing="2">
+      <TextBlock Classes="round-end-line"
+                 Classes.failed="{Binding HasFailed}"
+                 TextWrapping="Wrap"
+                 Text="{Binding Line}"
+                 AutomationProperties.AutomationId="turn-divider" />
+      <!-- The numbers the line leaves out, printed rather than hidden behind a hover: a wavy rule marks them as the detail. -->
+      <Panel IsVisible="{Binding HasExtra}" HorizontalAlignment="Left">
+        <StackPanel Spacing="0">
+          <TextBlock Classes="round-end-extra"
+                     Classes.failed="{Binding HasFailed}"
+                     MaxWidth="640"
+                     TextWrapping="NoWrap"
+                     TextTrimming="CharacterEllipsis"
+                     Text="{Binding Extra}"
+                     AutomationProperties.AutomationId="turn-divider-extra" />
+          <views:WavyUnderline Height="5"
+                               Classes.failed="{Binding HasFailed}"
+                               Stroke="{DynamicResource StatusSuccessBrush}" />
+        </StackPanel>
+      </Panel>
+    </StackPanel>
   </Grid>
 </UserControl>
