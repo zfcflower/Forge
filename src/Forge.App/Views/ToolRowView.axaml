@@ -72,7 +72,7 @@
       <ContentControl Content="{Binding ExpandedBody}" IsVisible="{Binding IsExpanded}">
         <ContentControl.ContentTemplate>
           <DataTemplate x:DataType="vm:ToolRowViewModel">
-            <StackPanel Spacing="4" Margin="14,2,0,2">
+            <StackPanel Spacing="4" Margin="18,2,0,2">
               <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
               <SelectableTextBlock Classes="mono"
                                    Text="{Binding Arguments}"

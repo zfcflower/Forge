@@ -75,16 +75,28 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private bool projectIsGeneral;
     private bool disposed;
 
-    /// <summary>The turns the session already recorded, read from <c>turn_checkpoints</c> once per strip.</summary>
+    /// <summary>The turns the session already recorded, read once per strip from <c>turn_metrics</c> (else its checkpoints).</summary>
     private SessionTurnHistory turnHistory = SessionTurnHistory.Empty;
 
-    /// <summary>How many turns this window watched complete; added to <see cref="turnHistory"/>.</summary>
+    /// <summary>
+    /// How many turns this window watched end — every one of them, including a failed or unreported turn, because the
+    /// averages are spread over all turns the session ran; added to <see cref="turnHistory"/>.
+    /// </summary>
     private int liveTurns;
 
     /// <summary>Guards the one background turn-history read against a strip that was disposed while it ran.</summary>
     private int turnHistoryToken;
 
     private bool turnHistoryLoaded;
+
+    /// <summary>The first turn number this window ran; rows at or above it belong to the live count, not the history.</summary>
+    private int? windowFirstTurn;
+
+    /// <summary>True when the loaded history cannot contain this window's rows (read before the first turn, or read through the cutoff).</summary>
+    private bool turnHistoryClean;
+
+    /// <summary>Guards the one corrective re-read: a history read that raced this window's first turn end is redone with the cutoff.</summary>
+    private bool turnHistoryReread;
 
     public SessionInstrumentsViewModel(
         SessionInfo session,
@@ -539,7 +551,12 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
                 " · ",
                 InstrumentsStrings.UsageTokens(Scale(usage.InputTokens), Scale(usage.OutputTokens)),
                 InstrumentsStrings.UsageCacheRead(Scale(usage.CacheReadTokens)),
-                InstrumentsStrings.UsageCacheWrite(Scale(usage.CacheWriteTokens)),
+                usage.CacheWrite1hTokens > 0
+                    ? InstrumentsStrings.UsageCacheWriteSplit(
+                        Scale(usage.CacheWriteTokens),
+                        Scale(usage.CacheWriteTokens - usage.CacheWrite1hTokens),
+                        Scale(usage.CacheWrite1hTokens))
+                    : InstrumentsStrings.UsageCacheWrite(Scale(usage.CacheWriteTokens)),
                 InstrumentsStrings.UsageCache(
                     (SessionUsageMath.CacheHitRatio(usage) * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%"),
                 Price(cost),
@@ -563,11 +580,46 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         }
 
         usage += delta;
-        liveTurns++;
         OnPropertyChanged(nameof(HasUsage));
         OnPropertyChanged(nameof(CacheReadText));
         OnPropertyChanged(nameof(UsageTooltip));
         RaiseUsageSummary();
+    }
+
+    /// <summary>
+    /// One turn of this window ended — completed, stopped, failed or unreported alike. The denominator of the averages is
+    /// every turn the session ran (a free or failed turn still took its place), so this is counted at the turn end and not
+    /// when usage arrives: <see cref="AddTurn"/> only sees a turn whose provider reported something.
+    /// </summary>
+    public void NoteTurnEnded(int turn)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        if (windowFirstTurn is null)
+        {
+            windowFirstTurn = turn;
+            MaybeRereadTurnHistory();
+        }
+
+        liveTurns++;
+        RaiseUsageSummary();
+    }
+
+    /// <summary>
+    /// A history read that landed after this window's first turn ended may have counted that turn's already-flushed row,
+    /// and the live count counts it too. One re-read with the window's first turn number as the cutoff puts every row on
+    /// exactly one side of the split; the flag keeps a session that keeps running from re-reading on every turn.
+    /// </summary>
+    private void MaybeRereadTurnHistory()
+    {
+        if (turnHistoryLoaded && !turnHistoryClean && !turnHistoryReread)
+        {
+            turnHistoryReread = true;
+            RefreshTurnHistory();
+        }
     }
 
     /// <summary>
@@ -660,8 +712,9 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// stored history knows — how many turns it ran and how long they took. The tokens are the strip's own <c>usage</c> (the
     /// stored message usage seeded when the history was replayed, plus every turn this window watched), so there is one total
     /// and not two that can disagree.
-    /// <para>The turn count and the time come from <c>turn_checkpoints</c>, read once off the UI thread when the strip is
-    /// built; a session without a git worktree records no checkpoints, and then only the turns this window watched count.</para>
+    /// <para>The turn count and the time come from <c>turn_metrics</c> — every recorded turn, a failed one included —
+    /// read once off the UI thread when the strip is built; a database without that table falls back to
+    /// <c>turn_checkpoints</c>, and a session that recorded neither only counts the turns this window watched.</para>
     /// </summary>
     public bool HasUsageSummary => usage.InputTokens > 0 || usage.OutputTokens > 0 || UsageTurnCount > 0;
 
@@ -725,7 +778,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     public string UsageDurationText =>
         turnHistory.Duration > TimeSpan.Zero ? TextFormat.Elapsed(turnHistory.Duration) : UsageStrings.UnknownText;
 
-    /// <summary>The turns the totals are divided by: the stored history plus the ones this window watched.</summary>
+    /// <summary>The turns the totals are divided by: the stored history plus the ones this window watched end, failures included.</summary>
     public int UsageTurnCount => turnHistory.Turns + liveTurns;
 
     public string UsageAverageInputText => Average(usage.InputTokens);
@@ -754,10 +807,13 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     private async Task LoadTurnHistoryAsync(int token)
     {
+        // The cutoff is read before the await: a row this window already watched land must stay out of the history
+        // count, because the live count already has it.
+        var cutoff = windowFirstTurn;
         SessionTurnHistory history;
         try
         {
-            history = await sources.TurnHistoryAsync(session.Id, CancellationToken.None).ConfigureAwait(true);
+            history = await sources.TurnHistoryAsync(session.Id, CancellationToken.None, cutoff).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or InvalidDataException
             or Microsoft.Data.Sqlite.SqliteException)
@@ -773,8 +829,13 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
         turnHistory = history;
         turnHistoryLoaded = true;
+        turnHistoryClean = cutoff is not null || windowFirstTurn is null;
         OnPropertyChanged(nameof(HasTurnHistory));
         RaiseUsageSummary();
+
+        // This read may have started before the first turn of this window ended and finished after its row landed, so the
+        // same turn can sit in both numbers. One re-read with the cutoff settles which side of the line it is on.
+        MaybeRereadTurnHistory();
     }
 
     /// <summary>One count of the turn column; the history and the live count are both plain counts.</summary>

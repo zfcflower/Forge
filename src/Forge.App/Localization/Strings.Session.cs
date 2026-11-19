@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Forge.Abstractions;
+using Forge.App.ViewModels;
 
 namespace Forge.App.Localization;
 
@@ -123,6 +124,19 @@ internal static class SessionStrings
     public const string StopReasonToolUseKey = "turn.stopReason.toolUse";
     public const string StopReasonMaxTokensKey = "turn.stopReason.maxTokens";
     public const string StopReasonUnknownKey = "turn.stopReason.unknown";
+    public const string UserTurnRoundKey = "turn.user.round";
+    public const string UserTurnGapKey = "turn.user.gap";
+    public const string TurnDividerKey = "turn.divider";
+    public const string TurnDividerFailedKey = "turn.divider.failed";
+    public const string TurnStatusCompletedKey = "turn.status.completed";
+    public const string TurnStatusStoppedKey = "turn.status.stopped";
+    public const string TurnStatusFailedKey = "turn.status.failed";
+    public const string TurnStatusLimitKey = "turn.status.limit";
+    public const string TurnDividerTipStatusKey = "turn.dividerTip.status";
+    public const string TurnDividerTipTimeKey = "turn.dividerTip.time";
+    public const string TurnDividerTipTokensKey = "turn.dividerTip.tokens";
+    public const string TurnDividerTipMetaKey = "turn.dividerTip.meta";
+    public const string TurnDividerRateNoteKey = "turn.dividerTip.rateNote";
 
     // ---------------------------------------------------------------- sub-agents
     public const string SubAgentQueuedKey = "subagent.queued";
@@ -412,6 +426,54 @@ internal static class SessionStrings
             _ => StopReasonUnknownKey,
         }];
 
+    /// <summary>The round marker of the meta line under a main-session user message: <c>第 2 轮</c> / <c>Turn 2</c>.</summary>
+    public static string UserTurnRound(int round) =>
+        Loc.Instance.Format(UserTurnRoundKey, TextFormat.Number(round));
+
+    /// <summary>How long after the previous user message this round started: <c>12 分钟后</c> / <c>12m 00s later</c>.</summary>
+    public static string TurnGap(string elapsed) => Loc.Instance.Format(UserTurnGapKey, elapsed);
+
+    /// <summary>
+    /// The round-end divider's line: <c>46.2 秒 · ↑37,000 ↓2,500 · 工具 6 · 54 tok/s</c>. Unknown sides read
+    /// <see cref="TextFormat.None"/>; units and arrows are symbols, identical in both languages.
+    /// </summary>
+    public static string TurnDivider(string elapsed, string input, string output, int tools, string rate) =>
+        Loc.Instance.Format(TurnDividerKey, elapsed, input, output, TextFormat.Number(tools), rate);
+
+    /// <summary>
+    /// The divider of a turn that did not complete: its status with the tokens as unknown, never zero.
+    /// </summary>
+    public static string TurnDividerFailed(string status, string elapsed, int tools) =>
+        Loc.Instance.Format(TurnDividerFailedKey, status, elapsed, TextFormat.None, TextFormat.Number(tools));
+
+    /// <summary>One word for how the turn ended, for the divider's line and tooltip.</summary>
+    public static string TurnStatusText(TurnEndStatus status) =>
+        Loc.Instance[status switch
+        {
+            TurnEndStatus.Stopped => TurnStatusStoppedKey,
+            TurnEndStatus.Failed => TurnStatusFailedKey,
+            TurnEndStatus.Limit => TurnStatusLimitKey,
+            _ => TurnStatusCompletedKey,
+        }];
+
+    /// <summary>The divider tooltip's status line, with the user-visible error when the turn left one.</summary>
+    public static string DividerTipStatus(string status) => Loc.Instance.Format(TurnDividerTipStatusKey, status);
+
+    /// <summary>The divider tooltip's time line: elapsed time, tool count and average output rate.</summary>
+    public static string DividerTipTime(string elapsed, int tools, string rate) =>
+        Loc.Instance.Format(TurnDividerTipTimeKey, elapsed, TextFormat.Number(tools), rate);
+
+    /// <summary>The divider tooltip's token line: all five columns, each unknown as <see cref="TextFormat.None"/>.</summary>
+    public static string DividerTipTokens(string input, string output, string cacheRead, string cacheWrite, string cacheWrite1h) =>
+        Loc.Instance.Format(TurnDividerTipTokensKey, input, output, cacheRead, cacheWrite, cacheWrite1h);
+
+    /// <summary>The divider tooltip's meta line: hit rate, cost and model.</summary>
+    public static string DividerTipMeta(string hitRate, string cost, string model) =>
+        Loc.Instance.Format(TurnDividerTipMetaKey, hitRate, cost, model);
+
+    /// <summary>Why the average output rate reads low: its denominator is the turn's wall clock, all of it.</summary>
+    public static string DividerRateNote => Loc.Instance[TurnDividerRateNoteKey];
+
     // ---------------------------------------------------------------- sub-agents
     public static string SubAgentQueued => Loc.Instance[SubAgentQueuedKey];
 
@@ -613,6 +675,31 @@ internal static class SessionStrings
         Loc.Register(StopReasonToolUseKey, "请求工具", "Requested tools");
         Loc.Register(StopReasonMaxTokensKey, "达到长度上限", "Hit the length limit");
         Loc.Register(StopReasonUnknownKey, "其他原因", "Other reason");
+        Loc.Register(UserTurnRoundKey, "第 {0} 轮", "Turn {0}");
+        Loc.Register(UserTurnGapKey, "{0} 后", "{0} later");
+        Loc.Register(TurnDividerKey, "{0} · ↑{1} ↓{2} · 工具 {3} · {4}", "{0} · ↑{1} ↓{2} · {3} tools · {4}");
+        Loc.Register(TurnDividerFailedKey, "{0} · {1} · ↑{2} ↓{2} · 工具 {3}", "{0} · {1} · ↑{2} ↓{2} · {3} tools");
+        Loc.Register(TurnStatusCompletedKey, "完成", "Done");
+        Loc.Register(TurnStatusStoppedKey, "已停止", "Stopped");
+        Loc.Register(TurnStatusFailedKey, "失败", "Failed");
+        Loc.Register(TurnStatusLimitKey, "超限", "Limit");
+        Loc.Register(TurnDividerTipStatusKey, "状态 {0}", "Status {0}");
+        Loc.Register(
+            TurnDividerTipTimeKey,
+            "耗时 {0} · 工具 {1} · 平均输出速率 {2}",
+            "Elapsed {0} · Tools {1} · Avg output rate {2}");
+        Loc.Register(
+            TurnDividerTipTokensKey,
+            "输入 {0} · 输出 {1} · 缓存读 {2} · 缓存写 {3} · 1 小时写 {4}",
+            "In {0} · Out {1} · Cache read {2} · Cache write {3} · 1h write {4}");
+        Loc.Register(
+            TurnDividerTipMetaKey,
+            "缓存命中率 {0} · 成本 {1} · 模型 {2}",
+            "Cache hit rate {0} · Cost {1} · Model {2}");
+        Loc.Register(
+            TurnDividerRateNoteKey,
+            "平均输出速率的分母为模型流式生成时间，不含排队、审批、工具与 git 快照",
+            "Average output rate divides by the model's streaming time, excluding queueing, approvals, tool runs and git snapshots");
 
         // sub-agents
         Loc.Register(SubAgentQueuedKey, "排队中", "Queued");

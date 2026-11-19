@@ -111,7 +111,7 @@ internal static class Program
 
     /// <summary>
     /// Every scenario, in the order the report shows them: read, write, copy, walk, grep, process, output, concurrency,
-    /// ratelimit.
+    /// ratelimit, usage.
     /// </summary>
     private static IEnumerable<BenchScenario> Registry(Fixtures fixtures)
     {
@@ -156,6 +156,11 @@ internal static class Program
         }
 
         foreach (var scenario in RateLimitScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
+        foreach (var scenario in UsageScenarios.Create(fixtures))
         {
             yield return scenario;
         }

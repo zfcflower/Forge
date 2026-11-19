@@ -1760,8 +1760,9 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                     return;
                 }
 
-                var childContext = new ToolContext(
-                    run.Context.SessionId, run.Context.WorkingDirectory, run.Depth + 1);
+                // Derived from the run's own context so the nested call keeps what the calling agent holds (its tool set, its
+                // parallelism slot): bash and git decide by those, and a fresh context would make them fail closed.
+                var childContext = run.Context with { AgentDepth = run.Depth + 1, Progress = null };
                 var toolCall = new ToolCall(
                     $"hostcall-{Interlocked.Increment(ref nextCallId)}", call.Name, call.ArgumentsJson);
                 var previous = trustedCall.Value;

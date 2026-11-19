@@ -4,13 +4,15 @@ using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Preferences;
 using Forge.App.Logging;
+using Forge.Core.Storage;
 using ZLogger;
 
 namespace Forge.App.Services;
 
 /// <summary>
-/// Everything the composer's instrument strip reads that does not belong to one session: the app-wide MCP health it shows
-/// on the resource button, the model metadata chain, and the two ways to open the session's project folder.
+/// Everything a session reads from the app besides its own state: the app-wide MCP health the strip shows on the resource
+/// button, the model metadata chain, the two ways to open the session's project folder, the recorded turns the usage summary
+/// counts, and the writer the turn end hands its metrics to.
 /// <para>The shell implements it once per window; the async members come back on the caller's context.</para>
 /// </summary>
 internal interface ISessionInstrumentSources
@@ -38,36 +40,84 @@ internal interface ISessionInstrumentSources
     void OpenInExplorer(string path);
 
     /// <summary>
-    /// The main turns a session already recorded in <c>turn_checkpoints</c>, summed for the usage summary: how many turns
-    /// and how long they took. Runs off the UI thread; a session without a git worktree records none, so the answer is
-    /// empty rather than a failure.
+    /// The main turns a session already recorded: how many it ran and how long they took, summed for the usage summary.
+    /// The source is <c>turn_metrics</c> — every turn, a failed or unreported one included — and a database without that
+    /// table falls back to <c>turn_checkpoints</c>. Runs off the UI thread; a session that recorded nothing (a scratch
+    /// session) is empty rather than a failure.
     /// </summary>
-    Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct);
+    Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct, int? maxTurnExclusive = null);
+
+    /// <summary>
+    /// The app's per-turn metrics writer, which the turn end hands one row through. Null (a standalone view, or a host that
+    /// built no recorder) records nothing; nothing on this interface reads from it.
+    /// </summary>
+    TurnMetricsRecorder? TurnMetricsRecorder { get; }
+
+    /// <summary>
+    /// The session's turn-metrics store, when the app has one: the transcript replays a stored conversation's per-turn
+    /// boundaries (elapsed time, tool count, outcome) from it — live turns never read it. Null in a standalone view.
+    /// </summary>
+    ITurnMetricsStore? TurnMetrics { get; }
 }
 
 /// <summary>
-/// The turns a session already recorded before this window opened it: the count and the wall clock summed over its turn
-/// checkpoints. The token totals are not here — they come from the session's stored message usage, which the strip already
-/// seeds itself with when the history is replayed.
+/// The turns a session already recorded before this window opened it: the count and the wall clock summed over the turns
+/// that recorded one. The token totals are not here — they come from the session's stored message usage, which the strip
+/// already seeds itself with when the history is replayed.
 /// </summary>
 internal readonly record struct SessionTurnHistory(int Turns, TimeSpan Duration)
 {
-    /// <summary>Nothing recorded: not an error, just a session nobody has a checkpoint for (a scratch session).</summary>
+    /// <summary>Nothing recorded: not an error, just a session nobody has a recorded turn for (a scratch session).</summary>
     public static SessionTurnHistory Empty => default;
 
     public bool IsEmpty => Turns == 0 && Duration <= TimeSpan.Zero;
 
     /// <summary>
-    /// Sums a session's checkpoints: one turn each, and the wall clock of every turn that has an end. A turn that began and
-    /// never completed (a crash) counts as a turn but contributes no time, because it has no duration to report.
+    /// Sums a session's turn metrics: one turn per row (a failed turn has a row too and counts, because it took its place in
+    /// the average) and the wall clock of every row that reports an end after its start.
     /// </summary>
-    public static SessionTurnHistory From(IReadOnlyList<TurnCheckpoint> checkpoints)
+    public static SessionTurnHistory From(IReadOnlyList<TurnMetric> turns, int? maxTurnExclusive = null)
+    {
+        ArgumentNullException.ThrowIfNull(turns);
+        var count = 0;
+        var duration = TimeSpan.Zero;
+        foreach (var turn in turns)
+        {
+            if (maxTurnExclusive is { } limit && turn.Turn >= limit)
+            {
+                // A row this window already watched land: it belongs to the live count, not the history. The corrective
+                // re-read passes the window's first turn number so a late read cannot double-count it.
+                continue;
+            }
+
+            count++;
+            if (turn.EndedAt > turn.StartedAt)
+            {
+                duration += turn.EndedAt - turn.StartedAt;
+            }
+        }
+
+        return new SessionTurnHistory(count, duration);
+    }
+
+    /// <summary>
+    /// Sums a session's checkpoints, the fallback for a database without the <c>turn_metrics</c> table: one turn each, and
+    /// the wall clock of every turn that has an end. A turn that began and never completed (a crash) counts as a turn but
+    /// contributes no time, because it has no duration to report.
+    /// </summary>
+    public static SessionTurnHistory From(IReadOnlyList<TurnCheckpoint> checkpoints, int? maxTurnExclusive = null)
     {
         ArgumentNullException.ThrowIfNull(checkpoints);
         var turns = 0;
         var duration = TimeSpan.Zero;
         foreach (var checkpoint in checkpoints)
         {
+            if (maxTurnExclusive is { } limit && checkpoint.Turn >= limit)
+            {
+                // Same split as the metrics overload: a row this window watched land stays on the live side.
+                continue;
+            }
+
             turns++;
             if (checkpoint.EndedAt is { } ended && ended > checkpoint.StartedAt)
             {
@@ -79,19 +129,79 @@ internal readonly record struct SessionTurnHistory(int Turns, TimeSpan Duration)
     }
 }
 
+/// <summary>
+/// Reads the turns a session already recorded — <c>turn_metrics</c> when the database has that table, the turn checkpoints
+/// when it does not (a database from before the feature, or one whose schema is older than the metrics table). The one
+/// existence probe is cached for the life of the reader, so a session that records nothing still costs one PRAGMA per app run.
+/// </summary>
+/// <remarks>
+/// This is the only read path of the feature, it runs when a strip is built (once per opened session) and it stays off the
+/// UI thread; nothing here is polled.
+/// </remarks>
+internal sealed class TurnHistoryReader
+{
+    private readonly ITurnMetricsStore? metrics;
+    private readonly ITurnCheckpointStore checkpoints;
+
+    /// <summary>0 unknown, 1 the table exists, 2 it does not; a failed probe leaves it unknown so a later read retries.</summary>
+    private int table;
+
+    public TurnHistoryReader(ITurnMetricsStore? metrics, ITurnCheckpointStore checkpoints)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoints);
+        this.metrics = metrics;
+        this.checkpoints = checkpoints;
+    }
+
+    /// <summary>True once the existence of the metrics table has been answered (by either answer); the strip does not read it.</summary>
+    internal bool MetricsTableKnown => Volatile.Read(ref table) != 0;
+
+    public async Task<SessionTurnHistory> ReadAsync(string sessionId, CancellationToken ct, int? maxTurnExclusive = null)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        if (metrics is { } store && await HasTableAsync(store, ct).ConfigureAwait(false))
+        {
+            return SessionTurnHistory.From(await store.ListAsync(sessionId, ct).ConfigureAwait(false), maxTurnExclusive);
+        }
+
+        return SessionTurnHistory.From(await checkpoints.ListAsync(sessionId, ct).ConfigureAwait(false), maxTurnExclusive);
+    }
+
+    private async Task<bool> HasTableAsync(ITurnMetricsStore store, CancellationToken ct)
+    {
+        var known = Volatile.Read(ref table);
+        if (known != 0)
+        {
+            return known == 1;
+        }
+
+        var present = await store.ExistsAsync(ct).ConfigureAwait(false);
+        Volatile.Write(ref table, present ? 1 : 2);
+        return present;
+    }
+}
+
 /// <summary>The shell's implementation: composition services and the platform launchers.</summary>
 internal sealed class SessionInstrumentSources : ISessionInstrumentSources
 {
     private readonly AppComposition composition;
+    private readonly TurnHistoryReader history;
     private readonly Lazy<string?> vsCode = new(ResolveVsCode, LazyThreadSafetyMode.PublicationOnly);
 
     public SessionInstrumentSources(AppComposition composition)
     {
         ArgumentNullException.ThrowIfNull(composition);
         this.composition = composition;
+        history = new TurnHistoryReader(composition.TurnMetrics, composition.TurnCheckpoints);
     }
 
     public bool HasVsCode => vsCode.Value is { Length: > 0 };
+
+    public TurnMetricsRecorder? TurnMetricsRecorder => composition.MetricsRecorder;
+
+    /// <summary>Composition owns the store; a standalone view has none, and replay then simply shows "—" for the values
+    /// only the metrics table knows.</summary>
+    public ITurnMetricsStore? TurnMetrics => composition.TurnMetrics;
 
     public bool McpFailed()
     {
@@ -206,10 +316,10 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
     }
 
     /// <summary>
-    /// Reads the session's turn checkpoints and sums them. A store that cannot be read is an empty history, not an error:
+    /// Reads the session's recorded turns and sums them. A store that cannot be read is an empty history, not an error:
     /// the summary then reports what this window watched instead of failing to open.
     /// </summary>
-    public async Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct)
+    public async Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct, int? maxTurnExclusive = null)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
         {
@@ -218,8 +328,7 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
 
         try
         {
-            var checkpoints = await composition.TurnCheckpoints.ListAsync(sessionId, ct).ConfigureAwait(false);
-            return SessionTurnHistory.From(checkpoints);
+            return await history.ReadAsync(sessionId, ct, maxTurnExclusive).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or InvalidDataException
             or Microsoft.Data.Sqlite.SqliteException)
@@ -305,6 +414,11 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
     {
     }
 
-    public Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct) =>
+    public Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct, int? maxTurnExclusive = null) =>
         Task.FromResult(SessionTurnHistory.Empty);
+
+    /// <summary>Nothing is recorded without the app's recorder: a standalone view writes no metrics row at all.</summary>
+    public TurnMetricsRecorder? TurnMetricsRecorder => null;
+
+    public ITurnMetricsStore? TurnMetrics => null;
 }

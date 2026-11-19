@@ -55,6 +55,19 @@ public sealed record ToolContext(string SessionId, string WorkingDirectory, int 
     /// producer, callable from any thread. Null when nobody watches; a tool must not require it.
     /// </summary>
     public Action<string>? Progress { get; init; }
+
+    /// <summary>
+    /// The tools the calling agent actually holds (its allow-list after the user's switches), as of the start of the tool batch; null when the caller
+    /// is not an agent loop. A tool that must not become a back door around another tool's ownership (<c>bash</c> and git)
+    /// asks this instead of guessing from the agent's role.
+    /// </summary>
+    public IToolRegistry? Tools { get; init; }
+
+    /// <summary>
+    /// Hands the caller's parallelism slot back while a tool waits on something it does not control (another agent's
+    /// command in the same workspace); disposing the result takes the slot back (with the turn's own token, whatever token is passed in). Null when the caller has no slot.
+    /// </summary>
+    public Func<CancellationToken, IAsyncDisposable>? YieldSlot { get; init; }
 }
 
 /// <summary>Where a tool comes from. Declared by whoever registers the tool, never reported by the tool itself.</summary>

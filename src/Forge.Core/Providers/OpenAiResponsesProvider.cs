@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -364,145 +365,213 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
         string? incompleteReason = null;
         var finished = false;
 
-        while (true)
+        // The streaming-time measurement every MessageCompleted must carry: first output increment to stream end, the
+        // denominator of a turn's output rate. A pair of Stopwatch timestamps rather than a Stopwatch instance, so the
+        // read loop stays allocation-free (the same shape UsageAttempt uses). The clock starts at the first output
+        // increment - an output-text or reasoning delta, a function-call announcement or an arguments delta; items and
+        // responses that carry only status or usage are bookkeeping, not output, so a call that streamed nothing
+        // measures zero. It stops wherever the loop ends; an attempt interrupted before its completion carries no
+        // MessageCompleted at all, so it contributes nothing to the turn - never a wall-clock stand-in. This wire has no
+        // non-streaming fallback: stream is always requested, and the cache-field downgrade resends over the same
+        // streaming path, so the resent attempt measures its own stream from its own first increment (the refused one
+        // produced neither an increment nor a completion).
+        var streamStart = 0L;
+        var streamEnd = 0L;
+
+        try
         {
-            var evt = await ReadEventAsync(reader, ct).ConfigureAwait(false);
-            if (evt is not { } sse)
+            while (true)
             {
-                break;
-            }
-
-            var data = sse.Data;
-            if (data.Length == 0 || data == "[DONE]")
-            {
-                continue;
-            }
-
-            using var document = ParseChunk(data);
-            var root = document.RootElement;
-            var type = ProviderJson.Str(root, "type") ?? sse.Event;
-
-            switch (type)
-            {
-                case "error":
-                    throw ErrorEvent(root);
-
-                case "response.failed":
-                    throw FailedResponse(root);
-
-                case "response.output_item.added":
+                var evt = await ReadEventAsync(reader, ct).ConfigureAwait(false);
+                if (evt is not { } sse)
                 {
-                    if (!TryGetItem(root, out var item) || ProviderJson.Str(item, "type") != FunctionCallItem)
-                    {
-                        break;
-                    }
-
-                    var state = Slot(calls, callsById, root);
-                    ApplyCall(state, item);
-                    Remember(callsById, state);
-                    if (!state.Started && state.Name.Length > 0)
-                    {
-                        state.Started = true;
-                        yield return new ToolCallStarted(state.Id, state.Name);
-                    }
-
-                    if (ProviderJson.Str(item, "arguments") is { Length: > 0 } initial)
-                    {
-                        state.Arguments.Append(initial);
-                        yield return new ToolCallArgumentsDelta(state.Id, initial);
-                    }
-
                     break;
                 }
 
-                case "response.output_item.done":
+                var data = sse.Data;
+                if (data.Length == 0 || data == "[DONE]")
                 {
-                    if (!TryGetItem(root, out var item) || ProviderJson.Str(item, "type") != FunctionCallItem)
+                    continue;
+                }
+
+                using var document = ParseChunk(data);
+                var root = document.RootElement;
+                var type = ProviderJson.Str(root, "type") ?? sse.Event;
+
+                switch (type)
+                {
+                    case "error":
+                        throw ErrorEvent(root);
+
+                    case "response.failed":
+                        throw FailedResponse(root);
+
+                    case "response.output_item.added":
                     {
+                        if (!TryGetItem(root, out var item) || ProviderJson.Str(item, "type") != FunctionCallItem)
+                        {
+                            break;
+                        }
+
+                        var state = Slot(calls, callsById, root);
+                        ApplyCall(state, item);
+                        Remember(callsById, state);
+                        if (!state.Started && state.Name.Length > 0)
+                        {
+                            state.Started = true;
+                            if (streamStart == 0)
+                            {
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
+
+                            yield return new ToolCallStarted(state.Id, state.Name);
+                        }
+
+                        if (ProviderJson.Str(item, "arguments") is { Length: > 0 } initial)
+                        {
+                            state.Arguments.Append(initial);
+                            if (streamStart == 0)
+                            {
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
+
+                            yield return new ToolCallArgumentsDelta(state.Id, initial);
+                        }
+
                         break;
                     }
 
-                    var state = Slot(calls, callsById, root);
-                    ApplyCall(state, item);
-                    Remember(callsById, state);
-                    if (!state.Started && state.Name.Length > 0)
+                    case "response.output_item.done":
                     {
-                        state.Started = true;
-                        yield return new ToolCallStarted(state.Id, state.Name);
+                        if (!TryGetItem(root, out var item) || ProviderJson.Str(item, "type") != FunctionCallItem)
+                        {
+                            break;
+                        }
+
+                        var state = Slot(calls, callsById, root);
+                        ApplyCall(state, item);
+                        Remember(callsById, state);
+                        if (!state.Started && state.Name.Length > 0)
+                        {
+                            state.Started = true;
+                            if (streamStart == 0)
+                            {
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
+
+                            yield return new ToolCallStarted(state.Id, state.Name);
+                        }
+
+                        if (ProviderJson.Str(item, "arguments") is { Length: > 0 } final
+                            && ReplaceArguments(state, final) is { Length: > 0 } suffix)
+                        {
+                            if (streamStart == 0)
+                            {
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
+
+                            yield return new ToolCallArgumentsDelta(state.Id, suffix);
+                        }
+
+                        break;
                     }
 
-                    if (ProviderJson.Str(item, "arguments") is { Length: > 0 } final
-                        && ReplaceArguments(state, final) is { Length: > 0 } suffix)
+                    case "response.function_call_arguments.delta":
                     {
+                        if (Find(calls, callsById, root) is not { } state
+                            || ProviderJson.Str(root, "delta") is not { Length: > 0 } delta)
+                        {
+                            break;
+                        }
+
+                        state.Arguments.Append(delta);
+                        if (streamStart == 0)
+                        {
+                            streamStart = Stopwatch.GetTimestamp();
+                        }
+
+                        yield return new ToolCallArgumentsDelta(state.Id, delta);
+                        break;
+                    }
+
+                    case "response.function_call_arguments.done":
+                    {
+                        if (Find(calls, callsById, root) is not { } state
+                            || ProviderJson.Str(root, "arguments") is not { } arguments
+                            || ReplaceArguments(state, arguments) is not { Length: > 0 } suffix)
+                        {
+                            break;
+                        }
+
+                        if (streamStart == 0)
+                        {
+                            streamStart = Stopwatch.GetTimestamp();
+                        }
+
                         yield return new ToolCallArgumentsDelta(state.Id, suffix);
-                    }
-
-                    break;
-                }
-
-                case "response.function_call_arguments.delta":
-                {
-                    if (Find(calls, callsById, root) is not { } state
-                        || ProviderJson.Str(root, "delta") is not { Length: > 0 } delta)
-                    {
                         break;
                     }
 
-                    state.Arguments.Append(delta);
-                    yield return new ToolCallArgumentsDelta(state.Id, delta);
-                    break;
-                }
+                    case "response.output_text.delta":
+                        if (ProviderJson.Str(root, "delta") is { Length: > 0 } textDelta)
+                        {
+                            if (streamStart == 0)
+                            {
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
 
-                case "response.function_call_arguments.done":
-                {
-                    if (Find(calls, callsById, root) is not { } state
-                        || ProviderJson.Str(root, "arguments") is not { } arguments
-                        || ReplaceArguments(state, arguments) is not { Length: > 0 } suffix)
-                    {
+                            text.Append(textDelta);
+                            yield return new TextDelta(textDelta);
+                        }
+
                         break;
-                    }
 
-                    yield return new ToolCallArgumentsDelta(state.Id, suffix);
-                    break;
+                    case "response.reasoning_summary_text.delta":
+                    case "response.reasoning_text.delta":
+                        if (ProviderJson.Str(root, "delta") is { Length: > 0 } thinkingDelta)
+                        {
+                            if (streamStart == 0)
+                            {
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
+
+                            thinking.Append(thinkingDelta);
+                            yield return new ThinkingDelta(thinkingDelta);
+                        }
+
+                        break;
+
+                    case "response.reasoning_summary_part.done":
+                        // Summaries arrive as separate parts; keep the blank line the API shows between them.
+                        thinking.Append("\n\n");
+                        if (streamStart == 0)
+                        {
+                            streamStart = Stopwatch.GetTimestamp();
+                        }
+
+                        yield return new ThinkingDelta("\n\n");
+                        break;
+
+                    case "response.completed":
+                    case "response.incomplete":
+                        status = ReadResponse(root, usage) ?? (type == "response.incomplete" ? "incomplete" : status);
+                        incompleteReason = IncompleteReason(root) ?? incompleteReason;
+                        finished = true;
+                        break;
                 }
 
-                case "response.output_text.delta":
-                    if (ProviderJson.Str(root, "delta") is { Length: > 0 } textDelta)
-                    {
-                        text.Append(textDelta);
-                        yield return new TextDelta(textDelta);
-                    }
-
+                if (finished)
+                {
                     break;
-
-                case "response.reasoning_summary_text.delta":
-                case "response.reasoning_text.delta":
-                    if (ProviderJson.Str(root, "delta") is { Length: > 0 } thinkingDelta)
-                    {
-                        thinking.Append(thinkingDelta);
-                        yield return new ThinkingDelta(thinkingDelta);
-                    }
-
-                    break;
-
-                case "response.reasoning_summary_part.done":
-                    // Summaries arrive as separate parts; keep the blank line the API shows between them.
-                    thinking.Append("\n\n");
-                    yield return new ThinkingDelta("\n\n");
-                    break;
-
-                case "response.completed":
-                case "response.incomplete":
-                    status = ReadResponse(root, usage) ?? (type == "response.incomplete" ? "incomplete" : status);
-                    incompleteReason = IncompleteReason(root) ?? incompleteReason;
-                    finished = true;
-                    break;
+                }
             }
-
-            if (finished)
-            {
-                break;
-            }
+        }
+        finally
+        {
+            // However the read loop ended - a parsed completion, a provider error, a caller cancellation -
+            // the clock stops at that moment. A stream that died mid-answer has its elapsed stopped at the
+            // interruption; one that never produced an output increment stays zero (the start was never set).
+            streamEnd = Stopwatch.GetTimestamp();
         }
 
         if (!finished)
@@ -532,7 +601,12 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
         }
 
         var stop = MapStopReason(status, incompleteReason, blocks);
-        yield return new MessageCompleted(new ChatMessage(MessageRole.Assistant, blocks), usage.ToTokenUsage(), stop);
+        yield return new MessageCompleted(new ChatMessage(MessageRole.Assistant, blocks), usage.ToTokenUsage(), stop)
+        {
+            // First output increment to stream end; zero when the stream produced no increment. There is no "unknown":
+            // a completion without this measurement is an adapter defect, never a wall-clock fallback.
+            StreamElapsed = streamStart == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(streamStart, streamEnd),
+        };
     }
 
     private JsonDocument ParseChunk(string data)

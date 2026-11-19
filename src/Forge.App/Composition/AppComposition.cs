@@ -54,6 +54,8 @@ internal sealed class AppComposition : IAsyncDisposable
     private readonly SqliteTodoStore todos;
     private readonly SqliteUiStateStore uiState;
     private readonly SqliteTurnCheckpointStore turnCheckpoints;
+    private readonly SqliteTurnMetricsStore turnMetrics;
+    private readonly TurnMetricsRecorder metricsRecorder;
     private readonly AgentRuntimeManager runtimes;
     private readonly PreferencesStore preferences;
     private readonly SettingsSections settings;
@@ -83,6 +85,8 @@ internal sealed class AppComposition : IAsyncDisposable
         SqliteTodoStore todos,
         SqliteUiStateStore uiState,
         SqliteTurnCheckpointStore turnCheckpoints,
+        SqliteTurnMetricsStore turnMetrics,
+        TurnMetricsRecorder metricsRecorder,
         TurnCheckpointService checkpoints,
         WorktreeService worktrees,
         AgentRuntimeManager runtimes,
@@ -111,6 +115,8 @@ internal sealed class AppComposition : IAsyncDisposable
         this.todos = todos;
         this.uiState = uiState;
         this.turnCheckpoints = turnCheckpoints;
+        this.turnMetrics = turnMetrics;
+        this.metricsRecorder = metricsRecorder;
         Checkpoints = checkpoints;
         Worktrees = worktrees;
         this.runtimes = runtimes;
@@ -217,6 +223,19 @@ internal sealed class AppComposition : IAsyncDisposable
     public IUiStateStore UiState => uiState;
 
     public ITurnCheckpointStore TurnCheckpoints => turnCheckpoints;
+
+    /// <summary>
+    /// The per-turn metrics store (<c>turn_metrics</c>): the strip's turn history reads it, and the recorder writes it. A
+    /// database from before the feature has no table and the store says so once through
+    /// <see cref="ITurnMetricsStore.ExistsAsync"/>.
+    /// </summary>
+    public ITurnMetricsStore TurnMetrics => turnMetrics;
+
+    /// <summary>
+    /// The one turn-metrics writer of the process: a bounded queue and a background task, handed to every session so a turn
+    /// end only ever does one struct channel write. Best effort by contract — see <see cref="TurnMetricsRecorder"/>.
+    /// </summary>
+    public TurnMetricsRecorder MetricsRecorder => metricsRecorder;
 
     public TurnCheckpointService Checkpoints { get; }
 
@@ -551,6 +570,11 @@ internal sealed class AppComposition : IAsyncDisposable
         var todos = new SqliteTodoStore(paths.UserDataDirectory);
         var uiState = new SqliteUiStateStore(paths.UserDataDirectory);
         var turnCheckpoints = new SqliteTurnCheckpointStore(paths.UserDataDirectory);
+        // The per-turn metrics table (turn_metrics) next to the checkpoints: its own store and its own writer, so a stuck
+        // metrics write can never hold up the session store, and its own existence probe (an old database has no table, and
+        // the whole feature then bypasses itself to a no-op).
+        var turnMetrics = new SqliteTurnMetricsStore(paths.UserDataDirectory);
+        var metricsRecorder = new TurnMetricsRecorder(turnMetrics);
 
         // The update checker (wave W10b): its own client through the one network stack, staged under <data>/updates, and
         // the UI-state store for the last-check time the automatic schedule reads. The service owns the client.
@@ -571,7 +595,7 @@ internal sealed class AppComposition : IAsyncDisposable
         // and a permanent delete removes one session's share of both. Not disposed with the composition: disposing it
         // clears every SQLite pool of the process, and it holds nothing else.
         var artifacts = new FileArtifactStore(Path.Combine(paths.UserDataDirectory, "artifacts"), sessions.ConnectionString);
-        var checkpoints = new TurnCheckpointService(git, turnCheckpoints);
+        var checkpoints = new TurnCheckpointService(git, turnCheckpoints, turnMetrics);
         var worktrees = new WorktreeService(git);
 
         // 8. The per-session agent runtimes. The git tools are built once for the whole app: they are stateless, take the
@@ -713,6 +737,8 @@ internal sealed class AppComposition : IAsyncDisposable
             todos,
             uiState,
             turnCheckpoints,
+            turnMetrics,
+            metricsRecorder,
             checkpoints,
             worktrees,
             runtimes,
@@ -996,6 +1022,10 @@ internal sealed class AppComposition : IAsyncDisposable
             await approvals.DisposeAsync().ConfigureAwait(false);
         }
 
+        // The metrics writer first: it drains what it already holds (bounded) and only then does the store it writes through
+        // go away. Reverse construction order otherwise.
+        await metricsRecorder.DisposeAsync().ConfigureAwait(false);
+        await turnMetrics.DisposeAsync().ConfigureAwait(false);
         await turnCheckpoints.DisposeAsync().ConfigureAwait(false);
         await uiState.DisposeAsync().ConfigureAwait(false);
         await todos.DisposeAsync().ConfigureAwait(false);

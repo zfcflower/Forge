@@ -335,6 +335,11 @@ internal static partial class TranscriptScenarios
         private static TurnCardViewModel Card(TranscriptViewModel transcript, int turn) =>
             transcript.Rows.OfType<TurnCardViewModel>().Skip(turn).First();
 
+        /// <summary>The card's own tool row by index — works on a collapsed-older transcript, where the global
+        /// row-skip cannot assume every turn's blocks are in the flat list.</summary>
+        private static ToolRowViewModel ToolOf(TurnCardViewModel card, int index) =>
+            card.Blocks.OfType<ToolRowViewModel>().Skip(index).First();
+
         /// <summary>The first row whose top is on screen, below <paramref name="from"/>.</summary>
         private static object FirstVisibleRow(Probe probe, double from = 0) =>
             probe.List.GetRealizedContainers()
@@ -347,7 +352,12 @@ internal static partial class TranscriptScenarios
         public Task<string> AnchorAsync(string name, bool pinned) =>
             Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                var probe = await MountAsync(BuildRich(name == "subagent-new-turn" ? 8 : 40, name == "subagent-new-turn"), pinned).ConfigureAwait(true);
+                // The turn-header toggle only exists in sub-agent transcripts now (a main-session turn has no header
+                // row): the three header cases ride a collapsed-older transcript like subagent-new-turn, so the coverage
+                // of "toggling a header must not move the content anchor" survives the layout change.
+                var headerCase = name is "turn-header-visible" or "turn-covering" or "turn-above";
+                var subagentStyle = headerCase || name == "subagent-new-turn";
+                var probe = await MountAsync(BuildRich(name == "subagent-new-turn" ? 8 : 40, subagentStyle), pinned).ConfigureAwait(true);
                 try
                 {
                     if (name is not ("follow-expand" or "follow-click-expand"))
@@ -406,6 +416,8 @@ internal static partial class TranscriptScenarios
                 case "turn-header-visible":
                 {
                     var card = Card(transcript, 20);
+                    card.IsExpanded = true;
+                    await FramesAsync(2).ConfigureAwait(true);
                     await PlaceAsync(probe, card, 150).ConfigureAwait(true);
                     Func<Button, bool> headerMatch = b => b.Classes.Contains("link");
                     results.Add(await MeasureAsync(probe, "collapse", () => ButtonY(probe, card, headerMatch), () => ClickIn(probe, card, headerMatch)).ConfigureAwait(true));
@@ -417,7 +429,9 @@ internal static partial class TranscriptScenarios
                 {
                     // The turn's header is far above the top edge and its blocks fill the screen; the turn collapses (programmatic).
                     var card = Card(transcript, 20);
-                    var tool = Tool(transcript, 20, 3);
+                    card.IsExpanded = true;
+                    await FramesAsync(2).ConfigureAwait(true);
+                    var tool = ToolOf(card, 3);
                     await PlaceAsync(probe, tool, 100).ConfigureAwait(true);
                     var next = transcript.Rows[transcript.Rows.IndexOf(card) + card.Blocks.Count + 1];
                     results.Add(await MeasureAsync(probe, "collapse (header y after)", () => RowY(probe, card), () => card.IsExpanded = false).ConfigureAwait(true));
@@ -443,7 +457,11 @@ internal static partial class TranscriptScenarios
 
                 case "turn-above":
                 {
-                    var tool = Tool(transcript, 20, 0);
+                    Card(transcript, 19).IsExpanded = true;
+                    var card = Card(transcript, 20);
+                    card.IsExpanded = true;
+                    await FramesAsync(2).ConfigureAwait(true);
+                    var tool = ToolOf(card, 0);
                     await PlaceAsync(probe, tool, 40).ConfigureAwait(true);
                     var watched = FirstVisibleRow(probe);
                     results.Add(await MeasureAsync(probe, "collapse turn above", () => RowY(probe, watched), () => Card(transcript, 19).IsExpanded = false).ConfigureAwait(true));

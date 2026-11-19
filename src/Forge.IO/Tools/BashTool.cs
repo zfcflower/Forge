@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -31,8 +32,12 @@ public sealed class BashTool : ToolBase
         ["NO_COLOR"] = "1",
     };
 
+    /// <summary>How long a command waits for the workspace before it gives up and says who is holding it.</summary>
+    internal static readonly TimeSpan MaxExecutionWait = TimeSpan.FromMinutes(10);
+
     private readonly IProcessRunner runner;
     private readonly Func<ToolOptions> options;
+    private readonly ExecutionGate executionGate;
 
     /// <summary>A tool with the default resource bounds.</summary>
     public BashTool(IProcessRunner runner)
@@ -42,19 +47,29 @@ public sealed class BashTool : ToolBase
 
     /// <summary>A tool that reads its bounds per call, so a preference change applies without a restart.</summary>
     public BashTool(IProcessRunner runner, Func<ToolOptions> options)
+        : this(runner, options, ExecutionGate.Shared)
+    {
+    }
+
+    /// <param name="runner">Starts the processes.</param>
+    /// <param name="options">Read per call.</param>
+    /// <param name="executionGate">Serializes the commands that are not trivially cheap per workspace; tests pass their own.</param>
+    public BashTool(IProcessRunner runner, Func<ToolOptions> options, ExecutionGate executionGate)
         : base(
             "bash",
-            "Run a command line in the workspace and return its exit code, duration and output. A simple command line " +
-            "runs as a program plus arguments (direct mode); anything with shell syntax (pipes, redirection, globs, " +
-            "variables, &&, ;) runs through the platform shell (script mode). Each output stream is capped, with the byte " +
-            "count reported; a timeout kills the whole process tree. A non-zero exit code is a normal result, not an error.",
+            "Run a command line in the workspace and return its exit code, duration and output. For what the built-in tools do not cover: " +
+            "building, testing, running programs, package managers, and git and 'gh pr/run/workflow/api' (only if you hold the git_* / pr_* tools). " +
+            "Piping a command's output through grep, head or tail is fine. Commands that are not trivially cheap run one at a time per workspace; " +
+            "that wait does not count against timeout_seconds.",
             Schema,
             ToolSideEffect.Execute)
     {
         ArgumentNullException.ThrowIfNull(runner);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(executionGate);
         this.runner = runner;
         this.options = options;
+        this.executionGate = executionGate;
     }
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
@@ -71,6 +86,12 @@ public sealed class BashTool : ToolBase
         var seconds = Math.Clamp(requestedSeconds, ToolOptions.MinShellTimeoutSeconds, ToolOptions.MaxShellTimeoutSeconds);
         var captureBytes = Math.Clamp(bounds.ShellCaptureBytes, 1, ToolOptions.MaxShellCaptureBytes);
         var workingDirectory = ResolveWorkingDirectory(Root(context), ToolJson.OptionalString(arguments, "workdir"));
+
+        var commands = BashCommandAnalyzer.Analyze(command);
+        if (BashPolicy.Check(commands, context.Tools) is { } refusal)
+        {
+            return new ToolResult(refusal, IsError: true);
+        }
 
         ProcessRequest request;
         string mode;
@@ -106,13 +127,90 @@ public sealed class BashTool : ToolBase
             mode = "script (" + shell.DialectName + ")";
         }
 
+        using var lease = BashPolicy.IsCheap(commands) ? null : await EnterWorkspaceAsync(context, command, ct).ConfigureAwait(false);
+        if (lease?.Busy is { } busy)
+        {
+            return new ToolResult(busy, IsError: true);
+        }
+
         var result = await runner.ExecuteAsync(request, ct).ConfigureAwait(false);
         if (result.EndReason == ProcessEndReason.Exited && result.ExitCode == ProcessRunner.StartFailedExitCode)
         {
             return new ToolResult(result.Stderr.Length > 0 ? result.Stderr : $"bash: '{request.FileName}' did not start.", IsError: true);
         }
 
-        return new ToolResult(Format(command, mode, result, seconds));
+        return new ToolResult(Format(command, mode, lease?.QueuedNote, result, seconds));
+    }
+
+    /// <summary>
+    /// Takes the workspace for this command. A free workspace is taken at once; a busy one is waited for with the caller's
+    /// parallelism slot handed back, so agents waiting here do not keep others from starting. The lease carries a busy
+    /// message instead when the wait ran out.
+    /// </summary>
+    private async ValueTask<WorkspaceLease> EnterWorkspaceAsync(ToolContext context, string command, CancellationToken ct)
+    {
+        var workspace = Root(context);
+        var holder = Describe(context, command);
+        if (executionGate.TryAcquire(workspace, holder, out var immediate))
+        {
+            return new WorkspaceLease(immediate, null, null);
+        }
+
+        var owner = executionGate.HolderOf(workspace) ?? "another command";
+        context.Progress?.Invoke("waiting for the workspace: " + owner);
+        var started = Stopwatch.GetTimestamp();
+        IDisposable? acquired = null;
+        try
+        {
+            await using (context.YieldSlot?.Invoke(ct))
+            {
+                acquired = await executionGate.AcquireAsync(workspace, holder, MaxExecutionWait, ct).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            acquired?.Dispose();
+            throw;
+        }
+
+        var waited = Stopwatch.GetElapsedTime(started);
+        if (acquired is null)
+        {
+            return new WorkspaceLease(
+                NoLease.Instance,
+                null,
+                $"bash: the workspace stayed busy for {(int)waited.TotalSeconds}s ({executionGate.HolderOf(workspace) ?? owner}). Nothing was run; try again later.");
+        }
+
+        return new WorkspaceLease(
+            acquired,
+            "queued: waited " + waited.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + "s for " + owner,
+            null);
+    }
+
+    private static string Describe(ToolContext context, string command)
+    {
+        var who = context.AgentId ?? context.AgentName ?? "agent";
+        var text = command.Length > 60 ? string.Concat(command.AsSpan(0, 60), "...") : command;
+        return who + ": " + text.Replace('\n', ' ');
+    }
+
+    private sealed class WorkspaceLease(IDisposable inner, string? queuedNote, string? busy) : IDisposable
+    {
+        public string? QueuedNote { get; } = queuedNote;
+
+        public string? Busy { get; } = busy;
+
+        public void Dispose() => inner.Dispose();
+    }
+
+    private sealed class NoLease : IDisposable
+    {
+        public static readonly NoLease Instance = new();
+
+        public void Dispose()
+        {
+        }
     }
 
     private static string ResolveWorkingDirectory(string root, string? requested)
@@ -142,11 +240,16 @@ public sealed class BashTool : ToolBase
         return tail;
     }
 
-    private static string Format(string command, string mode, ProcessResult result, int timeoutSeconds)
+    private static string Format(string command, string mode, string? queuedNote, ProcessResult result, int timeoutSeconds)
     {
         var text = new StringBuilder(command.Length + result.Stdout.Length + result.Stderr.Length + 128);
         text.Append("$ ").Append(command).Append('\n');
         text.Append("mode: ").Append(mode).Append('\n');
+        if (queuedNote is not null)
+        {
+            text.Append(queuedNote).Append('\n');
+        }
+
 
         var milliseconds = (long)Math.Round(result.Duration.TotalMilliseconds);
         if (result.EndReason == ProcessEndReason.TimedOut)

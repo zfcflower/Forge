@@ -21,9 +21,12 @@ public enum TurnMetricStatus
 
 /// <summary>
 /// One main-session turn's persisted metrics: the boundaries no stored message can reconstruct (start, end, outcome, who
-/// ran it) plus this turn's token snapshot in the turn card's own arithmetic — the root agent's instance-counter
-/// difference, all five token kinds, null on every column a failed or unreported turn never measured. Derived quantities
-/// (cost, cache-hit ratio, tokens per second) are never stored; readers compute them.
+/// ran it, how long the model spent streaming) plus this turn's token snapshot in the turn card's own arithmetic — the
+/// root agent's instance-counter difference, all five token kinds, null on every column a failed or unreported turn never
+/// measured. <see cref="TurnMetric.StreamElapsed"/> is never null and never a fallback: every model call produces it
+/// (first output increment to stream end, accumulated over the turn's calls), zero for a turn that streamed nothing —
+/// a missing measurement is an adapter defect. Derived quantities (cost, cache-hit ratio) are never stored; readers
+/// compute them.
 /// </summary>
 public sealed record TurnMetric(
     string SessionId,
@@ -39,7 +42,8 @@ public sealed record TurnMetric(
     int? CacheReadTokens = null,
     int? CacheWriteTokens = null,
     int? CacheWrite1hTokens = null,
-    int? ToolCalls = null);
+    int? ToolCalls = null,
+    TimeSpan StreamElapsed = default);
 
 /// <summary>
 /// Per-turn metrics of main sessions, keyed by <c>(session_id, turn)</c> — the table records the number the transcript

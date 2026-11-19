@@ -101,7 +101,7 @@
 
 ## 1.9 回合与检查点
 
-- 每个主轮次开始/结束（含失败、取消）用 `SnapshotTreeAsync` 取树哈希写 `turn_checkpoints`；轮次号从已存检查点续接，非 git 目录跳过。
+- 每个主轮次开始/结束（含失败、取消）用 `SnapshotTreeAsync` 取树哈希写 `turn_checkpoints`（仅 git 会话）；轮次号从 `MAX(turn_checkpoints, turn_metrics)+1` 续接——`turn_metrics` 两种会话每轮一行（含失败轮，见 Docs/12 §12.2），General（非 git）会话重开窗口不再从 1 重新数。
 - 树哈希实现把真实索引复制到临时文件后 `add --all` + `write-tree`，不改用户索引/HEAD/分支/stash。
 - “已改动”面板按轮次列出差异时用的就是这些树。
 

@@ -25,6 +25,8 @@
         <ResourceInclude Source="avares://Forge.App/Resources/Tokens.axaml" />
         <ResourceInclude Source="avares://Forge.App/Resources/Workbench.axaml" />
       </ResourceDictionary.MergedDictionaries>
+      <!-- The user-requested accent of the round marker: a deep Tiffany blue, readable on both theme variants. -->
+      <SolidColorBrush x:Key="TiffanyInkBrush" Color="#1B9EAA" />
     </ResourceDictionary>
   </Application.Resources>
 
@@ -671,7 +673,12 @@
                                 AutomationProperties.Name="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}">
             <wc:FluentIcon Data="{StaticResource IconCopy}" Width="13" Height="13" />
           </views:CopyTextButton>
-          <TextBlock Classes="caption" Text="{Binding Time}" VerticalAlignment="Center" />
+          <TextBlock Classes="caption" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+            <!-- One meta line under the bubble, next to the copy button: the round marker in the Tiffany accent, then the
+                 interval since the previous message (first round has none) and the local start clock. -->
+            <Run Foreground="{DynamicResource TiffanyInkBrush}" FontWeight="SemiBold" Text="{Binding RoundText}" />
+            <Run Text="{Binding MetaText}" />
+          </TextBlock>
         </StackPanel>
       </StackPanel>
       </Grid>
@@ -703,6 +710,11 @@
       </Grid>
     </DataTemplate>
 
+    <!-- The round-end metrics row: a rule with the turn's numbers in the middle, after the footnote. -->
+    <DataTemplate DataType="vm:TurnDividerViewModel" x:DataType="vm:TurnDividerViewModel">
+      <views:TimelineTurnDividerView />
+    </DataTemplate>
+
     <!-- The reasoning row carries no business data beyond its text. A collapsed row shows the first line only. -->
     <DataTemplate DataType="vm:TurnThinkingViewModel" x:DataType="vm:TurnThinkingViewModel">
       <Grid ColumnDefinitions="Auto,*">
@@ -726,6 +738,8 @@
           </Button>
           <ScrollViewer MaxHeight="240"
                         IsVisible="{Binding IsExpanded}"
+                        Margin="18,0,0,0"
+                        views:StreamFollow.Follow="True"
                         HorizontalScrollBarVisibility="Disabled"
                         VerticalScrollBarVisibility="Auto">
             <TextBlock Classes="caption"

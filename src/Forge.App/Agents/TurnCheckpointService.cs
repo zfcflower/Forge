@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Forge.Abstractions;
+using Forge.Core.Storage;
 using Forge.Workspace;
 using Forge.App.Logging;
 using ZLogger;
@@ -16,14 +17,21 @@ internal sealed class TurnCheckpointService
 {
     private readonly GitCli git;
     private readonly ITurnCheckpointStore store;
+    private readonly ITurnMetricsStore metrics;
     private readonly Action<string>? diagnostic;
 
-    public TurnCheckpointService(GitCli git, ITurnCheckpointStore store, Action<string>? diagnostic = null)
+    public TurnCheckpointService(
+        GitCli git,
+        ITurnCheckpointStore store,
+        ITurnMetricsStore metrics,
+        Action<string>? diagnostic = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(metrics);
         this.git = git;
         this.store = store;
+        this.metrics = metrics;
         this.diagnostic = diagnostic;
     }
 
@@ -58,8 +66,11 @@ internal sealed class TurnCheckpointService
     }
 
     /// <summary>
-    /// The next turn number that has no checkpoint yet. A reopened session continues the numbering of the stored
-    /// checkpoints instead of starting over, because a completed turn is never rewritten.
+    /// The next turn number neither table has yet: the highest recorded turn of <c>turn_checkpoints</c> and of
+    /// <c>turn_metrics</c>, plus one. A session without a git worktree records no checkpoint at all, so its reopened
+    /// numbering continues from the metrics table instead of starting over at 1 — and a session with both continues from
+    /// whichever got further (a crashed turn can leave a metrics row with no checkpoint, and a turn cancelled before its
+    /// first request the other way round).
     /// </summary>
     public async Task<int> NextTurnNumberAsync(string sessionId, CancellationToken ct)
     {
@@ -70,6 +81,7 @@ internal sealed class TurnCheckpointService
             highest = Math.Max(highest, checkpoint.Turn);
         }
 
+        highest = Math.Max(highest, await metrics.MaxTurnAsync(sessionId, ct).ConfigureAwait(false));
         return highest + 1;
     }
 

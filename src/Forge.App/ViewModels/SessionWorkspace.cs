@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Data.Common;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Avalonia.Threading;
@@ -15,6 +16,8 @@ using Forge.App.Preferences;
 using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.Core.Agents;
+using Forge.Core.Providers;
+using Forge.Core.Storage;
 using Forge.Workspace;
 using Forge.App.Logging;
 using ZLogger;
@@ -70,6 +73,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// </summary>
     private readonly ConcurrentDictionary<string, byte> automationChildIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TokenUsage> agentUsage = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The same per-agent accumulation for the model's streaming time, kept beside <see cref="agentUsage"/> and updated at
+    /// the same moment: an <c>AgentTurnCompleted</c> carries the instance's cumulative stream time, so the difference to the
+    /// previous event of that agent is what its card adds (see <see cref="AddTurnUsage"/>). Written and read on the UI
+    /// thread only, like the token dictionary; cleared where that one is cleared.
+    /// </summary>
+    private readonly Dictionary<string, TimeSpan> agentStream = new(StringComparer.Ordinal);
     private readonly ObservableCollection<SubAgentViewModel> finished = [];
     private readonly FinishedSubAgentsViewModel finishedMenu = new();
     private readonly FrameCoalescer<AgentEvent> coalescer;
@@ -101,6 +112,37 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private bool cacheRewriteNotified;
     private const int CacheRewriteNoticeThreshold = 3;
     private DateTimeOffset turnStartedAt;
+
+    /// <summary>
+    /// The app's turn-metrics writer, reached through <see cref="ISessionInstrumentSources"/> (the shell's one app-level
+    /// service block); null for a view built without one, which then records nothing.
+    /// </summary>
+    private readonly TurnMetricsRecorder? metricsRecorder;
+
+    /// <summary>
+    /// The session's sources, kept for the replay seeding only: the metrics table the dividers seed from and the model
+    /// metadata the cost line prices with. Live turns never read through it.
+    /// </summary>
+    private readonly ISessionInstrumentSources instrumentSources;
+
+    /// <summary>
+    /// The root instance's counters as the turn began (tokens, streaming time, and which instance they belong to). The turn-end
+    /// difference is the metrics row's snapshot. They are read from the instance itself, not from events: a turn that failed
+    /// or was stopped never sends <c>AgentTurnCompleted</c>, yet its calls already moved the counters, and an event-fed copy
+    /// would charge that spend to the next turn.
+    /// </summary>
+    private RootCounters turnStartCounters = RootCounters.None;
+
+    /// <summary>Tool calls the root agent started during this turn; incremented on the event thread, reset when the turn
+    /// begins. Counted there — not in TrackTool — so a Background flush landing after the turn's finally cannot miss a
+    /// call.</summary>
+    private int turnToolCalls;
+
+    /// <summary>The card of the turn now running (or just ended). The root's usage lands on the card the turn used, not on
+    /// whatever <c>Transcript.Current</c> happens to be when the coalescer's Background flush arrives — a quick next
+    /// message would otherwise hand the previous turn's tokens to the new card.</summary>
+    private TurnCardViewModel? turnCard;
+
     private bool disposed;
 
     /// <summary>The thread the session was built on (the UI thread); a language notification from another one is not ours.</summary>
@@ -168,6 +210,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         this.openSession = openSession;
         appPreferences = preferences;
         providerModel = providers.Catalog.Default?.DefaultModel ?? string.Empty;
+        var instrumentSourcesResolved = instrumentSources ?? EmptySessionInstrumentSources.Instance;
+        metricsRecorder = instrumentSourcesResolved.TurnMetricsRecorder;
+        this.instrumentSources = instrumentSourcesResolved;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
         coalescer = new FrameCoalescer<AgentEvent>(HandleOnUi, FlushAllPendingText);
         SubAgents = new ReadOnlyObservableCollection<SubAgentViewModel>(subAgents);
@@ -192,7 +237,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
         Instruments = new SessionInstrumentsViewModel(
             session,
-            instrumentSources ?? EmptySessionInstrumentSources.Instance,
+            instrumentSourcesResolved,
             () => Composer.Model,
             () => Composer.ProviderId,
             openInspector);
@@ -672,6 +717,23 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             var messages = await TranscriptReplay.ReadAsync(store, SessionId, ct).ConfigureAwait(true);
             Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, messages));
 
+            // The divider tooltips price with the composer's current choice when a replayed row names no model;
+            // live turns resolve the same way, so a model switch re-prices what the next hover shows.
+            Transcript.ResolveCost = ResolveTurnCost;
+            if (instrumentSources.TurnMetrics is { } turnMetrics)
+            {
+                try
+                {
+                    Transcript.SeedTurnMetrics(await turnMetrics.ListAsync(SessionId, ct).ConfigureAwait(true));
+                }
+                catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException
+                    or ObjectDisposedException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
+                {
+                    // Metrics seed the dividers only: losing them leaves "—" where the clock would be, never a notice.
+                    AppLogs.Session.ZLogWarning($"turn metrics seed skipped: {exception.GetType().Name}: {exception.Message}");
+                }
+            }
+
             await RestoreSubAgentsAsync(SessionId, "root", ct).ConfigureAwait(true);
 
             SyncFinishedMenu();
@@ -689,6 +751,28 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
             Transcript.AddNotice(SessionStrings.ReadFailed(exception.Message), isError: true);
+        }
+    }
+
+    /// <summary>
+    /// Prices one turn's snapshot for a divider tooltip at the model's own rates; null when the model is unknown or the
+    /// lookup fails. A row without a recorded model falls back to the composer's current choice — usually the model that
+    /// ran the turn — and a standalone view has no sources at all, so its tooltips read "—".
+    /// </summary>
+    private string? ResolveTurnCost(TokenUsage usage, string? provider, string? model)
+    {
+        try
+        {
+            var metadata = instrumentSources.ModelMetadata(
+                string.IsNullOrEmpty(model) ? Composer.Model : model,
+                string.IsNullOrEmpty(provider) ? Composer.ProviderId : provider);
+            return SessionUsageMath.Cost(usage, metadata.Pricing) is { } cost
+                ? TurnDividerText.FormatCost(cost)
+                : null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return null;
         }
     }
 
@@ -1467,19 +1551,30 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         var live = runtime!;
         turnRan = true;
+
+        // This turn's own failure starts empty. The field is written on the agent's thread as each event arrives (and cleared
+        // here), so what the turn end reads belongs to this turn: a stale text would make a turn that went through look failed.
+        turnRootFailure = null;
         if (rootRebuilt)
         {
             rootRebuilt = false;
             agentUsage.Remove("root");
+            agentStream.Remove("root");
         }
 
         TurnStarted?.Invoke(this, automationTurn);
         turnStartedAt = DateTimeOffset.Now;
         Interlocked.Exchange(ref lastActivityTicks, turnStartedAt.UtcTicks);
         Interlocked.Exchange(ref runningTools, 0);
+        turnStartCounters = live.ReadRootCounters();
+        turnToolCalls = 0;
         Instruments.RefreshCounters();
         Transcript.AddUserMessage(text, turnStartedAt, prompt.Attachments);
         var card = Transcript.BeginTurn(turnStartedAt);
+        turnCard = card;
+        card.NoteModel(
+            Composer.ProviderId is { Length: > 0 } provider ? provider : null,
+            Composer.Model is { Length: > 0 } model ? model : null);
         turnNumber = card.Round;
         IsRunning = true;
 
@@ -1537,6 +1632,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
                 lastTurnError = error;
                 Transcript.EndTurn(DateTimeOffset.Now - turnStartedAt, error);
+
+                // The turn's own numbers, handed over as one struct channel write: no await, no query, no formatting, and a
+                // recorder that is missing or has no table costs nothing. The denominator of the strip counts every turn,
+                // so it is told here (a failed or unreported turn is still a turn the averages are spread over).
+                Instruments.NoteTurnEnded(turnNo);
+                RecordTurnMetrics(turnNo, error);
                 if (checkpoints is not null)
                 {
                     try
@@ -1672,6 +1773,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (value is AgentToolStarted)
         {
             Interlocked.Increment(ref runningTools);
+            if (string.Equals(value.AgentId, "root", StringComparison.Ordinal))
+            {
+                // Counted here — on the event thread — rather than in TrackTool, so a deferred Background flush cannot
+                // make the turn's finally miss a call.
+                Interlocked.Increment(ref turnToolCalls);
+            }
         }
         else if (value is AgentToolFinished && Interlocked.Decrement(ref runningTools) < 0)
         {
@@ -1945,33 +2052,100 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>
     /// <see cref="AgentTurnCompleted"/> carries the usage accumulated by that agent instance over all its turns, so the
     /// card gets the difference to the previous turn; a provider that reported nothing leaves the card showing "—".
+    /// The same event carries the instance's cumulative streaming time, differenced the same way into the card's
+    /// <see cref="TurnCardViewModel.StreamElapsed"/> — the divider's output rate divides by that, never by the wall clock.
+    /// <para>The metrics row does not read this difference: it differences two snapshots of the instance counter itself
+    /// (the root instance's live counters against <see cref="turnStartCounters"/>), so the row and the card agree but do not
+    /// depend on the same flush timing, and a failed or stopped turn still records what it spent.</para>
     /// </summary>
     private void AddTurnUsage(AgentTurnCompleted completed)
     {
         var previous = agentUsage.TryGetValue(completed.AgentId, out var stored) ? stored : TokenUsage.Empty;
         agentUsage[completed.AgentId] = completed.Usage;
+        var root = string.Equals(completed.AgentId, "root", StringComparison.Ordinal);
         var delta = new TokenUsage(
             Math.Max(0, completed.Usage.InputTokens - previous.InputTokens),
             Math.Max(0, completed.Usage.OutputTokens - previous.OutputTokens),
             Math.Max(0, completed.Usage.CacheReadTokens - previous.CacheReadTokens),
-            Math.Max(0, completed.Usage.CacheWriteTokens - previous.CacheWriteTokens));
-        if (delta.InputTokens == 0 && delta.OutputTokens == 0 && delta.CacheReadTokens == 0 && delta.CacheWriteTokens == 0)
+            Math.Max(0, completed.Usage.CacheWriteTokens - previous.CacheWriteTokens),
+            Math.Max(0, completed.Usage.CacheWrite1hTokens - previous.CacheWrite1hTokens));
+
+        // The same difference for the streaming time. The counter is kept in step before the "nothing reported" return
+        // below, so a later event's difference can never swallow this event's time, and the card is addressed without
+        // Card(): a completion whose tokens stayed unknown still streamed, and it must not conjure a turn card just to add
+        // a duration. Time only moves forward, so a counter that went backwards contributes nothing.
+        var previousStream = agentStream.TryGetValue(completed.AgentId, out var streamed) ? streamed : TimeSpan.Zero;
+        agentStream[completed.AgentId] = completed.StreamElapsed;
+        if (completed.StreamElapsed > previousStream)
+        {
+            (root ? turnCard : Find(completed.AgentId)?.Transcript.Current)?.NoteStream(completed.StreamElapsed - previousStream);
+        }
+
+        // Nothing reported is not the same as zero spent: the strip and the card keep "—", and the metrics row keeps null, so
+        // a turn whose only non-zero column is the hour-lived cache write still counts as reported.
+        if (delta.InputTokens == 0 && delta.OutputTokens == 0 && delta.CacheReadTokens == 0 && delta.CacheWriteTokens == 0
+            && delta.CacheWrite1hTokens == 0)
         {
             return;
         }
 
         // The strip reports the root agent's spend (the context window and the price belong to that model); a sub-agent's
-        // usage stays on its own tab, and its turn card still gets its own delta here.
+        // usage stays on its own tab, and its turn card still gets its own delta here. The root's card is the turn's own
+        // card (see turnCard): a Background flush arriving after the next turn began must not misdeliver the tokens.
         Instruments.AddTurn(completed.AgentId, delta);
-        if (string.Equals(completed.AgentId, "root", StringComparison.Ordinal))
+        if (root)
         {
             // The session's tool set only exists once the first turn built the agent host, so the denominator is refreshed
             // after the turn that created it instead of before.
             Instruments.RefreshCounters();
+            turnCard?.AddUsage(delta, completed.Stop);
+        }
+        else
+        {
+            Card(completed.AgentId)?.AddUsage(delta, completed.Stop);
+        }
+        NoteFullCacheRewrite(completed.AgentId, delta);
+    }
+
+    /// <summary>
+    /// Hands the turn's metrics to the app's background writer: one struct channel write, synchronous, and the only cost the
+    /// turn end pays for its own metrics. The provider and the model are the composer's current choice by reference (the same
+    /// ones the turn card and the strip price with); the error text is the one the footnote already shows; the two stream
+    /// snapshots are field reads, so the stream duration costs the turn end one subtraction.
+    /// </summary>
+    private void RecordTurnMetrics(int turn, LocText? error)
+    {
+        if (metricsRecorder is not { Enabled: true } recorder)
+        {
+            return;
         }
 
-        Card(completed.AgentId)?.AddUsage(delta, completed.Stop);
-        NoteFullCacheRewrite(completed.AgentId, delta);
+        try
+        {
+            // The agent is rebuilt during a turn (agent or model switch): the new instance starts from zero, so the turn's
+            // start snapshot of the old one means nothing against it.
+            var end = runtime?.ReadRootCounters() ?? RootCounters.None;
+            var start = ReferenceEquals(end.Instance, turnStartCounters.Instance) ? turnStartCounters : RootCounters.None;
+            recorder.Record(TurnMetricsRowFactory.Build(
+                SessionId,
+                turn,
+                turnStartedAt,
+                DateTimeOffset.UtcNow,
+                error,
+                turnRootFailure,
+                end.Usage,
+                start.Usage,
+                end.Stream,
+                start.Stream,
+                turnToolCalls,
+                Composer.ProviderId is { Length: > 0 } provider ? provider : null,
+                Composer.Model is { Length: > 0 } model ? model : null));
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The writer promises never to throw, but a row is never worth a turn: this is the belt to that suspender.
+            AppLogs.Usage.ZLogWarning($"turn metrics row not queued: {exception.GetType().Name}: {exception.Message}");
+        }
     }
 
     /// <summary>
@@ -2105,6 +2279,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         subAgentById.TryRemove(finishedEvent.AgentId, out _);
         FinishToolsOf(finishedEvent.AgentId);
         agentUsage.Remove(finishedEvent.AgentId);
+        agentStream.Remove(finishedEvent.AgentId);
         subAgents.Remove(agent);
         finished.Add(agent);
         SyncFinishedMenu();

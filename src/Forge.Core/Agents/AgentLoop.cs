@@ -152,6 +152,7 @@ public sealed class AgentLoop(AgentLoopServices services)
 
             ChatMessage? assistant = null;
             var usage = TokenUsage.Empty;
+            var streamElapsed = TimeSpan.Zero;
             var stop = StopReason.Other;
             var messagesAtRequest = 0;
             var versionAtRequest = 0;
@@ -189,6 +190,7 @@ public sealed class AgentLoop(AgentLoopServices services)
                                 assistant = completed.Message;
                                 usage = completed.Usage;
                                 stop = completed.Stop;
+                                streamElapsed += completed.StreamElapsed;
                                 if (completed.RateLimit is { } limit)
                                 {
                                     sink.Emit(new AgentRateLimitUpdated(instance.Id, limit));
@@ -209,7 +211,10 @@ public sealed class AgentLoop(AgentLoopServices services)
                                                   && Providers.ProviderErrors.IsContextOverflow(exception))
                 {
                     // Overflow fallback: the window was misjudged (or unknown). Compact once and resend the same turn once;
-                    // when nothing could be compacted, or the resend overflows again, the provider error stands.
+                    // when nothing could be compacted, or the resend overflows again, the provider error stands. The resend
+                    // cannot double-count streaming time: it only happens while nothing has been observed, so the abandoned
+                    // attempt yielded no MessageCompleted and its measurement never landed anywhere - the resent attempt
+                    // measures its own stream from its own first increment.
                     overflowRetried = true;
                     if (!await CompactAfterOverflowAsync(instance, tools, sink, ct).ConfigureAwait(false))
                     {
@@ -229,6 +234,10 @@ public sealed class AgentLoop(AgentLoopServices services)
 
             RecordPromptUsage(instance, usage, messagesAtRequest, versionAtRequest);
             instance.Usage += usage;
+            // The turn's model-streaming time lands on the same instance-cumulative counter as the usage line above:
+            // a turn's own share is the difference against the turn-start snapshot, so the event below carries the
+            // cumulative value just like it carries the cumulative usage.
+            instance.StreamElapsed += streamElapsed;
             ReportFirstRequest(instance, provider, usage);
             instance.CommitText(Text(assistant));
             await PersistAsync(instance, assistant, usage, ct).ConfigureAwait(false);
@@ -243,7 +252,7 @@ public sealed class AgentLoop(AgentLoopServices services)
                     continue;
                 }
 
-                sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop));
+                sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop, instance.StreamElapsed));
                 return new AgentRunResult(Text(assistant), instance.Usage, stop);
             }
 
@@ -818,6 +827,18 @@ public sealed class AgentLoop(AgentLoopServices services)
         state.HistoryVersionAtRequest = versionAtRequest;
     }
 
+    /// <summary>The slot-yield a tool may use while it waits on another agent (see <see cref="ToolContext.YieldSlot"/>).</summary>
+    /// <param name="ct">The turn's token, not a call's: the slot is taken back with it, so cancelling one waiting call cannot leave the agent without its permit.</param>
+    private static IAsyncDisposable YieldCurrentSlot(CancellationToken ct) =>
+        AgentScope.Current is { } scope ? (IAsyncDisposable)scope.Permit.Detach(ct) : NoYield.Instance;
+
+    private sealed class NoYield : IAsyncDisposable
+    {
+        public static readonly NoYield Instance = new();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private static string ModelKey(ModelSettings model) => string.Concat(model.ProviderId, "\u001f", model.Model);
 
     private async ValueTask<(ContentBlock[] Results, string? Steering)> ExecuteToolsAsync(
@@ -833,6 +854,8 @@ public sealed class AgentLoop(AgentLoopServices services)
         {
             AgentId = instance.Id,
             AgentName = instance.Definition.Name,
+            Tools = tools.Current(),
+            YieldSlot = _ => YieldCurrentSlot(ct),
         };
         string? steering = null;
         try

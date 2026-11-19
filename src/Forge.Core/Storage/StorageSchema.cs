@@ -139,6 +139,7 @@ internal static class StorageSchema
             cache_write_tokens    INTEGER NULL,
             cache_write_1h_tokens INTEGER NULL,
             tool_calls            INTEGER NULL,
+            stream_ms             INTEGER NOT NULL,
             PRIMARY KEY (session_id, turn)
         ) WITHOUT ROWID;
         """;

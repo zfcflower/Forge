@@ -88,7 +88,8 @@
 ## 3.8 用量日志
 
 - `settings.json` 的 `usageLog` 段 `{"enabled":false}` 默认关；开启后每次模型请求追加一行到 `<数据根>/usage/usage-YYYYMMDD.jsonl`（UTC 日一个文件），保存即生效（录制器每次写前现读实时设置）。
-- 字段：`at`、`session`、`provider`、`kind`、`model`、`entrypoint`、`cacheTtl`、`downgraded`、`outcome`、`status`、`usage{input,output,cacheRead,cacheWrite}`、`elapsedMs`、`requestId`，以及账号计量 `rateLimit{fiveHour,weekly,…}`；缺的数值省略而不写 null。
+- 字段：`at`、`session`、`provider`、`kind`、`model`、`entrypoint`、`cacheTtl`、`downgraded`、`outcome`、`status`、`usage{input,output,cacheRead,cacheWrite,cacheWrite1h}`、`elapsedMs`、`requestId`，以及账号计量 `rateLimit{fiveHour,weekly,…}`；缺的数值省略而不写 null。
+- **与 `forge.db.turn_metrics` 的分工**：轮级指标（起止、结局、本轮 token 快照、工具次数）已常开进库、两种会话都有（见 Docs/12 §12.2）；本文件只做逐请求取证（延迟、失败、请求形状指纹、限流快照），默认关是既定隐私立场，不因轮级入库而改变。
 - **绝不写提示词或回复正文**：只写分析与复现需要的形状。录制是 best-effort：磁盘满、文件被占、目录被拒一律吞掉，只经诊断日志 Warning 报一次，绝不因为日志让回合失败。
 
 ## 3.9 提供商设置页与登录流

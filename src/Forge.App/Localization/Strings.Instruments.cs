@@ -103,6 +103,12 @@ internal static class InstrumentsStrings
 
     public static string UsageCacheWrite(string tokens) => Loc.Instance.Format(UsageCacheWriteKey, tokens);
 
+    /// <summary>W 缓存写总量的分解形态（总 = 5m + 1h，契约上 1h 是总量的子集）；仅在 1h 写非零时使用，其余提供商保持单值形态。</summary>
+    public const string UsageCacheWriteSplitKey = "session.strip.usage.cacheWrite.split";
+
+    public static string UsageCacheWriteSplit(string tokens, string fiveMinute, string oneHour) =>
+        Loc.Instance.Format(UsageCacheWriteSplitKey, tokens, fiveMinute, oneHour);
+
     public static string UsageCache(string ratio) => Loc.Instance.Format(UsageCacheKey, ratio);
 
 
@@ -296,6 +302,7 @@ internal static class InstrumentsStrings
         Loc.Register(UsageWindowKey, "C {0}", "C {0}");
         Loc.Register(UsageCacheReadKey, "R {0}", "R {0}");
         Loc.Register(UsageCacheWriteKey, "W {0}", "W {0}");
+        Loc.Register(UsageCacheWriteSplitKey, "W {0}（5m {1} · 1h {2}）", "W {0} (5m {1} · 1h {2})");
         Loc.Register(UsageCacheKey, "RC {0}", "RC {0}");
         Loc.Register(UsageContextKey, "{0}/{1} · {2}%", "{0}/{1} · {2}%");
         Loc.Register(ContextPercentKey, "{0}%", "{0}%");

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -647,148 +648,191 @@ public sealed class AnthropicProvider : HttpChatProvider
         string? stopReason = null;
         var completed = false;
 
-        while (true)
+        // The streaming-time measurement every MessageCompleted must carry: first output increment to stream end, the
+        // denominator of a turn's output rate. A pair of Stopwatch timestamps rather than a Stopwatch instance, so the
+        // read loop stays allocation-free (the same shape UsageAttempt uses). The clock starts at the first output
+        // increment - a text or thinking delta, a tool-call announcement or a tool-argument delta; message_start, pings
+        // and usage-only events are protocol bookkeeping, not output, so a call that streamed nothing measures zero.
+        // It stops wherever the loop ends; an attempt interrupted before its completion carries no MessageCompleted at
+        // all, so it contributes nothing to the turn - never a wall-clock stand-in. This wire has no non-streaming
+        // fallback: stream is always requested, and the beta downgrade resends over the same streaming path, so the
+        // resent attempt measures its own stream from its own first increment (the refused one produced neither an
+        // increment nor a completion).
+        var streamStart = 0L;
+        var streamEnd = 0L;
+
+        try
         {
-            var evt = await ReadEventAsync(reader, ct).ConfigureAwait(false);
-            if (evt is not { } sse)
+            while (true)
             {
-                break;
-            }
-
-            var type = sse.Event;
-            if (sse.Data.Length == 0)
-            {
-                continue;
-            }
-
-            using var document = ParseChunk(sse.Data);
-            var root = document.RootElement;
-            type = ProviderJson.Str(root, "type") ?? type;
-
-            switch (type)
-            {
-                case "ping":
-                    break;
-
-                case "message_start":
-                    if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object)
-                    {
-                        throw Malformed(sse.Data);
-                    }
-
-                    if (message.TryGetProperty("usage", out var startUsage))
-                    {
-                        usage.Merge(startUsage);
-                    }
-
-                    break;
-
-                case "content_block_start":
+                var evt = await ReadEventAsync(reader, ct).ConfigureAwait(false);
+                if (evt is not { } sse)
                 {
-                    var index = ProviderJson.Int(root, "index") ?? blocks.Count;
-                    while (blocks.Count <= index)
-                    {
-                        blocks.Add(null);
-                    }
-
-                    var state = blocks[index] ??= new BlockState();
-                    root.TryGetProperty("content_block", out var contentBlock);
-                    state.Type = ProviderJson.Str(contentBlock, "type") ?? string.Empty;
-                    state.Id = ProviderJson.Str(contentBlock, "id") ?? string.Empty;
-                    state.Name = ProviderJson.Str(contentBlock, "name") ?? string.Empty;
-                    state.Text.Append(ProviderJson.Str(contentBlock, "text"));
-                    state.Thinking.Append(ProviderJson.Str(contentBlock, "thinking"));
-                    state.Signature.Append(ProviderJson.Str(contentBlock, "signature"));
-                    if (state.Type == "redacted_thinking")
-                    {
-                        state.Signature.Append(RedactedSignaturePrefix).Append(ProviderJson.Str(contentBlock, "data"));
-                    }
-
-                    if (state.Type == "tool_use")
-                    {
-                        yield return new ToolCallStarted(state.Id, state.Name);
-                    }
-
                     break;
                 }
 
-                case "content_block_delta":
+                var type = sse.Event;
+                if (sse.Data.Length == 0)
                 {
-                    if (!root.TryGetProperty("delta", out var delta) || delta.ValueKind != JsonValueKind.Object)
+                    continue;
+                }
+
+                using var document = ParseChunk(sse.Data);
+                var root = document.RootElement;
+                type = ProviderJson.Str(root, "type") ?? type;
+
+                switch (type)
+                {
+                    case "ping":
+                        break;
+
+                    case "message_start":
+                        if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object)
+                        {
+                            throw Malformed(sse.Data);
+                        }
+
+                        if (message.TryGetProperty("usage", out var startUsage))
+                        {
+                            usage.Merge(startUsage);
+                        }
+
+                        break;
+
+                    case "content_block_start":
                     {
+                        var index = ProviderJson.Int(root, "index") ?? blocks.Count;
+                        while (blocks.Count <= index)
+                        {
+                            blocks.Add(null);
+                        }
+
+                        var state = blocks[index] ??= new BlockState();
+                        root.TryGetProperty("content_block", out var contentBlock);
+                        state.Type = ProviderJson.Str(contentBlock, "type") ?? string.Empty;
+                        state.Id = ProviderJson.Str(contentBlock, "id") ?? string.Empty;
+                        state.Name = ProviderJson.Str(contentBlock, "name") ?? string.Empty;
+                        state.Text.Append(ProviderJson.Str(contentBlock, "text"));
+                        state.Thinking.Append(ProviderJson.Str(contentBlock, "thinking"));
+                        state.Signature.Append(ProviderJson.Str(contentBlock, "signature"));
+                        if (state.Type == "redacted_thinking")
+                        {
+                            state.Signature.Append(RedactedSignaturePrefix).Append(ProviderJson.Str(contentBlock, "data"));
+                        }
+
+                        if (state.Type == "tool_use")
+                        {
+                            if (streamStart == 0)
+                            {
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
+
+                            yield return new ToolCallStarted(state.Id, state.Name);
+                        }
+
                         break;
                     }
 
-                    var index = ProviderJson.Int(root, "index") ?? -1;
-                    var state = index >= 0 && index < blocks.Count ? blocks[index] : null;
-                    var deltaType = ProviderJson.Str(delta, "type");
-
-                    switch (deltaType)
+                    case "content_block_delta":
                     {
-                        case "text_delta":
-                        case "text":
-                            if (ProviderJson.Str(delta, "text") is { Length: > 0 } text)
-                            {
-                                state?.Text.Append(text);
-                                yield return new TextDelta(text);
-                            }
-
+                        if (!root.TryGetProperty("delta", out var delta) || delta.ValueKind != JsonValueKind.Object)
+                        {
                             break;
+                        }
 
-                        case "thinking_delta":
-                        case "thinking":
-                            if (ProviderJson.Str(delta, "thinking") is { Length: > 0 } thinking)
-                            {
-                                state?.Thinking.Append(thinking);
-                                yield return new ThinkingDelta(thinking);
-                            }
+                        var index = ProviderJson.Int(root, "index") ?? -1;
+                        var state = index >= 0 && index < blocks.Count ? blocks[index] : null;
+                        var deltaType = ProviderJson.Str(delta, "type");
 
-                            break;
+                        switch (deltaType)
+                        {
+                            case "text_delta":
+                            case "text":
+                                if (ProviderJson.Str(delta, "text") is { Length: > 0 } text)
+                                {
+                                    if (streamStart == 0)
+                                    {
+                                        streamStart = Stopwatch.GetTimestamp();
+                                    }
 
-                        case "signature_delta":
-                        case "signature":
-                            state?.Signature.Append(ProviderJson.Str(delta, "signature"));
-                            break;
+                                    state?.Text.Append(text);
+                                    yield return new TextDelta(text);
+                                }
 
-                        case "input_json_delta":
-                        case "input_json":
-                            if (ProviderJson.Str(delta, "partial_json") is { Length: > 0 } partial)
-                            {
-                                state?.Json.Append(partial);
-                                yield return new ToolCallArgumentsDelta(state?.Id ?? string.Empty, partial);
-                            }
+                                break;
 
-                            break;
+                            case "thinking_delta":
+                            case "thinking":
+                                if (ProviderJson.Str(delta, "thinking") is { Length: > 0 } thinking)
+                                {
+                                    if (streamStart == 0)
+                                    {
+                                        streamStart = Stopwatch.GetTimestamp();
+                                    }
+
+                                    state?.Thinking.Append(thinking);
+                                    yield return new ThinkingDelta(thinking);
+                                }
+
+                                break;
+
+                            case "signature_delta":
+                            case "signature":
+                                state?.Signature.Append(ProviderJson.Str(delta, "signature"));
+                                break;
+
+                            case "input_json_delta":
+                            case "input_json":
+                                if (ProviderJson.Str(delta, "partial_json") is { Length: > 0 } partial)
+                                {
+                                    if (streamStart == 0)
+                                    {
+                                        streamStart = Stopwatch.GetTimestamp();
+                                    }
+
+                                    state?.Json.Append(partial);
+                                    yield return new ToolCallArgumentsDelta(state?.Id ?? string.Empty, partial);
+                                }
+
+                                break;
+                        }
+
+                        break;
                     }
 
-                    break;
+                    case "message_delta":
+                        if (root.TryGetProperty("delta", out var messageDelta) && messageDelta.ValueKind == JsonValueKind.Object)
+                        {
+                            stopReason = ProviderJson.Str(messageDelta, "stop_reason") ?? stopReason;
+                        }
+
+                        if (root.TryGetProperty("usage", out var endUsage))
+                        {
+                            usage.Merge(endUsage);
+                        }
+
+                        break;
+
+                    case "message_stop":
+                        completed = true;
+                        break;
+
+                    case "error":
+                        throw StreamError(root);
                 }
 
-                case "message_delta":
-                    if (root.TryGetProperty("delta", out var messageDelta) && messageDelta.ValueKind == JsonValueKind.Object)
-                    {
-                        stopReason = ProviderJson.Str(messageDelta, "stop_reason") ?? stopReason;
-                    }
-
-                    if (root.TryGetProperty("usage", out var endUsage))
-                    {
-                        usage.Merge(endUsage);
-                    }
-
+                if (completed)
+                {
                     break;
-
-                case "message_stop":
-                    completed = true;
-                    break;
-
-                case "error":
-                    throw StreamError(root);
+                }
             }
-
-            if (completed)
-            {
-                break;
-            }
+        }
+        finally
+        {
+            // However the read loop ended - a parsed completion, a provider error, a caller cancellation -
+            // the clock stops at that moment. A stream that died mid-answer has its elapsed stopped at the
+            // interruption; one that never produced an output increment stays zero (the start was never set).
+            streamEnd = Stopwatch.GetTimestamp();
         }
 
         if (!completed)
@@ -838,7 +882,12 @@ public sealed class AnthropicProvider : HttpChatProvider
         }
 
         var stop = MapStopReason(stopReason, content);
-        yield return new MessageCompleted(new ChatMessage(MessageRole.Assistant, content), usage.ToTokenUsage(), stop);
+        yield return new MessageCompleted(new ChatMessage(MessageRole.Assistant, content), usage.ToTokenUsage(), stop)
+        {
+            // First output increment to stream end; zero when the stream produced no increment. There is no "unknown":
+            // a completion without this measurement is an adapter defect, never a wall-clock fallback.
+            StreamElapsed = streamStart == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(streamStart, streamEnd),
+        };
     }
 
     private JsonDocument ParseChunk(string data)

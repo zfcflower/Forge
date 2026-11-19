@@ -72,7 +72,8 @@ public sealed record ChatMessage(MessageRole Role, IReadOnlyList<ContentBlock> C
 
 /// <param name="CacheWrite1hTokens">
 /// The part of <paramref name="CacheWriteTokens"/> written with the one-hour lifetime (Anthropic reports the split); the rest is the
-/// five-minute write. Analysis only: it is neither stored in a session nor priced separately.
+/// five-minute write. It is persisted in the message usage JSON (<c>cache_write_1h</c>, written only when non-zero) and priced at
+/// its own rate (2× the input price) by the session cost, which bills the five-minute remainder at the cache-write rate.
 /// </param>
 public sealed record TokenUsage(int InputTokens, int OutputTokens, int CacheReadTokens = 0, int CacheWriteTokens = 0, int CacheWrite1hTokens = 0)
 {

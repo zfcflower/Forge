@@ -1,0 +1,21 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.TimelineTurnDividerView"
+             x:DataType="vm:TurnDividerViewModel">
+  <!-- The round-end metrics row: one horizontal rule across the WHOLE row — the timeline axis draws nothing here, so
+       every turn's axis segment is its own, cut apart by this separator — with the turn's numbers in the middle.
+       The tooltip carries the full breakdown the line leaves out. -->
+  <Grid Margin="4,6,8,8"
+        ColumnDefinitions="*,Auto,*"
+        ToolTip.Tip="{Binding Tooltip}">
+    <Border VerticalAlignment="Center" Height="1" Background="{DynamicResource BorderBrush}" />
+    <TextBlock Grid.Column="1"
+               Classes="caption"
+               Margin="8,0"
+               VerticalAlignment="Center"
+               Text="{Binding Line}"
+               AutomationProperties.AutomationId="turn-divider" />
+    <Border Grid.Column="2" VerticalAlignment="Center" Height="1" Background="{DynamicResource BorderBrush}" />
+  </Grid>
+</UserControl>

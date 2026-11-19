@@ -75,6 +75,15 @@ public sealed class AgentInstance
 
     public TokenUsage Usage { get; internal set; } = TokenUsage.Empty;
 
+    /// <summary>
+    /// How long the model spent streaming this instance's answers so far: the sum of every completed call's
+    /// first-output-increment-to-stream-end measurement (<see cref="MessageCompleted.StreamElapsed"/>), an
+    /// instance-cumulative counter exactly like <see cref="Usage"/> - a turn's own share is the difference against
+    /// its start snapshot. An attempt that failed or was cancelled before its completion carries no measurement and
+    /// adds nothing, which is why this never needs an "unknown" fallback.
+    /// </summary>
+    public TimeSpan StreamElapsed { get; internal set; }
+
     /// <summary>Prompt-cache bookkeeping of this instance (routing key, last fingerprint, first-request report); loop-owned.</summary>
     internal PromptCacheState CacheState { get; } = new();
 

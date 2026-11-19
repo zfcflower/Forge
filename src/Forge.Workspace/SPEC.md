@@ -39,7 +39,7 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 
 **Worktree 并发创建。** slug/分支/路径分配是检查后动作:进程内按规范化仓库根(OS 比较器)取引用计数门串行“列分支 → 挑后缀 → `worktree add -b`”,最后一个持有者/等待者释放时移除;跨进程冲突(`already exists`/`cannot lock ref` 或目标路径已存在)重读分支取下一后缀重试,上限 20,耗尽时抛带最后一次 git 失败详情的 `GitException`。从不删除已存在的分支、目录或 worktree。
 
-**按轮次改动。** `SnapshotTreeAsync` 把本 worktree 真实索引复制到 `<系统临时目录>/forge-snapshot-<pid>-<guid>.index`,以 `GIT_INDEX_FILE` + `GIT_OPTIONAL_LOCKS=0` 执行 `add --all` + `write-tree`,`finally` 删除副本:用户索引、HEAD、分支、refs、stash 不变,唯一副作用是未引用对象(gc 回收);同内容同哈希。文件名带进程号,因为 `dotnet test` 会并行跑多个测试程序集并共用同一个系统临时目录,按进程归属才能断言本进程没有残留,而不会把别的进程(例如 App 测试里 `TurnCheckpointService` 的在途快照)算成泄漏。本仓约 70 ms,一万文件约 80–120 ms。轮次改动 = 相邻两棵树的 diff(`GetTreeDiffAsync`/`GetTreeDiffTextAsync`/`GetTreeChangesAsync`)。
+**按轮次改动。** `SnapshotTreeAsync` 把本 worktree 真实索引复制到 `<系统临时目录>/forge-snapshot-<pid>-<guid>.index`,以 `GIT_INDEX_FILE` + `GIT_OPTIONAL_LOCKS=0` 执行 `add --all` + `write-tree`,`finally` 删除副本:用户索引、HEAD、分支、refs、stash 不变,唯一副作用是未引用对象(gc 回收);同内容同哈希。文件名带进程号,因为 `dotnet test` 会并行跑多个测试程序集并共用同一个系统临时目录,按进程归属才能断言本进程没有残留,而不会把别的进程(例如 App 测试里 `TurnCheckpointService` 的在途快照)算成泄漏。本仓约 70 ms,一万文件约 80–120 ms。轮次改动 = 相邻两棵树的 diff(`GetTreeDiffAsync`/`GetTreeDiffTextAsync`/`GetTreeChangesAsync`)。每轮改动文件数**不入 `turn_metrics`**：树对树 diff 是权威，UI 需要时按 `(session_id, turn)` join 懒算（git-only，General 会话无此读数，不落库不复制）。
 
 **规格只读。** `SpecGraph` 只读索引(按文件大小 + 修改时间发现变化),不创建、不改写、不删除规格文件;规格由 Agent 经 `edit`/`write` 修改。
 

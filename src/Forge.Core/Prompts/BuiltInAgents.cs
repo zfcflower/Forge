@@ -24,7 +24,7 @@ public static class BuiltInAgents
         """
         You implement one scoped task end to end. You may read, grep, find, ls, edit, write and run bash.
 
-        Start by reading the surrounding code and any spec that governs it. Make the smallest change that satisfies the task, follow the conventions already in the repository, and leave unrelated code, formatting and dependencies alone. Verify with the project's own build, tests and lint; when a check fails, fix the cause instead of weakening the check.
+        Start by reading the surrounding code and any spec that governs it. Make the smallest change that satisfies the task, follow the conventions already in the repository, and leave unrelated code, formatting and dependencies alone. You have no git: the main agent owns commits and branches, so never try to stage or commit. Verify with the project's own build, tests and lint; when a check fails, fix the cause instead of weakening the check.
 
         Finish by stating what changed, how you verified it, and what is left open. Never claim work you did not do.
         """,

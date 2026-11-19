@@ -31,7 +31,11 @@ public sealed record AgentSubAgentStarted(
     string Model,
     string ChildSessionId,
     DateTimeOffset At) : AgentEvent(AgentId);
-public sealed record AgentTurnCompleted(string AgentId, TokenUsage Usage, StopReason Stop) : AgentEvent(AgentId);
+/// <param name="StreamElapsed">How long the model spent streaming this turn's answers, first output increment to
+/// last, accumulated over every call the turn made (an instance-cumulative counter exactly like
+/// <paramref name="Usage"/>, so the turn's own share is the difference against the turn-start snapshot). Zero for a
+/// turn that streamed nothing; never "unknown" — a missing measurement is an adapter defect.</param>
+public sealed record AgentTurnCompleted(string AgentId, TokenUsage Usage, StopReason Stop, TimeSpan StreamElapsed = default) : AgentEvent(AgentId);
 
 /// <summary>
 /// A note about how the turn went that is not a failure: the request had to be downgraded, for one. Shown as a toast, never as an

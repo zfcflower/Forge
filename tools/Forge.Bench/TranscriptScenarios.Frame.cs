@@ -245,7 +245,10 @@ internal static partial class TranscriptScenarios
                 transcript.Rows.OfType<TurnThinkingViewModel>().Skip(7).First(),
                 tools[9],
                 tools[10],
-                transcript.Rows.OfType<TurnCardViewModel>().Skip(12).First(),
+                // The main-session transcript no longer carries turn-card rows (the turn header only exists in a
+                // sub-agent transcript now, where the anchor scenarios mount it); the row type this sample has to cover
+                // is the divider — the new template whose pooled reuse must render pixel-identically.
+                transcript.Rows.OfType<TurnDividerViewModel>().Skip(12).First(),
                 tools[30],
                 tools[31],
             };

@@ -80,6 +80,15 @@ public sealed record MessageCompleted(ChatMessage Message, TokenUsage Usage, Sto
     /// fall back to a reduced shape, for one. Null when there is nothing to report; never a substitute for an error.
     /// </summary>
     public string? Notice { get; init; }
+
+    /// <summary>
+    /// How long the model spent producing this answer's stream: from the first output increment to the last, measured by
+    /// the adapter in its read loop. Every path sets it — a call that streamed nothing (cancelled before any content
+    /// arrived) carries zero, and a non-streaming fallback carries the moment its single response arrived, which is zero
+    /// by this definition. A missing value is an adapter defect, never "unknown". It excludes queueing, approval, tool
+    /// runs and git snapshots, which is exactly why a turn's output rate reads from it rather than from the wall clock.
+    /// </summary>
+    public TimeSpan StreamElapsed { get; init; }
 }
 
 /// <summary>One usage window as the server reported it; <see cref="Unknown"/> is a window the response did not mention.</summary>

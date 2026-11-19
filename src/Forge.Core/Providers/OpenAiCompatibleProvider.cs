@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -534,88 +535,126 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         string? finishReason = null;
         var completed = false;
 
-        while (true)
+        // The streaming-time measurement every MessageCompleted must carry: first output increment to stream end, the
+        // denominator of a turn's output rate. A pair of Stopwatch timestamps rather than a Stopwatch instance, so the
+        // read loop stays allocation-free (the same shape UsageAttempt uses). The clock starts at the first output
+        // increment - a content or reasoning delta, a tool-call announcement or a tool-argument delta; a chunk that
+        // carries only usage is bookkeeping, not output, so a call that streamed nothing measures zero. It stops
+        // wherever the loop ends; an attempt interrupted before its completion carries no MessageCompleted at all, so
+        // it contributes nothing to the turn - never a wall-clock stand-in. This wire has no non-streaming fallback:
+        // stream is always requested, and the cache-knob downgrade resends over the same streaming path, so the resent
+        // attempt measures its own stream from its own first increment (the refused one produced neither an increment
+        // nor a completion).
+        var streamStart = 0L;
+        var streamEnd = 0L;
+
+        try
         {
-            var evt = await ReadEventAsync(reader, ct).ConfigureAwait(false);
-            if (evt is not { } sse)
+            while (true)
             {
-                break;
-            }
+                var evt = await ReadEventAsync(reader, ct).ConfigureAwait(false);
+                if (evt is not { } sse)
+                {
+                    break;
+                }
 
-            var data = sse.Data;
-            if (data.Length == 0)
-            {
-                continue;
-            }
+                var data = sse.Data;
+                if (data.Length == 0)
+                {
+                    continue;
+                }
 
-            if (data == "[DONE]")
-            {
-                completed = true;
-                break;
-            }
+                if (data == "[DONE]")
+                {
+                    completed = true;
+                    break;
+                }
 
-            using var document = ParseChunk(data);
-            var root = document.RootElement;
+                using var document = ParseChunk(data);
+                var root = document.RootElement;
 
-            if (root.TryGetProperty("error", out var error))
-            {
-                throw StreamError(error);
-            }
+                if (root.TryGetProperty("error", out var error))
+                {
+                    throw StreamError(error);
+                }
 
-            if (root.TryGetProperty("usage", out var usageElement) && usageElement.ValueKind == JsonValueKind.Object)
-            {
-                usage = ReadUsage(usageElement, usage);
-            }
+                if (root.TryGetProperty("usage", out var usageElement) && usageElement.ValueKind == JsonValueKind.Object)
+                {
+                    usage = ReadUsage(usageElement, usage);
+                }
 
-            if (!root.TryGetProperty("choices", out var choices))
-            {
-                continue;
-            }
+                if (!root.TryGetProperty("choices", out var choices))
+                {
+                    continue;
+                }
 
-            if (choices.ValueKind != JsonValueKind.Array)
-            {
-                throw Malformed(data);
-            }
-
-            foreach (var choice in choices.EnumerateArray())
-            {
-                if (choice.ValueKind != JsonValueKind.Object)
+                if (choices.ValueKind != JsonValueKind.Array)
                 {
                     throw Malformed(data);
                 }
 
-                if (choice.TryGetProperty("delta", out var delta) && delta.ValueKind == JsonValueKind.Object)
+                foreach (var choice in choices.EnumerateArray())
                 {
-                    if (ProviderJson.Str(delta, "content") is { Length: > 0 } content)
+                    if (choice.ValueKind != JsonValueKind.Object)
                     {
-                        text.Append(content);
-                        yield return new TextDelta(content);
+                        throw Malformed(data);
                     }
 
-                    if ((ProviderJson.Str(delta, "reasoning_content") ?? ProviderJson.Str(delta, "reasoning")) is { Length: > 0 } reasoning)
+                    if (choice.TryGetProperty("delta", out var delta) && delta.ValueKind == JsonValueKind.Object)
                     {
-                        thinking.Append(reasoning);
-                        yield return new ThinkingDelta(reasoning);
-                    }
-
-                    if (delta.TryGetProperty("tool_calls", out var toolCalls) && toolCalls.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var toolCall in toolCalls.EnumerateArray())
+                        if (ProviderJson.Str(delta, "content") is { Length: > 0 } content)
                         {
-                            foreach (var emitted in ApplyToolCall(toolCall, calls))
+                            if (streamStart == 0)
                             {
-                                yield return emitted;
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
+
+                            text.Append(content);
+                            yield return new TextDelta(content);
+                        }
+
+                        if ((ProviderJson.Str(delta, "reasoning_content") ?? ProviderJson.Str(delta, "reasoning")) is { Length: > 0 } reasoning)
+                        {
+                            if (streamStart == 0)
+                            {
+                                streamStart = Stopwatch.GetTimestamp();
+                            }
+
+                            thinking.Append(reasoning);
+                            yield return new ThinkingDelta(reasoning);
+                        }
+
+                        if (delta.TryGetProperty("tool_calls", out var toolCalls) && toolCalls.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var toolCall in toolCalls.EnumerateArray())
+                            {
+                                foreach (var emitted in ApplyToolCall(toolCall, calls))
+                                {
+                                    if (streamStart == 0)
+                                    {
+                                        streamStart = Stopwatch.GetTimestamp();
+                                    }
+
+                                    yield return emitted;
+                                }
                             }
                         }
                     }
-                }
 
-                if (ProviderJson.Str(choice, StopReasonProperty) is { Length: > 0 } reason)
-                {
-                    finishReason = reason;
-                    completed = true;
+                    if (ProviderJson.Str(choice, StopReasonProperty) is { Length: > 0 } reason)
+                    {
+                        finishReason = reason;
+                        completed = true;
+                    }
                 }
             }
+        }
+        finally
+        {
+            // However the read loop ended - a parsed completion, a provider error, a caller cancellation -
+            // the clock stops at that moment. A stream that died mid-answer has its elapsed stopped at the
+            // interruption; one that never produced an output increment stays zero (the start was never set).
+            streamEnd = Stopwatch.GetTimestamp();
         }
 
         if (!completed)
@@ -645,7 +684,12 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         }
 
         var stop = MapStopReason(finishReason, blocks);
-        yield return new MessageCompleted(new ChatMessage(MessageRole.Assistant, blocks), usage, stop);
+        yield return new MessageCompleted(new ChatMessage(MessageRole.Assistant, blocks), usage, stop)
+        {
+            // First output increment to stream end; zero when the stream produced no increment. There is no "unknown":
+            // a completion without this measurement is an adapter defect, never a wall-clock fallback.
+            StreamElapsed = streamStart == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(streamStart, streamEnd),
+        };
     }
 
     private JsonDocument ParseChunk(string data)

@@ -707,6 +707,18 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
+    /// <summary>
+    /// The current root instance's cumulative counters, read live (they only move on the agent's own thread, and a turn's end
+    /// is read after its event stream finished). <see cref="RootCounters.None"/> before the root exists.
+    /// </summary>
+    internal RootCounters ReadRootCounters()
+    {
+        lock (gate)
+        {
+            return root is { } current ? new RootCounters(current.Usage, current.StreamElapsed, current) : RootCounters.None;
+        }
+    }
+
     private async Task<(AgentHost Host, AgentInstance Agent)> ResolveAsync()
     {
         AgentHost built;
@@ -1841,3 +1853,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 }
 
 /// <summary>Stands in for a provider when none is configured, so a turn fails with one clear sentence instead of a null.</summary>
+
+/// <summary>The root agent instance's cumulative usage and model-streaming time, with the instance they belong to (a rebuilt root is a different one, counting from zero).</summary>
+internal readonly record struct RootCounters(TokenUsage Usage, TimeSpan Stream, object? Instance)
+{
+    public static RootCounters None { get; } = new(TokenUsage.Empty, TimeSpan.Zero, null);
+}

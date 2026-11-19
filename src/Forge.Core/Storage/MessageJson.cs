@@ -85,6 +85,14 @@ public static class MessageJson
             writer.WriteNumber("output", usage.OutputTokens);
             writer.WriteNumber("cache_read", usage.CacheReadTokens);
             writer.WriteNumber("cache_write", usage.CacheWriteTokens);
+            // Only written when there is something to write: every adapter but Anthropic's reports the fifth field as
+            // zero, so their rows keep the exact bytes of the four-field format — a non-Anthropic session's persisted
+            // messages cost nothing extra here.
+            if (usage.CacheWrite1hTokens > 0)
+            {
+                writer.WriteNumber("cache_write_1h", usage.CacheWrite1hTokens);
+            }
+
             writer.WriteEndObject();
         }
 
@@ -108,7 +116,8 @@ public static class MessageJson
                 OptionalInt(root, "input"),
                 OptionalInt(root, "output"),
                 OptionalInt(root, "cache_read"),
-                OptionalInt(root, "cache_write"));
+                OptionalInt(root, "cache_write"),
+                OptionalInt(root, "cache_write_1h"));
         }
         catch (JsonException)
         {
