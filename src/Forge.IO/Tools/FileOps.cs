@@ -257,6 +257,83 @@ internal static class FileOps
         return new TreeStats(files, directories, bytes, 0);
     }
 
+    /// <summary>Deletes every path (each a file, a link or a directory tree); plain files in bulk go through the thread pool.</summary>
+    internal static TreeStats DeleteMany(IReadOnlyList<string> paths, CancellationToken ct)
+    {
+        var files = new List<string>();
+        var others = new List<string>();
+        var bytes = 0L;
+        foreach (var path in paths)
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0)
+            {
+                files.Add(path);
+                bytes += new FileInfo(path).Length;
+            }
+            else
+            {
+                others.Add(path);
+            }
+        }
+
+        if (files.Count >= ParallelDeleteThreshold)
+        {
+            ForEachParallel(files, ct, DeleteFile);
+        }
+        else
+        {
+            foreach (var file in files)
+            {
+                DeleteFile(file);
+            }
+        }
+
+        var total = new TreeStats(files.Count, 0, bytes, 0);
+        foreach (var path in others)
+        {
+            var part = DeleteTree(path, ct);
+            total = new TreeStats(total.Files + part.Files, total.Directories + part.Directories, total.Bytes + part.Bytes, 0);
+        }
+
+        return total;
+    }
+
+    /// <summary>Holds the gate of every path, taken in one fixed order so two calls over overlapping sets cannot wait on each other.</summary>
+    internal static async ValueTask<IDisposable> AcquireAllAsync(IEnumerable<string> paths, CancellationToken ct)
+    {
+        var leases = new List<IDisposable>();
+        try
+        {
+            foreach (var path in paths.Distinct(WorkspacePath.Comparer).Order(StringComparer.Ordinal))
+            {
+                leases.Add(await PathGate.Shared.AcquireAsync(path, ct).ConfigureAwait(false));
+            }
+        }
+        catch
+        {
+            foreach (var lease in leases)
+            {
+                lease.Dispose();
+            }
+
+            throw;
+        }
+
+        return new Leases(leases);
+    }
+
+    private sealed class Leases(List<IDisposable> leases) : IDisposable
+    {
+        public void Dispose()
+        {
+            for (var index = leases.Count - 1; index >= 0; index--)
+            {
+                leases[index].Dispose();
+            }
+        }
+    }
+
     /// <summary>Runs the action on several threads; a failure surfaces as the first thread's own exception, which is what the tool reports, not an aggregate that would escape it.</summary>
     private static void ForEachParallel<T>(List<T> items, CancellationToken ct, Action<T> action)
     {

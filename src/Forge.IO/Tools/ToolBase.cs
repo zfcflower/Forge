@@ -89,6 +89,44 @@ public static class ToolJson
         return value;
     }
 
+    /// <summary>A parameter that takes one string or an array of strings; the answer is always a list.</summary>
+    public static List<string> RequiredStrings(JsonElement arguments, string name)
+    {
+        if (!arguments.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            throw new ToolArgumentException($"'{name}' is required.");
+        }
+
+        var list = new List<string>();
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            list.Add(value.GetString() ?? string.Empty);
+        }
+        else if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String)
+                {
+                    throw new ToolArgumentException($"'{name}' must be a string or an array of strings.");
+                }
+
+                list.Add(item.GetString() ?? string.Empty);
+            }
+        }
+        else
+        {
+            throw new ToolArgumentException($"'{name}' must be a string or an array of strings.");
+        }
+
+        if (list.Count == 0 || list.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ToolArgumentException($"'{name}' must name at least one path, and no path may be empty.");
+        }
+
+        return list;
+    }
+
     public static string? OptionalString(JsonElement arguments, string name)
     {
         if (!arguments.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)

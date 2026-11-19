@@ -503,8 +503,8 @@ internal static class BashPolicy
         || (host.StartsWith("127.", StringComparison.Ordinal) && Uri.CheckHostName(host) == UriHostNameType.IPv4);
 
     /// <summary>
-    /// True when the command does what the owning tool does. Not a duplicate: a caller that holds no such tool, a glob (the
-    /// tools take one path), a command fed by a pipe, or a path the tool would refuse because it lies outside the workspace.
+    /// True when the command does what the owning tool does. Not a duplicate: a caller that holds no such tool, a shell
+    /// expansion the tools do not do (<c>$VAR</c>, a command substitution), a command fed by a pipe, or a path the tool would refuse because it lies outside the workspace.
     /// </summary>
     private static bool DuplicatesFileOperationTool(ShellCommand command, string owner, IToolRegistry? tools, string? workspace)
     {
@@ -521,7 +521,7 @@ internal static class BashPolicy
                 continue;
             }
 
-            if (argument.AsSpan().IndexOfAny("*?[{") >= 0 || (workspace is not null && !InsideWorkspace(argument, workspace)))
+            if (argument.AsSpan().IndexOfAny("$`") >= 0 || (workspace is not null && !InsideWorkspace(argument, workspace)))
             {
                 return false;
             }

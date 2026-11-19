@@ -145,4 +145,54 @@ public sealed class FileOperationToolsTests : IDisposable
         Assert.False(Directory.Exists(link));
         Assert.True(File.Exists(target));
     }
+
+    [Fact]
+    public async Task Delete_takes_patterns_and_arrays_and_skips_dotfiles_unless_named()
+    {
+        Make("logs/a.log");
+        Make("logs/b.log");
+        Make("logs/deep/c.log");
+        Make("logs/.hidden.log");
+        Make("keep.txt");
+
+        Assert.True((await RunAsync(new DeleteTool(), ("path", "logs/*.txt"))).IsError);
+
+        var shallow = await RunAsync(new DeleteTool(), ("path", "logs/*.log"));
+        Assert.False(shallow.IsError, shallow.Content);
+        Assert.False(File.Exists(Path.Combine(workspace, "logs", "a.log")));
+        Assert.True(File.Exists(Path.Combine(workspace, "logs", "deep", "c.log")));
+        Assert.True(File.Exists(Path.Combine(workspace, "logs", ".hidden.log")));
+
+        var deep = await RunAsync(new DeleteTool(), ("path", new[] { "logs/**/*.log", "keep.{txt,md}" }));
+        Assert.False(deep.IsError, deep.Content);
+        Assert.False(File.Exists(Path.Combine(workspace, "logs", "deep", "c.log")));
+        Assert.False(File.Exists(Path.Combine(workspace, "keep.txt")));
+        Assert.True(File.Exists(Path.Combine(workspace, "logs", ".hidden.log")));
+    }
+
+    [Fact]
+    public async Task Copy_and_move_go_into_a_directory_for_several_sources_and_check_everything_first()
+    {
+        Make("a.txt", "a");
+        Make("b.txt", "b");
+        Make("dir/x.txt", "x");
+
+        Assert.True((await RunAsync(new CopyTool(), ("from", "*.txt"), ("to", "out"))).IsError);
+
+        var copied = await RunAsync(new CopyTool(), ("from", new[] { "*.txt", "dir" }), ("to", "out/"));
+        Assert.False(copied.IsError, copied.Content);
+        Assert.Equal("b", File.ReadAllText(Path.Combine(workspace, "out", "b.txt")));
+        Assert.Equal("x", File.ReadAllText(Path.Combine(workspace, "out", "dir", "x.txt")));
+
+        // One existing destination fails the whole call before anything moves.
+        Make("target/b.txt", "old");
+        var refused = await RunAsync(new MoveTool(), ("from", "*.txt"), ("to", "target/"));
+        Assert.True(refused.IsError);
+        Assert.True(File.Exists(Path.Combine(workspace, "a.txt")));
+
+        var moved = await RunAsync(new MoveTool(), ("from", "*.txt"), ("to", "target/"), ("overwrite", true));
+        Assert.False(moved.IsError, moved.Content);
+        Assert.False(File.Exists(Path.Combine(workspace, "a.txt")));
+        Assert.Equal("b", File.ReadAllText(Path.Combine(workspace, "target", "b.txt")));
+    }
 }

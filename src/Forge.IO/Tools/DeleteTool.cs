@@ -12,41 +12,48 @@ namespace Forge.IO.Tools;
 public sealed class DeleteTool() : ToolBase("delete", Description, Schema, ToolSideEffect.Write)
 {
     private const string Schema =
-        """{"type":"object","properties":{"path":{"type":"string","description":"File or directory to delete, workspace-relative or absolute."},"recursive":{"type":"boolean","description":"Delete a non-empty directory with everything below it; default false."}},"required":["path"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"path":{"description":"What to delete: a path, a glob pattern (* ? [a-z] ** {a,b}) or an array of them; workspace-relative or absolute.","anyOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]},"recursive":{"type":"boolean","description":"Delete non-empty directories with everything below them; default false."}},"required":["path"],"additionalProperties":false}""";
 
     private const string Description =
-        "Delete a file or a directory inside the workspace. A non-empty directory needs recursive. A symbolic link is removed " +
-        "without touching its target. The workspace root and .git cannot be deleted. Deleted files are not recoverable.";
+        "Delete files and directories inside the workspace (rm -r). 'path' takes paths, glob patterns or an array. A non-empty directory " +
+        "needs recursive. A symbolic link is removed without touching its target. The workspace root and .git cannot be deleted. " +
+        "Deleted files are not recoverable.";
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
     {
-        var requested = ToolJson.RequiredString(arguments, "path");
+        var requested = ToolJson.RequiredStrings(arguments, "path");
         var recursive = ToolJson.OptionalBool(arguments, "recursive", false);
         var root = Root(context);
-        var path = FileOps.ResolveEntry(root, requested);
-        var display = FileOps.Display(root, path);
-        if (!File.Exists(path) && !Directory.Exists(path) && !IsDanglingLink(path))
+        var paths = PathPatterns.Expand(root, requested, plain => FileOps.ResolveEntry(root, plain), includeLinks: true, ct);
+        foreach (var path in paths)
         {
-            return new ToolResult($"delete: '{display}' does not exist.", IsError: true);
-        }
+            var display = FileOps.Display(root, path);
+            if (!File.Exists(path) && !Directory.Exists(path) && !IsDanglingLink(path))
+            {
+                return new ToolResult($"delete: '{display}' does not exist.", IsError: true);
+            }
 
-        if (FileOps.IsInsideGit(root, path))
-        {
-            return new ToolResult("delete: the .git directory is not deletable.", IsError: true);
-        }
+            if (FileOps.IsInsideGit(root, path))
+            {
+                return new ToolResult("delete: the .git directory is not deletable.", IsError: true);
+            }
 
-        using (await PathGate.Shared.AcquireAsync(path, ct).ConfigureAwait(false))
-        {
             if (!recursive && !FileOps.IsLink(path) && Directory.Exists(path) && Directory.EnumerateFileSystemEntries(path).Any())
             {
                 return new ToolResult($"delete: directory '{display}' is not empty; pass recursive to delete it with its contents.", IsError: true);
             }
+        }
 
-            var stats = FileOps.DeleteTree(path, ct);
+        using (await FileOps.AcquireAllAsync(paths, ct).ConfigureAwait(false))
+        {
+            var stats = FileOps.DeleteMany(paths, ct);
+            var shown = paths.Count == 1
+                ? FileOps.Display(root, paths[0])
+                : $"{paths.Count.ToString(CultureInfo.InvariantCulture)} items";
             return new ToolResult(
                 stats.Directories == 0 && stats.Files <= 1
-                    ? $"deleted {display}"
-                    : $"deleted {display}: {stats.Files.ToString(CultureInfo.InvariantCulture)} files, " +
+                    ? $"deleted {shown}"
+                    : $"deleted {shown}: {stats.Files.ToString(CultureInfo.InvariantCulture)} files, " +
                       $"{stats.Directories.ToString(CultureInfo.InvariantCulture)} directories ({stats.Bytes.ToString(CultureInfo.InvariantCulture)} bytes)");
         }
     }

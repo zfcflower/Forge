@@ -90,6 +90,9 @@ public sealed class BashPolicyTests : IDisposable
     [InlineData("cp -r src build")]
     [InlineData("mv a b")]
     [InlineData("rm -rf build")]
+    [InlineData("rm *.log")]
+    [InlineData("cp -r src/*.cs backup")]
+    [InlineData("mv a.txt b.txt dir")]
     [InlineData("Remove-Item x -Recurse")]
     public async Task Commands_a_dedicated_tool_owns_are_refused_and_never_started(string command)
     {
@@ -111,7 +114,7 @@ public sealed class BashPolicyTests : IDisposable
     [InlineData("dotnet test | tail -50")]
     [InlineData("dotnet build | Select-String error")]
     [InlineData("timeout 60 dotnet test")]
-    [InlineData("rm *.log")]
+    [InlineData("rm -rf $BUILD_DIR")]
     [InlineData("dotnet test | xargs rm")]
     [InlineData("rm -rf ~/scratch")]
     [InlineData("cp ../outside.txt here.txt")]

@@ -456,37 +456,48 @@ public sealed class SummaryCompactor : IContextCompactor
 
             foreach (var block in message.Content)
             {
-                if (block is ToolCallBlock call
-                    && FileTools.TryGetValue(call.Name, out var tool)
-                    && PathArgument(call.ArgumentsJson, tool.PathArgument) is { } path)
+                if (block is ToolCallBlock call && FileTools.TryGetValue(call.Name, out var tool))
                 {
-                    (tool.Modifies ? modified : read).Add(path);
+                    foreach (var path in PathArguments(call.ArgumentsJson, tool.PathArgument))
+                    {
+                        (tool.Modifies ? modified : read).Add(path);
+                    }
                 }
             }
         }
     }
 
-    private static string? PathArgument(string argumentsJson, string name)
+    /// <summary>The path argument of a file tool call: one string, or the strings of an array (copy, move and delete take several).</summary>
+    private static List<string> PathArguments(string argumentsJson, string name)
     {
+        var paths = new List<string>();
         if (string.IsNullOrWhiteSpace(argumentsJson))
         {
-            return null;
+            return paths;
         }
 
         try
         {
             using var document = JsonDocument.Parse(argumentsJson);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                   && document.RootElement.TryGetProperty(name, out var value)
-                   && value.ValueKind == JsonValueKind.String
-                   && value.GetString() is { Length: > 0 } path
-                ? path.Trim()
-                : null;
+            if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty(name, out var value))
+            {
+                return paths;
+            }
+
+            var items = value.ValueKind == JsonValueKind.Array ? value.EnumerateArray().ToArray() : [value];
+            foreach (var item in items)
+            {
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } path && path.Trim() is { Length: > 0 } trimmed)
+                {
+                    paths.Add(trimmed);
+                }
+            }
         }
         catch (JsonException)
         {
-            return null;
         }
+
+        return paths;
     }
 
     /// <summary>History summary, the split turn's prefix summary when there is one, then the file lists.</summary>
