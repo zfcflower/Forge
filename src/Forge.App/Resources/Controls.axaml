@@ -30,6 +30,12 @@
     <Setter Property="FontWeight" Value="Medium" />
   </Style>
 
+  <!-- A nested scroll area inside a tool body never takes focus: focusing it made the transcript bring-into-view the row,
+       which jumped the list to the top of a tall card. -->
+  <Style Selector="ScrollViewer.tool-body ScrollBar">
+    <Setter Property="Focusable" Value="False" />
+  </Style>
+
   <!-- The opened reasoning: one quiet inset block instead of loose text, so it reads as an aside beside the answer. -->
   <Style Selector="Border.thinking-block">
     <Setter Property="Background" Value="#F8F8FA" />

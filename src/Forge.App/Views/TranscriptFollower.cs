@@ -198,6 +198,14 @@ internal sealed class TranscriptFollower
 
     private void OnWheel(object? sender, PointerWheelEventArgs e)
     {
+        // A wheel over an open tool body's own scroll area belongs to that viewer, not to the transcript: treating it as a
+        // transcript scroll is what made the list jump when the pointer crossed the inner scroll bar.
+        if (e.Source is Visual source
+            && source.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault(viewer => !ReferenceEquals(viewer, scroller)) is not null)
+        {
+            return;
+        }
+
         anchor.UserScrolled();
         if (e.Delta.Y > 0 && CanScrollUp)
         {

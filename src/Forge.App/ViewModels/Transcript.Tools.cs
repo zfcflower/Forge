@@ -20,8 +20,8 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     /// <summary>The most result text a row lays out; a build log of megabytes would stall layout. Copy still gives all of it.</summary>
     private const int ResultDisplayLimit = 24_000;
 
-    /// <summary>A result past this many lines (or characters) gets the "show more" toggle; a short one never needs it.</summary>
-    private const int ExpandableLines = 10;
+    /// <summary>A result past this many lines (or characters) gets the "show all" toggle; a short one never needs it.</summary>
+    private const int ExpandableLines = 4;
 
     private static readonly string[] HeadlineKeys = ["command", "cmd", "file_path", "filePath", "path", "pattern", "query", "url", "description", "name"];
     private static readonly string[] PathKeys = ["file_path", "filePath", "path"];
@@ -256,7 +256,7 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
                 return false;
             }
 
-            if (text.Length > 1500)
+            if (text.Length > 400)
             {
                 return true;
             }
@@ -287,8 +287,11 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         }
     }
 
-    /// <summary>240 while folded; the expanded view is taller but still bounded, with its own scroll bar.</summary>
-    public double ResultMaxHeight => isResultExpanded ? 720 : 240;
+    /// <summary>
+    /// The cap on what a result lays out until the user asks for all of it: one screen's worth at most, so a chatty command
+    /// cannot push the rest of the transcript away. "Show all" drops the cap — the viewer then scrolls on its own.
+    /// </summary>
+    public double ResultMaxHeight => isResultExpanded ? double.PositiveInfinity : 200;
 
     public string ResultToggleText => isResultExpanded ? SessionStrings.ToolShowLess : SessionStrings.ToolShowMore;
 

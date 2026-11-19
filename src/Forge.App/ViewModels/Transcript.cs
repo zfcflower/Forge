@@ -1404,13 +1404,16 @@ internal sealed class TranscriptViewModel : ObservableObject
 
         foreach (var item in items)
         {
-            // The stored number and the replay's own count can disagree (a turn whose user message was never persisted, a
-            // session that numbers differently); a row whose start is nowhere near the card's belongs to another turn.
-            if (item is TurnCardViewModel card && byTurn.TryGetValue(card.Round, out var metric)
-                && (metric.StartedAt - card.StartedAt).Duration() <= MetricsMatchWindow)
+            if (item is not TurnCardViewModel card || !byTurn.TryGetValue(card.Round, out var metric))
             {
-                card.SeedReplayMetrics(metric);
+                continue;
             }
+
+            // The round number is the authority: both sides count user turns, and the row is keyed by it. The clock window is
+            // only a sanity check — a replayed card is stamped with its user message's time, which can sit minutes away from
+            // the turn's own start (queued behind a checkpoint or a slow first token), so a mismatch means drifted clocks,
+            // not a different turn: seeding anyway is what keeps the divider from reading "—" on every reopened session.
+            card.SeedReplayMetrics(metric);
         }
     }
 

@@ -178,7 +178,7 @@ internal sealed partial class ToolRowViewModel
 
         // The result joins the picked labels with ", " and rides free text along as "; other: …", so both separators split.
         var chosen = answer.Split([", ", "; "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var options = new List<QuestionOptionItem>(array.GetArrayLength());
+        var options = new List<QuestionOptionItem>(array.GetArrayLength() + 1);
         foreach (var element in array.EnumerateArray())
         {
             var label = element.TryGetProperty("label", out var l) && l.ValueKind == JsonValueKind.String ? l.GetString() ?? string.Empty : string.Empty;
@@ -189,6 +189,26 @@ internal sealed partial class ToolRowViewModel
 
             var description = element.TryGetProperty("description", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() ?? string.Empty : string.Empty;
             options.Add(new QuestionOptionItem(label, description, Array.IndexOf(chosen, label) >= 0));
+        }
+
+        // A typed answer is a pick too, and it gets a card of its own: the answer text has already been stripped of its
+        // "other: " tag, so anything in it that is not one of the declared labels is what the user typed.
+        foreach (var pick in chosen)
+        {
+            var declared = false;
+            for (var i = 0; i < options.Count; i++)
+            {
+                if (string.Equals(options[i].Label, pick, StringComparison.Ordinal))
+                {
+                    declared = true;
+                    break;
+                }
+            }
+
+            if (!declared)
+            {
+                options.Add(new QuestionOptionItem(pick, string.Empty, true));
+            }
         }
 
         return options;

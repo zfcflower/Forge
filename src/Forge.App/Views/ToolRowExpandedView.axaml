@@ -18,7 +18,9 @@
     <TextBlock Classes="label"
                Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
                IsVisible="{Binding HasResult}" />
-    <ScrollViewer MaxHeight="{Binding ResultMaxHeight}"
+    <ScrollViewer Classes="tool-body"
+                  MaxHeight="{Binding ResultMaxHeight}"
+                  Focusable="False"
                   HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto"
                   IsVisible="{Binding HasResult}">

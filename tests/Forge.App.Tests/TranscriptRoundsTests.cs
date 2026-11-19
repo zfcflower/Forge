@@ -98,6 +98,57 @@ public sealed class TranscriptRoundsTests
     }
 
     [Fact]
+    public void A_reopened_turn_takes_its_numbers_from_the_metrics_row_even_when_the_clocks_drifted()
+    {
+        var transcript = MainTranscript();
+        var at = new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
+        transcript.AddUserMessage("hi", at);
+        var card = transcript.BeginTurn(at);
+        card.AppendText("hello");
+        card.AddUsage(new Forge.Abstractions.TokenUsage(10, 20, 0, 0, 0), Forge.Abstractions.StopReason.EndTurn);
+        transcript.EndTurn(TimeSpan.FromSeconds(9), null);
+
+        // The stored turn started behind a checkpoint, so its clock sits minutes away from the message the replay stamps.
+        transcript.SeedTurnMetrics(
+        [
+            new Forge.Core.Storage.TurnMetric(
+                "s", 1, at.AddMinutes(-4), at.AddMinutes(-4) + TimeSpan.FromSeconds(9), Forge.Core.Storage.TurnMetricStatus.Completed,
+                "openai", "gpt-5", null, 10, 20, 0, 0, 0, 1, TimeSpan.FromSeconds(4)),
+        ]);
+
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
+        Assert.Contains("gpt-5", divider.Line, StringComparison.Ordinal);
+        Assert.Contains("tok/s", divider.Line, StringComparison.Ordinal);
+        Assert.Contains("9.0 秒", divider.Line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_typed_answer_gets_an_option_card_of_its_own()
+    {
+        var row = new ToolRowViewModel(
+            "ask_user",
+            """{"questions":[{"header":"Scope","question":"Which files?","options":[{"label":"Only the diff"},{"label":"Everything"}]}]}""");
+        row.Complete(new ToolResult([new TextBlock("Scope: the new parser only")]));
+
+        var question = Assert.Single(row.QuestionItems);
+        Assert.Equal(3, question.Options.Count);
+        Assert.False(question.Options[0].IsChosen);
+        Assert.True(question.Options[2].IsChosen);
+        Assert.Equal("the new parser only", question.Options[2].Label);
+    }
+
+    [Fact]
+    public void A_long_result_stays_capped_until_the_user_asks_for_all_of_it()
+    {
+        var row = new ToolRowViewModel("bash", "{\"command\":\"dir\"}");
+        row.Complete(new ToolResult([new TextBlock(string.Join('\n', Enumerable.Range(0, 40).Select(n => "line " + n)))]));
+        Assert.True(row.CanExpandResult);
+        Assert.Equal(200, row.ResultMaxHeight);
+        row.ToggleResultCommand.Execute(null);
+        Assert.True(double.IsPositiveInfinity(row.ResultMaxHeight));
+    }
+
+    [Fact]
     public void The_open_card_body_belongs_to_the_row_it_was_clicked_in()
     {
         var transcript = MainTranscript();

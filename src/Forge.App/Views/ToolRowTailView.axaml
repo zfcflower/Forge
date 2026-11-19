@@ -15,7 +15,9 @@
         <TextBlock Classes="label" Text="{Binding [resources.tail], Source={x:Static loc:Loc.Instance}}" />
         <TextBlock Classes="mono caption" Text="{Binding LiveElapsedText}" />
       </StackPanel>
-      <ScrollViewer MaxHeight="160"
+      <ScrollViewer Classes="tool-body"
+                    MaxHeight="160"
+                    Focusable="False"
                     VerticalScrollBarVisibility="Auto"
                     HorizontalScrollBarVisibility="Auto">
         <SelectableTextBlock Classes="mono"
