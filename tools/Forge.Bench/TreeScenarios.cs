@@ -32,6 +32,61 @@ internal static class TreeScenarios
         yield return Copy(fixtures, "copy.tree.process", process: true);
         yield return Delete(fixtures, "delete.tree", process: false);
         yield return Delete(fixtures, "delete.tree.process", process: true);
+        yield return SingleFile(fixtures);
+    }
+
+    /// <summary>One small file through each tool, against the bare <c>File.*</c> call: what the tool's own plumbing (JSON, path resolution, gate) costs on the common case.</summary>
+    private static BenchScenario SingleFile(Fixtures fixtures)
+    {
+        return new BenchScenario("copy.single", "copy", Heavy: false, PrepareAsync: _ =>
+        {
+            var directory = fixtures.Workspace.DirectoryAt("single/a/b/c/d");
+            var source = Path.Combine(directory, "source.txt");
+            File.WriteAllBytes(source, new byte[1024]);
+            var context = new ToolContext("bench", fixtures.Workspace.Root);
+            var copy = new CopyTool();
+            var move = new MoveTool();
+            var delete = new DeleteTool();
+            var toolCount = 0;
+            var baselineCount = 0;
+
+            // copy + move + delete of one file per call: the three tools' common path.
+            return Task.FromResult(new BenchCase
+            {
+                Run = async ct =>
+                {
+                    var copied = Path.Combine(directory, $"t{Interlocked.Increment(ref toolCount)}.txt");
+                    var moved = copied + ".moved";
+                    await Invoke(copy, "copy", Arguments(("from", source), ("to", copied)), context, ct).ConfigureAwait(false);
+                    await Invoke(move, "move", Arguments(("from", copied), ("to", moved)), context, ct).ConfigureAwait(false);
+                    await Invoke(delete, "delete", Arguments(("path", moved)), context, ct).ConfigureAwait(false);
+                    return new OpResult(1024, 3, 3);
+                },
+                Baseline = ct =>
+                {
+                    var copied = Path.Combine(directory, $"b{Interlocked.Increment(ref baselineCount)}.txt");
+                    var moved = copied + ".moved";
+                    File.Copy(source, copied);
+                    File.Move(copied, moved);
+                    File.Delete(moved);
+                    return Task.FromResult(new OpResult(1024, 3, 3));
+                },
+                BaselineName = "File.Copy + File.Move + File.Delete",
+                Warmup = 5,
+                Iterations = 200,
+                ProcessWideAllocation = true,
+                Note = "one 1 KiB file, three tool calls per sample, path 4 levels below the workspace root",
+            });
+        });
+    }
+
+    private static async Task Invoke(ITool tool, string name, string json, ToolContext context, CancellationToken ct)
+    {
+        var result = await tool.InvokeAsync(new ToolCall("c", name, json), context, ct).ConfigureAwait(false);
+        if (result.IsError)
+        {
+            throw new InvalidOperationException(result.Content);
+        }
     }
 
     private static BenchScenario Copy(Fixtures fixtures, string name, bool process)

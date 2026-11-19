@@ -36,7 +36,7 @@ public sealed class MoveTool() : ToolBase("move", Description, Schema, ToolSideE
             return new ToolResult("move: the .git directory is not a move source or target.", IsError: true);
         }
 
-        var sameEntry = WorkspacePath.SamePath(source, destination);
+        var sameEntry = string.Equals(source, destination, WorkspacePath.Comparison);
         if (sameEntry && string.Equals(source, destination, StringComparison.Ordinal))
         {
             return new ToolResult("move: the destination is the source.", IsError: true);

@@ -48,7 +48,7 @@ internal static class FileOps
             existing = parent;
         }
 
-        var resolved = WorkspacePath.Resolve(root, existing);
+        var resolved = WorkspacePath.Resolve(root, existing, rootIsReal: true);
         for (var index = missing.Count - 1; index >= 0; index--)
         {
             resolved = Path.Combine(resolved, missing[index]);
@@ -66,7 +66,7 @@ internal static class FileOps
     {
         var full = Path.TrimEndingDirectorySeparator(
             WorkspacePath.Normalize(Path.IsPathRooted(requested) ? requested : Path.Combine(root, requested)));
-        if (WorkspacePath.SamePath(full, root))
+        if (string.Equals(full, WorkspacePath.Normalize(root), WorkspacePath.Comparison))
         {
             throw new ToolArgumentException("the workspace root itself cannot be the target.");
         }
@@ -78,7 +78,10 @@ internal static class FileOps
             throw new ToolArgumentException($"'{requested}' is not a file or directory path.");
         }
 
-        return Path.Combine(WorkspacePath.Resolve(root, parent), name);
+        var entry = Path.Combine(WorkspacePath.Resolve(root, parent, rootIsReal: true), name);
+        return string.Equals(entry, WorkspacePath.Normalize(root), WorkspacePath.Comparison)
+            ? throw new ToolArgumentException("the workspace root itself cannot be the target.")
+            : entry;
     }
 
     internal static string Display(string root, string path) =>

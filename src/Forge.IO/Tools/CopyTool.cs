@@ -24,7 +24,7 @@ public sealed class CopyTool() : ToolBase("copy", Description, Schema, ToolSideE
         var to = ToolJson.RequiredString(arguments, "to");
         var overwrite = ToolJson.OptionalBool(arguments, "overwrite", false);
         var root = Root(context);
-        var source = WorkspacePath.Resolve(root, from);
+        var source = WorkspacePath.Resolve(root, from, rootIsReal: true);
         var destination = FileOps.ResolveTarget(root, to);
         var sourceIsDirectory = Directory.Exists(source);
         if (!sourceIsDirectory && !File.Exists(source))
@@ -37,7 +37,7 @@ public sealed class CopyTool() : ToolBase("copy", Description, Schema, ToolSideE
             return new ToolResult("copy: the .git directory is not a copy source or target.", IsError: true);
         }
 
-        if (WorkspacePath.SamePath(source, destination) || (sourceIsDirectory && WorkspacePath.IsUnder(destination, source)))
+        if (string.Equals(source, destination, WorkspacePath.Comparison) || (sourceIsDirectory && WorkspacePath.IsUnder(destination, source)))
         {
             return new ToolResult("copy: the destination is the source or lies inside it.", IsError: true);
         }

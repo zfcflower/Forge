@@ -81,6 +81,7 @@ parent: forge-architecture
 
 - **`ResolveRealPath` 对不存在的尾段原样追加**(不返回最深的已存在祖先):`a/b/c.txt` 全不存在时结果是 `.../a/b/c.txt`,否则 `write` 建新目录会写到错误的位置。这是改造前 `WorkspacePaths` 就有的缺陷,已在此修正。
 - **`Resolve(root, requested)` 是唯一的入口:** `GetFullPath` → 逐段解析已存在组件的链接 → 结果必须等于 root 或在 root 之下(Windows 不区分大小写);越界抛 `WorkspacePathException`,工具转成错误结果。工具看到的根也必须是真实路径(`ToolBase.Root` 做 `ResolveRealPath`):`Resolve` 返回真实路径,混用两种拼写会让 `read`/`write`/`edit` 在工作区本身经过链接时全部失败(macOS 的 `/var`、Windows 的 junction、subst 盘)。逐段解析让 junction/符号链接无法用来跨出工作区;但它挡不住 TOCTOU(见“边界”)。
+- **逐段解析的开销:** 每段只做一次目录项读取(存在性与是否链接同一次得到;内部段先按目录探测),不再是 `File.Exists`+`Directory.Exists`+链接探测。调用方已持有真实根时用 `Resolve(root, requested, rootIsReal: true)`:根不再重走,位于根下的路径只解析根以下的段;不在根下仍整条解析。`copy`/`move`/`delete` 的单文件三连调用实测 9.9 ms → 2.6 ms(bench `copy.single`,基线为裸 `File.*` 0.9 ms)。
 - **同一个路径的写串行。** `PathGate` 用引用计数门,条目归零即移除,长会话不会积累百万条目;跨会话共享一个实例,因为两个会话可能指向同一个目录。
 
 ### 回收站服务(`Trash/`)

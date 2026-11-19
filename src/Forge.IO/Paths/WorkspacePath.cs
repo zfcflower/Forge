@@ -64,12 +64,18 @@ public static class WorkspacePath
     {
         var full = Normalize(path);
         var root = Path.GetPathRoot(full) ?? string.Empty;
-        var segments = full[root.Length..].Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
-        var current = root;
+        return ResolveBelow(root, full[root.Length..]);
+    }
+
+    /// <summary>Resolves the components of <paramref name="relative"/> one by one below <paramref name="start"/>, which the caller has already resolved.</summary>
+    private static string ResolveBelow(string start, string relative)
+    {
+        var segments = relative.Split(['/', Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],StringSplitOptions.RemoveEmptyEntries);
+        var current = start;
         for (var index = 0; index < segments.Length; index++)
         {
             var candidate = Path.Combine(current, segments[index]);
-            if (!Exists(candidate))
+            if (!TryAttributes(candidate, index < segments.Length - 1, out var attributes))
             {
                 // Nothing below a missing component can be a link, so the rest is appended verbatim: a path that does not
                 // exist yet still resolves to where it would really land, not to its deepest existing ancestor.
@@ -82,7 +88,7 @@ public static class WorkspacePath
             }
 
             current = candidate;
-            if (ResolveLinkTarget(candidate) is { } target)
+            if ((attributes & FileAttributes.ReparsePoint) != 0 && ResolveLinkTarget(candidate) is { } target)
             {
                 current = target;
             }
@@ -104,7 +110,14 @@ public static class WorkspacePath
     /// inside or equal to <paramref name="root"/>.
     /// </summary>
     /// <exception cref="WorkspacePathException">The path resolved outside the root, or the path cannot be parsed.</exception>
-    public static string Resolve(string root, string requested)
+    public static string Resolve(string root, string requested) => Resolve(root, requested, rootIsReal: false);
+
+    /// <summary>
+    /// <see cref="Resolve(string, string)"/> for a root the caller already resolved (the file tools'
+    /// <c>Root(context)</c>): the root's components are not walked again, and a path lexically below it only has the
+    /// components under the root resolved. A path that is not below the root is resolved in full.
+    /// </summary>
+    public static string Resolve(string root, string requested, bool rootIsReal)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(requested);
@@ -113,9 +126,11 @@ public static class WorkspacePath
         string real;
         try
         {
-            realRoot = ResolveRealPath(root);
-            var combined = Path.IsPathRooted(requested) ? requested : Path.Combine(root, requested);
-            real = ResolveRealPath(combined);
+            realRoot = rootIsReal ? Normalize(root) : ResolveRealPath(root);
+            var combined = Normalize(Path.IsPathRooted(requested) ? requested : Path.Combine(root, requested));
+            real = rootIsReal && IsUnder(combined, realRoot)
+                ? ResolveBelow(realRoot, combined[realRoot.Length..])
+                : ResolveRealPath(combined);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -149,7 +164,29 @@ public static class WorkspacePath
         return NormalizeRelative(normalized[(normalizedRoot.Length + 1)..]);
     }
 
-    private static bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
+    /// <summary>
+    /// One directory-entry read answers both "does it exist" and "is it a link": the attributes come from a single query,
+    /// where <c>File.Exists</c> + <c>Directory.Exists</c> + the link probe were up to four. A missing entry (or a path the
+    /// platform cannot read) is reported as absent, which is what the existence checks said.
+    /// </summary>
+    private static bool TryAttributes(string path, bool likelyDirectory, out FileAttributes attributes)
+    {
+        // Exists never throws, and it fills the cached data Attributes reads, so a hit costs one query. Only the guess at the
+        // kind (inner components are directories) decides which probe goes first; the other is the fallback.
+        FileSystemInfo first = likelyDirectory ? new DirectoryInfo(path) : new FileInfo(path);
+        if (!first.Exists)
+        {
+            first = likelyDirectory ? new FileInfo(path) : new DirectoryInfo(path);
+            if (!first.Exists)
+            {
+                attributes = default;
+                return false;
+            }
+        }
+
+        attributes = first.Attributes;
+        return true;
+    }
 
     private static string? ResolveLinkTarget(string path)
     {
