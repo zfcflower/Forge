@@ -9,7 +9,7 @@
   <Grid RowDefinitions="*,Auto,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <Panel Grid.Row="0">
       <views:TranscriptListBox x:Name="Transcript"
-               ItemsSource="{Binding Transcript.Rows}"
+               ItemsSource="{Binding Transcript.Rounds}"
                Padding="{DynamicResource ChatTranscriptPadding}"
                SelectionMode="Single"
                AutoScrollToSelectedItem="False"

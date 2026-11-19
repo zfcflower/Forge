@@ -232,8 +232,10 @@ internal sealed class TranscriptFollower
 
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        // Sending a message always brings the user back to the bottom.
-        if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems is { Count: > 0 } added && added[^1] is UserMessageViewModel)
+        // Sending a message always brings the user back to the bottom. A message opens its own round, so it is the round's
+        // first row rather than the list's item.
+        if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems is { Count: > 0 } added
+            && added[^1] is TranscriptRoundViewModel { Rows.Count: > 0 } opened && opened.Rows[0] is UserMessageViewModel)
         {
             following = true;
         }
@@ -325,7 +327,7 @@ internal sealed class TranscriptFollower
 
             for (var i = Math.Min(first, source.Count - 1); i >= 0; i--)
             {
-                if (source[i] is UserMessageViewModel)
+                if (source[i] is TranscriptRoundViewModel { Rows.Count: > 0 } round && round.Rows[0] is UserMessageViewModel)
                 {
                     // When the first visible item is the message itself, it is on screen and nothing floats.
                     stickyIndex = i < first ? i : -1;

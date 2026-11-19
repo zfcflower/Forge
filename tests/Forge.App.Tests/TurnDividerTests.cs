@@ -26,7 +26,7 @@ public sealed class TurnDividerTests
         var transcript = MainTranscript();
         transcript.AddUserMessage("hi", At0);
 
-        var message = Assert.IsType<UserMessageViewModel>(transcript.Rows[0]);
+        var message = Assert.IsType<UserMessageViewModel>(transcript.FlatRows()[0]);
         Assert.True(message.HasRound);
         Assert.NotNull(message.RoundText);
         // The round marker rides the meta line; the first round has no gap segment, so the meta text is the bare clock.
@@ -42,7 +42,7 @@ public sealed class TurnDividerTests
         transcript.EndTurn(TimeSpan.FromSeconds(3), null);
         transcript.AddUserMessage("again", At1);
 
-        var message = Assert.IsType<UserMessageViewModel>(transcript.Rows[^1]);
+        var message = Assert.IsType<UserMessageViewModel>(transcript.FlatRows()[^1]);
         Assert.Equal(2, message.Round);
         Assert.NotNull(message.RoundText);
         // Round marker, then the gap, then the clock — two separators on the meta line, the clock at its end.
@@ -57,8 +57,8 @@ public sealed class TurnDividerTests
         transcript.AddUserMessage("hi", At0);
         var card = transcript.BeginTurn(At0);
 
-        Assert.Same(card, transcript.Rows[1]);
-        Assert.False(((UserMessageViewModel)transcript.Rows[0]).HasRound);
+        Assert.Same(card, transcript.FlatRows()[1]);
+        Assert.False(((UserMessageViewModel)transcript.FlatRows()[0]).HasRound);
     }
 
     // ---------------------------------------------------------------- line rules
@@ -125,8 +125,8 @@ public sealed class TurnDividerTests
         card.AppendText("done");
         transcript.EndTurn(TimeSpan.FromSeconds(46.2), null);
 
-        Assert.DoesNotContain(transcript.Rows, row => row is TurnCardViewModel);
-        var divider = Assert.IsType<TurnDividerViewModel>(transcript.Rows[^1]);
+        Assert.DoesNotContain(transcript.FlatRows(), row => row is TurnCardViewModel);
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.Same(card, divider.Card);
         Assert.Contains("tok/s", divider.Line);
         Assert.DoesNotContain("—", divider.Line);
@@ -139,7 +139,7 @@ public sealed class TurnDividerTests
         transcript.AddUserMessage("hi", At0);
         transcript.BeginTurn(At0);
 
-        Assert.DoesNotContain(transcript.Rows, row => row is TurnDividerViewModel);
+        Assert.DoesNotContain(transcript.FlatRows(), row => row is TurnDividerViewModel);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public sealed class TurnDividerTests
         card.AddUsage(new TokenUsage(100, 50), StopReason.EndTurn);
         transcript.EndTurn(TimeSpan.FromSeconds(4), Stopped());
 
-        var divider = Assert.IsType<TurnDividerViewModel>(transcript.Rows[^1]);
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.Same(card, divider.Card);
         Assert.True(divider.HasFailed);
         Assert.Contains("—", divider.Line);
@@ -170,7 +170,7 @@ public sealed class TurnDividerTests
         card.AppendText("hello");
         transcript.EndTurn(TimeSpan.FromSeconds(46.2), null);
 
-        var divider = Assert.IsType<TurnDividerViewModel>(transcript.Rows[^1]);
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.DoesNotContain("tok/s", divider.Line);
 
         card.NoteStream(TimeSpan.FromSeconds(10));
@@ -197,7 +197,7 @@ public sealed class TurnDividerTests
         card.AppendText("hello");
         transcript.EndTurn(null, null);
 
-        var dividerBefore = Assert.IsType<TurnDividerViewModel>(transcript.Rows[^1]);
+        var dividerBefore = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.Contains("—", dividerBefore.Line);
 
         transcript.SeedTurnMetrics(
@@ -231,7 +231,7 @@ public sealed class TurnDividerTests
 
         Assert.Equal(TurnEndStatus.Completed, card.EndStatus);
         Assert.Null(card.Elapsed);
-        var divider = Assert.IsType<TurnDividerViewModel>(transcript.Rows[^1]);
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.Contains("—", divider.Line);
     }
 
@@ -261,7 +261,7 @@ public sealed class TurnDividerTests
         card.AddUsage(new TokenUsage(1_000, 2_000), StopReason.EndTurn);
         transcript.EndTurn(null, null);
 
-        var divider = Assert.IsType<TurnDividerViewModel>(transcript.Rows[^1]);
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.DoesNotContain("tok/s", divider.Line);
 
         transcript.SeedTurnMetrics(
@@ -295,7 +295,7 @@ public sealed class TurnDividerTests
         transcript.AddUserMessage("three", At0.AddMinutes(9)); // the clock rolled back: no interval is shown
         transcript.AddUserMessage("four", At0.AddMinutes(20));
 
-        var messages = transcript.Rows.OfType<UserMessageViewModel>().ToArray();
+        var messages = transcript.FlatRows().OfType<UserMessageViewModel>().ToArray();
         Assert.Null(messages[0].GapSincePrevious);
         Assert.Equal(TimeSpan.FromMinutes(10), messages[1].GapSincePrevious);
         Assert.Null(messages[2].GapSincePrevious);
@@ -314,7 +314,7 @@ public sealed class TurnDividerTests
         card.AppendText("hello");
         transcript.EndTurn(TimeSpan.FromSeconds(46.2), null);
 
-        var divider = Assert.IsType<TurnDividerViewModel>(transcript.Rows[^1]);
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.EndsWith("claude-sonnet-4-5", divider.Line, StringComparison.Ordinal);
         Assert.Contains("claude-sonnet-4-5", divider.Tooltip, StringComparison.Ordinal);
 
@@ -335,7 +335,7 @@ public sealed class TurnDividerTests
         card.NoteStream(TimeSpan.FromSeconds(40));
         transcript.EndTurn(TimeSpan.FromSeconds(46.2), null);
 
-        var divider = Assert.IsType<TurnDividerViewModel>(transcript.Rows[^1]);
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.Contains("—", divider.Line);
 
         // The Background flush can trail the turn's Normal-priority continuation: the usage lands after the finish and

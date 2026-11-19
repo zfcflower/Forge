@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.VisualTree;
+using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
 
@@ -148,6 +149,12 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
         return new Size(size.Width, lastExtent);
     }
 
+    /// <summary>
+    /// What an unrealized item is worth. An item is a round, and a round is priced by its rows: every row already laid out
+    /// contributes its measured height, and a row nobody has seen yet the average of the rows of its type. That is the same
+    /// knowledge the flat row table had (one height per row), only summed over the round's own rows instead of averaged over
+    /// whatever happens to be on screen — so the thumb's place and length stay where the rows put them.
+    /// </summary>
     private double KnownHeight(object? item, double fallback)
     {
         if (item is null)
@@ -155,12 +162,28 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
             return fallback;
         }
 
-        if (heights.TryGetValue(item, out var box))
+        if (item is TranscriptRoundViewModel round)
+        {
+            var total = 0d;
+            foreach (var row in round.Rows)
+            {
+                total += KnownRowHeight(row, fallback);
+            }
+
+            return total;
+        }
+
+        return KnownRowHeight(item, fallback);
+    }
+
+    private double KnownRowHeight(object row, double fallback)
+    {
+        if (heights.TryGetValue(row, out var box))
         {
             return box.Height;
         }
 
-        return byType.TryGetValue(item.GetType(), out var type) && type.Count > 0 ? type.Sum / type.Count : fallback;
+        return byType.TryGetValue(row.GetType(), out var type) && type.Count > 0 ? type.Sum / type.Count : fallback;
     }
 
     private void Remember(object item, double height)
@@ -241,9 +264,32 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
 
         for (var i = FirstRealizedIndex; i >= 0 && i <= LastRealizedIndex && i < items.Count; i++)
         {
-            if (items[i] is { } item && ContainerFromIndex(i) is { IsMeasureValid: true } container)
+            if (items[i] is not { } item || ContainerFromIndex(i) is not { IsMeasureValid: true } container)
+            {
+                continue;
+            }
+
+            // A realized row reports its own height; a round also reports every row it hosts, which is what prices the rounds
+            // nobody has realized yet.
+            if (item is not TranscriptRoundViewModel round)
             {
                 Remember(item, container.DesiredSize.Height);
+                continue;
+            }
+
+            {
+                var rows = container.GetVisualDescendants().OfType<ItemsControl>()
+                    .FirstOrDefault(c => ReferenceEquals(c.ItemsSource, round.Rows));
+                if (rows is not null)
+                {
+                    for (var r = 0; r < round.Rows.Count; r++)
+                    {
+                        if (rows.ContainerFromIndex(r) is { IsMeasureValid: true } rowContainer)
+                        {
+                            Remember(round.Rows[r], rowContainer.DesiredSize.Height);
+                        }
+                    }
+                }
             }
         }
     }

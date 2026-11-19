@@ -28,6 +28,7 @@ internal static class TimelineStrings
     public const string NameError = "timeline.name.error";
     public const string NameApproval = "timeline.name.approval";
     public const string NameTool = "timeline.name.tool";
+    public const string NameRoundEnd = "timeline.name.roundEnd";
 
     public const string StateRunning = "timeline.state.running";
     public const string StateFailed = "timeline.state.failed";
@@ -57,6 +58,7 @@ internal static class TimelineStrings
         Loc.Register(NameError, "错误", "Error");
         Loc.Register(NameApproval, "审批", "Approval");
         Loc.Register(NameTool, "工具", "Tool");
+        Loc.Register(NameRoundEnd, "本轮结束", "End of round");
 
         Loc.Register(StateRunning, "运行中", "running");
         Loc.Register(StateFailed, "失败", "failed");

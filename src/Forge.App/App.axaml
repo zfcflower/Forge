@@ -599,6 +599,12 @@
       </StackPanel>
     </DataTemplate>
 
+    <!-- One round: a container of its own. Every row of the round is a child of this host, so rows of two rounds are never
+         siblings and the axis of a round starts and ends inside it. -->
+    <DataTemplate DataType="vm:TranscriptRoundViewModel" x:DataType="vm:TranscriptRoundViewModel">
+      <ItemsControl ItemsSource="{Binding Rows}" />
+    </DataTemplate>
+
     <!-- User message: a timeline node with a bubble on the text column's left edge, in line with the reply cards below. -->
     <DataTemplate DataType="vm:UserMessageViewModel" x:DataType="vm:UserMessageViewModel">
       <Grid ColumnDefinitions="Auto,*">
@@ -728,8 +734,8 @@
                   AutomationProperties.Name="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}">
             <StackPanel Orientation="Horizontal" Spacing="6">
               <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}" Classes="tree-chevron" Classes.expanded="{Binding IsExpanded}" Width="12" Height="12" />
-              <TextBlock Classes="caption" Text="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}" />
-              <TextBlock Classes="caption"
+              <TextBlock Classes="caption thinking-line" Text="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Classes="caption thinking-line"
                          MaxWidth="560"
                          Text="{Binding Preview}"
                          TextTrimming="CharacterEllipsis"
@@ -742,7 +748,7 @@
                         views:StreamFollow.Follow="True"
                         HorizontalScrollBarVisibility="Disabled"
                         VerticalScrollBarVisibility="Auto">
-            <TextBlock Classes="caption"
+            <TextBlock Classes="thinking-line"
                        Margin="0,0,8,0"
                        TextWrapping="Wrap"
                        Foreground="{DynamicResource TextMutedBrush}"
@@ -766,6 +772,14 @@
         <Border Grid.Column="1" Classes="notice" Classes.error="{Binding IsError}" Margin="0,2,0,4">
           <TextBlock Classes="caption" Text="{Binding Text}" TextWrapping="Wrap" />
         </Border>
+      </Grid>
+    </DataTemplate>
+
+    <!-- One run of consecutive tool calls: a grid of cards, at most four across. Its node on the axis is the run's. -->
+    <DataTemplate DataType="vm:TurnToolGroupViewModel" x:DataType="vm:TurnToolGroupViewModel">
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Role="Block" Kind="Tool" IsRunning="{Binding IsRunning}" />
+        <views:ToolGroupView Grid.Column="1" Margin="0,1,0,1" />
       </Grid>
     </DataTemplate>
 

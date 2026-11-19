@@ -1,0 +1,76 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             x:Class="Forge.App.Views.ToolGroupView"
+             x:DataType="vm:TurnToolGroupViewModel">
+  <UserControl.Resources>
+    <views:ToolIconConverter x:Key="ToolIcon" />
+  </UserControl.Resources>
+
+  <!-- A run of consecutive tool calls: up to four cards per row, evenly divided, the open one's body below the grid. The card is
+       the same face as a reply card (white, 1px outline, 8px corner); hovering and pressing only change its surface. -->
+  <StackPanel>
+    <ItemsControl ItemsSource="{Binding Tools}">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <UniformGrid Columns="4" />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:ToolRowViewModel">
+          <Button Classes="tool-card"
+                  Classes.open="{Binding IsExpanded}"
+                  Command="{Binding ToggleCommand}"
+                  Margin="0,1,6,4"
+                  AutomationProperties.AutomationId="tool-card"
+                  AutomationProperties.Name="{Binding Name}"
+                  ToolTip.Tip="{Binding Headline}">
+            <StackPanel Spacing="3">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <wc:FluentIcon Data="{Binding Kind, Converter={StaticResource ToolIcon}}"
+                               Width="13"
+                               Height="13"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextMutedBrush}" />
+                <TextBlock Grid.Column="1"
+                           Classes="mono tool-card-name"
+                           Margin="5,0,6,0"
+                           VerticalAlignment="Center"
+                           Text="{Binding Name}" />
+                <Panel Grid.Column="2" VerticalAlignment="Center">
+                  <wc:FluentIcon Classes="tool-status ok"
+                                 Data="{StaticResource IconCheck}"
+                                 IsVisible="{Binding IsSucceeded}" />
+                  <wc:FluentIcon Classes="tool-status fail"
+                                 Data="{StaticResource IconClose}"
+                                 IsVisible="{Binding IsError}" />
+                  <wc:FluentIcon Classes="tool-status run"
+                                 Data="{StaticResource IconRefresh}"
+                                 IsVisible="{Binding IsRunning}" />
+                  <wc:FluentIcon Classes="tool-status wait"
+                                 Data="{StaticResource IconEllipsis}"
+                                 IsVisible="{Binding IsWaiting}" />
+                </Panel>
+              </Grid>
+              <TextBlock Classes="mono tool-card-body" Text="{Binding CardBody}" />
+            </StackPanel>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <!-- The open call's whole body, in the same view the tool row uses: opening a card does not create a second rendering of
+         arguments, results, images and the live tail. -->
+    <ContentControl Content="{Binding Open}" IsVisible="{Binding HasOpen}">
+      <ContentControl.ContentTemplate>
+        <DataTemplate x:DataType="vm:ToolRowViewModel">
+          <Border Classes="tool-open" Margin="0,2,6,4">
+            <views:ToolRowExpandedView />
+          </Border>
+        </DataTemplate>
+      </ContentControl.ContentTemplate>
+    </ContentControl>
+  </StackPanel>
+</UserControl>

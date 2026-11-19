@@ -37,7 +37,7 @@
 
     <views:TranscriptListBox x:Name="Transcript"
              Grid.Row="1"
-             ItemsSource="{Binding Transcript.Rows}"
+             ItemsSource="{Binding Transcript.Rounds}"
              Padding="{DynamicResource ChatTranscriptPadding}"
              SelectionMode="Single"
              AutoScrollToSelectedItem="False"

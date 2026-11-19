@@ -101,7 +101,7 @@ internal static partial class TranscriptScenarios
                     probe.Follower.StopFollowing();
                     var steps = new List<(double Ms, int Built, string Types, int Gcs)>();
                     var built = new List<string>();
-                    probe.List.ContainerPrepared += (_, e) => built.Add(probe.Transcript.Rows[e.Index].GetType().Name.Replace("ViewModel", ""));
+                    probe.List.ContainerPrepared += (_, e) => built.Add(probe.Transcript.FlatRows()[e.Index].GetType().Name.Replace("ViewModel", ""));
                     var transcript = probe.Transcript;
                     switch (name)
                     {
@@ -199,7 +199,7 @@ internal static partial class TranscriptScenarios
                         {
                             var tool = Tool(transcript, 20, 2);
                             await PlaceAsync(probe, tool, 300).ConfigureAwait(true);
-                            var thinking = transcript.Rows.OfType<TurnThinkingViewModel>().Skip(20).First();
+                            var thinking = transcript.FlatRows().OfType<TurnThinkingViewModel>().Skip(20).First();
                             for (var i = 0; i < 40; i++)
                             {
                                 if (name == "toggle")
@@ -236,19 +236,19 @@ internal static partial class TranscriptScenarios
         private async Task<string> PoolPixelsAsync()
         {
             var transcript = BuildRich(40, false);
-            var tools = transcript.Rows.OfType<ToolRowViewModel>().ToList();
+            var tools = AllTools(transcript).ToList();
             var samples = new List<object>
             {
-                transcript.Rows.OfType<UserMessageViewModel>().Skip(3).First(),
+                transcript.FlatRows().OfType<UserMessageViewModel>().Skip(3).First(),
                 tools[3],
                 tools[4],
-                transcript.Rows.OfType<TurnThinkingViewModel>().Skip(7).First(),
+                transcript.FlatRows().OfType<TurnThinkingViewModel>().Skip(7).First(),
                 tools[9],
                 tools[10],
                 // The main-session transcript no longer carries turn-card rows (the turn header only exists in a
                 // sub-agent transcript now, where the anchor scenarios mount it); the row type this sample has to cover
                 // is the divider — the new template whose pooled reuse must render pixel-identically.
-                transcript.Rows.OfType<TurnDividerViewModel>().Skip(12).First(),
+                transcript.FlatRows().OfType<TurnDividerViewModel>().Skip(12).First(),
                 tools[30],
                 tools[31],
             };
@@ -372,7 +372,7 @@ internal static partial class TranscriptScenarios
                 return null;
             }
 
-            foreach (var group in transcript.Rows.GroupBy(r => r.GetType()))
+            foreach (var group in transcript.FlatRows().GroupBy(r => r.GetType()))
             {
                 var rows = group.ToList();
                 if (rows.Count < 8)
@@ -447,7 +447,7 @@ internal static partial class TranscriptScenarios
         {
             var transcript = BuildRich(40, false);
             var parts = new List<string>();
-            foreach (var group in transcript.Rows.GroupBy(r => r.GetType()))
+            foreach (var group in transcript.FlatRows().GroupBy(r => r.GetType()))
             {
                 var rows = group.ToList();
                 var box = NewList(transcript, "pinned");
@@ -835,7 +835,7 @@ internal static partial class TranscriptScenarios
                 .Select(c => (Y: c.TranslatePoint(default, probe.Scroller)?.Y ?? double.NaN, H: c.Bounds.Height, I: probe.List.IndexFromContainer(c)))
                 .OrderBy(t => t.I)
                 .ToList();
-            return $"target {F(target)}, offset {F(probe.Scroller.Offset.Y)}, extent {F(probe.Scroller.Extent.Height)}, uncovered {F(gap)}, realized {spans.Count} rows #{spans.FirstOrDefault().I}..#{spans.LastOrDefault().I} y {F(spans.FirstOrDefault().Y)}..{F(spans.LastOrDefault().Y + spans.LastOrDefault().H)} of viewport {F(probe.Scroller.Viewport.Height)}, rows {probe.Transcript.Rows.Count}, reconciled {Forge.App.Views.TranscriptStackPanel.Reconciled}";
+            return $"target {F(target)}, offset {F(probe.Scroller.Offset.Y)}, extent {F(probe.Scroller.Extent.Height)}, uncovered {F(gap)}, realized {spans.Count} rows #{spans.FirstOrDefault().I}..#{spans.LastOrDefault().I} y {F(spans.FirstOrDefault().Y)}..{F(spans.LastOrDefault().Y + spans.LastOrDefault().H)} of viewport {F(probe.Scroller.Viewport.Height)}, rows {probe.Transcript.FlatRows().Count}, reconciled {Forge.App.Views.TranscriptStackPanel.Reconciled}";
         }
 
         /// <summary>

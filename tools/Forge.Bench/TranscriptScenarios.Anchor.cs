@@ -222,8 +222,31 @@ internal static partial class TranscriptScenarios
             }
         }
 
-        private static double? RowY(Probe probe, object row) =>
-            probe.List.ContainerFromItem(row) is { } container && container.TranslatePoint(default, probe.Scroller) is { } point ? point.Y : null;
+        private static double? RowY(Probe probe, object row)
+        {
+            // A row lives inside its round, so the list has no container for it: find the realized visual that is bound to it.
+            if (probe.List.ContainerFromItem(row) is { } container && container.TranslatePoint(default, probe.Scroller) is { } point)
+            {
+                return point.Y;
+            }
+
+            var visual = probe.List.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => ReferenceEquals(c.DataContext, row));
+            return visual?.TranslatePoint(default, probe.Scroller)?.Y;
+        }
+
+        /// <summary>The index of the round that hosts <paramref name="row"/>, which is what the list scrolls by.</summary>
+        private static int RoundIndexOf(TranscriptViewModel transcript, object row)
+        {
+            for (var i = 0; i < transcript.Rounds.Count; i++)
+            {
+                if (transcript.Rounds[i].Rows.Contains(row))
+                {
+                    return i;
+                }
+            }
+
+            return 0;
+        }
 
         private static double? ElementY(Probe probe, Visual element) =>
             element.IsAttachedToVisualTree() && element.TranslatePoint(default, probe.Scroller) is { } point ? point.Y : null;
@@ -231,7 +254,7 @@ internal static partial class TranscriptScenarios
         /// <summary>Scrolls until <paramref name="row"/>'s top sits at <paramref name="y"/> on screen (clamped by the extent).</summary>
         private async Task PlaceAsync(Probe probe, object row, double y)
         {
-            probe.List.ScrollIntoView(probe.Transcript.Rows.IndexOf(row));
+            probe.List.ScrollIntoView(RoundIndexOf(probe.Transcript, row));
             await FramesAsync(2).ConfigureAwait(true);
             for (var attempt = 0; attempt < 4; attempt++)
             {
@@ -301,7 +324,7 @@ internal static partial class TranscriptScenarios
         {
             var before = watch();
             var topBefore = FirstVisibleRow(probe);
-            var topIndexBefore = probe.Transcript.Rows.IndexOf(topBefore);
+            var topIndexBefore = probe.Transcript.FlatRows().IndexOf(topBefore);
             var offset = probe.Scroller.Offset.Y;
             var extent = probe.Scroller.Extent.Height;
             var anchor = probe.Follower.Anchor;
@@ -324,21 +347,33 @@ internal static partial class TranscriptScenarios
             var after = watch();
             var drift = before is { } b && after is { } a ? F(a - b) : "lost";
             var top = FirstVisibleRow(probe);
-            var shown = $"top row #{topIndexBefore}->#{probe.Transcript.Rows.IndexOf(top)} (old top now #{probe.Transcript.Rows.IndexOf(topBefore)})";
+            var shown = $"top row #{topIndexBefore}->#{probe.Transcript.FlatRows().IndexOf(top)} (old top now #{probe.Transcript.FlatRows().IndexOf(topBefore)})";
             var firstDrift = before is { } b1 && afterFirst is { } a1 ? F(a1 - b1) : "lost";
             return $"{label}: drift {drift} (first frame {firstDrift}, {F(firstFrame)} ms), {shown} (y {F(before ?? double.NaN)}->{F(after ?? double.NaN)}), offset {F(offset)}->{F(probe.Scroller.Offset.Y)}, extent {F(extent)}->{F(probe.Scroller.Extent.Height)}, offset writes {probe.OffsetWrites} (anchor {anchor.Corrections - corrections}, restores {anchor.Restores - restores}, give-ups {anchor.GiveUps - giveUps}, {F((anchor.Busy - busy).TotalMilliseconds)} ms in it)";
         }
 
         private static ToolRowViewModel Tool(TranscriptViewModel transcript, int turn, int index) =>
-            transcript.Rows.OfType<ToolRowViewModel>().Skip(turn * 6 + index).First();
+            ToolsOf(Card(transcript, turn)).Skip(index).First();
+
+        /// <summary>Every tool call of a card, in arrival order: the calls live inside their groups.</summary>
+        private static IEnumerable<ToolRowViewModel> ToolsOf(TurnCardViewModel card) =>
+            card.Blocks.OfType<TurnToolGroupViewModel>().SelectMany(group => group.Tools);
+
+        /// <summary>Every tool call of every card, in order: a call lives inside its group, not directly in the round's rows.</summary>
+        private static IEnumerable<ToolRowViewModel> AllTools(TranscriptViewModel transcript) =>
+            Cards(transcript).SelectMany(ToolsOf);
+
+        /// <summary>Every card of a live transcript, in order (the round rows host them for a sub-agent only).</summary>
+        private static IEnumerable<TurnCardViewModel> Cards(TranscriptViewModel transcript) =>
+            transcript.Rounds.Select(r => r.Card).OfType<TurnCardViewModel>();
 
         private static TurnCardViewModel Card(TranscriptViewModel transcript, int turn) =>
-            transcript.Rows.OfType<TurnCardViewModel>().Skip(turn).First();
+            Cards(transcript).Skip(turn).First();
 
         /// <summary>The card's own tool row by index — works on a collapsed-older transcript, where the global
         /// row-skip cannot assume every turn's blocks are in the flat list.</summary>
         private static ToolRowViewModel ToolOf(TurnCardViewModel card, int index) =>
-            card.Blocks.OfType<ToolRowViewModel>().Skip(index).First();
+            ToolsOf(card).Skip(index).First();
 
         /// <summary>The first row whose top is on screen, below <paramref name="from"/>.</summary>
         private static object FirstVisibleRow(Probe probe, double from = 0) =>
@@ -405,7 +440,7 @@ internal static partial class TranscriptScenarios
 
                 case "thinking-visible":
                 {
-                    var thinking = transcript.Rows.OfType<TurnThinkingViewModel>().Skip(20).First();
+                    var thinking = transcript.FlatRows().OfType<TurnThinkingViewModel>().Skip(20).First();
                     await PlaceAsync(probe, thinking, 250).ConfigureAwait(true);
                     Func<Button, bool> toggleMatch = b => b.Classes.Contains("link");
                     results.Add(await MeasureAsync(probe, "expand", () => ButtonY(probe, thinking, toggleMatch), () => ClickIn(probe, thinking, toggleMatch)).ConfigureAwait(true));
@@ -433,9 +468,11 @@ internal static partial class TranscriptScenarios
                     await FramesAsync(2).ConfigureAwait(true);
                     var tool = ToolOf(card, 3);
                     await PlaceAsync(probe, tool, 100).ConfigureAwait(true);
-                    var next = transcript.Rows[transcript.Rows.IndexOf(card) + card.Blocks.Count + 1];
+                    object? next = card.Host is { } host && transcript.Rounds.IndexOf(host) is var at && at >= 0 && at + 1 < transcript.Rounds.Count && transcript.Rounds[at + 1].Rows.Count > 0
+                        ? transcript.Rounds[at + 1].Rows[0]
+                        : null;
                     results.Add(await MeasureAsync(probe, "collapse (header y after)", () => RowY(probe, card), () => card.IsExpanded = false).ConfigureAwait(true));
-                    results.Add($"next row y {F(RowY(probe, next) ?? double.NaN)}");
+                    results.Add($"next row y {F(next is null ? double.NaN : RowY(probe, next) ?? double.NaN)}");
                     break;
                 }
 
@@ -473,7 +510,7 @@ internal static partial class TranscriptScenarios
                 {
                     // A visible thinking block opens by itself (no click, no row inserted). The first row on screen is the
                     // anchor and is watched; the thinking row below it must stay too, the rows after it move down (it grew).
-                    var thinking = transcript.Rows.OfType<TurnThinkingViewModel>().Skip(20).First();
+                    var thinking = transcript.FlatRows().OfType<TurnThinkingViewModel>().Skip(20).First();
                     await PlaceAsync(probe, thinking, 60).ConfigureAwait(true);
                     var watched = FirstVisibleRow(probe);
                     var thinkingY = RowY(probe, thinking);
@@ -520,7 +557,7 @@ internal static partial class TranscriptScenarios
                 {
                     // Following the reply at the bottom; the last tool row opens by itself. The list must end at the bottom.
                     await FramesAsync(3).ConfigureAwait(true);
-                    var last = transcript.Rows.OfType<ToolRowViewModel>().Last();
+                    var last = AllTools(transcript).Last();
                     last.IsExpanded = true;
                     await FramesAsync(4).ConfigureAwait(true);
                     var sv = probe.Scroller;
@@ -591,7 +628,7 @@ internal static partial class TranscriptScenarios
                     // click's command): the row opens below the pointer; the list must stay where the header is, not run to
                     // the bottom of what opened.
                     await FramesAsync(3).ConfigureAwait(true);
-                    var last = transcript.Rows.OfType<ToolRowViewModel>().Last();
+                    var last = AllTools(transcript).Last();
                     Func<Button, bool> match = b => ReferenceEquals(b.Command, last.ToggleCommand);
                     results.Add(await MeasureAsync(probe, "press header of the last row", () => ButtonY(probe, last, match), () =>
                     {
@@ -607,8 +644,8 @@ internal static partial class TranscriptScenarios
                 {
                     // A sub-agent transcript: the user reads the middle of the newest turn, then the next turn starts and
                     // collapses it (its blocks leave the list, the screen's content among them).
-                    var card = transcript.Rows.OfType<TurnCardViewModel>().Last();
-                    var tool = card.Blocks.OfType<ToolRowViewModel>().ElementAt(3);
+                    var card = Cards(transcript).Last();
+                    var tool = ToolsOf(card).ElementAt(3);
                     await PlaceAsync(probe, tool, 200).ConfigureAwait(true);
                     results.Add(await MeasureAsync(probe, "new turn (old header y after)", () => RowY(probe, card), () => transcript.BeginTurn(DateTimeOffset.UtcNow)).ConfigureAwait(true));
                     break;

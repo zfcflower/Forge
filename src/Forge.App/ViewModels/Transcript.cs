@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using Forge.Abstractions;
@@ -17,6 +18,45 @@ internal abstract class TranscriptItemViewModel : NotifyingObject
     /// </summary>
     public virtual void RefreshText()
     {
+    }
+}
+
+/// <summary>
+/// One round of a transcript: an independent container that owns every row of that round — the user message, the turn's
+/// blocks, its footnote and the round-end row. Rounds are the list's items, so rows of different rounds are never siblings:
+/// hovering, selecting, text selection and the timeline axis all stay inside one round.
+/// <para>The axis is continuous inside a round because the rows of one round are the items of one <c>ItemsControl</c>: a row
+/// only has to answer "am I the first/last of my round", which no other round's items can change.</para>
+/// </summary>
+internal sealed class TranscriptRoundViewModel : TranscriptItemViewModel
+{
+    private readonly ObservableCollection<object> rows = [];
+
+    public TranscriptRoundViewModel() => Rows = new ReadOnlyObservableCollection<object>(rows);
+
+    /// <summary>The rows of this round, in order; the round template binds a plain item host to it.</summary>
+    public ReadOnlyObservableCollection<object> Rows { get; }
+
+    /// <summary>The turn this round belongs to, or null for a round that holds only a note.</summary>
+    public TurnCardViewModel? Card { get; internal set; }
+
+    /// <summary>The mutable view the transcript edits; only the transcript model touches it.</summary>
+    internal ObservableCollection<object> RowList => rows;
+
+    public override void RefreshText()
+    {
+        foreach (var row in rows)
+        {
+            switch (row)
+            {
+                case TranscriptItemViewModel item:
+                    item.RefreshText();
+                    break;
+                case TurnBlockViewModel block:
+                    block.RefreshText();
+                    break;
+            }
+        }
     }
 }
 
@@ -132,6 +172,108 @@ internal sealed class NoticeViewModel(LocText text, bool isError = false, Timeli
     public TimelineNodeKind Kind { get; } = kind;
 
     public override void RefreshText() => OnPropertyChanged(nameof(Text));
+}
+
+/// <summary>
+/// A run of consecutive tool calls inside one turn: the cards are laid out in a grid of at most four columns, and at most one
+/// of them is open at a time — opening one shows its full body (arguments, result, live tail) under the grid, reusing the
+/// row's own expanded content.
+/// <para>A group exists so the transcript can show several calls side by side instead of one row each; the timeline still
+/// gets one node for the run, on the group's row.</para>
+/// </summary>
+internal sealed class TurnToolGroupViewModel : TurnBlockViewModel
+{
+    private readonly ObservableCollection<ToolRowViewModel> tools = [];
+    private ToolRowViewModel? open;
+
+    public TurnToolGroupViewModel() => Tools = new ReadOnlyObservableCollection<ToolRowViewModel>(tools);
+
+    public ReadOnlyObservableCollection<ToolRowViewModel> Tools { get; }
+
+    /// <summary>The one call whose body is open, or null; the grid always shows every card.</summary>
+    public ToolRowViewModel? Open => open;
+
+    public bool HasOpen => open is not null;
+
+    /// <summary>Whether any call in the run is still running; the group's node on the axis pulses while one is.</summary>
+    public bool IsRunning
+    {
+        get
+        {
+            foreach (var tool in tools)
+            {
+                if (tool.IsRunning)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>Whether any call in the run failed; the group's node then wears the failure colour.</summary>
+    public bool IsError
+    {
+        get
+        {
+            foreach (var tool in tools)
+            {
+                if (tool.IsError)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    internal void Add(ToolRowViewModel tool)
+    {
+        tool.PropertyChanged += OnToolChanged;
+        tools.Add(tool);
+    }
+
+    private void OnToolStateChanged()
+    {
+        OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(IsError));
+    }
+
+    private void OnToolChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ToolRowViewModel.IsRunning) or nameof(ToolRowViewModel.IsError))
+        {
+            OnToolStateChanged();
+            return;
+        }
+
+        if (e.PropertyName != nameof(ToolRowViewModel.IsExpanded))
+        {
+            return;
+        }
+
+        var tool = (ToolRowViewModel)sender!;
+        if (tool.IsExpanded)
+        {
+            open = tool;
+            foreach (var other in tools)
+            {
+                if (!ReferenceEquals(other, tool))
+                {
+                    other.IsExpanded = false;
+                }
+            }
+        }
+        else if (ReferenceEquals(open, tool))
+        {
+            open = null;
+        }
+
+        OnPropertyChanged(nameof(Open));
+        OnPropertyChanged(nameof(HasOpen));
+    }
 }
 
 /// <summary>Base of the blocks inside a turn card: reply text, tool rows and notes, in arrival order.</summary>
@@ -340,6 +482,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     private readonly ObservableCollection<TurnBlockViewModel> blocks = [];
     private TurnTextViewModel? openText;
     private TurnThinkingViewModel? openThinking;
+    private TurnToolGroupViewModel? openToolGroup;
     private TurnFootnoteViewModel? footnoteRow;
     private TurnDividerViewModel? dividerRow;
     private LocText footnote;
@@ -419,8 +562,11 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         }
     }
 
-    /// <summary>The transcript whose flat row list shows this card; it keeps the card's block rows in step.</summary>
+    /// <summary>The transcript whose round list shows this card; it keeps the card's block rows in step.</summary>
     internal TranscriptViewModel? Owner { get; set; }
+
+    /// <summary>The round container that hosts this turn's rows, set by the transcript when the turn begins.</summary>
+    internal TranscriptRoundViewModel? Host { get; set; }
 
     /// <summary>The row after the card's blocks that shows the footnote; created on first use.</summary>
     internal TurnFootnoteViewModel FootnoteRow => footnoteRow ??= new TurnFootnoteViewModel(this);
@@ -567,6 +713,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     public void AppendText(string chunk)
     {
         SealThinking();
+        SealToolGroup();
         if (openText is null)
         {
             openText = new TurnTextViewModel();
@@ -586,6 +733,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         if (openThinking is null)
         {
             SealText();
+            SealToolGroup();
             openThinking = new TurnThinkingViewModel();
             AddBlock(openThinking);
         }
@@ -601,7 +749,16 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         var row = new ToolRowViewModel(call.Name, call.ArgumentsJson);
         toolRows[call.Id] = row;
         toolCallsTotal++;
-        AddBlock(row);
+
+        // Consecutive calls share one group (and one grid) until something else takes the line; a call that arrives after a
+        // reply or a note starts a new group.
+        if (openToolGroup is null)
+        {
+            openToolGroup = new TurnToolGroupViewModel();
+            AddBlock(openToolGroup);
+        }
+
+        openToolGroup.Add(row);
         return row;
     }
 
@@ -624,6 +781,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     {
         SealText();
         SealThinking();
+        SealToolGroup();
         AddBlock(new TurnNoticeViewModel(text, isError, kind));
     }
 
@@ -631,6 +789,8 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     /// Closes the open reply text before a tool row or a note takes over: a sealed block no longer streams, so it shows its
     /// copy button and its rendering stops being provisional.
     /// </summary>
+    private void SealToolGroup() => openToolGroup = null;
+
     private void SealText()
     {
         openText?.Complete();
@@ -874,13 +1034,16 @@ internal sealed class TranscriptViewModel : ObservableObject
 {
     private readonly List<TranscriptItemViewModel> items = [];
 
-    /// <summary>The list the view shows: one row per user message, notice, turn header, block and footnote, in order.</summary>
-    private readonly ObservableCollection<object> rows = [];
+    /// <summary>The list the view shows: one round per user message (or per turn, for a sub-agent), in order.</summary>
+    private readonly ObservableCollection<TranscriptRoundViewModel> rounds = [];
     private readonly Lock pendingGate = new();
     private readonly StringBuilder pending = new();
     private readonly StringBuilder pendingThinking = new();
     private TurnCardViewModel? current;
     private int round;
+
+    /// <summary>The round the last user message opened and the next <c>BeginTurn</c> claims; null once claimed.</summary>
+    private TranscriptRoundViewModel? pendingRound;
 
     /// <summary>When the latest user message arrived, for the next message's gap segment; reset with the transcript.</summary>
     private DateTimeOffset? lastUserAt;
@@ -891,16 +1054,21 @@ internal sealed class TranscriptViewModel : ObservableObject
     public TranscriptViewModel(bool collapseOlderTurns)
     {
         CollapseOlderTurns = collapseOlderTurns;
-        Rows = new ReadOnlyObservableCollection<object>(rows);
+        Rounds = new ReadOnlyObservableCollection<TranscriptRoundViewModel>(rounds);
     }
 
     /// <summary>
-    /// What the transcript list binds to. It is flat on purpose: a virtualizing list can only estimate the height of what it
-    /// has not realized, and an estimate over whole turns (a turn is anywhere from one line to several screens) is far
-    /// off, which makes the scroll bar jump when dragged. Rows of one block each keep the estimate close and the realized
-    /// part small, however long the conversation is.
+    /// What the transcript list binds to: one container per round. Every row of a round lives inside that round, so rows of
+    /// different rounds are never siblings and the axis of one round cannot be crossed by another. The panel prices a round
+    /// it has not realized yet as the sum of its rows (see <c>TranscriptStackPanel</c>) instead of one average per round.
     /// </summary>
-    public ReadOnlyObservableCollection<object> Rows { get; }
+    public ReadOnlyObservableCollection<TranscriptRoundViewModel> Rounds { get; }
+
+    /// <summary>
+    /// Every row of every round in order, as a snapshot. The list binds to <see cref="Rounds"/>; this flattened view exists for
+    /// callers that reason about individual rows (the tests and the bench), and it is deliberately not the live collection.
+    /// </summary>
+    internal List<object> FlatRows() => Rounds.SelectMany(round => round.Rows).ToList();
 
     public bool CollapseOlderTurns { get; }
 
@@ -949,11 +1117,28 @@ internal sealed class TranscriptViewModel : ObservableObject
             pendingUserMessage = message;
         }
 
-        Add(message);
+        // A user message opens its own round; the turn that follows joins it, so the round is the unit the list hosts.
+        items.Add(message);
+        var host = new TranscriptRoundViewModel();
+        host.RowList.Add(message);
+        rounds.Add(host);
+        if (!CollapseOlderTurns)
+        {
+            pendingRound = host;
+        }
+
+        OnPropertyChanged(nameof(IsEmpty));
     }
 
-    public void AddNotice(LocText text, bool isError = false, TimelineNodeKind kind = TimelineNodeKind.Notice) =>
-        Add(new NoticeViewModel(text, isError, kind));
+    public void AddNotice(LocText text, bool isError = false, TimelineNodeKind kind = TimelineNodeKind.Notice)
+    {
+        var notice = new NoticeViewModel(text, isError, kind);
+        items.Add(notice);
+        var host = new TranscriptRoundViewModel();
+        host.RowList.Add(notice);
+        rounds.Add(host);
+        OnPropertyChanged(nameof(IsEmpty));
+    }
 
     /// <summary>
     /// Starts the next turn card and collapses the previous one when this transcript only expands the newest. A stored
@@ -987,20 +1172,38 @@ internal sealed class TranscriptViewModel : ObservableObject
 
         current = card;
         card.Owner = this;
-        if (pendingUserMessage is { } pending)
+        var claimed = !CollapseOlderTurns && pendingRound is { } pending;
+        var host = claimed ? pendingRound! : new TranscriptRoundViewModel();
+        pendingRound = null;
+        host.Card = card;
+        card.Host = host;
+        if (!claimed)
         {
-            pendingUserMessage = null;
-            card.UserMessage = pending;
+            rounds.Add(host);
         }
 
-        Add(card);
+        if (pendingUserMessage is { } user)
+        {
+            pendingUserMessage = null;
+            card.UserMessage = user;
+        }
+
+        // A sub-agent turn keeps its collapsible header row; a main-session turn does not (its information sits under the
+        // user message and in the round-end row).
+        if (CollapseOlderTurns)
+        {
+            host.RowList.Add(card);
+        }
+
+        items.Add(card);
+        OnPropertyChanged(nameof(IsEmpty));
         return card;
     }
 
     /// <summary>A block joined a card: it takes its place after the card's last block row, unless the card is collapsed.</summary>
     internal void BlockAdded(TurnCardViewModel card, TurnBlockViewModel block)
     {
-        if (!card.IsExpanded)
+        if (!card.IsExpanded || card.Host?.RowList is not { } rows)
         {
             return;
         }
@@ -1015,15 +1218,20 @@ internal sealed class TranscriptViewModel : ObservableObject
     /// <summary>A card was expanded or collapsed: its block rows appear after its header or go away.</summary>
     internal void ExpandedChanged(TurnCardViewModel card)
     {
-        var header = RowIndex(card);
-        if (header < 0)
+        if (card.Host?.RowList is not { } rows)
         {
             return;
         }
 
+        var header = IndexOf(rows, card);
         if (card.IsExpanded)
         {
             var at = header + 1;
+            if (at <= 0)
+            {
+                at = EndOfBlocks(card);
+            }
+
             foreach (var block in card.Blocks)
             {
                 rows.Insert(at++, block);
@@ -1041,8 +1249,13 @@ internal sealed class TranscriptViewModel : ObservableObject
     /// <summary>A card gained or lost its footnote: the footnote row follows the card's block rows.</summary>
     internal void FootnoteChanged(TurnCardViewModel card)
     {
+        if (card.Host?.RowList is not { } rows)
+        {
+            return;
+        }
+
         var row = card.FootnoteRow;
-        var at = RowIndex(row);
+        var at = IndexOf(rows, row);
         if (card.HasFootnote)
         {
             if (at < 0 && EndOfBlocks(card) is var insertAt && insertAt >= 0)
@@ -1059,18 +1272,24 @@ internal sealed class TranscriptViewModel : ObservableObject
     }
 
     /// <summary>
-    /// A card finished: its divider row lands after the footnote (or after the blocks when there is none), just before
-    /// the next user message. Re-entrant like the finish itself — a replayed turn finishes once per tool message.
+    /// A card finished: its end row lands after the footnote (or after the blocks when there is none) and becomes the last row
+    /// of the round, where the axis ends on the round's closing node. Re-entrant like the finish itself — a replayed turn
+    /// finishes once per tool message.
     /// </summary>
     internal void DividerChanged(TurnCardViewModel card)
     {
+        if (card.Host?.RowList is not { } rows)
+        {
+            return;
+        }
+
         var row = card.DividerRow;
-        var at = RowIndex(row);
+        var at = IndexOf(rows, row);
         if (card.HasDivider)
         {
             if (at < 0)
             {
-                var insert = card.HasFootnote && RowIndex(card.FootnoteRow) is var footnoteAt && footnoteAt >= 0
+                var insert = card.HasFootnote && IndexOf(rows, card.FootnoteRow) is var footnoteAt && footnoteAt >= 0
                     ? footnoteAt + 1
                     : EndOfBlocks(card);
                 if (insert >= 0)
@@ -1121,10 +1340,15 @@ internal sealed class TranscriptViewModel : ObservableObject
         }
     }
 
-    /// <summary>The index just past the card's header and block rows, or -1 when the card is not in the list.</summary>
+    /// <summary>The index just past the card's header and block rows inside its own round, or -1 when it has no round.</summary>
     private int EndOfBlocks(TurnCardViewModel card)
     {
-        var at = RowIndex(card);
+        if (card.Host?.RowList is not { } rows)
+        {
+            return -1;
+        }
+
+        var at = IndexOf(rows, card);
         if (at >= 0)
         {
             at++;
@@ -1148,7 +1372,7 @@ internal sealed class TranscriptViewModel : ObservableObject
 
         if (card.UserMessage is { } user)
         {
-            var userAt = RowIndex(user);
+            var userAt = IndexOf(rows, user);
             if (userAt >= 0)
             {
                 return userAt + 1;
@@ -1159,7 +1383,7 @@ internal sealed class TranscriptViewModel : ObservableObject
     }
 
     /// <summary>Searches from the end: the rows being changed are almost always the newest.</summary>
-    private int RowIndex(object row)
+    private static int IndexOf(System.Collections.IList rows, object row)
     {
         for (var index = rows.Count - 1; index >= 0; index--)
         {
@@ -1241,27 +1465,12 @@ internal sealed class TranscriptViewModel : ObservableObject
     public void Clear()
     {
         items.Clear();
-        rows.Clear();
+        rounds.Clear();
         current = null;
         round = 0;
         lastUserAt = null;
+        pendingRound = null;
         pendingUserMessage = null;
-        OnPropertyChanged(nameof(IsEmpty));
-    }
-
-    private void Add(TranscriptItemViewModel item)
-    {
-        items.Add(item);
-        if (item is TurnCardViewModel && !CollapseOlderTurns)
-        {
-            // A main-session turn renders no header row: the blocks follow the user message directly and the card
-            // itself stays out of the flat list (a sub-agent transcript keeps its collapsible header). The card still
-            // lives in items, so its blocks, footnote and divider anchor off it exactly as before.
-            OnPropertyChanged(nameof(IsEmpty));
-            return;
-        }
-
-        rows.Add(item);
         OnPropertyChanged(nameof(IsEmpty));
     }
 }

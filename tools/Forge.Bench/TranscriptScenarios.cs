@@ -217,7 +217,7 @@ internal static partial class TranscriptScenarios
             box.Padding = new Thickness(8);
             box.SelectionMode = SelectionMode.Single;
             box.AutoScrollToSelectedItem = false;
-            box.ItemsSource = transcript.Rows;
+            box.ItemsSource = transcript.Rounds;
             ScrollViewer.SetHorizontalScrollBarVisibility(box, Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled);
             if (stack == "stack")
             {

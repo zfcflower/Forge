@@ -24,6 +24,12 @@
     <Setter Property="TextWrapping" Value="NoWrap" />
   </Style>
 
+  <!-- The thinking row: one step up from the caption it replaces (12 px, weight 500), still quieter than the reply. -->
+  <Style Selector="TextBlock.thinking-line">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+
   <Style Selector="TextBlock.muted">
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
@@ -150,6 +156,83 @@
 
   <Style Selector="Border.tool-row.expanded">
     <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+  </Style>
+
+  <!-- A tool card: the reply card's face (white, 1px outline, 8px corner), with only the surface moving under the pointer. -->
+  <Style Selector="Button.tool-card">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="Padding" Value="7,6,8,7" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Top" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <Style Selector="Button.tool-card /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+  </Style>
+
+  <Style Selector="Button.tool-card:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+  </Style>
+
+  <Style Selector="Button.tool-card:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+  </Style>
+
+  <Style Selector="Button.tool-card.open /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.tool-card-name">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.tool-card-body">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tool-status">
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Height" Value="13" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tool-status.ok">
+    <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tool-status.fail">
+    <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tool-status.run">
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.tool-status.wait">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <Style Selector="Border.tool-open">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="Padding" Value="8,6" />
   </Style>
 
   <Style Selector="Border.notice">

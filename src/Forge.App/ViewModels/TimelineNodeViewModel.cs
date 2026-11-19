@@ -62,6 +62,9 @@ internal enum TimelineNodeKind
 
     /// <summary>The turn header: a node-less connector the axis passes through.</summary>
     Turn,
+
+    /// <summary>The round-end node: the last row of a round, where the axis stops.</summary>
+    RoundEnd,
 }
 
 /// <summary>How a node currently reads: the regular/filled variant and the colour both follow this.</summary>
@@ -78,6 +81,9 @@ internal enum TimelineNodeState
 
     /// <summary>An approval was refused: a filled icon in the warning colour.</summary>
     Warning,
+
+    /// <summary>A round that finished cleanly: the round-end node in the success colour.</summary>
+    Done,
 }
 
 /// <summary>
@@ -192,6 +198,7 @@ internal static class TimelineNodeMap
     public static TimelineNodeState StateOf(TimelineNodeKind kind, bool running, bool failing) =>
         failing ? (kind == TimelineNodeKind.Approval ? TimelineNodeState.Warning : TimelineNodeState.Failed)
         : running ? TimelineNodeState.Running
+        : kind == TimelineNodeKind.RoundEnd ? TimelineNodeState.Done
         : TimelineNodeState.Idle;
 
     /// <summary>
@@ -213,7 +220,7 @@ internal static class TimelineNodeMap
     {
         TimelineNodeKind.User => "IconPerson",
         TimelineNodeKind.Assistant or TimelineNodeKind.Turn => "IconChat",
-        TimelineNodeKind.Thinking => "IconLightbulb",
+        TimelineNodeKind.Thinking => "IconThinking",
         TimelineNodeKind.ReadFile => "IconDocument",
         TimelineNodeKind.Search => "IconSearchRegular",
         TimelineNodeKind.EditFile => "IconEditRegular",
@@ -225,6 +232,7 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Notice => "IconInfo",
         TimelineNodeKind.Error => "IconWarning",
         TimelineNodeKind.Approval => "IconShieldCheckRegular",
+        TimelineNodeKind.RoundEnd => "IconCheckmarkCircleSparkle",
         _ => "IconWrenchRegular",
     };
 
@@ -232,7 +240,7 @@ internal static class TimelineNodeMap
     {
         TimelineNodeKind.User => "IconPersonFilled",
         TimelineNodeKind.Assistant or TimelineNodeKind.Turn => "IconChatFilled",
-        TimelineNodeKind.Thinking => "IconLightbulbFilled",
+        TimelineNodeKind.Thinking => "IconThinkingFilled",
         TimelineNodeKind.ReadFile => "IconDocumentFilled",
         TimelineNodeKind.Search => "IconSearchFilled",
         TimelineNodeKind.EditFile => "IconEditFilled",
@@ -244,6 +252,7 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Notice => "IconInfoFilled",
         TimelineNodeKind.Error => "IconWarningFilled",
         TimelineNodeKind.Approval => "IconShieldCheckFilled",
+        TimelineNodeKind.RoundEnd => "IconCheckmarkCircleSparkleFilled",
         _ => "IconWrenchFilled",
     };
 
@@ -264,6 +273,7 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Notice => TimelineStrings.NameNotice,
         TimelineNodeKind.Error => TimelineStrings.NameError,
         TimelineNodeKind.Approval => TimelineStrings.NameApproval,
+        TimelineNodeKind.RoundEnd => TimelineStrings.NameRoundEnd,
         _ => TimelineStrings.NameTool,
     };
 
@@ -273,6 +283,7 @@ internal static class TimelineNodeMap
         TimelineNodeState.Running => TimelineStrings.StateRunning,
         TimelineNodeState.Failed => TimelineStrings.StateFailed,
         TimelineNodeState.Warning => TimelineStrings.StateWarning,
+        TimelineNodeState.Done => string.Empty,
         _ => string.Empty,
     };
 }

@@ -1,0 +1,53 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             x:Class="Forge.App.Views.ToolRowExpandedView"
+             x:DataType="vm:ToolRowViewModel">
+  <!-- What one tool call looks like when it is open: arguments, result, the result's actions, its images and the live tail of a
+       call that has not returned yet. One implementation, used by the inspector row, by the tool card group and by the tool
+       row, so the three can never drift apart. -->
+  <StackPanel Spacing="4" Margin="0,2,0,2">
+    <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
+    <SelectableTextBlock Classes="mono"
+                         Text="{Binding Arguments}"
+                         TextWrapping="Wrap"
+                         Foreground="{DynamicResource TextSecondaryBrush}" />
+    <TextBlock Classes="label"
+               Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
+               IsVisible="{Binding HasResult}" />
+    <ScrollViewer MaxHeight="{Binding ResultMaxHeight}"
+                  HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto"
+                  IsVisible="{Binding HasResult}">
+      <SelectableTextBlock Classes="mono"
+                           Text="{Binding ResultDisplay}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,8,0"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+    </ScrollViewer>
+    <TextBlock Classes="caption" Text="{Binding ResultNote}" IsVisible="{Binding HasResultNote}" />
+    <!-- Result actions: the whole output to the clipboard, a taller view for a long one, and the file the call worked on. -->
+    <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasResult}">
+      <views:CopyTextButton Classes="ghost icon"
+                            Width="26"
+                            Height="22"
+                            ToolTip.Tip="{Binding [turn.toolCopyResult], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="tool-copy-result"
+                            AutomationProperties.Name="{Binding [turn.toolCopyResult], Source={x:Static loc:Loc.Instance}}">
+        <wc:FluentIcon Data="{StaticResource IconCopy}" Width="12" Height="12" />
+      </views:CopyTextButton>
+      <Button Classes="link"
+              Command="{Binding ToggleResultCommand}"
+              IsVisible="{Binding CanExpandResult}"
+              AutomationProperties.AutomationId="tool-result-toggle">
+        <TextBlock Classes="caption" Text="{Binding ResultToggleText}" />
+      </Button>
+    </StackPanel>
+    <!-- Result images (wave W4) and the live output tail (wave W8). -->
+    <views:ToolRowImagesView />
+    <views:ToolRowTailView />
+  </StackPanel>
+</UserControl>

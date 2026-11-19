@@ -88,6 +88,39 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
 
     public RelayCommand ToggleCommand => toggleCommand ??= new RelayCommand(() => IsExpanded = !IsExpanded);
 
+    /// <summary>The timeline node kind this call wears; the card in a tool group repeats that glyph.</summary>
+    public TimelineNodeKind Kind => TimelineNodeMap.KindForTool(Name);
+
+    /// <summary>Whether the call carried an input worth a line of its own (an empty object is no input).</summary>
+    public bool HasInput => Arguments is not ("{}" or "null" or "");
+
+    /// <summary>
+    /// The card's one body line: what went in, or — for a call that carries no input — what came out. The status is never
+    /// this line: the card's own status icon already says it.
+    /// </summary>
+    public string CardBody => HasInput ? Headline : OutputLine;
+
+    /// <summary>True once the call returned without failing; the card's check.</summary>
+    public bool IsSucceeded => HasResult && !IsError;
+
+    /// <summary>True while the call has produced nothing yet: queued or just started, drawn as a waiting dot.</summary>
+    public bool IsWaiting => !IsRunning && !HasResult && !IsError;
+
+    private string OutputLine
+    {
+        get
+        {
+            var text = Result;
+            if (string.IsNullOrEmpty(text))
+            {
+                return Status;
+            }
+
+            var end = text.IndexOfAny(['\r', '\n']);
+            return Compact(end < 0 ? text : text[..end], SummaryLimit);
+        }
+    }
+
     // ---------------------------------------------------------------- readable header and result
 
     /// <summary>

@@ -448,24 +448,11 @@ internal sealed class TimelineGutter : Control
             return new TimelineRowLayout(true, false, false);
         }
 
+        // The owning ItemsControl is the round this row belongs to, so the index and the count are the row's place inside
+        // its own round and the axis is continuous there by construction.
         var index = owner.IndexFromContainer(container);
-
-        var count = owner.ItemCount;
-        var isFirst = index == 0;
-        var isLast = index == count - 1;
-        switch (Role)
-        {
-            case TimelineRowRole.TurnHeader:
-                return TimelineLayout.TurnHeader(isFirst, isLast, VisibleBlocks, turn?.HasFootnote == true);
-            case TimelineRowRole.Footnote:
-            case TimelineRowRole.Block:
-                return TimelineLayout.TurnRow(index, count);
-            default:
-                return TimelineLayout.Item(isFirst, isLast);
-        }
+        return TimelineLayout.Row(index, owner.ItemCount, Role != TimelineRowRole.TurnHeader);
     }
-
-    private int VisibleBlocks => turn is { IsExpanded: true } expanded ? expanded.Blocks.Count : 0;
 
     private (TimelineNodeKind Kind, TimelineNodeState State) Effective()
     {
@@ -681,6 +668,7 @@ internal sealed class TimelineGutter : Control
             TimelineNodeState.Running => "BrandActionBrush",
             TimelineNodeState.Failed => "StatusErrorBrush",
             TimelineNodeState.Warning => "StatusWarningBrush",
+            TimelineNodeState.Done => "StatusSuccessBrush",
             _ => "TextMutedBrush",
         });
         if (icon is null || foreground is null)
