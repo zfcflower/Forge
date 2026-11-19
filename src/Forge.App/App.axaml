@@ -725,7 +725,7 @@
     <DataTemplate DataType="vm:TurnThinkingViewModel" x:DataType="vm:TurnThinkingViewModel">
       <Grid ColumnDefinitions="Auto,*">
         <views:TimelineGutter Role="Block" Kind="Thinking" IsRunning="{Binding IsStreaming}" />
-        <StackPanel Grid.Column="1" Margin="0,2,0,4" Spacing="2">
+        <StackPanel Grid.Column="1" Margin="0,4,0,6" Spacing="4">
           <Button Classes="link"
                   HorizontalAlignment="Left"
                   HorizontalContentAlignment="Left"
@@ -734,27 +734,27 @@
                   AutomationProperties.Name="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}">
             <StackPanel Orientation="Horizontal" Spacing="6">
               <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}" Classes="tree-chevron" Classes.expanded="{Binding IsExpanded}" Width="12" Height="12" />
-              <TextBlock Classes="caption thinking-line" Text="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}" />
-              <TextBlock Classes="caption thinking-line"
+              <TextBlock Classes="thinking-line" Text="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Classes="thinking-line"
                          MaxWidth="560"
                          Text="{Binding Preview}"
                          TextTrimming="CharacterEllipsis"
                          IsVisible="{Binding !IsExpanded}" />
             </StackPanel>
           </Button>
-          <ScrollViewer MaxHeight="240"
-                        IsVisible="{Binding IsExpanded}"
-                        Margin="18,0,0,0"
-                        views:StreamFollow.Follow="True"
-                        HorizontalScrollBarVisibility="Disabled"
-                        VerticalScrollBarVisibility="Auto">
-            <TextBlock Classes="thinking-line"
-                       Margin="0,0,8,0"
-                       TextWrapping="Wrap"
-                       Foreground="{DynamicResource TextMutedBrush}"
-                       Text="{Binding Text}"
-                       AutomationProperties.AutomationId="thinking-text" />
-          </ScrollViewer>
+          <Border Classes="thinking-block" IsVisible="{Binding IsExpanded}" Margin="18,0,0,0">
+            <ScrollViewer MaxHeight="240"
+                          views:StreamFollow.Follow="True"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+              <TextBlock Classes="thinking-line"
+                         Margin="0,0,4,0"
+                         TextWrapping="Wrap"
+                         Foreground="{DynamicResource TextSecondaryBrush}"
+                         Text="{Binding Text}"
+                         AutomationProperties.AutomationId="thinking-text" />
+            </ScrollViewer>
+          </Border>
         </StackPanel>
       </Grid>
     </DataTemplate>

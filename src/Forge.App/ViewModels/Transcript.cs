@@ -434,8 +434,39 @@ internal sealed class TurnThinkingViewModel : TurnBlockViewModel
     /// <summary>Whether anything at all has arrived; a reasoning row with no text is not shown as a preview.</summary>
     public bool HasText => text.Length > 0;
 
-    /// <summary>The reasoning as it has arrived so far, exactly as the provider sent it.</summary>
-    public string Text => materialized ??= text.ToString();
+    /// <summary>
+    /// The reasoning as it arrived, with runs of blank lines collapsed to one: providers separate paragraphs with one or two
+    /// empty lines, and three or more read as a hole in the block rather than as spacing.
+    /// </summary>
+    public string Text => materialized ??= Collapse(text.ToString());
+
+    private static string Collapse(string raw)
+    {
+        if (raw.IndexOf("\n\n\n", StringComparison.Ordinal) < 0)
+        {
+            return raw;
+        }
+
+        var builder = new StringBuilder(raw.Length);
+        var newlines = 0;
+        foreach (var character in raw)
+        {
+            if (character == '\n')
+            {
+                if (++newlines <= 2)
+                {
+                    builder.Append(character);
+                }
+
+                continue;
+            }
+
+            newlines = 0;
+            builder.Append(character);
+        }
+
+        return builder.ToString();
+    }
 
     /// <summary>
     /// The first non-blank line, capped at <see cref="PreviewCharacters">; what the collapsed row shows. Only that line is

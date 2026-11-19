@@ -496,8 +496,8 @@ internal sealed class TimelineGutter : Control
         /// <summary>A running node's icon breathes (opacity 1 → 0.3 → 1 over 1.2 s).</summary>
         Pulse,
 
-        /// <summary>The slow halo of a running reasoning stretch.</summary>
-        Thinking,
+        /// <summary>A running reasoning stretch: a fast, deep light-to-dark breath (no halo).</summary>
+        ThinkingPulse,
 
         /// <summary>Ripples outward from a node that waits for the user (a pending question or approval).</summary>
         Waiting,
@@ -526,7 +526,7 @@ internal sealed class TimelineGutter : Control
 
         if (kind == TimelineNodeKind.Thinking)
         {
-            return animated ? Motion.Thinking : Motion.None;
+            return animated ? Motion.ThinkingPulse : Motion.None;
         }
 
         return animated ? Motion.Pulse : Motion.None;
@@ -650,7 +650,7 @@ internal sealed class TimelineGutter : Control
 
         var (kind, state) = Effective();
         var motion = MotionOf(kind, state);
-        if (motion is Motion.Thinking or Motion.Waiting or Motion.Still)
+        if (motion is Motion.Waiting or Motion.Still)
         {
             DrawRing(context, motion, new Point(node / 2, Metrics.NodeTopGap + node / 2));
         }
@@ -678,9 +678,10 @@ internal sealed class TimelineGutter : Control
 
         // The icon's 24x24 grid scaled into the node box, as FluentIcon's viewbox does.
         var place = Matrix.CreateScale(node / IconGrid, node / IconGrid) * Matrix.CreateTranslation(0, Metrics.NodeTopGap);
-        if (motion == Motion.Pulse)
+        if (motion is Motion.Pulse or Motion.ThinkingPulse)
         {
-            using (context.PushOpacity(1 - 0.7 * Triangle(SineInOut(Phase(1.2)))))
+            var (period, depth) = motion == Motion.ThinkingPulse ? (0.7, 0.8) : (1.2, 0.7);
+            using (context.PushOpacity(1 - depth * Triangle(SineInOut(Phase(period)))))
             using (context.PushTransform(place))
             {
                 context.DrawGeometry(foreground, null, icon);
@@ -701,14 +702,6 @@ internal sealed class TimelineGutter : Control
         double opacity;
         switch (motion)
         {
-            case Motion.Thinking:
-            {
-                var t = Triangle(SineInOut(Phase(1.8)));
-                size = 14 + 7 * t;
-                opacity = 0.15 + 0.7 * t;
-                break;
-            }
-
             case Motion.Waiting:
             {
                 var f = 1 - Math.Pow(1 - Phase(1.4), 3);

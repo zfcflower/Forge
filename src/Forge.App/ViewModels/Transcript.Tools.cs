@@ -98,7 +98,42 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     /// The card's one body line: what went in, or — for a call that carries no input — what came out. The status is never
     /// this line: the card's own status icon already says it.
     /// </summary>
-    public string CardBody => IsQuestionCard ? QuestionSummary : HasInput ? Headline : OutputLine;
+    public string CardBody => IsQuestionCard ? QuestionSummary
+        : IsRunning && HasLiveOutput ? LiveTailLine
+        : HasInput ? Headline
+        : OutputLine;
+
+    /// <summary>
+    /// The last line of output a running command has streamed so far: the card shows the command while it is queued and
+    /// switches to what it prints the moment output arrives, so a long call is readable without opening it.
+    /// </summary>
+    private string LiveTailLine
+    {
+        get
+        {
+            var text = LiveOutputText;
+            if (text.Length == 0)
+            {
+                return Headline;
+            }
+
+            // The last line with anything on it: a streamed chunk usually ends on a newline.
+            var end = text.LastIndexOfAny(['\r', '\n']);
+            if (end >= 0 && end == text.Length - 1)
+            {
+                end = text.LastIndexOfAny(['\r', '\n'], end - 1);
+            }
+
+            var line = end >= 0 ? text[(end + 1)..] : text;
+            return Compact(line.Trim(), SummaryLimit);
+        }
+    }
+
+    /// <summary>True once the call returned without failing; the card's check.</summary>
+    public bool IsSucceeded => HasResult && !IsError;
+
+    /// <summary>True while the call has produced nothing yet: queued or just started, drawn as a waiting spinner.</summary>
+    public bool IsWaiting => !IsRunning && !HasResult && !IsError;
 
     /// <summary>The question itself for an <c>ask_user</c> card, in place of the arguments JSON nobody answers.</summary>
     private string QuestionSummary
@@ -110,12 +145,7 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         }
     }
 
-    /// <summary>True once the call returned without failing; the card's check.</summary>
-    public bool IsSucceeded => HasResult && !IsError;
-
-    /// <summary>True while the call has produced nothing yet: queued or just started, drawn as a waiting dot.</summary>
-    public bool IsWaiting => !IsRunning && !HasResult && !IsError;
-
+    /// <summary>The first line of what came out, for a call that carries no input.</summary>
     private string OutputLine
     {
         get
@@ -325,6 +355,7 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         OnPropertyChanged(nameof(HasLiveOutput));
         OnPropertyChanged(nameof(LiveOutputText));
         OnPropertyChanged(nameof(LiveElapsedText));
+        OnPropertyChanged(nameof(CardBody));
     }
 
     // ---------------------------------------------------------------- result

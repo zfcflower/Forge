@@ -56,6 +56,18 @@ public sealed class TranscriptRoundsTests
     }
 
     [Fact]
+    public void A_running_command_shows_its_streamed_output_on_the_card()
+    {
+        var row = new ToolRowViewModel("bash", "{\"command\":\"dotnet build\"}");
+        Assert.Equal("dotnet build", row.CardBody);
+
+        row.AttachLive(new LiveToolViewModel("root", () => "main", new ToolCall("t1", "bash", "{}"), At, stopCall: null));
+        row.Live!.RecordTail("first line\nsecond line\n");
+        row.Live!.RefreshTail(50);
+        Assert.Equal("second line", row.CardBody);
+    }
+
+    [Fact]
     public void A_question_card_offers_every_option_and_marks_the_chosen_one()
     {
         const string arguments = """
@@ -72,6 +84,16 @@ public sealed class TranscriptRoundsTests
         Assert.Equal(2, question.Options.Count);
         Assert.True(question.Options[0].IsChosen);
         Assert.False(question.Options[1].IsChosen);
+
+        // The tool joins the picked labels with ", ", so a comma-separated answer must mark every pick.
+        var multi = new ToolRowViewModel(
+            "ask_user",
+            """{"questions":[{"header":"Files","question":"Which?","multiSelect":true,"options":[{"label":"a.cs"},{"label":"b.cs"},{"label":"c.cs"}]}]}""");
+        multi.Complete(new ToolResult([new TextBlock("Files: a.cs, c.cs")]));
+        var picks = Assert.Single(multi.QuestionItems).Options;
+        Assert.True(picks[0].IsChosen);
+        Assert.False(picks[1].IsChosen);
+        Assert.True(picks[2].IsChosen);
         Assert.Equal("Read every line", question.Options[1].Description);
     }
 

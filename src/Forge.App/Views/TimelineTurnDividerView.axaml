@@ -5,24 +5,16 @@
              x:Class="Forge.App.Views.TimelineTurnDividerView"
              x:DataType="vm:TurnDividerViewModel">
   <!-- The round-end row: the axis stops on this round's closing node (a check when the round finished cleanly, the failure
-       icon when it did not) and the round's numbers ride beside it. It is the last row of its round, so it can never be
-       crossed by another round's axis. The tooltip carries the full breakdown the line leaves out. -->
+       icon when it did not) and the round's numbers ride beside it. The line wraps instead of trimming: its tail is the model
+       name, and a metrics line that loses its tail reads as missing data. The tooltip carries the full breakdown. -->
   <Grid ColumnDefinitions="Auto,*" ToolTip.Tip="{Binding Tooltip}">
     <views:TimelineGutter Kind="RoundEnd" IsFailing="{Binding HasFailed}" />
-    <StackPanel Grid.Column="1"
-                Orientation="Horizontal"
-                Margin="0,2,8,8"
-                VerticalAlignment="Center"
-                Spacing="8">
-      <TextBlock Classes="caption"
-                 VerticalAlignment="Center"
-                 Text="{Binding Line}"
-                 AutomationProperties.AutomationId="turn-divider" />
-      <Border VerticalAlignment="Center"
-              Height="1"
-              MinWidth="24"
-              Background="{DynamicResource BorderBrush}"
-              IsVisible="True" />
-    </StackPanel>
+    <TextBlock Grid.Column="1"
+               Classes="caption"
+               Margin="0,2,8,8"
+               VerticalAlignment="Center"
+               TextWrapping="Wrap"
+               Text="{Binding Line}"
+               AutomationProperties.AutomationId="turn-divider" />
   </Grid>
 </UserControl>

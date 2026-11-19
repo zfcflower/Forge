@@ -176,7 +176,8 @@ internal sealed partial class ToolRowViewModel
             return [];
         }
 
-        var chosen = answer.Split("; ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // The result joins the picked labels with ", " and rides free text along as "; other: …", so both separators split.
+        var chosen = answer.Split([", ", "; "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var options = new List<QuestionOptionItem>(array.GetArrayLength());
         foreach (var element in array.EnumerateArray())
         {

@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Specialized;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -10,6 +11,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.Localization;
+using Forge.App.Workbench.Controls;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
@@ -61,18 +63,24 @@ internal sealed class TranscriptFollower
         sticky.Bind(Border.BorderBrushProperty, sticky.GetResourceObservable("BorderBrush"));
         sticky.PointerPressed += OnStickyPressed;
 
+        var followIcon = new FluentIcon { Width = 16, Height = 16 };
+        followIcon.Bind(FluentIcon.DataProperty, followIcon.GetResourceObservable("IconChatArrowBackDown"));
         follow = new Button
         {
             VerticalAlignment = VerticalAlignment.Bottom,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 0, 0, 12),
-            Padding = new Thickness(12, 5),
-            CornerRadius = new CornerRadius(14),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 0, 12, 12),
+            Width = 32,
+            Height = 32,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(16),
             BorderThickness = new Thickness(1),
             IsVisible = false,
+            Classes = { "icon" },
+            Content = followIcon,
         };
         follow.Bind(TemplatedControl.BackgroundProperty, follow.GetResourceObservable("CardBackgroundBrush"));
-        follow.Bind(TemplatedControl.BorderBrushProperty, follow.GetResourceObservable("BrandInteractiveBrush"));
+        follow.Bind(TemplatedControl.BorderBrushProperty, follow.GetResourceObservable("BrandSoftBrush"));
         follow.Bind(TemplatedControl.ForegroundProperty, follow.GetResourceObservable("BrandActionBrush"));
         follow.Click += (_, _) => Resume();
         RefreshText();
@@ -325,12 +333,20 @@ internal sealed class TranscriptFollower
                 }
             }
 
-            for (var i = Math.Min(first, source.Count - 1); i >= 0; i--)
+            // The list's items are rounds, so the message and the content below it are the same item: the sticky belongs to the
+            // first visible round when that round's own top has scrolled out of view, and to the round above it otherwise.
+            var candidate = first;
+            if (candidate >= 0 && candidate < source.Count
+                && list.ContainerFromIndex(candidate)?.TranslatePoint(default, sv) is { Y: >= 0 })
+            {
+                candidate--;
+            }
+
+            for (var i = Math.Min(candidate, source.Count - 1); i >= 0; i--)
             {
                 if (source[i] is TranscriptRoundViewModel { Rows.Count: > 0 } round && round.Rows[0] is UserMessageViewModel)
                 {
-                    // When the first visible item is the message itself, it is on screen and nothing floats.
-                    stickyIndex = i < first ? i : -1;
+                    stickyIndex = i;
                     break;
                 }
             }
@@ -362,5 +378,10 @@ internal sealed class TranscriptFollower
 
     private void OnLanguageChanged(object? sender, EventArgs e) => RefreshText();
 
-    private void RefreshText() => follow.Content = "↓  " + TranscriptScrollStrings.Follow;
+    /// <summary>The button is an icon: the tooltip carries the words, and it is refreshed with the language.</summary>
+    private void RefreshText()
+    {
+        ToolTip.SetTip(follow, TranscriptScrollStrings.Follow);
+        AutomationProperties.SetName(follow, TranscriptScrollStrings.Follow);
+    }
 }

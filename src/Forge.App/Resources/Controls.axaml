@@ -30,6 +30,14 @@
     <Setter Property="FontWeight" Value="Medium" />
   </Style>
 
+  <!-- The opened reasoning: one quiet inset block instead of loose text, so it reads as an aside beside the answer. -->
+  <Style Selector="Border.thinking-block">
+    <Setter Property="Background" Value="#F8F8FA" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
   <Style Selector="TextBlock.muted">
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
@@ -140,7 +148,7 @@
        the window's off-white, so the reply sits on top of the page instead of blending into it. -->
   <Style Selector="Border.assistant-card">
     <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrandSoftBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
     <Setter Property="Padding" Value="10,8" />
@@ -221,10 +229,32 @@
 
   <Style Selector="wc|FluentIcon.tool-status.run">
     <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
+    <Setter Property="RenderTransform" Value="rotate(0deg)" />
+    <Style.Animations>
+      <Animation Duration="0:0:1" IterationCount="INFINITE">
+        <KeyFrame Cue="0%">
+          <Setter Property="RotateTransform.Angle" Value="0" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="RotateTransform.Angle" Value="360" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
   </Style>
 
   <Style Selector="wc|FluentIcon.tool-status.wait">
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="RenderTransform" Value="rotate(0deg)" />
+    <Style.Animations>
+      <Animation Duration="0:0:1.6" IterationCount="INFINITE">
+        <KeyFrame Cue="0%">
+          <Setter Property="RotateTransform.Angle" Value="0" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="RotateTransform.Angle" Value="360" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
   </Style>
 
   <Style Selector="Border.tool-open">
