@@ -50,7 +50,7 @@ public sealed class BashPolicyTests : IDisposable
 
     private static ProcessResult Done() => new(0, "out", string.Empty, 3, 0, false, false, ProcessEndReason.Exited, TimeSpan.FromMilliseconds(5));
 
-    private static readonly string[] WorkerTools = ["read", "grep", "find", "ls", "edit", "write", "bash"];
+    private static readonly string[] WorkerTools = ["read", "grep", "find", "ls", "edit", "write", "copy", "move", "delete", "bash"];
 
     private static readonly string[] RootTools = [.. WorkerTools, "git_status", "git_log", "git_diff", "git_fetch", "git_branch", "git_sync", "pr_view", "web_fetch"];
 
@@ -86,6 +86,11 @@ public sealed class BashPolicyTests : IDisposable
     [InlineData("env -i grep foo file")]
     [InlineData("dotnet build | grep -r error src")]
     [InlineData("dotnet build | tee build.log")]
+    [InlineData("cp a b")]
+    [InlineData("cp -r src build")]
+    [InlineData("mv a b")]
+    [InlineData("rm -rf build")]
+    [InlineData("Remove-Item x -Recurse")]
     public async Task Commands_a_dedicated_tool_owns_are_refused_and_never_started(string command)
     {
         var (result, runner) = await RunAsync(command, RootTools);
@@ -98,7 +103,6 @@ public sealed class BashPolicyTests : IDisposable
     [InlineData("dotnet build")]
     [InlineData("dotnet test --filter Foo")]
     [InlineData("sed -n 1p file.txt")]
-    [InlineData("cp a b")]
     [InlineData("curl http://localhost:5000/health")]
     [InlineData("curl -s http://127.0.0.1:8080/")]
     [InlineData("dotnet build 2>&1")]
@@ -107,6 +111,10 @@ public sealed class BashPolicyTests : IDisposable
     [InlineData("dotnet test | tail -50")]
     [InlineData("dotnet build | Select-String error")]
     [InlineData("timeout 60 dotnet test")]
+    [InlineData("rm *.log")]
+    [InlineData("dotnet test | xargs rm")]
+    [InlineData("rm -rf ~/scratch")]
+    [InlineData("cp ../outside.txt here.txt")]
     public async Task Everything_no_tool_owns_still_runs(string command)
     {
         var (result, runner) = await RunAsync(command, RootTools);

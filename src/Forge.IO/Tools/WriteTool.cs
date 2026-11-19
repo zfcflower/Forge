@@ -26,8 +26,8 @@ public sealed class WriteTool() : ToolBase("write", Description, Schema, ToolSid
 
         var append = ToolJson.OptionalBool(arguments, "append", false);
         var root = Root(context);
-        var path = ResolveTarget(root, requested);
-        var display = Display(root, path);
+        var path = FileOps.ResolveTarget(root, requested);
+        var display = FileOps.Display(root, path);
         if (Directory.Exists(path))
         {
             return new ToolResult($"{Definition.Name}: '{display}' is a directory.", IsError: true);
@@ -43,38 +43,4 @@ public sealed class WriteTool() : ToolBase("write", Description, Schema, ToolSid
 
         return new ToolResult($"{(append ? "appended" : "wrote")} {written} bytes to {display}");
     }
-
-    /// <summary>
-    /// Resolves a path this call may create. <see cref="WorkspacePath.Resolve"/> stops at the first component that does
-    /// not exist, so a file inside a directory that is about to be created would lose its tail; the deepest existing
-    /// ancestor is resolved (and checked against the root) and the names below it are appended unchanged.
-    /// </summary>
-    private static string ResolveTarget(string root, string requested)
-    {
-        var full = WorkspacePath.Normalize(Path.IsPathRooted(requested) ? requested : Path.Combine(root, requested));
-        var existing = full;
-        var missing = new List<string>();
-        while (!File.Exists(existing) && !Directory.Exists(existing))
-        {
-            var parent = Path.GetDirectoryName(existing);
-            if (string.IsNullOrEmpty(parent))
-            {
-                break;
-            }
-
-            missing.Add(Path.GetFileName(existing));
-            existing = parent;
-        }
-
-        var resolved = WorkspacePath.Resolve(root, existing);
-        for (var index = missing.Count - 1; index >= 0; index--)
-        {
-            resolved = Path.Combine(resolved, missing[index]);
-        }
-
-        return resolved;
-    }
-
-    private static string Display(string root, string path) =>
-        WorkspacePath.RelativeTo(root, path) is { Length: > 0 } relative ? relative : path;
 }

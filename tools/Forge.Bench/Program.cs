@@ -130,6 +130,11 @@ internal static class Program
             yield return scenario;
         }
 
+        foreach (var scenario in TreeScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
         foreach (var scenario in WalkScenarios.Create(fixtures))
         {
             yield return scenario;

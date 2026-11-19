@@ -88,7 +88,7 @@ public sealed class BashTool : ToolBase
         var workingDirectory = ResolveWorkingDirectory(Root(context), ToolJson.OptionalString(arguments, "workdir"));
 
         var commands = BashCommandAnalyzer.Analyze(command);
-        if (BashPolicy.Check(commands, context.Tools) is { } refusal)
+        if (BashPolicy.Check(commands, context.Tools, Root(context)) is { } refusal)
         {
             return new ToolResult(refusal, IsError: true);
         }

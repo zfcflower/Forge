@@ -112,6 +112,9 @@ internal static class TimelineNodeMap
             // Writes and edits.
             ["edit"] = TimelineNodeKind.EditFile,
             ["write"] = TimelineNodeKind.EditFile,
+            ["copy"] = TimelineNodeKind.EditFile,
+            ["move"] = TimelineNodeKind.EditFile,
+            ["delete"] = TimelineNodeKind.EditFile,
 
             // Commands.
             ["bash"] = TimelineNodeKind.Command,

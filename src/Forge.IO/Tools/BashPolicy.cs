@@ -23,6 +23,15 @@ internal static class BashPolicy
 
     private static readonly Dictionary<string, string> FileOwners = BuildFileOwners();
 
+    /// <summary>The copy, move and delete commands and the tool that owns each.</summary>
+    private static readonly Dictionary<string, string> FileOperationOwners = new(StringComparer.Ordinal)
+    {
+        ["cp"] = "copy", ["copy"] = "copy", ["copy-item"] = "copy", ["cpi"] = "copy",
+        ["mv"] = "move", ["move"] = "move", ["move-item"] = "move", ["mi"] = "move", ["ren"] = "move", ["rename"] = "move", ["rename-item"] = "move",
+        ["rm"] = "delete", ["del"] = "delete", ["erase"] = "delete", ["rmdir"] = "delete", ["rd"] = "delete", ["remove-item"] = "delete",
+        ["ri"] = "delete", ["unlink"] = "delete",
+    };
+
     private static readonly HashSet<string> WebCommands = new(StringComparer.Ordinal)
     {
         "curl", "wget", "invoke-webrequest", "iwr", "invoke-restmethod", "irm",
@@ -76,11 +85,11 @@ internal static class BashPolicy
     };
 
     /// <summary>A refusal text (an error result for the model), or null when every command in the line may run.</summary>
-    public static string? Check(IReadOnlyList<ShellCommand> commands, IToolRegistry? tools)
+    public static string? Check(IReadOnlyList<ShellCommand> commands, IToolRegistry? tools, string? workspace = null)
     {
         foreach (var command in commands)
         {
-            var refusal = CheckOne(command, tools);
+            var refusal = CheckOne(command, tools, workspace);
             if (refusal is not null)
             {
                 return refusal;
@@ -126,8 +135,13 @@ internal static class BashPolicy
         return true;
     }
 
-    private static string? CheckOne(ShellCommand command, IToolRegistry? tools)
+    private static string? CheckOne(ShellCommand command, IToolRegistry? tools, string? workspace)
     {
+        if (FileOperationOwners.TryGetValue(command.Name, out var operationOwner))
+        {
+            return DuplicatesFileOperationTool(command, operationOwner, tools, workspace) ? Refuse(command.Name, operationOwner) : null;
+        }
+
         if (FileOwners.TryGetValue(command.Name, out var owner))
         {
             return command.FromPipe && ReadsOnlyStdin(command) ? null : Refuse(command.Name, owner);
@@ -487,6 +501,55 @@ internal static class BashPolicy
         host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
         || host is "[::1]" or "::1"
         || (host.StartsWith("127.", StringComparison.Ordinal) && Uri.CheckHostName(host) == UriHostNameType.IPv4);
+
+    /// <summary>
+    /// True when the command does what the owning tool does. Not a duplicate: a caller that holds no such tool, a glob (the
+    /// tools take one path), a command fed by a pipe, or a path the tool would refuse because it lies outside the workspace.
+    /// </summary>
+    private static bool DuplicatesFileOperationTool(ShellCommand command, string owner, IToolRegistry? tools, string? workspace)
+    {
+        if (command.FromPipe || (tools is not null && !tools.TryGet(owner, out _)))
+        {
+            return false;
+        }
+
+        var paths = 0;
+        foreach (var argument in command.Arguments)
+        {
+            if (argument.Length == 0 || argument[0] == '-' || (argument[0] == '/' && command.Name is "del" or "rd" or "rmdir" or "copy" or "move" or "ren"))
+            {
+                continue;
+            }
+
+            if (argument.AsSpan().IndexOfAny("*?[{") >= 0 || (workspace is not null && !InsideWorkspace(argument, workspace)))
+            {
+                return false;
+            }
+
+            paths++;
+        }
+
+        return paths > 0;
+    }
+
+    private static bool InsideWorkspace(string argument, string workspace)
+    {
+        if (argument[0] == '~')
+        {
+            return false;
+        }
+
+        try
+        {
+            return WorkspacePath.IsUnder(
+                Path.IsPathRooted(argument) ? argument : Path.Combine(workspace, argument),
+                workspace);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 
     private static Dictionary<string, string> BuildFileOwners()
     {

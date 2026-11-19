@@ -7,8 +7,9 @@ namespace Forge.IO.Tools;
 /// workspace from each call's <see cref="ToolContext"/>, and read their bounds through <see cref="Func{ToolOptions}"/> so a
 /// preference change applies to the next call.
 /// <para>The set is the one the built-in agents name — <c>read</c>, <c>write</c>, <c>edit</c>, <c>ls</c>, <c>find</c>,
-/// <c>grep</c>, <c>bash</c> — and nothing more: fewer, sharper tools are cheaper to route and to cache than a family of
-/// synonyms. Copy, move and delete are a <c>bash</c> command on purpose; they have no second meaning to guess at.</para>
+/// <c>grep</c>, <c>copy</c>, <c>move</c>, <c>delete</c>, <c>bash</c> — and nothing more: fewer, sharper tools are cheaper to
+/// route and to cache than a family of synonyms. Copy, move and delete are tools of their own because a process start costs
+/// far more than the file operation, and because the workspace bound and the path gate cannot see inside a shell command.</para>
 /// </summary>
 public sealed class FileTools
 {
@@ -35,9 +36,12 @@ public sealed class FileTools
         List = new ListTool(options);
         Find = new FindTool(options);
         Grep = new GrepTool(options, processes);
+        Copy = new CopyTool();
+        Move = new MoveTool();
+        Delete = new DeleteTool();
         Bash = new BashTool(processes, options);
 
-        All = [Read, Write, Edit, List, Find, Grep, Bash];
+        All = [Read, Write, Edit, List, Find, Grep, Copy, Move, Delete, Bash];
     }
 
     public ITool Read { get; }
@@ -51,6 +55,12 @@ public sealed class FileTools
     public ITool Find { get; }
 
     public ITool Grep { get; }
+
+    public ITool Copy { get; }
+
+    public ITool Move { get; }
+
+    public ITool Delete { get; }
 
     public ITool Bash { get; }
 

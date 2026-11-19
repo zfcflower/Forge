@@ -17,7 +17,7 @@ public static class BuiltInPrompts
         Ground rules:
         - The repository's specs are ground truth. Read the relevant spec before changing code, and update it in the same change when a documented contract, boundary, or invariant moves.
         - Make the smallest change that satisfies the task. Follow the conventions already in the repository and leave unrelated code alone.
-        - Always use the built-in tools (read/ls/find/grep/edit/write/web_fetch/web_search) for what they support; use bash only for what they do not cover, and follow bash's tool declaration.
+        - Always use the built-in tools (read/ls/find/grep/edit/write/copy/move/delete/web_fetch/web_search) for what they support; use bash only for what they do not cover, and follow bash's tool declaration.
         - Read a file before editing it. Never guess at file contents, APIs, or command output; use your tools to find out.
         - Run the project's own checks (build, tests, lint) before calling work done.
         - Report what changed, how you verified it, and anything left open. Never claim work you did not do.
@@ -34,7 +34,7 @@ public static class BuiltInPrompts
         Ground rules:
         - The repository's specs are ground truth. Read the relevant spec before changing code, and update it in the same change when a documented contract, boundary, or invariant moves.
         - Make the smallest change that satisfies the task. Follow the conventions already in the repository and leave unrelated code alone.
-        - Always use the built-in tools (read/ls/find/grep/edit/write/web_fetch/web_search) for what they support; use bash only for what they do not cover, and follow bash's tool declaration.
+        - Always use the built-in tools (read/ls/find/grep/edit/write/copy/move/delete/web_fetch/web_search) for what they support; use bash only for what they do not cover, and follow bash's tool declaration.
         - Read a file before editing it. Never guess at file contents, APIs, or command output; use your tools to find out.
         - Run the project's own checks (build, tests, lint) before calling work done.
         - Report what changed, how you verified it, and anything left open. Never claim work you did not do.

@@ -24,10 +24,12 @@
 | 文件/搜索/shell | `read` | 只读 | 有界窗口读：默认 2000 行 / 256 KiB，上限 20000 行 / 1 MiB；BOM 嗅探 + 严格 UTF-8 前 8 KiB；二进制即报错 |
 | | `write` | 写 | 整写走原子替换（临时文件 + fsync + 改名）；`append` 为普通追加 |
 | | `edit` | 写 | 要求唯一匹配；0 次或多于 1 次且未 `replace_all` 即报错并给行号；同路径串行 |
+| | `copy` / `move` | 写 | `to` 是确切新路径；目标已存在默认报错，`overwrite` 才替换文件/合并目录；目录树 ≥64 文件时并行复制；不复制链接与 `.git` |
+| | `delete` | 写 | 非空目录须 `recursive`；删链接不碰目标；工作区根与 `.git` 不可删；≥64 文件时并行删 |
 | | `ls` | 只读 | 单层列目录，最多 10000 条；显式目录不套忽略规则，链接以 `l` 标记 |
 | | `find` | 只读 | 遍历 + glob，最多 1000 条（上限 10000），深度上限 64，遵循完整 gitignore 语义 |
 | | `grep` | 只读 | 托管引擎（可选 ripgrep 加速），默认 1000 条命中，单文件 8 MiB，并发 `min(核数,8)`，正则 2 秒超时 |
-| | `bash` | 执行 | 先 Direct（参数向量、不经 shell），出现 shell 语法才走解释器；每流 512 KiB、默认超时 120 s（1–600）、全局并发 8；超时/取消杀整棵树；只做没有专用工具的事：与 `read/grep/find/ls/edit/write/web_fetch` 重叠的命令被拒绝并指路，`git` / `gh pr|run|workflow|api` 只对持有 `git_*` / `pr_*` 工具的调用者开放(持有任一 `pr_*` 则整个 `gh` 放行)(git 另分只读/写两档,且不含工具已覆盖的子命令);只过滤管道输入的 `grep/head/tail` 放行；非廉价命令按工作区串行（等锁不计超时） |
+| | `bash` | 执行 | 先 Direct（参数向量、不经 shell），出现 shell 语法才走解释器；每流 512 KiB、默认超时 120 s（1–600）、全局并发 8；超时/取消杀整棵树；只做没有专用工具的事：与 `read/grep/find/ls/edit/write/copy/move/delete/web_fetch` 重叠的命令被拒绝并指路，`git` / `gh pr|run|workflow|api` 只对持有 `git_*` / `pr_*` 工具的调用者开放(持有任一 `pr_*` 则整个 `gh` 放行)(git 另分只读/写两档,且不含工具已覆盖的子命令);只过滤管道输入的 `grep/head/tail` 放行；非廉价命令按工作区串行（等锁不计超时） |
 | 会话 | `todo` | 读/写按参数 | 7 种操作：`list`/`add`/`update`/`remove`/`promote`/`plan_summary_get`/`plan_summary_set`；写操作先确认条目属于本会话 |
 | | `ask_user` | 只读 | 仅在宿主提供问题处理器时注册；问题卡 + 选项/自由文本；支持多选 min/max |
 | | `skill` | 只读 | 按名返回 `SKILL.md` 全文（上限 64000 字符）；名字只在本会话发现的四个技能根里解析 |

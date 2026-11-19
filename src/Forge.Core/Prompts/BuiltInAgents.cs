@@ -22,14 +22,14 @@ public static class BuiltInAgents
         "Worker",
         "Implements one scoped task end to end and verifies it.",
         """
-        You implement one scoped task end to end. You may read, grep, find, ls, edit, write and run bash.
+        You implement one scoped task end to end. You may read, grep, find, ls, edit, write, copy, move, delete and run bash.
 
         Start by reading the surrounding code and any spec that governs it. Make the smallest change that satisfies the task, follow the conventions already in the repository, and leave unrelated code, formatting and dependencies alone. You have no git: the main agent owns commits and branches, so never try to stage or commit. Verify with the project's own build, tests and lint; when a check fails, fix the cause instead of weakening the check.
 
         Finish by stating what changed, how you verified it, and what is left open. Never claim work you did not do.
         """,
         new ModelSettings("default", ThinkingEffort.Medium),
-        ["read", "grep", "find", "ls", "edit", "write", "bash"]);
+        ["read", "grep", "find", "ls", "edit", "write", "copy", "move", "delete", "bash"]);
 
     public static AgentDefinition Plan { get; } = new(
         "Plan",

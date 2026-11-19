@@ -17,7 +17,7 @@ parent: forge-architecture
 - **进程**(`Process/`):`ProcessRunner` 有界字节捕获的进程执行;`ShellResolver` 平台 shell 解析;`CommandLine` 引用感知切分与 direct/script 判定。
   - **实时输出尾部**:`ProcessRequest.OnOutput`(空则零开销)收到 stdout/stderr 按到达顺序合并后的最新尾部快照(≤ `OutputTailChars`,默认 16 KiB),至多每 `OutputInterval`(默认 250 ms)一次,间隔内到达的输出由一次性定时器补报;每路一个 UTF-8 `Decoder`;`ProcessOutputTail` 在持锁时调用监听者,所以快照严格有序、不并发,监听者必须不阻塞、抛异常被吞;进程退出时未报的尾部丢弃(结果含全部输出)。
 - **搜索**(`Search/`):`GlobMatcher`、`GitIgnore`(完整 gitignore 语义)、`GrepEngine`(托管)、`RipgrepBackend`(可选加速)。
-- **工具**(`Tools/`):`read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 七个 `ITool`、`FileTools` 聚合、`ToolOptions`、`ToolBase`。
+- **工具**(`Tools/`):`read`/`write`/`edit`/`ls`/`find`/`grep`/`copy`/`move`/`delete`/`bash` 十个 `ITool`、`FileTools` 聚合、`FileOps`(复制/删除的树遍历与路径规则)、`ToolOptions`、`ToolBase`。
 - `AtomicFile`:无锁、可用于用户工作区文件。写临时文件、落盘、改名覆盖;读取带 `FileShare.ReadWrite | Delete`。对外两组入口:整份写入 `WriteAllBytes`/`WriteAllBytesAsync`,以及只做“发布”的 `ReplaceFile`/`ReplaceFileAsync`(给已经流式写好并落盘的临时文件用)。
 - `AtomicJsonStore<T>` + `FileLock`:仅用于本程序自有、多进程共享的小状态文件(设置等)。每次更新在跨进程锁内重读最新值再应用修改,避免后写覆盖先写。用户工作区文件不可加锁(其他程序不遵守)。
 - 审批记录不使用本组件,改用 SQLite。
@@ -39,10 +39,10 @@ parent: forge-architecture
 
 ### 工具面
 
-- **只给七个工具,名字对齐提示词。** `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 的名字与 `Forge.Core.Prompts.BuiltInAgents` 的白名单逐字一致(Scout 与 Plan 用前面四个,Worker 再加 `edit`/`write`/`bash`;Reviewer 是前面四个加只读的 `git_diff`,它不属本模块,见 forge-core),所以工具落地不需要改提示词与白名单。不提供 `copy`/`move`/`delete` 独立工具:它们是 `bash` 的一行命令,而工具数量本身就是模型的选择成本。
+- **只给十个工具,名字对齐提示词。** `read`/`write`/`edit`/`ls`/`find`/`grep`/`copy`/`move`/`delete`/`bash` 的名字与 `Forge.Core.Prompts.BuiltInAgents` 的白名单逐字一致(Scout 与 Plan 用前面四个,Worker 再加 `edit`/`write`/`copy`/`move`/`delete`/`bash`;Reviewer 是前面四个加只读的 `git_diff`,它不属本模块,见 forge-core),所以工具落地不需要改提示词与白名单。`copy`/`move`/`delete` 是独立工具而不是 `bash` 一行命令:进程启动比文件操作本身贵得多(基准:600 文件复制 94 ms vs 进程 306 ms,删除 21 ms vs 112 ms),且工作区边界与 `PathGate` 看不到 shell 命令里的路径。
 - **文件操作留在进程内。** 读、写、改、列、找、搜全部是原生实现,不搭 `cat`/`sed`/`find` 进程;只有真的需要外部程序时才创建子进程,`grep` 的 ripgrep 后端只是可选的加速,不是前提。
 - **常量 schema。** 每个工具的 `InputSchemaJson` 是 `const string`,参数由 `JsonDocument` 读取(无反射、无源生成以外的序列化);两次请求字节相同,提示词缓存不被无意义地打散。参数错误一律转成 `IsError` 结果,只有取消向外抛。
-- **审批只看副作用。** `read`/`ls`/`find`/`grep` 是 `ReadOnly`(走 `DefaultApprovalPolicy` 的自动放行),`write`/`edit` 是 `Write`,`bash` 是 `Execute`。**W14 起**:`read`/`ls`/`find`/`grep` 进 `run_code` 的脚本注册表,依据就是同一个 `ReadOnly` 判定(主程序按 `SideEffect == ReadOnly` 挑候选,不认名字);`write`/`edit`/`bash` 仍永不进,脚本既调不到也看不到。用户在 `tools` 分区关掉其中某个工具后,脚本面也同步去掉它(`Tools.List()` 不列、调用按未知名拒绝)。
+- **审批只看副作用。** `read`/`ls`/`find`/`grep` 是 `ReadOnly`(走 `DefaultApprovalPolicy` 的自动放行),`write`/`edit`/`copy`/`move`/`delete` 是 `Write`,`bash` 是 `Execute`。**W14 起**:`read`/`ls`/`find`/`grep` 进 `run_code` 的脚本注册表,依据就是同一个 `ReadOnly` 判定(主程序按 `SideEffect == ReadOnly` 挑候选,不认名字);`write`/`edit`/`copy`/`move`/`delete`/`bash` 仍永不进,脚本既调不到也看不到。用户在 `tools` 分区关掉其中某个工具后,脚本面也同步去掉它(`Tools.List()` 不列、调用按未知名拒绝)。
 
 ### 读与写
 
@@ -50,6 +50,7 @@ parent: forge-architecture
 - **编码策略明确。** 嗅探 BOM(UTF-8 / UTF-16LE / UTF-16BE);无 BOM 时按 UTF-8 **严格**解码,且只严格校验前 8 KiB(此后按宽松解码,因为半行截断本就会切在多字节字符中间)。首 8 KiB 含 `0x00` 或严格解码失败的,判为二进制/非 UTF-8 并报错(带字节数),不返回乱码。
 - **`edit` 要求唯一匹配。** 0 次出现、以及多于 1 次又没给 `replace_all`,都返回错误并给出文件行数与前两处行号:猜一处是最坏的结果。读-改-写整段持同一把 `PathGate` 租约,写回走 `AtomicFile`。
 - **`edit` 会把 UTF-16 文件写回 UTF-8。** 这是已知偏差:保留原编码要多一套编码探测与回写路径,而仓库里的文本文件几乎全是 UTF-8。已在工具文档与这里写明,不静默。
+- **`copy`/`move`/`delete` 的契约。** 三者都是 `Write`、路径必须在工作区内(目标沿用 `write` 的“最深已存在祖先”解析,末段是链接则跟随后再判界)。`to` 是**确切的新路径**而不是“拷进某目录”,缺的父目录自动建;目标已存在默认报错,`overwrite` 才替换文件/合并进目录(`move` 永不替换目录)。源的最后一段不跟随链接:`delete`/`move` 作用于链接本身,删链接不碰目标;`copy` 目录时树里的链接与 `.git` 项跳过并计数。工作区根与 `.git`(含其下)永不可作 `delete`/`move` 的目标,`copy` 也不碰 `.git`;目录不能复制/移入自身。`delete` 非空目录必须 `recursive`(写错路径只损失一次报错,不损失一棵树),只读文件先去只读属性再删。路径闸只锁顶层路径(`move` 按固定序锁源与目标,防反向对调死锁),不锁树内文件。树遍历每目录只读一次(`FileSystemEnumerable` 直接带出类型与链接位,不额外 stat);文件数 ≥64 时用至多 `min(核数,8)` 线程并行复制/删除(目录先建好、最深目录最后删),失败取首个线程的原异常(不让 `AggregateException` 漏出工具边界)。
 - **追加不承诺原子。** `write` 默认整写(同目录临时文件 + `fsync` + 改名,失败不留半文件);`append` 是普通追加,并发追加的字节顺序由 OS 决定。
 
 ### 遍历、忽略与搜索
@@ -71,7 +72,7 @@ parent: forge-architecture
 - **stdin 重定向后立即关闭。** 等输入的命令应当立刻拿到 EOF 并退出,而不是挂到超时(这是 Agent 的非交互调用该有的样子)。
 - **超时与取消杀整棵树。** `Kill(entireProcessTree: true)` → 有界等待退出(10 s)→ 有界等待泵(3 s,再 1 s 取消读)。取消在清理完成后抛 `OperationCanceledException`;超时返回 `TimedOut` 并带回已捕获输出。进程树清理不是沙箱:后代自己 `setsid` 就能脱离。
 - **启动失败是结果不是异常。** `ProcessRunner.StartFailedExitCode`(-1)加 stderr 里的原因,由 `bash` 呈现为错误结果;模型侧看到的应当是“没能启动”,而不是一次循环中断。
-- **`bash` 只做没有专用工具的事(`BashPolicy`)。** 判据只有一条:**与内置工具重复的才拒绝**,没有工具覆盖的一律放行;没有工具就没有能力,bash 不是后门。文件读写搜索(`cat/head/tail`、`ls/dir`、`find`、`grep/rg/findstr`、`tee`/`Tee-Object`、`sed -i` 及 PowerShell 同义命令)指向 `read/ls/find/grep/write/edit`,但**只过滤管道输入、不带文件操作数、不递归**的 `grep/head/tail/findstr/Select-String`(如 `dotnet build | grep error`)不是文件操作,放行(文件工具看不到进程输出);联网(`curl/wget/Invoke-WebRequest`)指向 `web_fetch`,只放行目标**每一个**位置参数都是回环地址的调用(选项的取值不算目标;测自己起的服务)。`git` 看调用者的工具面(`ToolContext.Tools`,不看角色):不持有任何 `git_*` 工具就整体拒绝(内置子 Agent 都是);持有时,工具已覆盖的子命令(`status/log/diff/fetch`、`switch/checkout`、改动型 `branch`、`pull/push/rebase/merge`)指向对应工具;其余没有工具覆盖的子命令里,只读的(`show/blame/rev-parse/…`)任一 git 工具即放行,改变仓库的(`add/commit/stash/reset/restore/cherry-pick/…`)要求持有写工具(`git_branch` 或 `git_sync`)。`gh pr`、`gh run`、`gh workflow`、`gh api`(能到达同样的端点)只看 `pr_*` 工具:没有任何 `pr_*` 就严格拒绝,持有任一 `pr_*` 则整个 `gh` 全部放行(包括合并与 `gh repo sync`,持有者自担);没有 `pr_*` 时 `gh repo sync` 按 git 规则、`gh` 其余命令不限制。拒绝是错误结果,命令不启动。`BashCommandAnalyzer` 按 `; | && || ( ) { }`、换行与反引号切分并记下“来自管道”,剥掉 `env/sudo -u x/timeout 5/xargs/nice/time` 等前缀(含其带值选项),看进 `$(…)` 与反引号(双引号里也看)和一层 `sh -c`/`pwsh -Command`/`cmd /c`。**这是护栏不是沙箱**:脚本文件、`make`、`npm run` 内部再调的命令看不到;`>` 重定向写文件不拦(构建命令常用)。
+- **`bash` 只做没有专用工具的事(`BashPolicy`)。** 判据只有一条:**与内置工具重复的才拒绝**,没有工具覆盖的一律放行;没有工具就没有能力,bash 不是后门。文件读写搜索(`cat/head/tail`、`ls/dir`、`find`、`grep/rg/findstr`、`tee`/`Tee-Object`、`sed -i` 及 PowerShell 同义命令)指向 `read/ls/find/grep/write/edit`,复制/移动/删除(`cp`/`mv`/`rm`、`Copy-Item`/`Move-Item`/`Remove-Item` 及 cmd 同义命令)指向 `copy/move/delete`——但调用者没有对应工具、带通配符(工具只收一个路径)、由管道供数(`… | xargs rm`)或路径在工作区外(`~`、`../x`、别处绝对路径,工具会拒)时不是重复,放行。另外,**只过滤管道输入、不带文件操作数、不递归**的 `grep/head/tail/findstr/Select-String`(如 `dotnet build | grep error`)不是文件操作,放行(文件工具看不到进程输出);联网(`curl/wget/Invoke-WebRequest`)指向 `web_fetch`,只放行目标**每一个**位置参数都是回环地址的调用(选项的取值不算目标;测自己起的服务)。`git` 看调用者的工具面(`ToolContext.Tools`,不看角色):不持有任何 `git_*` 工具就整体拒绝(内置子 Agent 都是);持有时,工具已覆盖的子命令(`status/log/diff/fetch`、`switch/checkout`、改动型 `branch`、`pull/push/rebase/merge`)指向对应工具;其余没有工具覆盖的子命令里,只读的(`show/blame/rev-parse/…`)任一 git 工具即放行,改变仓库的(`add/commit/stash/reset/restore/cherry-pick/…`)要求持有写工具(`git_branch` 或 `git_sync`)。`gh pr`、`gh run`、`gh workflow`、`gh api`(能到达同样的端点)只看 `pr_*` 工具:没有任何 `pr_*` 就严格拒绝,持有任一 `pr_*` 则整个 `gh` 全部放行(包括合并与 `gh repo sync`,持有者自担);没有 `pr_*` 时 `gh repo sync` 按 git 规则、`gh` 其余命令不限制。拒绝是错误结果,命令不启动。`BashCommandAnalyzer` 按 `; | && || ( ) { }`、换行与反引号切分并记下“来自管道”,剥掉 `env/sudo -u x/timeout 5/xargs/nice/time` 等前缀(含其带值选项),看进 `$(…)` 与反引号(双引号里也看)和一层 `sh -c`/`pwsh -Command`/`cmd /c`。**这是护栏不是沙箱**:脚本文件、`make`、`npm run` 内部再调的命令看不到;`>` 重定向写文件不拦(构建命令常用)。
 - **非廉价命令按工作区串行(`ExecutionGate`)。** 构建与测试会抢 `obj/`、`bin/`、测试宿主,并行只会互相失败,所以同一工作区(规范化后的根目录,进程内共享)同一时刻只跑一条;只有 `echo/pwd/cd/whoami/hostname/date/which/where/true/false/printenv`、只读的 `git`(`show/blame/rev-parse/…`;`stash/reset/restore/clean` 会改源码,要排队)与 `dotnet --version` 一类明确廉价的命令免排队,无法识别的命令一律排队(分类只用来放宽)。等锁时通过 `ToolContext.YieldSlot` 交还并行名额,结束后取回(取回用**整轮**的取消令牌,不用这次调用的:只取消一次排队中的调用不会让 Agent 永久少占名额;取回本身要等池子有空位,这段时间工作区锁仍被这条命令占着,不会死锁——其余等锁者都已交还名额);等锁不计入 `timeout_seconds`(超时从拿到锁后算);结果里写“queued: waited Ns for <持有者>”;最长等 10 分钟,超时返回“工作区繁忙”且不运行;取消立即退出并释放。
 - **环境最小化。** 继承父进程后移除仓库定位变量(`GIT_DIR`/`GIT_WORK_TREE`/… 与 `GitCli` 同一份清单),`bash` 再设 `GIT_TERMINAL_PROMPT=0`、`GIT_PAGER=cat`、`PAGER=cat`、`TERM=dumb`、`NO_COLOR=1`;不覆盖 `LC_ALL`/`LANG`。
 - **不复用进程。** 每次调用一个进程;不做常驻 shell 或进程池(没有实测收益前不引入,见规范 P2)。
@@ -148,6 +149,8 @@ parent: forge-architecture
 | `write` 1 KiB 原子写 | 2.67 ms vs 直写 0.40 ms(差距全在 `fsync`,是耐久性代价) |
 | `write` 1 MiB 原子写 | 4.34 ms vs 直写 5.53 ms(比 BCL 快 21%) |
 | `File.Copy` 100 MiB | 31.7 ms(3.09 GB/s) |
+| `copy` 600 文件目录树(4 KiB/个) | 94–99 ms,对手写 `File.Copy` 循环 0.42×、对 `cp -r`/`xcopy` 进程 0.31×(顺序版 201 ms,并行 2.2× 加速) |
+| `delete` 600 文件目录树 | 21–24 ms,对 `Directory.Delete(recursive)` 0.47×、对 `rm -rf`/`rmdir /s /q` 进程 0.21×(顺序版 35 ms) |
 | `FileWalker` 1k/10k/100k | 0.79 / 9.19 / 56.9 ms(100k 为 1.8 M 项/秒);比 `EnumerateFileSystemEntries` 慢 1.7–2.2×,因为它同时给出全路径、相对路径与目录/链接分类 |
 | 托管 `grep` 10k 文件(14 MB) | 命中 114 ms / 无命中 121 ms(≈85k 文件/秒);rg 103–105 ms,即慢 11–15%,命中数 420/420 相同 |
 | `ProcessRunner` 短命令 | p50 19.6 ms,直接 `Process.Start` 19.9 ms(启动开销主导) |

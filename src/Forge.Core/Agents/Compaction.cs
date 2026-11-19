@@ -207,6 +207,9 @@ public sealed class SummaryCompactor : IContextCompactor
             ["read"] = (false, "path"),
             ["edit"] = (true, "path"),
             ["write"] = (true, "path"),
+            ["delete"] = (true, "path"),
+            ["copy"] = (true, "to"),
+            ["move"] = (true, "to"),
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private readonly ISessionStore store;

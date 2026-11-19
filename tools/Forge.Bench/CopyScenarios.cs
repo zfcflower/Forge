@@ -1,8 +1,7 @@
 namespace Forge.Bench;
 
 /// <summary>
-/// The copy case (the tool set has no <c>copy</c> command on purpose - a copy is a <c>bash</c> command - so this only
-/// reports the platform cost): <see cref="File.Copy(string, string, bool)"/> of a 1 MiB and a 100 MiB file against a
+/// The single-file cost under the <c>copy</c> tool: <see cref="File.Copy(string, string, bool)"/> of a 1 MiB and a 100 MiB file against a
 /// managed stream copy. Both write real bytes: the payload is not a hole, because the write is the thing measured.
 /// </summary>
 internal static class CopyScenarios
