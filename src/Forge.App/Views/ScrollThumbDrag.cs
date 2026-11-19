@@ -48,7 +48,13 @@ internal sealed class ScrollThumbDrag
     private void OnDragStarted(object? sender, VectorEventArgs e)
     {
         Release();
-        if (e.Source is not Visual visual || visual.FindAncestorOfType<ScrollBar>(includeSelf: true) is not { Orientation: Orientation.Vertical } bar || bar.Maximum <= bar.Minimum)
+        // Only this scroll viewer's own bar drives this list: a nested viewer inside a row (a tool body's output) raises the
+        // same events, and dragging its thumb used to write that small value into the transcript's offset — the list jumped
+        // to the top while the pointer was on an inner scroll bar.
+        if (e.Source is not Visual visual
+            || visual.FindAncestorOfType<ScrollBar>(includeSelf: true) is not { Orientation: Orientation.Vertical } bar
+            || !ReferenceEquals(bar.FindAncestorOfType<ScrollViewer>(), scroller)
+            || bar.Maximum <= bar.Minimum)
         {
             return;
         }

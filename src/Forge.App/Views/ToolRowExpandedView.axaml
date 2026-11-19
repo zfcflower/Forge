@@ -11,10 +11,19 @@
        row, so the three can never drift apart. -->
   <StackPanel Spacing="4" Margin="0,2,0,2">
     <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
-    <SelectableTextBlock Classes="mono"
-                         Text="{Binding Arguments}"
-                         TextWrapping="Wrap"
-                         Foreground="{DynamicResource TextSecondaryBrush}" />
+    <!-- Arguments can be a whole file (write, edit): they are capped like the result, so one call never opens into a screen
+         of text. The same toggle lifts both caps. -->
+    <ScrollViewer Classes="tool-body"
+                  MaxHeight="{Binding ResultMaxHeight}"
+                  Focusable="False"
+                  HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+      <SelectableTextBlock Classes="mono"
+                           Text="{Binding Arguments}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,8,0"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+    </ScrollViewer>
     <TextBlock Classes="label"
                Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
                IsVisible="{Binding HasResult}" />
