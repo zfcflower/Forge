@@ -39,7 +39,7 @@ public sealed class GitStepChangeProbeTests : IDisposable
         }
     }
 
-    private void Run(params string[] args)
+    private string Run(params string[] args)
     {
         var info = new ProcessStartInfo("git") { WorkingDirectory = repo, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in args)
@@ -48,10 +48,12 @@ public sealed class GitStepChangeProbeTests : IDisposable
         }
 
         using var p = Process.Start(info)!;
-        p.StandardOutput.ReadToEnd();
-        p.StandardError.ReadToEnd();
+        // stderr is drained on its own task first: a full stderr pipe would block the child while stdout is still being read.
+        var stderr = p.StandardError.ReadToEndAsync();
+        var stdout = p.StandardOutput.ReadToEnd();
         p.WaitForExit();
-        Assert.Equal(0, p.ExitCode);
+        Assert.True(p.ExitCode == 0, $"git {string.Join(' ', args)} exited {p.ExitCode}: {stderr.GetAwaiter().GetResult()}");
+        return stdout;
     }
 
     private Task<StepChangeProbe> Probe() =>
@@ -111,6 +113,8 @@ public sealed class GitStepChangeProbeTests : IDisposable
     {
         File.WriteAllText(Path.Combine(repo, "new.txt"), "x");
         await Probe();
-        Run("diff", "--cached", "--quiet");
+
+        // The index stays empty: the new file is reported untracked ("??"), never staged ("A ").
+        Assert.Equal("?? new.txt", Run("status", "--porcelain", "--untracked-files=all").Trim());
     }
 }

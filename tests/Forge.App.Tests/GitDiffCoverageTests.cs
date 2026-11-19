@@ -43,7 +43,7 @@ public sealed class GitDiffCoverageTests : IDisposable
         }
     }
 
-    private void Run(params string[] args)
+    private string Run(params string[] args)
     {
         var info = new ProcessStartInfo("git") { WorkingDirectory = repo, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in args)
@@ -52,22 +52,15 @@ public sealed class GitDiffCoverageTests : IDisposable
         }
 
         using var p = Process.Start(info)!;
-        p.StandardOutput.ReadToEnd();
-        p.StandardError.ReadToEnd();
+        // stderr is drained on its own task first: a full stderr pipe would block the child while stdout is still being read.
+        var stderr = p.StandardError.ReadToEndAsync();
+        var stdout = p.StandardOutput.ReadToEnd();
         p.WaitForExit();
-        Assert.Equal(0, p.ExitCode);
+        Assert.True(p.ExitCode == 0, $"git {string.Join(' ', args)} exited {p.ExitCode}: {stderr.GetAwaiter().GetResult()}");
+        return stdout;
     }
 
-    private string Head()
-    {
-        var info = new ProcessStartInfo("git") { WorkingDirectory = repo, RedirectStandardOutput = true };
-        info.ArgumentList.Add("rev-parse");
-        info.ArgumentList.Add("HEAD");
-        using var p = Process.Start(info)!;
-        var text = p.StandardOutput.ReadToEnd().Trim();
-        p.WaitForExit();
-        return text;
-    }
+    private string Head() => Run("rev-parse", "HEAD").Trim();
 
     private void Commit(string name, int lines)
     {

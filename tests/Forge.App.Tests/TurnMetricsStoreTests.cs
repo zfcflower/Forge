@@ -68,6 +68,11 @@ public sealed class TurnMetricsStoreTests : IDisposable
         Assert.Equal("2026-01-02T03:04:05.0000000+00:00", Text(connection, "SELECT started_at FROM turn_metrics WHERE turn = 7"));
         Assert.Equal("2026-01-02T03:04:40.0000000+00:00", Text(connection, "SELECT ended_at FROM turn_metrics WHERE turn = 7"));
         Assert.Equal(2500L, Number(connection, "SELECT stream_ms FROM turn_metrics WHERE turn = 7"));
+
+        // The timestamp guards fire: a row that is not the canonical round-trip shape is refused by the database itself.
+        Assert.Throws<SqliteException>(() =>
+            Exec(connection, "INSERT INTO turn_metrics (session_id, turn, started_at, ended_at, status, stream_ms) " +
+                             "VALUES ('s1', 9, '2026-01-02T03:04:05Z', '2026-01-02T03:04:40+00:00', 'completed', 7)"));
     }
 
     [Fact]
@@ -137,26 +142,6 @@ public sealed class TurnMetricsStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task A_fresh_database_has_the_table_and_its_timestamp_guards()
-    {
-        await using (var store = new SqliteTurnMetricsStore(dir))
-        {
-            await store.WriteAsync(Metric(1, TurnMetricStatus.Completed), CancellationToken.None);
-            Assert.True(await store.ExistsAsync(CancellationToken.None));
-        }
-
-        using var connection = Open();
-        Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'turn_metrics'"));
-        Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_turn_metrics_started_at_insert'"));
-        Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_turn_metrics_ended_at_update'"));
-
-        // The guards fire: a write that is not the canonical round-trip shape is refused by the database itself.
-        Assert.Throws<SqliteException>(() =>
-            Exec(connection, "INSERT INTO turn_metrics (session_id, turn, started_at, ended_at, status, stream_ms) " +
-                             "VALUES ('s1', 9, '2026-01-02T03:04:05Z', '2026-01-02T03:04:40+00:00', 'completed', 7)"));
-    }
-
-    [Fact]
     public async Task A_database_without_the_table_reads_as_empty_and_refuses_writes()
     {
         await using (var store = new SqliteTurnMetricsStore(dir))
@@ -183,13 +168,6 @@ public sealed class TurnMetricsStoreTests : IDisposable
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Directory.EnumerateFiles(dir, "*.db").Single() }.ToString());
         connection.Open();
         return connection;
-    }
-
-    private static long Scalar(SqliteConnection c, string sql)
-    {
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = sql;
-        return Convert.ToInt64(cmd.ExecuteScalar());
     }
 
     private static string Text(SqliteConnection c, string sql)

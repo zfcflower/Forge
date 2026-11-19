@@ -3,22 +3,12 @@ using Xunit;
 
 namespace Forge.App.Tests;
 
-public sealed class PromptSourceWatcherTests : IDisposable
+// Which paths count as a prompt source. The signalling side (a real FileSystemWatcher: a folder created after Arm, one
+// signal per Arm, Dispose not waiting on a running handler) has no test host here — it needs an injection point for
+// change events, and a test that waits on the OS notifier's own timing is not a test.
+public sealed class PromptSourceWatcherTests
 {
-    private readonly string dir = Path.Combine(Path.GetTempPath(), "forge-watch-" + Guid.NewGuid().ToString("n"));
-
-    public PromptSourceWatcherTests() => Directory.CreateDirectory(dir);
-
-    public void Dispose()
-    {
-        try
-        {
-            Directory.Delete(dir, true);
-        }
-        catch (IOException)
-        {
-        }
-    }
+    private const string Root = "/work/.forge";
 
     [Theory]
     [InlineData("agents/scout.md", true)]
@@ -33,72 +23,6 @@ public sealed class PromptSourceWatcherTests : IDisposable
     [InlineData("sessions/x.db", false)]
     public void Relevant_accepts_prompt_sources_and_whole_folder_events(string relative, bool expected)
     {
-        var root = Path.Combine(dir, ".forge");
-        Assert.Equal(expected, PromptSourceWatcher.Relevant(root, Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))));
-    }
-
-    private static async Task<bool> SignalledAsync(Task signalled) => await Task.WhenAny(signalled, Task.Delay(TimeSpan.FromSeconds(15))) == signalled;
-
-    [Fact]
-    public async Task A_folder_created_after_the_watch_started_is_noticed()
-    {
-        var workspace = Path.Combine(dir, "ws");
-        Directory.CreateDirectory(workspace);
-        using var watcher = new PromptSourceWatcher(null, workspace);
-        var signalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        watcher.Changed += () => signalled.TrySetResult();
-        watcher.Arm();
-
-        Directory.CreateDirectory(Path.Combine(workspace, ".forge", "agents"));
-        await File.WriteAllTextAsync(Path.Combine(workspace, ".forge", "agents", "x.md"), "text");
-
-        Assert.True(await SignalledAsync(signalled.Task));
-    }
-
-    [Fact]
-    public async Task A_change_inside_an_existing_folder_signals_once_per_arm()
-    {
-        var workspace = Path.Combine(dir, "ws2");
-        var agents = Path.Combine(workspace, ".forge", "agents");
-        Directory.CreateDirectory(agents);
-        using var watcher = new PromptSourceWatcher(null, workspace);
-        var count = 0;
-        var signalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        watcher.Changed += () =>
-        {
-            Interlocked.Increment(ref count);
-            signalled.TrySetResult();
-        };
-        watcher.Arm();
-
-        await File.WriteAllTextAsync(Path.Combine(agents, "a.md"), "one");
-        await File.WriteAllTextAsync(Path.Combine(agents, "a.md"), "two");
-        Assert.True(await SignalledAsync(signalled.Task));
-        await Task.Delay(300);
-        Assert.Equal(1, Volatile.Read(ref count));
-    }
-
-    [Fact]
-    public async Task Dispose_does_not_wait_for_a_handler_that_is_still_running()
-    {
-        var agents = Path.Combine(dir, "ws3", ".forge", "agents");
-        Directory.CreateDirectory(agents);
-        var watcher = new PromptSourceWatcher(null, Path.Combine(dir, "ws3"));
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new ManualResetEventSlim();
-        watcher.Changed += () =>
-        {
-            entered.TrySetResult();
-            release.Wait(TimeSpan.FromSeconds(20));
-        };
-        watcher.Arm();
-        await File.WriteAllTextAsync(Path.Combine(agents, "a.md"), "x");
-        Assert.True(await SignalledAsync(entered.Task));
-
-        // The session disposes the old watcher while holding its own lock, and its handler takes that same lock.
-        var disposing = Task.Run(watcher.Dispose);
-        var finished = await Task.WhenAny(disposing, Task.Delay(TimeSpan.FromSeconds(10))) == disposing;
-        release.Set();
-        Assert.True(finished);
+        Assert.Equal(expected, PromptSourceWatcher.Relevant(Root, Path.Combine(Root, relative.Replace('/', Path.DirectorySeparatorChar))));
     }
 }

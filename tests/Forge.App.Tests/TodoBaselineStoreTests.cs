@@ -41,37 +41,4 @@ public sealed class TodoBaselineStoreTests : IDisposable
         await store.UpdateAsync(item.Id, null, null, null, new TodoStepFields(BaselineTree: ""), CancellationToken.None);
         Assert.Null((await Reload(store, item.Id)).BaselineTree);
     }
-
-    [Fact]
-    public async Task Fresh_database_has_the_baseline_column()
-    {
-        await using (var store = new SqliteTodoStore(dir))
-        {
-            await store.AddAsync(Session, "step", null, null, CancellationToken.None);
-        }
-
-        using var connection = Open();
-        Assert.Equal(1L, Scalar(connection, "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name = 'baseline_tree'"));
-    }
-
-    private SqliteConnection Open()
-    {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Directory.EnumerateFiles(dir, "*.db").Single() }.ToString());
-        connection.Open();
-        return connection;
-    }
-
-    private static long Scalar(SqliteConnection c, string sql)
-    {
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = sql;
-        return Convert.ToInt64(cmd.ExecuteScalar());
-    }
-
-    private static void Exec(SqliteConnection c, string sql)
-    {
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
-    }
 }

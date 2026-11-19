@@ -171,7 +171,8 @@ public sealed class ReviewLedgerPersistenceTests : IDisposable
 
             var fresh = Ledger(reviews);
             await fresh.EnsureLoadedAsync(Session, CancellationToken.None);
-            Assert.Equal(ledger.Find(Session, step) is null, fresh.Find(Session, step) is null);
+            // Both sides must agree on the entry itself, not just on whether it exists: same verdict, commit and tree.
+            Assert.Equal(ledger.Find(Session, step), fresh.Find(Session, step));
         }
     }
 
