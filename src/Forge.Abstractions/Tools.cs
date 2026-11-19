@@ -68,6 +68,31 @@ public sealed record ToolContext(string SessionId, string WorkingDirectory, int 
     /// command in the same workspace); disposing the result takes the slot back (with the turn's own token, whatever token is passed in). Null when the caller has no slot.
     /// </summary>
     public Func<CancellationToken, IAsyncDisposable>? YieldSlot { get; init; }
+
+    /// <summary>
+    /// The calling agent's file-version ledger, which <c>write</c> consults before overwriting an existing file: no record
+    /// means it never read the file, a stale record means someone changed it since. Null when the caller is not an agent loop
+    /// (a script, a plugin bridge) - tools must then not check.
+    /// </summary>
+    public IFileVersionLedger? FileVersions { get; init; }
+}
+
+/// <summary>One file's identity, as cheaply as the filesystem can tell it.</summary>
+public readonly record struct FileVersion(long Length, long LastWriteTicks);
+
+/// <summary>
+/// The file versions one agent has seen: <c>read</c> records, <c>write</c> compares before overwriting and records after a
+/// successful write, <c>edit</c>/<c>append</c> record only when the pre-edit state still matched. Implemented per agent
+/// instance, not per session id - a rebuilt agent has not seen what its predecessor read. Thread-safe; callers pass a path
+/// already normalized by <c>WorkspacePath.Normalize</c>. Null in <see cref="ToolContext.FileVersions"/> means "do not check".
+/// </summary>
+public interface IFileVersionLedger
+{
+    /// <summary>Whether this agent has a record for <paramref name="path"/>; false when it never read the file.</summary>
+    bool TryGet(string path, out FileVersion version);
+
+    /// <summary>Records (or replaces) what this agent has seen of <paramref name="path"/>.</summary>
+    void Record(string path, FileVersion version);
 }
 
 /// <summary>Where a tool comes from. Declared by whoever registers the tool, never reported by the tool itself.</summary>
