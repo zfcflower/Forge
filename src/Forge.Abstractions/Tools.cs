@@ -77,7 +77,11 @@ public sealed record ToolContext(string SessionId, string WorkingDirectory, int 
     public IFileVersionLedger? FileVersions { get; init; }
 }
 
-/// <summary>One file's identity, as cheaply as the filesystem can tell it.</summary>
+/// <summary>
+/// One file's identity, as cheaply as the filesystem can tell it. <paramref name="LastWriteTicks"/> is
+/// <c>FileInfo.LastWriteTimeUtc.Ticks</c> (UTC) — mixing local time in makes every read/write comparison mismatch and the
+/// overwrite check refuse or miss files wholesale (same convention as the spec-graph's spec cache).
+/// </summary>
 public readonly record struct FileVersion(long Length, long LastWriteTicks);
 
 /// <summary>
