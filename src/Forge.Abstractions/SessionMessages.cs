@@ -71,15 +71,16 @@ public static class SessionReplies
             .Append(" · 状态:").Append(StatusText(status, reason))
             .Append(" · 任务:").Append(Label(taskLabel, 40))
             .Append("]\n改动: ").Append(changedFiles).Append(" 个文件 (+").Append(addedLines).Append("/−").Append(removedLines).Append(")\n报告: ");
+        var store = string.IsNullOrWhiteSpace(artifactId) ? null : Label(artifactId, 80);
         var fitted = AppendCapped(text, report);
-        if (!fitted && artifactId is null)
+        if (!fitted && store is null)
         {
             throw new ArgumentException("A report past the caps must be stored as an artifact first; pass its id.", nameof(artifactId));
         }
 
-        if (!fitted || artifactId is not null)
+        if (!fitted || store is not null)
         {
-            text.Append("\n完整报告: ").Append(artifactId);
+            text.Append("\n完整报告: ").Append(store);
         }
 
         return text.ToString();
