@@ -76,7 +76,16 @@ public partial class ComposerToolbar : UserControl
         return new PickerPopup(chip, content);
     }
 
-    private void OnAgentPicked(object? sender, RoutedEventArgs e) => agent.Close(restoreFocus: true);
+    private void OnAgentPicked(object? sender, RoutedEventArgs e)
+    {
+        // A greyed row (a kind an agent-session tab cannot drive) is not a pick: it is there so its tooltip can say why.
+        if (sender is PickerRow { DataContext: ComposerAgentOption { IsAvailable: false } })
+        {
+            return;
+        }
+
+        agent.Close(restoreFocus: true);
+    }
 
     private void OnModelPicked(object? sender, RoutedEventArgs e) => model.Close(restoreFocus: true);
 

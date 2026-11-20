@@ -46,6 +46,9 @@ public partial class SessionView : UserControl
         {
             items = viewModel.Transcript.Rounds;
             items.CollectionChanged += OnItemsChanged;
+            // An agent-session tab re-shapes the composer's chips - only the kinds that may drive one, the kind's own model,
+            // no orchestration chip (forge-app "Agent 会话的界面与接线"); an ordinary session's composer stays as it is.
+            viewModel.Composer.IsAgentSession = viewModel.IsAgentSession;
         }
     }
 

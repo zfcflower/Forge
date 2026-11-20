@@ -16,15 +16,29 @@ using Forge.Workspace;
 
 namespace Forge.App.ViewModels;
 
+/// <summary>Why a <see cref="ComposerAgentOption"/> cannot drive an agent-session tab; <see cref="None"/> is the runnable case.</summary>
+internal enum AgentUnavailableReason
+{
+    /// <summary>Nothing says it cannot: the kind names a tool whitelist that may drive a user session.</summary>
+    None,
+
+    /// <summary>The kind declares no tool whitelist, so which tools it would reach is unknown.</summary>
+    NoTools,
+
+    /// <summary>The whitelist names a git write or a pull request tool: only the root session may call those.</summary>
+    RootOnlyTools,
+}
+
 /// <summary>One entry of the composer's agent menu: the default main agent or a built-in agent kind.</summary>
 internal sealed class ComposerAgentOption : ObservableObject
 {
     private bool isSelected;
+    private AgentUnavailableReason unavailable;
 
     public ComposerAgentOption(AgentDefinition? definition)
     {
         Definition = definition;
-        SelectCommand = new RelayCommand(() => Selected?.Invoke(this));
+        SelectCommand = new RelayCommand(() => Selected?.Invoke(this), () => IsAvailable);
     }
 
     /// <summary>The built-in kind, or null for the default main agent.</summary>
@@ -45,6 +59,41 @@ internal sealed class ComposerAgentOption : ObservableObject
         set => Set(ref isSelected, value);
     }
 
+    /// <summary>
+    /// Whether an agent-session tab may run this kind (forge-app "Agent 会话的界面与接线"): it has to name the tools it may call
+    /// and that list may hold no git write and no pull request tool. Every row is available until a kind like that is marked,
+    /// so an ordinary session only ever lists runnable rows.
+    /// </summary>
+    public bool IsAvailable => unavailable == AgentUnavailableReason.None;
+
+    /// <summary>Why the row is greyed, read through the table so it follows a language switch; null when it is runnable.</summary>
+    public string? UnavailableReason => unavailable switch
+    {
+        AgentUnavailableReason.NoTools => AgentSessionStrings.AgentNoTools,
+        AgentUnavailableReason.RootOnlyTools => AgentSessionStrings.AgentRootOnlyTools,
+        _ => null,
+    };
+
+    /// <summary>
+    /// The row's opacity: a greyed row reads as unavailable. A property rather than a style because the picker lives in the
+    /// window's overlay layer, outside the toolbar's style scope.
+    /// </summary>
+    public double Opacity => IsAvailable ? 1 : 0.5;
+
+    /// <summary>Marks the kind as one an agent-session tab cannot run, with the sentence that says why.</summary>
+    internal void MarkUnavailable(AgentUnavailableReason reason)
+    {
+        if (unavailable == reason)
+        {
+            return;
+        }
+
+        unavailable = reason;
+        OnPropertyChanged(nameof(IsAvailable));
+        OnPropertyChanged(nameof(UnavailableReason));
+        OnPropertyChanged(nameof(Opacity));
+    }
+
     public RelayCommand SelectCommand { get; }
 
     internal event Action<ComposerAgentOption>? Selected;
@@ -53,6 +102,7 @@ internal sealed class ComposerAgentOption : ObservableObject
     {
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(Description));
+        OnPropertyChanged(nameof(UnavailableReason));
     }
 }
 
@@ -355,14 +405,17 @@ internal sealed record ComposerCarry(string Draft, IReadOnlyList<ComposerPrompt>
 /// <summary>One row of the <c>/</c> or <c>@</c> picker.</summary>
 internal sealed class ComposerSuggestionItem : ObservableObject
 {
+    private readonly string unavailableKey;
     private bool isSelected;
 
-    public ComposerSuggestionItem(string value, string title, string detail, string badge)
+    /// <param name="unavailableKey">The key of the sentence that says why this row cannot be picked; empty when it can.</param>
+    public ComposerSuggestionItem(string value, string title, string detail, string badge, string unavailableKey = "")
     {
         Value = value;
         Title = title;
         Detail = detail;
         Badge = badge;
+        this.unavailableKey = unavailableKey ?? string.Empty;
     }
 
     /// <summary>What is inserted after the trigger character.</summary>
@@ -377,6 +430,12 @@ internal sealed class ComposerSuggestionItem : ObservableObject
     public string Badge { get; }
 
     public bool HasBadge => Badge.Length > 0;
+
+    /// <summary>False for a row this tab cannot use (a skill an agent session may not run); it stays listed so it can be read.</summary>
+    public bool IsAvailable => unavailableKey.Length == 0;
+
+    /// <summary>Why the row cannot be picked, resolved on read so it follows the language; null when it can be.</summary>
+    public string? UnavailableReason => unavailableKey.Length == 0 ? null : Loc.Instance[unavailableKey];
 
     public bool IsSelected
     {
@@ -396,6 +455,12 @@ internal sealed class ComposerSuggestionItem : ObservableObject
 /// </summary>
 internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 {
+    /// <summary>
+    /// The model id a resolved agent kind carries when its template names no model: the runtime substitutes the
+    /// <c>settings.json</c> default for it (see <c>SessionRuntime.ResolveAgentDefaults</c>), so the chip keeps its own model.
+    /// </summary>
+    private const string ConfiguredModelPlaceholder = "default";
+
     private readonly Action<AgentDefinition?> apply;
     private readonly ComposerPreferences preferences;
     private readonly AppPreferences? appPreferences;
@@ -410,6 +475,9 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     private readonly Func<string?, string?, IReadOnlyList<ThinkingEffort>> thinkingLevels;
     private readonly List<ComposerModelOption> allModels = [];
 
+    /// <summary>Every agent row in menu order - the main agent first - of which <see cref="Agents"/> lists the visible ones.</summary>
+    private readonly List<ComposerAgentOption> allAgents;
+
     /// <summary>One provider's header plus the models it lists, in catalogue order; the pinned caption lives apart from these.</summary>
     private readonly List<ComposerModelProviderGroup> providerGroups = [];
     private readonly ComposerModelGroupOption pinnedSection = new(SessionStrings.ComposerPinnedSection, isSection: true);
@@ -421,6 +489,9 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     private IReadOnlyList<ThinkingEffort> effortSteps = [ThinkingEffort.Off];
     private string providerId = string.Empty;
     private ComposerAgentOption selectedAgent;
+
+    /// <summary>The tab is an agent session; see <see cref="IsAgentSession"/>.</summary>
+    private bool agentSession;
     private List<ComposerOrchestrationOption>? orchestrations;
     private ComposerOrchestrationOption? selectedOrchestration;
     private string model = string.Empty;
@@ -504,7 +575,8 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             agent.Selected += OnAgentSelected;
         }
 
-        Agents = agents;
+        allAgents = agents;
+        Agents.ReplaceAll(allAgents);
         selectedAgent = agents.FirstOrDefault(agent => string.Equals(agent.Key, preferences.DefaultAgent, StringComparison.Ordinal)) ??
                         agents[0];
         selectedAgent.IsSelected = true;
@@ -544,7 +616,78 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         services.ModelCatalog.Changed -= OnModelCatalogChanged;
     }
 
-    public IReadOnlyList<ComposerAgentOption> Agents { get; }
+    /// <summary>
+    /// The rows the agent chip lists: every kind for an ordinary session; an agent-session tab leaves the main agent out (the
+    /// tab already hangs under one) and keeps the kinds it cannot run, greyed with the reason.
+    /// </summary>
+    public RangeObservableCollection<ComposerAgentOption> Agents { get; } = [];
+
+    /// <summary>
+    /// The tab is an agent session (forge-app "Agent 会话的界面与接线"): the agent chip offers only the kinds that may drive one,
+    /// the model chip follows the selected kind's own model, the orchestration chip is gone (every message runs directly), and
+    /// a skill whose <c>allowed-tools</c> need a git write or a pull request tool is greyed here. Set once by the view that
+    /// hosts the session; an ordinary session leaves it false and every chip behaves as before.
+    /// </summary>
+    public bool IsAgentSession
+    {
+        get => agentSession;
+        set
+        {
+            if (agentSession == value)
+            {
+                return;
+            }
+
+            agentSession = value;
+            OnPropertyChanged();
+            // A kind an agent-session tab cannot drive is greyed there rather than hidden, so the reason can be read; an
+            // ordinary session lists the same kinds it always did, all of them pickable.
+            foreach (var agent in allAgents)
+            {
+                agent.MarkUnavailable(agentSession ? UnavailableReasonFor(agent.Definition) : AgentUnavailableReason.None);
+            }
+
+            Agents.ReplaceAll(agentSession ? [.. allAgents.Where(static agent => !agent.IsDefault)] : allAgents);
+            if (agentSession)
+            {
+                // The tab starts on the implementing agent (forge-app: Worker is the default kind); a session without a
+                // runnable Worker falls back to the first kind it can run.
+                SelectedAgent =
+                    Agents.FirstOrDefault(static agent => agent.IsAvailable && string.Equals(agent.Key, AgentSessionKinds.Default, StringComparison.Ordinal))
+                    ?? Agents.FirstOrDefault(static agent => agent.IsAvailable)
+                    ?? selectedAgent;
+            }
+            else
+            {
+                SelectedAgent = allAgents[0];
+            }
+
+            // A '/' popup already open on this tab lists rows that just became greyed.
+            if (IsSuggestionOpen)
+            {
+                UpdateSuggestions(lastText, lastCaret);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Why a kind cannot drive an agent-session tab: it names no tool whitelist, or the whitelist holds a tool only the root
+    /// session may call. <see cref="AgentUnavailableReason.None"/> for the kinds the shared rule lets through.
+    /// </summary>
+    private static AgentUnavailableReason UnavailableReasonFor(AgentDefinition? kind)
+    {
+        if (kind is null)
+        {
+            return AgentUnavailableReason.None;
+        }
+
+        if (SessionWorkspaceViewModel.CanBeUserSession(kind))
+        {
+            return AgentUnavailableReason.None;
+        }
+
+        return kind.ToolNames is { Count: > 0 } ? AgentUnavailableReason.RootOnlyTools : AgentUnavailableReason.NoTools;
+    }
 
     /// <summary>Auto, Direct and the built-in workflow skills: how the next message is orchestrated.</summary>
     public IReadOnlyList<ComposerOrchestrationOption> Orchestrations
@@ -590,6 +733,12 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     /// <summary>The choice for the message being sent now; the selection goes back to Auto.</summary>
     public OrchestrationChoice TakeOrchestration()
     {
+        // An agent-session tab has no orchestration to pick (the chip is hidden): every message it sends runs directly.
+        if (agentSession)
+        {
+            return OrchestrationChoice.Direct;
+        }
+
         if (selectedOrchestration is not { } current)
         {
             return OrchestrationChoice.Auto;
@@ -612,9 +761,12 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         }
 
         // Auto and Direct need nothing from disk, so the popup opens at once; the skills folder scan (disk) follows off the
-        // UI thread and adds the workflow rows when it is done.
+        // UI thread and adds the workflow rows when it is done. An agent-session tab never picks one, so it does not scan.
         InstallOrchestrations([]);
-        _ = LoadWorkflowsAsync();
+        if (!agentSession)
+        {
+            _ = LoadWorkflowsAsync();
+        }
     }
 
     private async Task LoadWorkflowsAsync()
@@ -684,6 +836,7 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             selectedAgent.IsSelected = true;
             OnPropertyChanged();
             OnPropertyChanged(nameof(AgentLabel));
+            FollowAgentModel(value.Definition);
             Apply();
         }
     }
@@ -920,11 +1073,15 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
                 skills ??= LoadSkills();
                 foreach (var entry in ComposerSuggestions.FilterSlash(SlashEntries(), token.Query))
                 {
+                    // An agent-session tab has no git write and no pr_* tool: a skill whose `allowed-tools` need one is greyed
+                    // here, so the reason shows up before a workflow is run halfway into a tool the session does not have.
+                    var needsRootSession = agentSession && entry.RequiresUnavailable(hasGitWrite: false, hasPrTools: false);
                     items.Add(new ComposerSuggestionItem(
                         entry.Name,
                         "/" + entry.Name,
                         entry.Description,
-                        entry.IsSkill ? SessionStrings.ComposerSkill : SessionStrings.ComposerCommand));
+                        entry.IsSkill ? SessionStrings.ComposerSkill : SessionStrings.ComposerCommand,
+                        needsRootSession ? AgentSessionStrings.SkillNeedsRootKey : string.Empty));
                 }
 
                 break;
@@ -960,11 +1117,25 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             Suggestions.Add(item);
         }
 
-        Select(items.Count > 0 ? 0 : -1);
+        Select(FirstAvailable(items));
         IsSuggestionOpen = items.Count > 0;
     }
 
-    /// <summary>Moves the highlighted row by <paramref name="delta"/>, wrapping around.</summary>
+    /// <summary>The row the picker highlights when it opens, or -1: a greyed row is listed but never preselected.</summary>
+    private static int FirstAvailable(List<ComposerSuggestionItem> items)
+    {
+        for (var index = 0; index < items.Count; index++)
+        {
+            if (items[index].IsAvailable)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Moves the highlighted row by <paramref name="delta"/>, wrapping around and skipping greyed rows.</summary>
     public void MoveSelection(int delta)
     {
         if (Suggestions.Count == 0)
@@ -972,8 +1143,17 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        var next = ((selectedSuggestion < 0 ? 0 : selectedSuggestion + delta) % Suggestions.Count + Suggestions.Count) % Suggestions.Count;
-        Select(next);
+        var count = Suggestions.Count;
+        var index = selectedSuggestion < 0 ? (delta < 0 ? 0 : -1) : selectedSuggestion;
+        for (var step = 0; step < count; step++)
+        {
+            index = ((index + delta) % count + count) % count;
+            if (Suggestions[index].IsAvailable)
+            {
+                Select(index);
+                return;
+            }
+        }
     }
 
     /// <summary>
@@ -983,7 +1163,7 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     public (string Text, int Caret)? Accept(ComposerSuggestionItem? item = null)
     {
         item ??= selectedSuggestion >= 0 && selectedSuggestion < Suggestions.Count ? Suggestions[selectedSuggestion] : null;
-        if (!IsSuggestionOpen || item is null || token.Kind == ComposerTokenKind.None)
+        if (!IsSuggestionOpen || item is null || !item.IsAvailable || token.Kind == ComposerTokenKind.None)
         {
             return null;
         }
@@ -1170,14 +1350,23 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 
     private void OnModelSelected(ComposerModelOption option)
     {
-        var providerChanged = !string.Equals(providerId, option.ProviderId, StringComparison.Ordinal);
-        providerId = option.ProviderId;
-
-        // Two providers can serve a model with the same id: the name alone does not change, but the selection did, so the
-        // rows and the next turn's definition still have to follow it.
-        if (!Set(ref model, option.Name) && !providerChanged)
+        if (SwitchModel(option.Name, option.ProviderId))
         {
-            return;
+            Apply();
+        }
+    }
+
+    /// <summary>
+    /// Points the model chip at another model of (possibly) another provider; false when neither moved. Two providers can
+    /// serve a model with the same id: the name alone would not change, but the selection did, so the rows follow it anyway.
+    /// </summary>
+    private bool SwitchModel(string name, string provider)
+    {
+        var providerChanged = !string.Equals(providerId, provider, StringComparison.Ordinal);
+        providerId = provider;
+        if (!Set(ref model, name) && !providerChanged)
+        {
+            return false;
         }
 
         MarkSelectedOption();
@@ -1185,7 +1374,28 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         FilterModels();
         OnPropertyChanged(nameof(ModelLabel));
         RefreshEffortSteps();
-        Apply();
+        return true;
+    }
+
+    /// <summary>
+    /// Moves the model chip onto the model the kind is configured with, on an agent-session tab (forge-app "Agent 会话的界面与
+    /// 接线"). A kind that names no model of its own - the <c>default</c> placeholder every built-in kind uses, which the
+    /// runtime fills from <c>settings.json</c> - leaves the session's model alone.
+    /// </summary>
+    private void FollowAgentModel(AgentDefinition? kind)
+    {
+        if (!agentSession || kind is null || !catalog.IsConfigured)
+        {
+            return;
+        }
+
+        var modelName = kind.Model.Model;
+        if (string.IsNullOrWhiteSpace(modelName) || string.Equals(modelName, ConfiguredModelPlaceholder, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        SwitchModel(modelName, ResolveProviderFor(modelName) ?? providerId);
     }
 
     /// <summary>

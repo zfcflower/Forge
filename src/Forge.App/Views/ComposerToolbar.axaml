@@ -29,6 +29,10 @@
               <DataTemplate x:DataType="vm:ComposerAgentOption">
                 <views:PickerRow Command="{Binding SelectCommand}"
                         Click="OnAgentPicked"
+                        IsEnabled="{Binding IsAvailable}"
+                        Opacity="{Binding Opacity}"
+                        ToolTip.ShowOnDisabled="True"
+                        ToolTip.Tip="{Binding UnavailableReason}"
                         AutomationProperties.Name="{Binding Name}">
                   <Grid ColumnDefinitions="18,*">
                     <wc:FluentIcon Data="{StaticResource IconCheck}"
@@ -288,6 +292,7 @@
   <Button x:Name="OrchestrationChip"
           Margin="4,0,0,0"
           Classes="composer-chip"
+          IsVisible="{Binding !IsAgentSession}"
           AutomationProperties.AutomationId="composer-orchestration"
           AutomationProperties.Name="{Binding [session.composer.orchestration], Source={x:Static loc:Loc.Instance}}"
           ToolTip.Tip="{Binding [session.composer.orchestrationHint], Source={x:Static loc:Loc.Instance}}">

@@ -586,8 +586,11 @@
                 <DataTemplate x:DataType="vm:ComposerSuggestionItem">
                   <Button Classes="composer-row suggestion"
                           Classes.selected="{Binding IsSelected}"
+                          IsEnabled="{Binding IsAvailable}"
                           Focusable="False"
                           Click="OnSuggestionClick"
+                          ToolTip.ShowOnDisabled="True"
+                          ToolTip.Tip="{Binding UnavailableReason}"
                           AutomationProperties.Name="{Binding Title}">
                     <Grid ColumnDefinitions="Auto,*,Auto">
                       <TextBlock Text="{Binding Title}" FontWeight="Medium" VerticalAlignment="Center" />
