@@ -43,6 +43,12 @@
 | 一个会话切换多个工作区目录 | 推迟（`turn_checkpoints` 主键、步骤提交、PR 闸门、索引都要按当前目录取） |
 | 恢复到某一轮 | 推迟（届时被接手会话的检查点只读） |
 | 子 Agent 跨工作区派发、同父多子 Agent 抢 `obj/`/`bin/` | 另立任务 |
+| Agent 会话切换种类/模型不落库 | 切换在下一轮前重建实例并生效，但 `sessions.agent_kind` 只在建行时写、`composer.json` 只由“设为默认”写；重启进程后重开该会话，chip 仍显示库里的旧种类与偏好模型 |
+| 无标签的投递回合没有工具计数 | Core 自驱的 `message_session` 回合会写 `turn_metrics`（token/流式时长/状态都真实），但工具调用次数未知，该行 `tool_calls` 写 NULL 而不是 0 |
+| 根终结路径不等待在飞回合 | 归档、移除、接手、交接在拆除根时直接释放 runtime，可能打断其 Agent 会话正在跑的一轮（既有整体拆除语义；关标签路径已改成等回合结束） |
+| Agent 会话的未读是文本前缀 | 标签与树行用 `● ` 前缀而非图形圆点（`TabModel`/`TabHeaderView`/`ProjectView` 未加未读状态） |
+| `message_session` 的授权只在该进程内 | 内存态，重启即清空：同一会话里重启后需要重新 `@` 点名 |
+| 投递回执的通知不可测 | 唯一发出点是窗口私有方法，`AppComposition` 内部自建 `NotificationCenter`，无法注入替身——接线正确性只有代码审查保证 |
 | Worker 资源限制（CPU/内存/活动进程） | 受威胁模型决策门控，未实现；Windows 可设 Job Object 上限，其他平台不承诺 |
 | 预启动执行器池 | 未采用；只允许“取”不允许“还”，须由分段实测决定 |
 | 自动更新的发布管线 | 只有 `scripts/make-update-manifest.ps1`，没有 tag 触发的打包/哈希/上传 workflow |
