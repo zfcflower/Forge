@@ -219,6 +219,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         };
         Projects.SessionArchived = OnSessionArchived;
         Projects.ArchiveGuard = ConfirmArchiveAsync;
+        Projects.NewAgentSession = OpenAgentSessionAsync;
+        Projects.OpenAgentSession = OpenAgentSessionByIdAsync;
+        Projects.IsAgentSessionUnread = IsAgentSessionUnread;
+        Projects.SessionRenamed = OnSessionRenamed;
         WireLifecycle(Projects);
         Projects.AgentTrees = sessionId =>
             sessions.TryGetValue(sessionId, out var session) ? session.AgentSnapshots() : [];
@@ -244,6 +248,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             OpenSubAgent = OpenSubAgentTabAsync,
             SessionArchived = OnSessionArchived,
             ArchiveGuard = ConfirmArchiveAsync,
+            OpenAgentSession = OpenAgentSessionByIdAsync,
+            IsAgentSessionUnread = IsAgentSessionUnread,
+            SessionRenamed = OnSessionRenamed,
         };
         WireLifecycle(GeneralChats);
         Changes = new ChangesViewModel(
@@ -951,8 +958,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         var sessions = composition.Sessions;
         var info = await BackgroundRead.RunAsync(token => sessions.GetSessionAsync(sessionId, token), ct)
             .ConfigureAwait(true);
-        if (info is null || info.ParentSessionId is not null)
+        if (info is null)
         {
+            return;
+        }
+
+        if (info.ParentSessionId is not null)
+        {
+            // A child session the user opened under a root (an agent session) comes back as its own tab; a model-spawned
+            // sub-agent has no tab of its own and is shown inside its root's bottom group instead.
+            await OpenAgentSessionByIdAsync(info.Id, ct).ConfigureAwait(true);
             return;
         }
 
@@ -1041,10 +1056,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// the tree refresh keeps; no git runs here). A store failure lets the turn start: the check guards against a stale tab,
     /// it is not a second source of truth.
     /// </summary>
-    private async Task<TurnRejection> CheckTurnAsync(SessionWorkspaceViewModel session, CancellationToken ct)
+    private Task<TurnRejection> CheckTurnAsync(SessionWorkspaceViewModel session, CancellationToken ct) =>
+        CheckTurnAsync(session.SessionId, ct);
+
+    /// <summary>
+    /// The same check by session id: an agent-session tab gates its turns on the row of its root (the child's own row says
+    /// nothing about the root having been taken over or archived).
+    /// </summary>
+    private async Task<TurnRejection> CheckTurnAsync(string id, CancellationToken ct)
     {
         var store = composition.Sessions;
-        var id = session.SessionId;
         SessionInfo? current;
         try
         {
@@ -2046,7 +2067,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         if (Workbench.FindTab(WorkbenchIds.SessionTab(sessionId)) is { } tab)
         {
             Workbench.ActivateTab(tab);
+            return;
         }
+
+        // An agent session's tab keeps the id it was opened under (the draft's), so the stored session id finds it here.
+        ActivateAgentSessionTab(sessionId);
     }
 
     private void CloseSessionTab(string sessionId)
@@ -2093,16 +2118,37 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         UnhookAutomations(session);
         session.Dispose();
-        composition.Runtimes.Release(session.SessionId);
+        if (!HasOpenAgentSessions(session.SessionId))
+        {
+            // The root's runtime is what its agent sessions run in: a closed root tab releases nothing while one of them is
+            // still open, or the child would lose its host mid-conversation.
+            composition.Runtimes.Release(session.SessionId);
+        }
+    }
+
+    /// <summary>Whether an open agent-session tab runs under this root.</summary>
+    private bool HasOpenAgentSessions(string rootSessionId)
+    {
+        foreach (var session in agentViews.Keys)
+        {
+            if (string.Equals(session.AgentSessionRoot?.Id, rootSessionId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
     /// An archived session leaves the tree together with its tab: the tab is closed first, so no dead tab survives the
-    /// view model it shows, and a later reopen finds no duplicate <c>session:</c> tab.
+    /// view model it shows, and a later reopen finds no duplicate <c>session:</c> tab. Archiving a root takes its agent
+    /// sessions with it: their tabs close too, and the root's runtime is released once they are gone.
     /// </summary>
     private void OnSessionArchived(string sessionId)
     {
         terminals.OnSessionArchived(sessionId);
+        CloseAgentSessionTabs(sessionId);
         CloseSessionTab(sessionId);
         openTabs.Remove(sessionId);
 
@@ -2114,6 +2160,18 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         composition.Runtimes.Release(sessionId);
+    }
+
+    /// <summary>Closes every open agent-session tab of an archived root, so no tab outlives the runtime it runs in.</summary>
+    private void CloseAgentSessionTabs(string rootSessionId)
+    {
+        foreach (var (session, tab) in agentViews.ToArray())
+        {
+            if (string.Equals(session.AgentSessionRoot?.Id, rootSessionId, StringComparison.Ordinal))
+            {
+                Workbench.CloseTab(tab);
+            }
+        }
     }
 
     private async Task RefreshAfterTurnAsync(SessionWorkspaceViewModel session)
@@ -2388,6 +2446,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         if (tab.Kind == TabKind.Session && tab.Content is SessionWorkspaceViewModel session)
         {
+            DetachAgentSessionTab(tab);
             session.TabTitleChanged -= OnSessionTitleChanged;
             openTabs.Remove(session.SessionId);
 
@@ -2412,6 +2471,17 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         if (tab.Content is not SessionWorkspaceViewModel session)
         {
             return;
+        }
+
+        // An agent-session tab that is on screen has nothing unread: the mark it may carry goes now, and its tree row with it.
+        if (session.IsAgentSession)
+        {
+            var wasUnread = session.HasAgentUnread;
+            session.MarkAgentSeen();
+            if (wasUnread)
+            {
+                RefreshTreeAgents();
+            }
         }
 
         if (!ReferenceEquals(session, activeSession))
@@ -3151,6 +3221,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         foreach (var session in sessions.Values)
         {
             UnhookAutomations(session);
+            session.Dispose();
+        }
+
+        // An agent-session view whose row its first message never created is in no session map: it still holds a composer
+        // and a language subscription, so it goes with the rest.
+        foreach (var session in agentViews.Keys)
+        {
             session.Dispose();
         }
 

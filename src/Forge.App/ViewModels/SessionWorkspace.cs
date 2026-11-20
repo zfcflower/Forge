@@ -198,9 +198,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         INotifications? notifications = null,
         AppPreferences? preferences = null,
         Action? openInspector = null,
-        Action? openSession = null)
+        Action? openSession = null,
+        AgentSessionLaunch? agentSession = null)
     {
         Info = session;
+        this.agentSession = agentSession;
+        // A tab opened from the store starts at the child's stored row: its id and its name are what the tree row shows.
+        agentChildSessionId = agentSession is { IsDraft: false } ? session.Id : null;
+        agentName = agentSession is { IsDraft: false } ? session.Title : null;
         this.runtime = runtime;
         isReadOnlyView = runtime is null;
         this.checkpoints = checkpoints;
@@ -296,13 +301,18 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     public string SessionId => Info.Id;
 
-    public string Title => Info.Title;
+    public string Title => agentSession is { } launch
+        ? launch.Root.Title + AgentSessionLabel.Separator + AgentSessionName
+        : Info.Title;
 
     /// <summary>
     /// The tab's label. The session tab's marker is not part of it: the tab strip draws that one as a chat bubble icon for
-    /// session tabs, so the title stays plain text for tooltips, automation and window titles.
+    /// session tabs, so the title stays plain text for tooltips, automation and window titles. An agent-session tab adds the
+    /// unread mark in front of the root's title and its own name.
     /// </summary>
-    public string TabTitle => Info.Title;
+    public string TabTitle => agentSession is not null
+        ? (agentUnread ? AgentSessionLabel.UnreadMark : string.Empty) + Title
+        : Info.Title;
 
     public string WorkDir => Info.WorkspacePath;
 
@@ -699,6 +709,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public void Rename(string title)
     {
         Info = Info with { Title = title };
+        if (agentSession is not null)
+        {
+            agentName = title;
+            OnPropertyChanged(nameof(AgentSessionName));
+        }
+
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(TabTitle));
         TabTitleChanged?.Invoke(this, EventArgs.Empty);
@@ -886,12 +902,32 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         TickLiveTools();
     }
 
-    /// <summary>Stops the running turn; queued messages stay and wait for the next send.</summary>
+    /// <summary>
+    /// Stops the running turn; queued messages stay and wait for the next send. On a root tab the stop reaches the whole tree:
+    /// the user sessions opened under this root stop with it, and an interjection they never saw is not delivered later.
+    /// </summary>
     public void Cancel()
     {
         queuePaused = true;
         redirectText = null;
         CancelTurn();
+        if (agentSession is null)
+        {
+            // The root's stop reaches the whole tree: the agent sessions it hosts stop with it (the same control surface the
+            // model's stop tool uses). Disposing the view is not a stop: closing a root tab leaves its agent sessions running,
+            // and their runtime is kept alive for exactly that.
+            if (!disposed)
+            {
+                runtime?.StopUserChildren(SessionStrings.SubAgentStoppedByUser);
+            }
+        }
+        else if (!disposed && Volatile.Read(ref agentAgentId) is { Length: > 0 } agentId)
+        {
+            // The child's own stop goes through the host's control surface as well, so the run ends the way a stop always
+            // ends (partial text kept, the session reported as stopped) instead of being cut off at the token.
+            runtime?.StopUserChild(agentId, SessionStrings.SubAgentStoppedByUser);
+        }
+
         RefreshCanSend();
     }
 
@@ -1366,8 +1402,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
 
         // Attachments travel with the interjection: the loop delivers text and attachments together at the next tool-batch
-        // boundary. When no turn takes it, the message is queued normally.
-        var delivered = isRunning && runtime is { } live && live.TryInterject(prompt.Text, prompt.Attachments);
+        // boundary. When no turn takes it, the message is queued normally. An agent-session tab never interjects: the root's
+        // interjection inbox belongs to the root's own conversation, and the child's run has no such boundary yet.
+        var delivered = agentSession is null && isRunning && runtime is { } live && live.TryInterject(prompt.Text, prompt.Attachments);
         var front = queued.TakeWhile(message => message.IsInterjection).Count();
         AddQueued(new QueuedMessageViewModel(prompt, delivered, RemoveQueued), delivered ? front : 0);
         if (!isRunning)
@@ -1535,6 +1572,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     private void ApplyRootDefinition(AgentDefinition? definition)
     {
+        // An agent-session tab runs its own child, not the session's root: handing the composer's pick to the runtime would
+        // change the root agent of the tab the user never touched. The child's kind stays the one its tab was opened with
+        // (switching it rebuilds the instance, which the composer's chip columns own).
+        if (agentSession is not null)
+        {
+            return;
+        }
+
         if (runtime?.SetRootDefinition(definition) == true)
         {
             rootRebuilt = true;
@@ -1543,6 +1588,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     private async Task RunTurnAsync(ComposerPrompt prompt)
     {
+        if (agentSession is not null)
+        {
+            await RunAgentSessionTurnAsync(prompt).ConfigureAwait(true);
+            return;
+        }
+
         var text = prompt.Text;
         if (!await PassesTurnGateAsync(prompt).ConfigureAwait(true))
         {

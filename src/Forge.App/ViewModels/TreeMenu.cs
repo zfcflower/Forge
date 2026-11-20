@@ -14,6 +14,7 @@ internal enum TreeMenuKey
     Reveal,
     CloseProject,
     NewSession,
+    NewAgentSession,
     ReplaceSession,
     Fork,
     ForkInherit,
@@ -43,6 +44,7 @@ internal enum TreeRowKind
     Workspace,
     RecycledWorkspace,
     ActiveSession,
+    AgentSession,
     HistorySession,
     RemovedSession,
 }
@@ -139,6 +141,9 @@ internal static class TreeMenu
                 new(TreeMenuKey.PurgeAll),
             ],
             TreeRowKind.ActiveSession => ActiveSession(row),
+            // A session the user opened under a root: it is renamed here and nowhere else; archiving and removal follow the
+            // root, so the row offers no entries of its own for them.
+            TreeRowKind.AgentSession => [Gate(TreeMenuKey.RenameSession, WorkspaceBlock(row))],
             TreeRowKind.HistorySession => HistorySession(row),
             TreeRowKind.RemovedSession =>
             [
@@ -221,14 +226,22 @@ internal static class TreeMenu
         var warning = row.HeadOffBranch ? TreeMenuStrings.HeadWarning : null;
         if (row.SessionTitle is null)
         {
-            return [Gate(TreeMenuKey.NewSession, block, isDefault: true) with { Warning = warning }];
+            return
+            [
+                Gate(TreeMenuKey.NewSession, block, isDefault: true) with { Warning = warning },
+                // An agent session hangs under an active root session; without one there is nothing to attach it to.
+                Gate(TreeMenuKey.NewAgentSession, block ?? AgentSessionStrings.NoRoot),
+            ];
         }
 
         var busy = BusyReason(row);
         var replaceReason = block ?? busy;
-        var entries = new List<TreeMenuEntry>(2)
+        var entries = new List<TreeMenuEntry>(3)
         {
             Gate(TreeMenuKey.ReplaceSession, replaceReason, isDefault: true) with { Warning = warning },
+            // The root is busy or not: an agent session queues for a run slot like any other child, so only a workspace that
+            // cannot take a new session at all disables this one.
+            Gate(TreeMenuKey.NewAgentSession, block),
         };
         if (row.InRepository)
         {
@@ -329,6 +342,7 @@ internal static class TreeMenu
         TreeMenuKey.Reveal => ProjectStrings.RevealInExplorer,
         TreeMenuKey.CloseProject => RemovalStrings.MenuCloseProject,
         TreeMenuKey.NewSession => ProjectStrings.NewSession,
+        TreeMenuKey.NewAgentSession => AgentSessionStrings.MenuNew,
         TreeMenuKey.ReplaceSession => TreeMenuStrings.ReplaceSession(row.SessionTitle ?? string.Empty),
         TreeMenuKey.Fork => ForkStrings.MenuFork,
         TreeMenuKey.ForkInherit => ForkStrings.MenuForkInherit,

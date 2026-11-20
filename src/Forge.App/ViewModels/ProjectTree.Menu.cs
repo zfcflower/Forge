@@ -28,6 +28,16 @@ internal sealed partial class TreeNodeViewModel
     /// </summary>
     public Func<TreeRowState>? MenuState { get; set; }
 
+    /// <summary>"New agent session" on a workspace row: a draft session under the workspace's active root session.</summary>
+    public ICommand? NewAgentSessionCommand { get; private set; }
+
+    /// <summary>Replaces the agent-session command of a reused node; null hides the entry.</summary>
+    public void SetNewAgentSessionCommand(ICommand? command)
+    {
+        NewAgentSessionCommand = command;
+        OnPropertyChanged(nameof(NewAgentSessionCommand));
+    }
+
     /// <summary>"Link an existing workspace…" on a repository project row (7.10).</summary>
     public ICommand? LinkWorkspaceCommand { get; private set; }
 
@@ -88,9 +98,11 @@ internal sealed partial class TreeNodeViewModel
     }
 
     /// <summary>
-    /// The trailing "+": on a root-checkout or workspace row it runs the first group's one enabled entry and returns true,
-    /// or returns false so the view shows the first group as a small menu (several entries, or none enabled to explain
-    /// why). Every other row runs its new-session command (a project row: "new workspace…").
+    /// The trailing "+": on a root-checkout or workspace row it runs the first group's one entry and returns true, or
+    /// returns false so the view shows the first group as a small menu. A row that offers more than one entry always shows
+    /// the menu - the first group of a workspace is "new session" and "new agent session", and a single action would hide
+    /// one of them (and the reason it is greyed out). Every other row runs its new-session command (a project row: "new
+    /// workspace…").
     /// </summary>
     public bool TryRunPlus()
     {
@@ -106,6 +118,11 @@ internal sealed partial class TreeNodeViewModel
         }
 
         var items = Render(TreeMenu.FirstGroup(state), state);
+        if (items.Length > 1)
+        {
+            return false;
+        }
+
         TreeMenuItemViewModel? only = null;
         foreach (var item in items)
         {
@@ -129,6 +146,7 @@ internal sealed partial class TreeNodeViewModel
     public ICommand? CommandFor(TreeMenuKey key) => key switch
     {
         TreeMenuKey.NewWorkspace or TreeMenuKey.NewSession => NewSessionCommand,
+        TreeMenuKey.NewAgentSession => NewAgentSessionCommand,
         TreeMenuKey.LinkWorkspace => LinkWorkspaceCommand,
         TreeMenuKey.RenameProject or TreeMenuKey.RenameSession => RenameCommand,
         TreeMenuKey.Reveal => RevealCommand,
@@ -608,6 +626,15 @@ internal sealed partial class ProjectTreeViewModel
                 break;
             case TreeNodeKind.Worktree when plan.RowMark is TreeRowMark.None or TreeRowMark.Unverified && plan.Project is { } owner:
                 var directory = plan.WorktreePath;
+                if (plan.ActiveSession is { } agentHolder && NewAgentSession is { } openAgent)
+                {
+                    // The entry hangs under the workspace's active root session; without one it stays, greyed, and says so.
+                    node.SetNewAgentSessionCommand(new AsyncRelayCommand(
+                        ct => openAgent(agentHolder, ct),
+                        () => !Blocked(directory),
+                        OnFailed));
+                }
+
                 if (plan.ActiveSession is { } holder)
                 {
                     var branch = plan.Branch;
@@ -698,6 +725,9 @@ internal sealed partial class ProjectTreeViewModel
                     Operating = Operating(directory),
                     Conflicted = Conflicted(directory),
                 };
+            case TreeNodeKind.AgentSession when plan.Session is { } agentSession:
+                var agentFacts = new TreeRowState(TreeRowKind.AgentSession) { SessionTitle = agentSession.Title };
+                return () => agentFacts with { Operating = Operating(DirectoryOf(agentSession)) };
             case TreeNodeKind.Session when plan.Session is { ParentSessionId: null } session:
                 var sessionDirectory = DirectoryOf(session);
                 var kind = session.Status switch

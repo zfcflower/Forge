@@ -494,6 +494,122 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>
+    /// Starts a user-driven session under this host's root and runs its first turn (Core: <see cref="AgentHost.StartUserChildAsync"/>).
+    /// The caller names the agent (<paramref name="definition"/>), so the tab's kind and model are the user's pick; the
+    /// session row, the run slot, the approval path and the cancellation table are the same ones a model spawn uses. The
+    /// host is built first: a user session can only start under a root the host already holds, and opening its tab must not
+    /// take the focus from the session the user is in.
+    /// </summary>
+    internal async Task<SubAgentOutcome> StartUserChildAsync(
+        AgentDefinition definition,
+        string task,
+        string? sessionTitle,
+        Action<AgentEvent> sink,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(sink);
+        // Counted before the host is resolved, exactly like SpawnChildAsync: a prompt reload must not swap the host (and
+        // dispose its approval handlers) in between.
+        lock (gate)
+        {
+            outsideChildren++;
+        }
+
+        try
+        {
+            var agentHost = await ResolveHostAsync(ct).ConfigureAwait(false);
+            var forward = new ForwardingSink(sink);
+            return await Task.Run(() => agentHost.StartUserChildAsync(definition, task, sessionTitle, forward, ct), CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (gate)
+            {
+                outsideChildren--;
+            }
+        }
+    }
+
+    /// <summary>
+    /// One more turn of a user session (Core: <see cref="AgentHost.RunUserChildTurnAsync"/>): one message is one run, so it
+    /// queues for a tree slot exactly like the first one and ends with one <see cref="AgentSubAgentFinished"/> carrying that
+    /// run's usage. The events reach <paramref name="sink"/> on a worker thread.
+    /// </summary>
+    internal async Task RunUserChildTurnAsync(
+        AgentInstance child,
+        string text,
+        IReadOnlyList<ContentBlock> attachments,
+        Action<AgentEvent> sink,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        ArgumentNullException.ThrowIfNull(sink);
+        var agentHost = await ResolveHostAsync(ct).ConfigureAwait(false);
+        var message = UserMessage(text, attachments);
+        await Task.Run(
+                async () =>
+                {
+                    await foreach (var value in agentHost.RunUserChildTurnAsync(child, message, ct).ConfigureAwait(false))
+                    {
+                        sink(value);
+                    }
+                },
+                CancellationToken.None)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Rebuilds a stored user session as an instance of this host (Core: <see cref="AgentHost.ResumeUserChildAsync"/>) after a
+    /// restart or a released tab. Idempotent: an instance this host already holds for that session is returned as-is.
+    /// </summary>
+    internal async Task<AgentInstance> ResumeUserChildAsync(
+        string sessionId,
+        string workingDirectory,
+        AgentDefinition definition,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        var agentHost = await ResolveHostAsync(ct).ConfigureAwait(false);
+        return await agentHost.ResumeUserChildAsync(sessionId, workingDirectory, definition, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stops every run of a user session under this root, queued or running (Core: <see cref="AgentHost.StopUserChildren"/>),
+    /// and returns how many were stopped. The root's own turn is not touched: the shell stops that one itself and calls this
+    /// when the user presses stop on the root's tab.
+    /// </summary>
+    internal int StopUserChildren(string? reason = null)
+    {
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        return built?.StopUserChildren(reason) ?? 0;
+    }
+
+    /// <summary>Stops one user session's current run by its agent id - the stop button of its own tab; false when it is not running.</summary>
+    internal bool StopUserChild(string agentId, string reason)
+    {
+        if (string.IsNullOrEmpty(agentId) || SubAgentControl is not { } control)
+        {
+            return false;
+        }
+
+        return control.Stop(agentId, reason) == SubAgentControlResult.Accepted;
+    }
+
+    /// <summary>
+    /// The host of this session, building it (and resuming the root) when it does not exist yet. Used before a user session
+    /// starts, so the runtime is loaded without the root's tab being opened or brought to the front.
+    /// </summary>
+    private async Task<AgentHost> ResolveHostAsync(CancellationToken ct) =>
+        (await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false)).Host;
+
+    /// <summary>
     /// The definition the root agent runs with from the next turn on: null is the default main agent with the configured
     /// model. A change rebuilds the root from the store before the next turn, so the conversation keeps its context; the
     /// turn already running keeps the definition it started with.

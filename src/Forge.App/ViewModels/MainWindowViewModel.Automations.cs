@@ -34,7 +34,7 @@ internal sealed partial class MainWindowViewModel : IAutomationHost
         openAutomationsCommand ??= new RelayCommand(() => OpenSettingsSection(SettingsSectionIds.Automations));
 
     IAutomationSession? IAutomationHost.FindOpen(string sessionId) =>
-        sessions.TryGetValue(sessionId, out var session) && !session.IsReadOnlyView ? session : null;
+        sessions.TryGetValue(sessionId, out var session) && !session.IsReadOnlyView && !session.IsAgentSession ? session : null;
 
     async Task<IAutomationSession?> IAutomationHost.OpenAsync(string sessionId, CancellationToken ct)
     {
@@ -66,17 +66,58 @@ internal sealed partial class MainWindowViewModel : IAutomationHost
     {
         get
         {
+            // Agent sessions are not automation targets of their own: they are the user's conversation, and an automation
+            // that delivered a turn into one would be talking to a session the model was not asked to drive.
             var list = new List<IAutomationSession>(sessions.Count);
             foreach (var session in sessions.Values)
             {
-                if (!session.IsReadOnlyView)
+                if (!session.IsReadOnlyView && !session.IsAgentSession)
                 {
                     list.Add(session);
                 }
             }
 
+            // A root session with an agent session on screen is open even when its own tab is closed: the idle-archive step
+            // reads this set by session id, so the root has to be here or a live agent tab would be archived away under the
+            // user. The entry never runs a turn (it reports itself busy), it only names the root.
+            foreach (var root in RootsWithOpenAgentSessions())
+            {
+                if (!sessions.ContainsKey(root.Id))
+                {
+                    list.Add(new OpenRootSession(root));
+                }
+            }
+
             return list;
         }
+    }
+
+    /// <summary>
+    /// A root session kept open by an agent-session tab of it (see <see cref="IAutomationHost.OpenSessions"/>). It carries no
+    /// turn and no child of its own: it exists so the session's id is in the open set, and it reports itself closed to the
+    /// session watch so that watch keeps measuring the tabs that really run.
+    /// </summary>
+    private sealed record OpenRootSession(SessionInfo Info) : IAutomationSession
+    {
+        public string SessionId => Info.Id;
+
+        public string Title => Info.Title;
+
+        public bool IsRunning => false;
+
+        public DateTimeOffset LastActivityAt => Info.LastActiveAt;
+
+        public bool IsToolRunning => false;
+
+        public bool IsAutomationIdle => false;
+
+        public bool IsAutomationClosed => true;
+
+        public Task<MailboxResult> RunAutomationTurnAsync(string text, LocText origin, AgentDefinition? agent) =>
+            throw new InvalidOperationException("An agent session's root session is open only to keep the archive step away from it.");
+
+        public Task<ChildAgentResult> LaunchChildAsync(string kind, string task, CancellationToken ct) =>
+            throw new InvalidOperationException("An agent session's root session is open only to keep the archive step away from it.");
     }
 
     bool IAutomationHost.IsWindowActive =>

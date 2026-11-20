@@ -23,6 +23,9 @@ internal enum TreeNodeKind
     Session,
     MainAgent,
     SubAgent,
+
+    /// <summary>A user-driven child session of a root session (an agent session): a session row, not a sub-agent row.</summary>
+    AgentSession,
 }
 
 /// <summary>
@@ -149,6 +152,7 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     private string? forkOfBranch;
     private bool automationSession;
     private bool isConflicted;
+    private bool isUnread;
     private TreeRowMark rowMark;
 
     public TreeNodeViewModel(TreeNodeKind kind)
@@ -218,16 +222,31 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     /// </summary>
     public string Title
     {
-        get => Kind switch
+        get
         {
-            TreeNodeKind.General => ProjectStrings.GeneralSection,
-            TreeNodeKind.History => ProjectStrings.HistoryTitle(historyCount),
-            // The repository root checkout has no branch name while HEAD is detached, so the plan leaves its stored title
-            // empty and the label is resolved from the string table on every read, like the general and history rows.
-            TreeNodeKind.Worktree when isMainCheckout && title.Length == 0 => ProjectStrings.MainCheckoutDetached,
-            _ => title,
-        };
+            var label = Kind switch
+            {
+                TreeNodeKind.General => ProjectStrings.GeneralSection,
+                TreeNodeKind.History => ProjectStrings.HistoryTitle(historyCount),
+                // The repository root checkout has no branch name while HEAD is detached, so the plan leaves its stored title
+                // empty and the label is resolved from the string table on every read, like the general and history rows.
+                TreeNodeKind.Worktree when isMainCheckout && title.Length == 0 => ProjectStrings.MainCheckoutDetached,
+                _ => title,
+            };
+            // An agent session whose reply the user has not looked at carries the mark in front of its name.
+            return isUnread ? AgentSessionLabel.UnreadMark + label : label;
+        }
         set => Set(ref title, value);
+    }
+
+    /// <summary>
+    /// An agent-session row with a reply the user has not seen: the row (and its tab) carry the unread mark until the tab is
+    /// shown again. Read from the open tabs when the tree is planned, so it needs no subscription of its own.
+    /// </summary>
+    public bool IsUnread
+    {
+        get => isUnread;
+        set => SetAndNotify(ref isUnread, value, nameof(Title));
     }
 
     /// <summary>
@@ -626,7 +645,7 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     /// <summary>Re-asks every command of the row whether it can run, after an in-memory lifecycle state changed.</summary>
     public void NotifyCommandStates()
     {
-        foreach (var command in new[] { OpenCommand, NewSessionCommand, ArchiveCommand, RenameCommand, RevealCommand, RemoveCommand, ForkCommand, MergeBackCommand, SyncCommand, AbortMergeCommand, RestoreCommand, PurgeCommand, LinkWorkspaceCommand, ReplaceSessionCommand, RenameBranchCommand, ContinueCommand })
+        foreach (var command in new[] { OpenCommand, NewSessionCommand, NewAgentSessionCommand, ArchiveCommand, RenameCommand, RevealCommand, RemoveCommand, ForkCommand, MergeBackCommand, SyncCommand, AbortMergeCommand, RestoreCommand, PurgeCommand, LinkWorkspaceCommand, ReplaceSessionCommand, RenameBranchCommand, ContinueCommand })
         {
             (command as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         }
@@ -897,6 +916,18 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// </summary>
     public Func<string, string, CancellationToken, Task>? OpenSubAgent { get; set; }
 
+    /// <summary>"New agent session" of a worktree row: opens a draft agent tab under the row's active root session.</summary>
+    public Func<SessionInfo, CancellationToken, Task>? NewAgentSession { get; set; }
+
+    /// <summary>Opens (or brings forward) the tab of an agent-session row by its child session id.</summary>
+    public Func<string, CancellationToken, Task>? OpenAgentSession { get; set; }
+
+    /// <summary>Whether an agent session has a reply the user has not looked at; read when a row is applied (UI thread).</summary>
+    public Func<string, bool>? IsAgentSessionUnread { get; set; }
+
+    /// <summary>A session was renamed: the shell renames the open tab of it too, wherever that tab is.</summary>
+    public Action<string, string>? SessionRenamed { get; set; }
+
     /// <summary>Called after a session was archived, so the shell can drop its runtime when nothing else uses it.</summary>
     public Action<string>? SessionArchived { get; set; }
     public Func<string, Task<bool>>? ArchiveGuard { get; set; }
@@ -1062,12 +1093,12 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             }
 
             var snapshot = provider(node.SessionId);
-            Merge(
-                node.Children,
+            var rows = PlanAgentSessions(storedChildren, node.SessionId, RunningSessionIds());
+            rows.AddRange(
                 snapshot.Count > 0
                     ? PlanSessionAgents(snapshot, node.SessionId)
-                    : PlanStoredAgents(storedChildren, node.SessionId, node.SessionId, RunningSessionIds()),
-                node.Depth + 1);
+                    : PlanStoredAgents(storedChildren, node.SessionId, node.SessionId, RunningSessionIds()));
+            Merge(node.Children, rows, node.Depth + 1);
             node.NotifyChildrenChanged();
         }
 
@@ -1078,7 +1109,8 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     {
         foreach (var node in Enumerate(Sections))
         {
-            if (node.Kind == TreeNodeKind.Session && string.Equals(node.SessionId, sessionId, StringComparison.Ordinal))
+            if (node.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession
+                && string.Equals(node.SessionId, sessionId, StringComparison.Ordinal))
             {
                 node.IsRunning = isRunning;
             }
@@ -1133,6 +1165,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     public async Task RenameAsync(string sessionId, string title, CancellationToken ct)
     {
         await BackgroundRead.RunAsync(token => catalog.RenameAsync(sessionId, title, token), ct).ConfigureAwait(true);
+        SessionRenamed?.Invoke(sessionId, title);
         await RefreshAsync(ct).ConfigureAwait(true);
     }
 
@@ -1566,9 +1599,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             session.WorktreePath ?? session.WorkspacePath,
             session.Branch,
             false,
-            agents.TryGetValue(session.Id, out var snapshot) && snapshot.Count > 0
-                ? PlanSessionAgents(snapshot, session.Id)
-                : PlanStoredAgents(storedChildren, session.Id, session.Id, running))
+            SessionChildren(session.Id, storedChildren, running, agents))
         {
             IsArchived = session.Status == SessionStatus.Archived,
             // A removed session says where its directory went: gone (recycled) or still there (kept, shared, rebuilt).
@@ -1579,6 +1610,67 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                                && session.ParentSessionId is null
                                && !Directory.Exists(session.WorktreePath ?? session.WorkspacePath),
         };
+
+    /// <summary>Whether a stored child session is one the user opened under its root (an agent session) rather than a model spawn.</summary>
+    internal static bool IsAgentSession(SessionInfo session) =>
+        string.Equals(session.ChildDriver, AgentSessionKinds.ChildDriverUser, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The rows under a session, in display order: the agent sessions the user opened under it, then the agents the model
+    /// spawned (the live roster when the session is loaded, the store's parent links when it is not).
+    /// </summary>
+    private static List<TreeNodePlan> SessionChildren(
+        string sessionId,
+        ILookup<string, SessionInfo> storedChildren,
+        HashSet<string> running,
+        IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents)
+    {
+        var children = PlanAgentSessions(storedChildren, sessionId, running);
+        children.AddRange(
+            agents.TryGetValue(sessionId, out var snapshot) && snapshot.Count > 0
+                ? PlanSessionAgents(snapshot, sessionId)
+                : PlanStoredAgents(storedChildren, sessionId, sessionId, running));
+        return children;
+    }
+
+    /// <summary>
+    /// The agent-session rows of a session: the user-driven child sessions of a root, in the same place as the sub-agent rows
+    /// but drawn as sessions (a chat-bubble icon, and the child's own name). A root session's row is their parent, so they
+    /// follow it into the history group and disappear with it.
+    /// </summary>
+    private static List<TreeNodePlan> PlanAgentSessions(
+        ILookup<string, SessionInfo> children,
+        string parentSessionId,
+        HashSet<string> running)
+    {
+        var plans = new List<TreeNodePlan>();
+        foreach (var child in children[parentSessionId])
+        {
+            if (!IsAgentSession(child))
+            {
+                continue;
+            }
+
+            plans.Add(new TreeNodePlan(
+                TreeNodeKind.AgentSession,
+                "agent-session:" + child.Id,
+                child.Title,
+                string.Empty,
+                running.Contains(child.Id),
+                null,
+                child,
+                child.WorktreePath ?? child.WorkspacePath,
+                child.Branch,
+                false,
+                PlanStoredAgents(children, child.Id, child.Id, running))
+            {
+                AgentKind = child.AgentKind ?? string.Empty,
+                AgentSessionId = parentSessionId,
+            });
+        }
+
+        return plans;
+    }
 
     /// <summary>
     /// The rows under a session that is not loaded in this run: its sub-agent sessions come straight from the store, by the
@@ -1595,6 +1687,12 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         var plans = new List<TreeNodePlan>();
         foreach (var child in children[parentSessionId])
         {
+            if (IsAgentSession(child))
+            {
+                // A session the user opened under this one is a session row of its own, planned by PlanAgentSessions.
+                continue;
+            }
+
             plans.Add(new TreeNodePlan(
                 TreeNodeKind.SubAgent,
                 "agent:" + child.Id,
@@ -1799,7 +1897,11 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         node.ForkOfBranch = plan.Kind == TreeNodeKind.Worktree && plan.RowMark != TreeRowMark.Recycled ? plan.ForkOfBranch : null;
         node.RowMark = plan.RowMark;
         node.StatusText = plan.StatusText;
-        node.IsActiveSession = plan.Kind == TreeNodeKind.Session
+        // Replaced with every rebuild: a reused row must not keep the command of a plan that had an active root session.
+        node.SetNewAgentSessionCommand(null);
+        node.IsUnread = plan.Kind == TreeNodeKind.AgentSession
+                        && IsAgentSessionUnread?.Invoke(plan.Session?.Id ?? string.Empty) == true;
+        node.IsActiveSession = plan.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession
             && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
         node.IsActiveAgent = node.IsAgent && string.Equals(plan.AgentId, activeAgentId, StringComparison.Ordinal);
         node.Icon = IconOf(plan);
@@ -1878,6 +1980,17 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                             () => RemoveSession is not null && !Blocked(DirectoryOf(session)) && IsSessionBusy?.Invoke(session.Id) != true,
                             OnFailed)
                         : null);
+                break;
+            case TreeNodeKind.AgentSession when plan.Session is { } child:
+                // A session row: the click opens (or brings forward) its tab in the main group, and it can be renamed like any
+                // other session (the name is the store's Title, so a reopened tab reads the same one).
+                node.SetCommands(
+                    open: new AsyncRelayCommand(ct => OpenAgentSession?.Invoke(child.Id, ct) ?? Task.CompletedTask, () => true, OnFailed),
+                    newSession: null,
+                    archive: null,
+                    rename: new AsyncRelayCommand(ct => RenameSessionAsync(child, ct), () => !Blocked(DirectoryOf(child)), OnFailed),
+                    reveal: null,
+                    remove: null);
                 break;
             case TreeNodeKind.MainAgent or TreeNodeKind.SubAgent when plan.AgentId.Length > 0:
                 var agentId = plan.AgentId;
