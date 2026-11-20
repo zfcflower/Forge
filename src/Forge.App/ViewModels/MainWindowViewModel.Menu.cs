@@ -25,7 +25,7 @@ internal sealed partial class MainWindowViewModel
         tree.ContinueSession = ContinueSessionAsync;
         tree.RenameBranch = RenameBranchAsync;
         tree.LinkWorkspace = LinkWorkspaceAsync;
-        tree.SessionBusyReasons = id => sessions.TryGetValue(id, out var view) ? view.BusyReasons() : [];
+        tree.SessionBusyReasons = SessionBusyReasons;
         tree.IsSessionHandingOver = handingOver.Contains;
         tree.IsWorkspaceOperating = states.IsOperating;
         tree.ReadWorkspaceState = (directory, ct) => ReadWorkspaceStateAsync(git, directory, ct);

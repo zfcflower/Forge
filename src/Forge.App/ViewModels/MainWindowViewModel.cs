@@ -1439,6 +1439,36 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
     }
 
+    /// <summary>Adds the reasons of <paramref name="extra"/> that <paramref name="reasons"/> does not name yet.</summary>
+    private static void Merge(List<string> reasons, IReadOnlyList<string> extra)
+    {
+        foreach (var reason in extra)
+        {
+            if (!reasons.Contains(reason))
+            {
+                reasons.Add(reason);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Why the session is not idle (section 2, "the busy reasons are merged into the root"): the busy sources of its open
+    /// tab first, then those of the agent sessions running under it - they run turns and write tools in its worktree whether
+    /// or not their tabs, or its own, are open. The tree reads this one list for both the disabled entries and the flyout
+    /// text, so the two never disagree; a reason shared with an agent session appears once. In memory only.
+    /// </summary>
+    private List<string> SessionBusyReasons(string sessionId)
+    {
+        var reasons = new List<string>(5);
+        if (sessions.TryGetValue(sessionId, out var view))
+        {
+            reasons.AddRange(view.BusyReasons());
+        }
+
+        Merge(reasons, AgentSessionBusyReasons(sessionId));
+        return reasons;
+    }
+
     /// <summary>
     /// Why <paramref name="holder"/> cannot be taken over now (section 2, idle): the busy sources of its open tab, the busy
     /// reasons of the agent sessions running under it (they run turns and write tools in the holder's worktree, and they do so
@@ -1449,13 +1479,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private List<string> HandoverBusyReasons(SessionInfo holder, SessionWorkspaceViewModel? holderView)
     {
         var reasons = new List<string>(holderView?.BusyReasons() ?? []);
-        foreach (var reason in AgentSessionBusyReasons(holder.Id))
-        {
-            if (!reasons.Contains(reason))
-            {
-                reasons.Add(reason);
-            }
-        }
+        Merge(reasons, AgentSessionBusyReasons(holder.Id));
 
         if (handingOver.Contains(holder.Id) && !reasons.Contains(HandoverStrings.BusyHandingOver))
         {
@@ -1501,12 +1525,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     /// <summary>
     /// The busy flags of a session's open tab, a handover running for it, and the agent sessions under it (their turns, queue
-    /// and interjections live in the same worktree); in memory only.
+    /// and interjections live in the same worktree) - the same reasons the tree names when an entry is disabled; in memory only.
     /// </summary>
     private bool IsSessionBusy(string sessionId) =>
-        handingOver.Contains(sessionId)
-        || (sessions.TryGetValue(sessionId, out var view) && view.BusyReasons().Count > 0)
-        || AgentSessionBusyReasons(sessionId).Count > 0;
+        handingOver.Contains(sessionId) || SessionBusyReasons(sessionId).Count > 0;
 
     /// <summary>
     /// The parallel fork (6.5) of <paramref name="source"/>: reads the live HEAD, changes and sparse config off the UI
@@ -1838,8 +1860,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// The idle check of the merge target (section 2): the busy sources of the active session open in that workspace and
-    /// the workspace's own states. When busy, lists the reasons and returns true; nothing is queued or forced.
+    /// The idle check of the merge target (section 2): the busy sources of a session open in that workspace, the busy
+    /// reasons of the agent sessions working in it (their tabs, and their roots' tabs, may all be closed while their turns go
+    /// on), and the workspace's own states. When busy, lists the reasons and returns true; nothing is queued or forced. With
+    /// no session of that workspace on screen the dialog names the target itself - a path, not a session title.
     /// </summary>
     private async Task<bool> ShowTargetBusyAsync(string title, string target)
     {
@@ -1847,27 +1871,20 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         var live = sessions.Values.FirstOrDefault(session =>
             !session.IsReadOnlyView
             && OccupancyKey.Compute(null, session.Info.WorktreePath ?? session.Info.WorkspacePath) == key);
-        List<string> reasons;
-        string owner;
-        if (live is not null)
+        var reasons = live is not null ? HandoverBusyReasons(live.Info, live) : new List<string>(5);
+        // A session with no tab on screen is not in the open table, but its agent sessions keep running turns in that
+        // worktree: their roots answer the same busy question a handover asks.
+        Merge(reasons, WorkspaceAgentSessionBusyReasons(key));
+
+        var states = composition.WorkspaceStates;
+        if (states.IsOperating(target) && !reasons.Contains(HandoverStrings.BusyWorkspaceOperating))
         {
-            reasons = HandoverBusyReasons(live.Info, live);
-            owner = live.Info.Title;
+            reasons.Add(HandoverStrings.BusyWorkspaceOperating);
         }
-        else
+
+        if (states.IsConflicted(target) && !reasons.Contains(HandoverStrings.BusyMergeConflict))
         {
-            reasons = [];
-            if (composition.WorkspaceStates.IsOperating(target))
-            {
-                reasons.Add(HandoverStrings.BusyWorkspaceOperating);
-            }
-
-            if (composition.WorkspaceStates.IsConflicted(target))
-            {
-                reasons.Add(HandoverStrings.BusyMergeConflict);
-            }
-
-            owner = target;
+            reasons.Add(HandoverStrings.BusyMergeConflict);
         }
 
         if (reasons.Count == 0)
@@ -1875,8 +1892,35 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return false;
         }
 
-        await dialogs!.NotifyAsync(title, ForkStrings.Busy(owner, reasons)).ConfigureAwait(true);
+        await dialogs!.NotifyAsync(title, ForkStrings.Busy(live?.Info.Title ?? target, reasons)).ConfigureAwait(true);
         return true;
+    }
+
+    /// <summary>
+    /// Why the agent sessions working in the workspace keyed <paramref name="key"/> are busy (section 2, "the busy reasons
+    /// are merged into the root"): every root that has an agent-session view there - one with a tab on screen
+    /// (<see cref="agentViews"/>) or one whose tab closed while a turn ran (<see cref="agentViewsClosing"/>) - answers with
+    /// the reasons a handover of that root would give, whether or not the root's own tab is open. Each root and each reason
+    /// once.
+    /// </summary>
+    private List<string> WorkspaceAgentSessionBusyReasons(string key)
+    {
+        var reasons = new List<string>(5);
+        var roots = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var session in agentViews.Keys.Concat(agentViewsClosing))
+        {
+            if (session.AgentSessionRoot is not { } root
+                || OccupancyKey.Compute(null, HandoverFlow.DirectoryOf(root)) != key
+                || !roots.Add(root.Id))
+            {
+                continue;
+            }
+
+            sessions.TryGetValue(root.Id, out var view);
+            Merge(reasons, HandoverBusyReasons(root, view));
+        }
+
+        return reasons;
     }
 
     /// <summary>The confirmation text: what merges where, and the commits it brings in (the newest listed, the rest counted).</summary>

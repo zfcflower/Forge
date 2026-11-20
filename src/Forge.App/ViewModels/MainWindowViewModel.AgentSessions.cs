@@ -456,17 +456,9 @@ internal sealed partial class MainWindowViewModel
         var reasons = new List<string>(5);
         foreach (var session in agentViews.Keys.Concat(agentViewsClosing))
         {
-            if (!string.Equals(session.AgentSessionRoot?.Id, rootSessionId, StringComparison.Ordinal))
+            if (string.Equals(session.AgentSessionRoot?.Id, rootSessionId, StringComparison.Ordinal))
             {
-                continue;
-            }
-
-            foreach (var reason in session.BusyReasons())
-            {
-                if (!reasons.Contains(reason))
-                {
-                    reasons.Add(reason);
-                }
+                Merge(reasons, session.BusyReasons());
             }
         }
 
