@@ -214,7 +214,8 @@ internal sealed partial class ProjectTreeViewModel
     /// <summary>"Continue this session…" (6.2) of an archived session row; set by the shell.</summary>
     public Func<string, CancellationToken, Task>? ContinueSession { get; set; }
 
-    /// <summary>Why a session is not idle (its open tab's busy sources); in memory only, empty when idle or not open.</summary>
+    /// <summary>Why a session is not idle: its open tab's busy sources plus those of the user-driven agent sessions under it
+    /// (a closed root tab keeps both); in memory only, empty when idle.</summary>
     public Func<string, IReadOnlyList<string>>? SessionBusyReasons { get; set; }
 
     /// <summary>A handover of the session is running; in memory only.</summary>
