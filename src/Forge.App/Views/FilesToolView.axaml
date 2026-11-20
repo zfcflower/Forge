@@ -545,6 +545,7 @@
                 Classes.draft="{Binding Git.PullRequestIsDraft}"
                 Classes.merged="{Binding Git.PullRequestIsMerged}"
                 Classes.closed="{Binding Git.PullRequestIsClosed}"
+                IsVisible="{Binding Git.ShowsWriteActions}"
                 VerticalAlignment="Center"
                 ToolTip.Tip="{Binding Git.PullRequestProblemText}"
                 AutomationProperties.AutomationId="git-ship-target"
@@ -621,6 +622,7 @@
 
           <Button Classes="git-row-action"
                   Command="{Binding Git.PullCommand}"
+                  IsVisible="{Binding Git.ShowsWriteActions}"
                   ToolTip.Tip="{Binding Git.PullTooltip}"
                   AutomationProperties.AutomationId="git-pull"
                   AutomationProperties.Name="{Binding Git.PullTooltip}">
@@ -645,6 +647,7 @@
 
           <Button Classes="git-row-action"
                   Command="{Binding Git.PushCommand}"
+                  IsVisible="{Binding Git.ShowsWriteActions}"
                   ToolTip.Tip="{Binding Git.PushTooltip}"
                   AutomationProperties.AutomationId="git-push"
                   AutomationProperties.Name="{Binding Git.PushTooltip}">

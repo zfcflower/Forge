@@ -50,6 +50,9 @@ internal sealed class ApprovalSessionDirectory
 /// tool runs: a remembered rule answers immediately, anything else becomes a card in the <see cref="ApprovalQueue"/> and
 /// the loop waits for the user. Cancelling the waiting call withdraws the card (a late click then cannot revive it) and
 /// reports cancellation; releasing the session withdraws every card of that session as a denial.
+/// <para>A card names the session that asked: the root's own calls and a model-spawned child's stay on the root, while a
+/// user-driven child session (forge-app "Agent 会话的界面与接线") keeps its own id and its tab's title. The tool set, the
+/// policy and the remembered rules stay the root's either way: a child run shares this host.</para>
 /// <para>Several requests of one session can be open at once: Core's approval gate serializes the agent loop's own calls, but
 /// plugin and workflow <c>host.tool_call</c> steps reach this handler through <see cref="SessionToolCallRouter"/> without it.
 /// Each request owns its card and its own wait, so decisions and cancellations never touch another request's card.</para>
@@ -70,6 +73,13 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
     private readonly ApprovalQueue queue;
     private readonly ApprovalRules rules;
     private readonly string projectId;
+
+    /// <summary>
+    /// The user-driven child sessions of this root, so a card of one of them names that session instead of the root; null
+    /// for a handler built without a runtime (a card then always names the root).
+    /// </summary>
+    private readonly IAgentSessionScope? childSessions;
+
     private bool disposed;
 
     public SessionApprovalHandler(
@@ -77,12 +87,14 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
         ApprovalRules rules,
         SessionInfo session,
         INotifications? notifications = null,
-        Func<string, McpApprovalServer?>? mcpToolInfo = null)
+        Func<string, McpApprovalServer?>? mcpToolInfo = null,
+        IAgentSessionScope? childSessions = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         this.queue = queue ?? throw new ArgumentNullException(nameof(queue));
         this.rules = rules ?? throw new ArgumentNullException(nameof(rules));
         this.mcpToolInfo = mcpToolInfo;
+        this.childSessions = childSessions;
         SessionId = session.Id;
         SessionTitle = string.IsNullOrWhiteSpace(session.Title) ? session.Id : session.Title;
 
@@ -133,7 +145,15 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
         public ToolApprovalCardViewModel? Leader;
     }
 
-    public async ValueTask<ApprovalDecision> RequestAsync(ApprovalRequest request, CancellationToken ct)
+    public ValueTask<ApprovalDecision> RequestAsync(ApprovalRequest request, CancellationToken ct) =>
+        RequestAsync(request, requesterSessionId: null, ct);
+
+    /// <summary>
+    /// Same ask, for a caller that already knows which session made it: the plugin and workflow route names the calling
+    /// session, whose id a user-driven child session's flow does not carry (an agent loop's own request has no session id
+    /// at all, so that path reads <see cref="IAgentSessionScope.CurrentChildSessionId"/> meanwhile).
+    /// </summary>
+    internal async ValueTask<ApprovalDecision> RequestAsync(ApprovalRequest request, string? requesterSessionId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (disposed)
@@ -168,7 +188,7 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
             return ApprovalDecision.Allow;
         }
 
-        return await AskAsync(request, ct).ConfigureAwait(false);
+        return await AskAsync(request, requesterSessionId, ct).ConfigureAwait(false);
     }
 
     /// <summary>Withdraws this session's cards as a denial; the waiting agent loops then report an ordinary denial.</summary>
@@ -180,10 +200,23 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
         }
 
         disposed = true;
-        _ = queue.WithdrawSessionAsync(SessionId);
+        _ = WithdrawAsync();
     }
 
-    private async Task<ApprovalDecision> AskAsync(ApprovalRequest request, CancellationToken ct)
+    /// <summary>
+    /// Withdraws the root's cards and the cards of the user-driven child sessions that ran under it: a released runtime
+    /// leaves no live card behind, wherever its session ran.
+    /// </summary>
+    private async Task WithdrawAsync()
+    {
+        await queue.WithdrawSessionAsync(SessionId).ConfigureAwait(false);
+        foreach (var childSessionId in childSessions?.ChildSessionIds ?? [])
+        {
+            await queue.WithdrawSessionAsync(childSessionId).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<ApprovalDecision> AskAsync(ApprovalRequest request, string? requesterSessionId, CancellationToken ct)
     {
         // A script run's inner calls join their (run, tool) group first: the group hands out one ask at a time, so a
         // fanned-out call waits behind the card the fan-out's first call already showing instead of stacking its own.
@@ -204,10 +237,17 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
                 }
             }
 
+            // The card names the session that asked - a user-driven child session when the request came from one - while the
+            // tool, the policy and the remembered rules stay the root's (this handler's).
+            var (cardSessionId, cardTitle) = AgentSessionCardOwner.Resolve(
+                childSessions,
+                requesterSessionId ?? childSessions?.CurrentChildSessionId,
+                SessionId,
+                SessionTitle);
             var card = new ToolApprovalCardViewModel(
                 new ToolApprovalCardRequest(
-                    SessionId,
-                    SessionTitle,
+                    cardSessionId,
+                    cardTitle,
                     projectId.Length == 0 ? null : projectId,
                     request.ToolName,
                     request.SideEffect,
@@ -227,7 +267,7 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
             notifications.Notify(
                 NotificationLevel.Warning,
                 NotificationsStrings.ApprovalWaitingTitle,
-                NotificationsStrings.ApprovalWaiting(SessionTitle, request.ToolName),
+                NotificationsStrings.ApprovalWaiting(cardTitle, request.ToolName),
                 "approval:" + card.Id);
             try
             {

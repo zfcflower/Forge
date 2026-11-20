@@ -56,6 +56,13 @@ internal sealed class FileReviewController : ReviewSurfaceCore, IDisposable
         _ = Fire(ReloadAsync);
     }
 
+    /// <summary>
+    /// Whether the controller already works for exactly these services and this owner. The shell re-resolves a preview's
+    /// owner on every tab switch (forge-app "Agent 会话的界面与接线"), so it needs a way to leave an unchanged one alone.
+    /// </summary>
+    internal bool IsConfiguredFor(ReviewServices? newServices, ReviewOwner? newOwner) =>
+        ReferenceEquals(services, newServices) && owner == newOwner;
+
     public override bool CanCommentOn(int startLine, int endLine) => true;
 
     public override ReviewDraft? BeginDraft(int startLine, int endLine)

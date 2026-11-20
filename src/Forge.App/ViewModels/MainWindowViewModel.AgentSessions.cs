@@ -279,6 +279,14 @@ internal sealed partial class MainWindowViewModel
             ReleaseAgentDraft(root.Id);
         }
 
+        if (ReferenceEquals(session, activeSession))
+        {
+            // The tab's id just became the stored one: the panels (review comments, turns, git row) and the question
+            // workbench read the active session's id, so they follow the tab instead of a draft id no row will ever carry.
+            ApplyPanelContext();
+            questionPanels?.OnActiveSessionChanged(session.SessionId);
+        }
+
         _ = RefreshAgentSessionTreesAsync();
     }
 

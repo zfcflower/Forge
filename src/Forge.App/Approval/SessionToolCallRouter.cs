@@ -17,6 +17,14 @@ internal interface ISessionToolScope
 
     /// <summary>The session's handler; null means an "ask" is a denial, exactly as in the agent loop.</summary>
     IApprovalHandler? ApprovalHandler { get; }
+
+    /// <summary>
+    /// Asks the session's handler, naming the session that made the call: a plugin or workflow run of a user-driven child
+    /// session reaches this scope through its alias, and the card belongs to that child's tab while the tool set and the
+    /// policy stay the root's. A scope that has no handler denies, exactly as the router did before.
+    /// </summary>
+    ValueTask<ApprovalDecision> RequestApprovalAsync(string requesterSessionId, ApprovalRequest request, CancellationToken ct) =>
+        ApprovalHandler is { } handler ? handler.RequestAsync(request, ct) : ValueTask.FromResult(ApprovalDecision.Deny);
 }
 
 /// <summary>
@@ -24,7 +32,8 @@ internal interface ISessionToolScope
 /// tool comes from that session's tool set, the policy is the one the session's agent loop uses and an "ask" goes to that
 /// session's <see cref="SessionApprovalHandler"/>, so remembered rules and the card's session label are right. An unknown or
 /// closed session fails closed. A running sub-agent's child session id is registered as an alias of its root's scope (by
-/// <c>SessionRuntime</c>), so a child call resolves against the root's tool set and policy and its cards name the root session. The five extension authoring tools are never reachable from a plugin: their policy is
+/// <c>SessionRuntime</c>), so a child call resolves against the root's tool set and policy; its card names the root for a
+/// model-spawned child, and the child's own session for a user-driven one (forge-app "Agent 会话的界面与接线"). The five extension authoring tools are never reachable from a plugin: their policy is
 /// "allow without asking" because the plugin card is the real gate, and a plugin must not be able to stage drafts.
 /// </summary>
 internal sealed class SessionToolCallRouter : IHostToolCallRouter
@@ -80,8 +89,8 @@ internal sealed class SessionToolCallRouter : IHostToolCallRouter
         {
             case ApprovalMode.Allow:
                 return ApprovalDecision.Allow;
-            case ApprovalMode.Ask when scope.ApprovalHandler is { } handler:
-                return await handler.RequestAsync(request, ct).ConfigureAwait(false);
+            case ApprovalMode.Ask:
+                return await scope.RequestApprovalAsync(sessionId, request, ct).ConfigureAwait(false);
             default:
                 return ApprovalDecision.Deny;
         }

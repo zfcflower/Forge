@@ -18,6 +18,12 @@ internal sealed record PanelContext(string SessionId, string WorkingDirectory, s
     public static PanelContext Empty { get; } = new(string.Empty, string.Empty, null);
 
     public bool HasSession => SessionId.Length > 0;
+
+    /// <summary>
+    /// False for an agent-session tab: only the root session changes git (branch, sync, pull request), so the git row there
+    /// keeps its reads and hides its writes (forge-app "Agent 会话的界面与接线").
+    /// </summary>
+    public bool GitWrites { get; init; } = true;
 }
 
 // ---------------------------------------------------------------- files

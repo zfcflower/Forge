@@ -137,20 +137,23 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
         HttpClient? repositoryHttp = null) =>
         new(paths, host, hostProblem, notifications, preferences, repositoryHttp);
 
-    /// <summary>Registers the session title and returns the handler the session's host injects.</summary>
-    public SessionApprovalHandler CreateHandler(SessionInfo session)
+    /// <summary>
+    /// Registers the session title and returns the handler the session's host injects. <paramref name="childSessions"/> is the
+    /// runtime's list of user-driven child sessions, so their cards name the child instead of the root.
+    /// </summary>
+    public SessionApprovalHandler CreateHandler(SessionInfo session, IAgentSessionScope? childSessions = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         Sessions.Register(session.Id, session.Title);
-        return new SessionApprovalHandler(Queue, Rules, session, Notifications, McpToolInfo);
+        return new SessionApprovalHandler(Queue, Rules, session, Notifications, McpToolInfo, childSessions);
     }
 
     /// <summary>The <c>ask_user</c> handler of one session; its cards share the approval queue and its notifications.</summary>
-    public SessionQuestionHandler CreateQuestionHandler(SessionInfo session)
+    public SessionQuestionHandler CreateQuestionHandler(SessionInfo session, IAgentSessionScope? childSessions = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         Sessions.Register(session.Id, session.Title);
-        return new SessionQuestionHandler(Queue, session, Notifications);
+        return new SessionQuestionHandler(Queue, session, Notifications, childSessions);
     }
 
     /// <summary>

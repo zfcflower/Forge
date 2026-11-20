@@ -62,6 +62,13 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     private readonly WorktreeState emptyState = new(string.Empty);
 
     private PanelContext context = PanelContext.Empty;
+
+    /// <summary>
+    /// Whether the attached session may change git. An agent-session tab is read-only here: only the root session owns the
+    /// branch and the remote, so that tab keeps the branch, the numbers, fetch and the pull-request state and hides every
+    /// write (pull, push, publish, the pull-request menu).
+    /// </summary>
+    private bool gitWrites = true;
     private WorktreeState current;
     private GitSnapshot snapshot = GitSnapshot.Empty;
     /// <summary>The shell's notification entry; null (a row built on its own) means nothing is announced.</summary>
@@ -185,6 +192,12 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     /// <summary>True when the attached session is in a repository; the row is hidden otherwise.</summary>
     public bool HasRepository => snapshot.Status is not null;
+
+    /// <summary>
+    /// False in an agent-session tab: the sync verbs, the publish pill and the pull-request menu are its write half and only
+    /// the root session changes git. The reads (branch, ahead/behind, fetch, the row's own state) stay.
+    /// </summary>
+    public bool ShowsWriteActions => gitWrites;
 
     /// <summary>The branch name, or <c>HEAD@3f2a1c9</c> for a detached head; empty outside a repository.</summary>
     public string BranchLabel
@@ -407,14 +420,15 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     /// <summary>True while the branch is published (it has an upstream) and the platform says it has no pull request.</summary>
     public bool CanComposePullRequest =>
-        pullRequests is not null
+        gitWrites
+        && pullRequests is not null
         && composePullRequest is not null
         && HasUpstream
         && pullRequestPhase == PullRequestPhase.None
         && defaultBranch is { Length: > 0 };
 
     /// <summary>The 发布 pill only exists before the first push: after it, the same verb lives on the git row above.</summary>
-    public bool ShowPublish => HasRepository && !HasUpstream;
+    public bool ShowPublish => gitWrites && HasRepository && !HasUpstream;
 
     /// <summary>
     /// The 远程 readout: one line that always answers "am I on the remote?" — not published yet, N commits to push, in sync,
@@ -592,22 +606,24 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     /// <summary>True when a local merge is possible in principle: there is a root checkout and a different default branch.</summary>
     public bool CanMergeLocally() =>
-        context.ProjectRoot is { Length: > 0 } && defaultBranch is { Length: > 0 }
+        gitWrites && context.ProjectRoot is { Length: > 0 } && defaultBranch is { Length: > 0 }
         && !string.Equals(defaultBranch, snapshot.Status?.Branch, StringComparison.Ordinal);
 
     /// <summary>A draft pull request can be marked ready; every other state has nothing to take out of draft.</summary>
-    public bool CanMarkPullRequestReady => pullRequests is not null && pullRequestPhase == PullRequestPhase.Draft;
+    public bool CanMarkPullRequestReady => gitWrites && pullRequests is not null && pullRequestPhase == PullRequestPhase.Draft;
 
     /// <summary>A pull request can be merged when it is open, not a draft, and the platform says it is mergeable.</summary>
     public bool CanMergePullRequest =>
-        pullRequests is not null
+        gitWrites
+        && pullRequests is not null
         && composeMerge is not null
         && pullRequestPhase == PullRequestPhase.Open
         && pullRequestMergeState is PrMergeStateStatus.Clean or PrMergeStateStatus.HasHooks or PrMergeStateStatus.Unstable;
 
     /// <summary>The remote branch may be cleaned up once the work is in the base branch (merged or closed for good).</summary>
     public bool CanDeleteRemoteBranch =>
-        pullRequestPhase is PullRequestPhase.Merged or PullRequestPhase.Closed
+        gitWrites
+        && pullRequestPhase is PullRequestPhase.Merged or PullRequestPhase.Closed
         && HasRemote
         && snapshot.Status?.Branch is { Length: > 0 } branch
         && !string.Equals(branch, defaultBranch, StringComparison.Ordinal);
@@ -1319,6 +1335,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
         var previous = this.context;
         this.context = context;
+        gitWrites = context.GitWrites;
 
         var active = HasContext;
         var changed = !string.Equals(previous.SessionId, context.SessionId, StringComparison.Ordinal)
@@ -1739,21 +1756,22 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     private bool CanOperate() => CanRead() && snapshot.HasRepository;
 
-    /// <summary>Fetch is read-only and only needs a repository and a remote.</summary>
+    /// <summary>Fetch is read-only and only needs a repository and a remote; it stays in an agent-session tab.</summary>
     private bool CanFetchRow() => CanOperate() && HasRemote;
 
     /// <summary>
     /// Pulling needs an upstream, not a behind count: <see cref="Behind"/> only becomes true after a fetch, so gating the
     /// verb on it would leave the one action that brings the commits in unreachable until something else fetched. The
-    /// number on the button is information; the command is the user's call.
+    /// number on the button is information; the command is the user's call. Only the root session pulls.
     /// </summary>
-    private bool CanPullRow() => CanOperate() && HasUpstream;
+    private bool CanPullRow() => gitWrites && CanOperate() && HasUpstream;
 
     /// <summary>
     /// Push needs a remote and a branch — same reasoning as pull: the ahead count is as stale as the last fetch, so it
-    /// never gates the verb. With nothing to send git answers "Everything up-to-date", which is a truthful result.
+    /// never gates the verb. With nothing to send git answers "Everything up-to-date", which is a truthful result. Only the
+    /// root session pushes.
     /// </summary>
-    private bool CanPushRow() => CanOperate() && HasRemote && !IsDetached;
+    private bool CanPushRow() => gitWrites && CanOperate() && HasRemote && !IsDetached;
 
     private void NotifyCommands()
     {
@@ -1940,6 +1958,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RowAutomationName));
         OnPropertyChanged(nameof(StrategyText));
         OnPropertyChanged(nameof(PullRequestPhase));
+        OnPropertyChanged(nameof(ShowsWriteActions));
         OnPropertyChanged(nameof(CanComposePullRequest));
         OnPropertyChanged(nameof(ShowPublish));
         OnPropertyChanged(nameof(RemoteStateText));

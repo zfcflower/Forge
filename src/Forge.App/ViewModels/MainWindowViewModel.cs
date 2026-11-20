@@ -173,6 +173,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly WorkspaceDiagnostics? problemsDiagnostics;
     private PanelToolButton newTerminalButton;
     private ReviewStore reviews;
+
+    /// <summary>
+    /// The one review wiring every preview and the changes view deliver through; built on first use so a tab switch can
+    /// re-resolve a document's owner without allocating a new one (the controller compares it by reference).
+    /// </summary>
+    private Review.ReviewServices? reviewServices;
     private PanelToolButton? openChangesTool;
     private PanelToolButton? addProjectTool;
     private PanelToolButton? refreshProjectsTool;
@@ -2505,19 +2511,25 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             GitSync.Attach(PanelContext.Empty);
             SyncFinishedMenu(null);
             PruneSubAgentTabs(null, []);
+            ReapplyReviewOwners();
             return;
         }
 
         var projectRoot = session.Info.ProjectId is { } projectId && projectRoots.TryGetValue(projectId, out var root)
             ? root
             : null;
-        var context = new PanelContext(session.SessionId, session.WorkDir, projectRoot);
+
+        // The panels follow the tab: an agent-session tab hands them the child session's own id (never the root's), so the
+        // review comments, the turn list and the changed-file tree are that session's alone. Only the root changes git, so
+        // the git row of a child's tab keeps its reads and hides its writes.
+        var context = new PanelContext(session.SessionId, session.WorkDir, projectRoot) { GitWrites = !session.IsAgentSession };
         Changes.Attach(context);
         Files.Attach(context);
         Todos.Attach(session.SessionId);
         Reviews.Attach(context);
         Specs.Attach(context);
         GitSync.Attach(context);
+        ReapplyReviewOwners();
         SyncSubAgentRegion();
     }
 
@@ -2661,18 +2673,53 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     private void ConfigureReview(FileDocumentViewModel document, Review.ReviewOwner? ownerOverride = null, bool hasOverride = false)
     {
-        var session = activeSession;
-        Review.ReviewOwner? owner = hasOverride
-            ? ownerOverride
-            : session is { WorkDir.Length: > 0 }
-                ? new Review.ReviewOwner(session.WorkDir, session.SessionId)
-                : null;
-        document.ConfigureReview(CreateReviewServices(), owner);
+        // The opener either pins an owner (a stored diagnostic, a definition target) or leaves the document to the tab on
+        // screen: a preview has no owner of its own, so every tab switch re-resolves it (ApplyPanelContext).
+        document.PinReviewOwner(hasOverride ? ownerOverride : null);
+        document.ConfigureReview(CreateReviewServices(), hasOverride ? ownerOverride : ActiveReviewOwner());
+    }
+
+    /// <summary>
+    /// The session a preview's review comments belong to: the one on screen, same as the review panel and the diff view, so
+    /// an opinion written in A's preview is A's and is gone after switching to B (forge-app "Agent 会话的界面与接线").
+    /// </summary>
+    private Review.ReviewOwner? ActiveReviewOwner()
+    {
+        // A draft agent-session tab has no session row yet: a comment stored under its make-believe id could never be found
+        // again once the row exists, so the preview offers no comments there (the status line says why).
+        if (activeSession is not { WorkDir.Length: > 0 } session
+            || (session.IsAgentSession && session.AgentChildSessionId is null))
+        {
+            return null;
+        }
+
+        return new Review.ReviewOwner(session.WorkDir, session.SessionId);
+    }
+
+    /// <summary>
+    /// Hands every open preview the owner of the tab on screen again. Without this, a document keeps the owner it was opened
+    /// under, and a comment written in one agent session's preview would be filed - and shown - under another session.
+    /// </summary>
+    private void ReapplyReviewOwners()
+    {
+        foreach (var tab in Workbench.PreviewTabs.Tabs)
+        {
+            if (tab.Content is not FileDocumentViewModel document)
+            {
+                continue;
+            }
+
+            var owner = document.PinnedReviewOwner ?? ActiveReviewOwner();
+            if (document.ReviewOwner != owner)
+            {
+                document.ConfigureReview(CreateReviewServices(), owner);
+            }
+        }
     }
 
     /// <summary>File previews and the changes view share one review store, delivery path and panel refresh.</summary>
     private Review.ReviewServices CreateReviewServices() =>
-        new(
+        reviewServices ??= new(
             reviews,
             (sessionId, text, withdrawn) => sessions.TryGetValue(sessionId, out var target) && target.TryQueueReview(text, withdrawn),
             () => _ = RefreshReviewsAsync());

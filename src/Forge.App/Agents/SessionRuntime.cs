@@ -244,7 +244,7 @@ internal sealed record AgentRuntimeServices(
 /// history. A session that already has stored messages is resumed through <see cref="AgentHost.ResumeRootAsync"/>, so a
 /// reopened or restarted session continues with its context.
 /// </summary>
-internal sealed class SessionRuntime : IDisposable, ISessionToolScope
+internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSessionScope
 {
     private readonly AgentRuntimeServices services;
     private readonly Lock gate = new();
@@ -316,6 +316,26 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
     // Sub-agent sessions aliased to this runtime in the router, by child agent id. Guarded by gate.
     private readonly Dictionary<string, string> childSessions = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The user-driven child sessions of this root (forge-app "Agent 会话的界面与接线"), by session id, with the name their
+    /// cards show. Guarded by gate; entries stay for the life of the runtime so a released runtime can withdraw every card.
+    /// </summary>
+    private readonly Dictionary<string, string> userChildren = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The user-driven run of this runtime the current flow belongs to. An <see cref="AsyncLocal{T}"/> because an
+    /// <c>ApprovalRequest</c> names no session and a child's run shares the root's host; the value is set around that run only,
+    /// so the root's own turn and a model-spawned child's run keep asking under the root. One per runtime, so a flow that
+    /// reaches another session's tools is never mistaken for one of those sessions' runs.
+    /// </summary>
+    private readonly AsyncLocal<UserChildRun?> currentUserChild = new();
+
+    /// <summary>One user-driven run on its way; the session id arrives with the run's own <see cref="AgentSubAgentStarted"/>.</summary>
+    private sealed class UserChildRun
+    {
+        public string? SessionId;
+    }
 
     public SessionRuntime(AgentRuntimeServices services, SessionInfo session)
     {
@@ -516,12 +536,29 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             outsideChildren++;
         }
 
+        // The run carries its session: the row and the id only exist once the run announced itself, so the holder starts empty
+        // and the sink fills it in before any tool of this run can ask for approval. It is set right before the run starts, so
+        // the value belongs to the run's flow alone.
         try
         {
             var agentHost = await ResolveHostAsync(ct).ConfigureAwait(false);
-            var forward = new ForwardingSink(sink);
-            return await Task.Run(() => agentHost.StartUserChildAsync(definition, task, sessionTitle, forward, ct), CancellationToken.None)
-                .ConfigureAwait(false);
+            var run = new UserChildRun();
+            var forward = new ForwardingSink(value =>
+            {
+                TrackUserChildRun(value, run, sessionTitle);
+                sink(value);
+            });
+            var outer = currentUserChild.Value;
+            currentUserChild.Value = run;
+            try
+            {
+                return await Task.Run(() => agentHost.StartUserChildAsync(definition, task, sessionTitle, forward, ct), CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                currentUserChild.Value = outer;
+            }
         }
         finally
         {
@@ -548,16 +585,29 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         ArgumentNullException.ThrowIfNull(sink);
         var agentHost = await ResolveHostAsync(ct).ConfigureAwait(false);
         var message = UserMessage(text, attachments);
-        await Task.Run(
-                async () =>
-                {
-                    await foreach (var value in agentHost.RunUserChildTurnAsync(child, message, ct).ConfigureAwait(false))
+
+        // A later turn of a session this runtime already holds: the id is known before the run starts.
+        var run = new UserChildRun { SessionId = child.SessionId };
+        var outer = currentUserChild.Value;
+        currentUserChild.Value = run;
+        try
+        {
+            await Task.Run(
+                    async () =>
                     {
-                        sink(value);
-                    }
-                },
-                CancellationToken.None)
-            .ConfigureAwait(false);
+                        await foreach (var value in agentHost.RunUserChildTurnAsync(child, message, ct).ConfigureAwait(false))
+                        {
+                            TrackUserChildRun(value, run, title: null);
+                            sink(value);
+                        }
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            currentUserChild.Value = outer;
+        }
     }
 
     /// <summary>
@@ -572,7 +622,64 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         var agentHost = await ResolveHostAsync(ct).ConfigureAwait(false);
-        return await agentHost.ResumeUserChildAsync(sessionId, workingDirectory, definition, ct).ConfigureAwait(false);
+        var child = await agentHost.ResumeUserChildAsync(sessionId, workingDirectory, definition, ct).ConfigureAwait(false);
+        RegisterUserChild(sessionId, await StoredTitleAsync(sessionId, definition, ct).ConfigureAwait(false));
+        return child;
+    }
+
+    /// <summary>
+    /// The name a user-driven child's cards show: the store's title, which is what the tab and the tree row name the session.
+    /// The kind's name stands in only when the store has no row to read (a resumed session that vanished).
+    /// </summary>
+    private async Task<string> StoredTitleAsync(string sessionId, AgentDefinition definition, CancellationToken ct)
+    {
+        try
+        {
+            var stored = await services.Store.GetSessionAsync(sessionId, ct).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(stored?.Title))
+            {
+                return stored.Title;
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            AppLogs.Approval.ZLogWarning($"the title of the agent session '{sessionId}' could not be read: {exception.Message}");
+        }
+
+        return definition.Name;
+    }
+
+    /// <summary>
+    /// One event of a user-driven run. Its own start is emitted ahead of the loop, so the first one names this session: the
+    /// id is remembered (the card of a later approval or question belongs to it) and aliased to this runtime in the tool
+    /// router, exactly like a model-spawned child, so a plugin or workflow call of that session still resolves against the
+    /// root's tools, policy and approval handler. Later starts are the session's own children, which are ordinary sub-agents.
+    /// </summary>
+    private void TrackUserChildRun(AgentEvent value, UserChildRun run, string? title)
+    {
+        TrackSubAgent(value);
+        if (run.SessionId is null && value is AgentSubAgentStarted { ChildSessionId.Length: > 0 } started)
+        {
+            run.SessionId = started.ChildSessionId;
+            RegisterUserChild(started.ChildSessionId, title);
+        }
+    }
+
+    /// <summary>Remembers a user-driven child session of this root and the name its cards show.</summary>
+    private void RegisterUserChild(string sessionId, string? title)
+    {
+        lock (gate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            if (!userChildren.ContainsKey(sessionId) || !string.IsNullOrWhiteSpace(title))
+            {
+                userChildren[sessionId] = string.IsNullOrWhiteSpace(title) ? sessionId : title;
+            }
+        }
     }
 
     /// <summary>
@@ -1273,13 +1380,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         // Armed before the sources are read: an edit made while this build runs marks the snapshot stale instead of getting lost.
         StartPromptWatch();
-        var handler = services.Approvals?.CreateHandler(Session);
+        var handler = services.Approvals?.CreateHandler(Session, this);
 
         // A retried build (the first resume failed) replaces the handler; the old one must not keep a dead wait alive.
         approvalHandler?.Dispose();
         approvalHandler = handler;
         questionHandler?.Dispose();
-        questionHandler = services.Approvals?.CreateQuestionHandler(Session);
+        questionHandler = services.Approvals?.CreateQuestionHandler(Session, this);
 
         // One snapshot per build: the system slot, the agent kinds and the compaction prompt stay fixed for this host.
         var templates = services.PromptTemplates?.Resolve(Session.WorkspacePath)
@@ -1650,6 +1757,45 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             lock (gate)
             {
                 return approvalHandler;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A plugin or workflow call of a child session reaches this scope through the child's alias; the requester names that
+    /// session so its card can sit in its own tab, while the tools and the policy stay this root's.
+    /// </summary>
+    ValueTask<ApprovalDecision> ISessionToolScope.RequestApprovalAsync(string requesterSessionId, ApprovalRequest request, CancellationToken ct)
+    {
+        SessionApprovalHandler? handler;
+        lock (gate)
+        {
+            handler = disposed ? null : approvalHandler;
+        }
+
+        return handler is null
+            ? ValueTask.FromResult(ApprovalDecision.Deny)
+            : handler.RequestAsync(request, requesterSessionId, ct);
+    }
+
+    // IAgentSessionScope: what this runtime's approval and question handlers read about its user-driven child sessions.
+    string? IAgentSessionScope.CurrentChildSessionId => currentUserChild.Value?.SessionId is { Length: > 0 } id ? id : null;
+
+    string? IAgentSessionScope.ChildSessionTitle(string sessionId)
+    {
+        lock (gate)
+        {
+            return userChildren.TryGetValue(sessionId, out var title) ? title : null;
+        }
+    }
+
+    IReadOnlyList<string> IAgentSessionScope.ChildSessionIds
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. userChildren.Keys];
             }
         }
     }
