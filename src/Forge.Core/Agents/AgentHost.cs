@@ -139,6 +139,12 @@ public sealed class AgentHost
     private readonly AgentLoop loop;
     private readonly ISessionStore? store;
 
+    /// <summary>
+    /// The root session this host belongs to, recorded when the root agent is created or resumed: user-driven sessions
+    /// start under it, and their start events name it as the parent. One host carries one main session.
+    /// </summary>
+    private RootSession? rootSession;
+
     public AgentHost(AgentHostOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -301,6 +307,77 @@ public sealed class AgentHost
     }
 
     /// <summary>
+    /// Host side of a new agent session: starts a user-driven child session under this host's root session and runs its
+    /// first turn. It uses the same tree <see cref="SpawnChildAsync"/> uses - one run slot from the same pool (queued when
+    /// they are all busy), the same approval handler and cancellation table - but the caller names the agent
+    /// <paramref name="definition"/>, so the app decides the kind and model the user picked, and the session row is written
+    /// with <c>child_driver = "user"</c> and the root session as its parent. The sink receives
+    /// <see cref="AgentSubAgentStarted"/> with the root session as parent, then the child's own events, then exactly one
+    /// <see cref="AgentSubAgentFinished"/> carrying the run's usage and elapsed time. Returns the child's final text.
+    /// </summary>
+    public Task<SubAgentOutcome> StartUserChildAsync(
+        AgentDefinition definition,
+        string task,
+        string? sessionTitle,
+        IAgentEventSink sink,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(sink);
+        var root = Volatile.Read(ref rootSession) ?? throw new InvalidOperationException(
+            "This host has no root session yet: create or resume the root agent before starting a user session under it.");
+        return scheduler.StartUserSessionAsync(definition, task, sessionTitle, root.SessionId, root.WorkingDirectory, sink, ct);
+    }
+
+    /// <summary>
+    /// Runs one more turn of a user-driven session as a stream of its events. It is the same run as
+    /// <see cref="RunAsync(AgentInstance, ChatMessage, CancellationToken)"/> - same loop, same slot pool, same approval
+    /// path - plus the user-session lifecycle: the run joins the cancellation table, so <see cref="SubAgentControl"/> stops
+    /// it, and <see cref="AgentSubAgentFinished"/> closes it with this turn's usage and elapsed time. An instance this host
+    /// did not register as a user session is not run at all: the stream carries one <see cref="AgentFailed"/> saying why.
+    /// </summary>
+    public IAsyncEnumerable<AgentEvent> RunUserChildTurnAsync(
+        AgentInstance child,
+        ChatMessage message,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        ArgumentNullException.ThrowIfNull(message);
+        var root = Volatile.Read(ref rootSession);
+        return StreamAsync(
+            child.Id,
+            child.Definition.Model,
+            (sink, token) => scheduler.RunUserTurnAsync(child, message, root?.SessionId, sink, token),
+            ct);
+    }
+
+    /// <summary>
+    /// Rebuilds a stored user-driven session as an instance of this host after a restart: the history comes back the way the
+    /// compactor leaves it (the same <see cref="SessionHistory"/> path <see cref="ResumeRootAsync"/> takes) and the instance
+    /// is registered as user-owned under the <c>session-&lt;n&gt;</c> namespace, so the model's tools still cannot reach it.
+    /// Resuming a session this host already holds returns that instance instead of building a second agent for it.
+    /// </summary>
+    public Task<AgentInstance> ResumeUserChildAsync(
+        string sessionId,
+        string workingDirectory,
+        AgentDefinition definition,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentNullException.ThrowIfNull(definition);
+        return scheduler.ResumeUserSessionAsync(sessionId, workingDirectory, definition, ct);
+    }
+
+    /// <summary>
+    /// Stops every run of a user-driven session this host owns - queued or running - and returns how many were stopped. The
+    /// root session's own turn is not touched: the shell stops that one and calls this for the sessions under it when the
+    /// user presses stop on the root.
+    /// </summary>
+    public int StopUserChildren(string? reason = null) => scheduler.StopUserSessions(reason);
+
+    /// <summary>
     /// Replaces the externally supplied tools (the <see cref="AgentHostOptions.Tools"/> part; built-in tools such as
     /// retrieval, <c>todo</c> and the sub-agent tools stay). Thread-safe. Running loops pick the new set up before their next
     /// model request, so a tool approved mid-turn is callable in the same turn; the changed definitions break the prompt
@@ -358,13 +435,17 @@ public sealed class AgentHost
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         var kind = definition ?? new AgentDefinition("Root", "Main coding agent.", string.Empty, options.DefaultModel);
-        return new AgentInstance(
+        var directory = Path.GetFullPath(workingDirectory);
+        var root = new AgentInstance(
             id,
             kind,
             sessionId,
-            Path.GetFullPath(workingDirectory),
+            directory,
             0,
             composer.Compose(new PromptInput(layers, kind.Prompt, null)));
+        // The host now knows its main session: a user-driven child session is started under this one.
+        Volatile.Write(ref rootSession, new RootSession(sessionId, directory));
+        return root;
     }
 
     public AgentInstance CreateRoot(string sessionId, string workingDirectory, string kind, string id = "root")
@@ -432,14 +513,31 @@ public sealed class AgentHost
     /// Runs one user turn whose message is already built (text plus attached images); otherwise the same as the text
     /// overload.
     /// </summary>
-    public async IAsyncEnumerable<AgentEvent> RunAsync(
+    public IAsyncEnumerable<AgentEvent> RunAsync(
         AgentInstance root,
         ChatMessage userMessage,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(userMessage);
+        return StreamAsync(
+            root.Id,
+            root.Definition.Model,
+            (sink, token) => loop.RunAsync(root, userMessage, sink, token),
+            ct);
+    }
 
+    /// <summary>
+    /// One run's events as a stream: <paramref name="body"/> runs off the caller's thread into a sink that feeds the channel,
+    /// failures arrive as <see cref="AgentFailed"/> (with the account's windows when a provider rejected the request), and
+    /// abandoning the enumeration cancels the run. Shared by the root, user-session and any other run of this host.
+    /// </summary>
+    private async IAsyncEnumerable<AgentEvent> StreamAsync(
+        string agentId,
+        ModelSettings model,
+        Func<IAgentEventSink, CancellationToken, Task> body,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var channel = Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions
         {
@@ -453,7 +551,7 @@ public sealed class AgentHost
             {
                 try
                 {
-                    await loop.RunAsync(root, userMessage, sink, token).ConfigureAwait(false);
+                    await body(sink, token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
@@ -464,16 +562,16 @@ public sealed class AgentHost
                     // shows what is actually exhausted instead of only that something failed.
                     if (exception is ProviderException { RateLimit: { } rateLimit })
                     {
-                        sink.Emit(new AgentRateLimitUpdated(root.Id, rateLimit));
+                        sink.Emit(new AgentRateLimitUpdated(agentId, rateLimit));
                     }
 
                     if (exception is ProviderException provider
-                        && ProviderQuota.Classify(provider, root.Definition.Model, DateTimeOffset.UtcNow) is { } quota)
+                        && ProviderQuota.Classify(provider, model, DateTimeOffset.UtcNow) is { } quota)
                     {
-                        sink.Emit(new AgentQuotaExhausted(root.Id, quota));
+                        sink.Emit(new AgentQuotaExhausted(agentId, quota));
                     }
 
-                    sink.Emit(new AgentFailed(root.Id, exception.Message));
+                    sink.Emit(new AgentFailed(agentId, exception.Message));
                 }
                 finally
                 {
@@ -502,4 +600,7 @@ public sealed class AgentHost
             }
         }
     }
+
+    /// <summary>The main session this host was built for; see <see cref="rootSession"/>.</summary>
+    private sealed record RootSession(string SessionId, string WorkingDirectory);
 }

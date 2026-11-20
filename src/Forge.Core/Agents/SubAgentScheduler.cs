@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using Forge.Abstractions;
 using Forge.Core.Prompts;
+using Forge.Core.Storage;
 
 namespace Forge.Core.Agents;
 
@@ -33,6 +34,9 @@ public sealed class SubAgentScheduler : ISubAgentControl
 {
     private const int TitleLimit = 80;
     private const string ParentCancelled = "parent cancelled";
+
+    /// <summary>A user-driven session sits directly under the root session; its own spawns are the only ones below it.</summary>
+    private const int UserSessionDepth = 1;
 
     private readonly AgentCatalog catalog;
     private readonly PromptLayers layers;
@@ -203,11 +207,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
         WarnWhenBroaderThanParent(definition, parentId, sink);
 
         AgentInstance? instance = null;
-        SubAgentRun? run = null;
         var holdsGate = false;
-        var usageBefore = TokenUsage.Empty;
-        var completed = false;
-        string? failure = null;
         var watch = Stopwatch.StartNew();
         try
         {
@@ -243,37 +243,243 @@ public sealed class SubAgentScheduler : ISubAgentControl
             if (instance is null)
             {
                 var sessionId = await CreateSessionAsync(definition, task, context, ct).ConfigureAwait(false);
-                instance = new AgentInstance(
-                    NextId(definition.Name, owner),
-                    definition,
-                    sessionId,
-                    context.WorkingDirectory,
-                    context.AgentDepth + 1,
-                    composer.Compose(new PromptInput(layers, definition.Prompt, null)));
+                instance = NewInstance(definition, sessionId, context.WorkingDirectory, context.AgentDepth + 1, owner);
                 Register(instance, owner);
                 instance.TryAcquire();
                 holdsGate = true;
             }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The run never started, so no finish event is due; report it the way a failed run would.
+            var id = instance?.Id ?? resumeId ?? string.Empty;
+            return new SubAgentOutcome(id, $"Sub-agent '{id}' failed: {exception.Message}", IsError: true);
+        }
 
-            usageBefore = instance.Usage;
+        try
+        {
+            return await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, watch, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (holdsGate)
+            {
+                instance.Release();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Starts a user-driven child session (an "Agent session" the user opened under the root session) and runs its first
+    /// turn. Everything a model spawn uses is shared: the tree's run slots and queue order, the approval path, the
+    /// cancellation table and the rate limits. Only ownership differs - the session row records
+    /// <see cref="StorageSchema.ChildDriverUser"/> with <paramref name="rootSessionId"/> as its parent, and the instance is
+    /// registered as <see cref="AgentOwner.User"/> under the <c>session-&lt;n&gt;</c> namespace, so the model's tools answer
+    /// for its id exactly like for one that never existed. The definition is the caller's choice (the app offers the kinds
+    /// and models the user picked); this method never looks a kind up in the catalog.
+    /// </summary>
+    public async Task<SubAgentOutcome> StartUserSessionAsync(
+        AgentDefinition definition,
+        string task,
+        string? sessionTitle,
+        string rootSessionId,
+        string workingDirectory,
+        IAgentEventSink sink,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(sink);
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootSessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+
+        var watch = Stopwatch.StartNew();
+        var context = new ToolContext(rootSessionId, workingDirectory, 0);
+        var sessionId = await CreateSessionAsync(definition, task, context, ct, sessionTitle, StorageSchema.ChildDriverUser)
+            .ConfigureAwait(false);
+        var instance = NewInstance(definition, sessionId, context.WorkingDirectory, UserSessionDepth, AgentOwner.User);
+        Register(instance, AgentOwner.User);
+
+        // A session that was just registered has never run, so its gate is free.
+        instance.TryAcquire();
+        try
+        {
+            return await DriveAsync(instance, ChatMessage.User(task), task, sink, rootSessionId, watch, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            instance.Release();
+        }
+    }
+
+    /// <summary>
+    /// Runs one more turn of a user-driven session with the same lifecycle every child run has: the run joins the
+    /// cancellation table (so <see cref="ISubAgentControl.Stop"/> reaches it), queues for a tree slot, and ends with exactly
+    /// one <see cref="AgentSubAgentFinished"/> carrying this turn's usage and elapsed time. An instance this scheduler did
+    /// not register as a user session is not driven at all: the sink gets one <see cref="AgentFailed"/> saying why.
+    /// <paramref name="parentId"/> is what the started event names as the parent, or null to announce no start.
+    /// </summary>
+    public async Task<SubAgentOutcome> RunUserTurnAsync(
+        AgentInstance instance,
+        ChatMessage message,
+        string? parentId,
+        IAgentEventSink sink,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(sink);
+        if (!IsUserSession(instance))
+        {
+            return Refuse(instance.Id, $"Agent '{instance.Id}' is not a user-driven session of this host, so it was not run.", sink);
+        }
+
+        if (!instance.TryAcquire())
+        {
+            return Refuse(instance.Id, $"Agent session '{instance.Id}' is still running.", sink);
+        }
+
+        try
+        {
+            return await DriveAsync(instance, message, TextOf(message), sink, parentId, Stopwatch.StartNew(), ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            instance.Release();
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds a stored user-driven session as an instance of this host, with the history the compactor leaves
+    /// (<see cref="SessionHistory.LoadAsync"/>, the path <see cref="AgentHost.ResumeRootAsync"/> takes) and registered as
+    /// <see cref="AgentOwner.User"/> under the <c>session-&lt;n&gt;</c> namespace. Resuming a session this scheduler already
+    /// holds returns that instance instead of building a second agent for it. Nothing announces a start here: after a
+    /// restart the shell places the session from this instance, and each turn announces its own run.
+    /// </summary>
+    public async Task<AgentInstance> ResumeUserSessionAsync(
+        string sessionId,
+        string workingDirectory,
+        AgentDefinition definition,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentNullException.ThrowIfNull(definition);
+        if (FindUserSession(sessionId) is { } existing)
+        {
+            return existing;
+        }
+
+        var instance = NewInstance(definition, sessionId, Path.GetFullPath(workingDirectory), UserSessionDepth, AgentOwner.User);
+        if (RegisterUserSession(sessionId, instance) is { } raced)
+        {
+            return raced;
+        }
+
+        if (store is { } sessionStore)
+        {
+            instance.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, sessionId, ct).ConfigureAwait(false));
+        }
+
+        return instance;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="instance"/> is a user-driven session this scheduler registered - the same instance, not just
+    /// an id - so an instance built elsewhere (or a model-spawned child whose id was copied) is never driven as one.
+    /// </summary>
+    public bool IsUserSession(AgentInstance instance)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        lock (gate)
+        {
+            return instances.TryGetValue(instance.Id, out var registered)
+                   && ReferenceEquals(registered, instance)
+                   && owners.TryGetValue(instance.Id, out var owner)
+                   && owner == AgentOwner.User;
+        }
+    }
+
+    /// <summary>
+    /// Stops every run of a user-driven session this scheduler owns - queued or running - and returns how many were stopped.
+    /// Runs the model owns are untouched, and so is the root session's own turn: the shell stops that one and calls this for
+    /// the sessions under it when the user stops the root.
+    /// </summary>
+    public int StopUserSessions(string? reason = null)
+    {
+        List<SubAgentRun> victims = [];
+        lock (gate)
+        {
+            foreach (var (id, run) in runs)
+            {
+                if (owners.TryGetValue(id, out var owner) && owner == AgentOwner.User)
+                {
+                    victims.Add(run);
+                }
+            }
+        }
+
+        var stopped = 0;
+        foreach (var run in victims)
+        {
+            if (!run.StopRequested && run.Stop(reason) == SubAgentControlResult.Accepted)
+            {
+                stopped++;
+            }
+        }
+
+        return stopped;
+    }
+
+    private static SubAgentOutcome Refuse(string id, string reason, IAgentEventSink sink)
+    {
+        sink.Emit(new AgentFailed(id, reason));
+        return new SubAgentOutcome(id, reason, IsError: true);
+    }
+
+    /// <summary>
+    /// Runs one turn of an instance under the lifecycle every child run shares: it joins the cancellation table, queues for a
+    /// tree slot, announces itself when <paramref name="parentId"/> is known, and ends with exactly one
+    /// <see cref="AgentSubAgentFinished"/> carrying this run's usage and elapsed time (measured from <paramref name="watch"/>,
+    /// so queueing is included).
+    /// </summary>
+    private async Task<SubAgentOutcome> DriveAsync(
+        AgentInstance instance,
+        ChatMessage message,
+        string task,
+        IAgentEventSink sink,
+        string? parentId,
+        Stopwatch watch,
+        CancellationToken ct)
+    {
+        SubAgentRun? run = null;
+        var usageBefore = instance.Usage;
+        var completed = false;
+        string? failure = null;
+        try
+        {
             instance.ResetText();
             run = Attach(instance, sink, ct);
+            if (parentId is not null)
+            {
+                sink.Emit(new AgentSubAgentStarted(
+                    parentId,
+                    instance.Id,
+                    instance.Definition.Name,
+                    task,
+                    instance.Definition.Model.Model,
+                    instance.SessionId,
+                    DateTimeOffset.UtcNow));
+            }
 
-            sink.Emit(new AgentSubAgentStarted(
-                parentId,
-                instance.Id,
-                instance.Definition.Name,
-                task,
-                instance.Definition.Model.Model,
-                instance.SessionId,
-                DateTimeOffset.UtcNow));
-            var result = await Runner(instance, ChatMessage.User(task), sink, run.Token).ConfigureAwait(false);
+            var result = await Runner(instance, message, sink, run.Token).ConfigureAwait(false);
             completed = true;
             return new SubAgentOutcome(instance.Id, result.Text, IsError: false);
         }
         catch (OperationCanceledException) when (run is not null && run.StopRequested)
         {
-            return new SubAgentOutcome(instance!.Id, StoppedText(instance, run), IsError: false) { Stopped = true };
+            return new SubAgentOutcome(instance.Id, StoppedText(instance, run), IsError: false) { Stopped = true };
         }
         catch (OperationCanceledException)
         {
@@ -282,28 +488,18 @@ public sealed class SubAgentScheduler : ISubAgentControl
         catch (Exception exception)
         {
             failure = exception.Message;
-            if (instance is not null)
-            {
-                sink.Emit(new AgentFailed(instance.Id, exception.Message));
-            }
-
-            var id = instance?.Id ?? resumeId ?? string.Empty;
-            return new SubAgentOutcome(id, $"Sub-agent '{id}' failed: {exception.Message}", IsError: true);
+            sink.Emit(new AgentFailed(instance.Id, exception.Message));
+            return new SubAgentOutcome(instance.Id, $"Sub-agent '{instance.Id}' failed: {exception.Message}", IsError: true);
         }
         finally
         {
-            if (run is not null && instance is not null)
+            if (run is not null)
             {
                 var (status, error) = FinishState(completed, run, failure, ct);
                 run.Finish(status, UsageOf(instance, usageBefore), watch.Elapsed, error);
                 instance.Control = null;
                 Detach(instance.Id, run);
                 run.Dispose();
-            }
-
-            if (holdsGate)
-            {
-                instance!.Release();
             }
         }
     }
@@ -342,6 +538,22 @@ public sealed class SubAgentScheduler : ISubAgentControl
             total.OutputTokens - before.OutputTokens,
             total.CacheReadTokens - before.CacheReadTokens,
             total.CacheWriteTokens - before.CacheWriteTokens);
+    }
+
+    /// <summary>The typed text of a message, which the started event carries as that run's task.</summary>
+    private static string TextOf(ChatMessage message)
+    {
+        StringBuilder? builder = null;
+        foreach (var block in message.Content)
+        {
+            if (block is TextBlock text)
+            {
+                builder ??= new StringBuilder(text.Text.Length + 32);
+                builder.Append(text.Text);
+            }
+        }
+
+        return builder?.ToString() ?? string.Empty;
     }
 
     private static string StoppedText(AgentInstance instance, SubAgentRun run)
@@ -401,6 +613,61 @@ public sealed class SubAgentScheduler : ISubAgentControl
         }
     }
 
+    /// <summary>An instance with a fresh id of <paramref name="owner"/>'s namespace and its own prompt prefix.</summary>
+    private AgentInstance NewInstance(
+        AgentDefinition definition,
+        string sessionId,
+        string workingDirectory,
+        int depth,
+        AgentOwner owner) =>
+        new(
+            NextId(definition.Name, owner),
+            definition,
+            sessionId,
+            workingDirectory,
+            depth,
+            composer.Compose(new PromptInput(layers, definition.Prompt, null)));
+
+    private AgentInstance? FindUserSession(string sessionId)
+    {
+        lock (gate)
+        {
+            return FindUserSessionLocked(sessionId);
+        }
+    }
+
+    /// <summary><paramref name="instance"/> registered, or the instance another caller registered for the same session first.</summary>
+    private AgentInstance? RegisterUserSession(string sessionId, AgentInstance instance)
+    {
+        lock (gate)
+        {
+            if (FindUserSessionLocked(sessionId) is { } raced)
+            {
+                return raced;
+            }
+
+            instances[instance.Id] = instance;
+            owners[instance.Id] = AgentOwner.User;
+            return null;
+        }
+    }
+
+    /// <summary>The user-driven instance of <paramref name="sessionId"/> this scheduler holds, if any. Called under <see cref="gate"/>.</summary>
+    private AgentInstance? FindUserSessionLocked(string sessionId)
+    {
+        foreach (var (id, instance) in instances)
+        {
+            if (string.Equals(instance.SessionId, sessionId, StringComparison.Ordinal)
+                && owners.TryGetValue(id, out var owner)
+                && owner == AgentOwner.User)
+            {
+                return instance;
+            }
+        }
+
+        return null;
+    }
+
     private string NextId(string kind, AgentOwner owner)
     {
         // Model-spawned children stay <kind>-<n>; user-driven sessions get their own namespace so an id alone says who
@@ -414,15 +681,22 @@ public sealed class SubAgentScheduler : ISubAgentControl
         }
     }
 
-    private async Task<string> CreateSessionAsync(AgentDefinition definition, string task, ToolContext context, CancellationToken ct)
+    private async Task<string> CreateSessionAsync(
+        AgentDefinition definition,
+        string task,
+        ToolContext context,
+        CancellationToken ct,
+        string? title = null,
+        string? childDriver = null)
     {
         if (store is null)
         {
             return Guid.NewGuid().ToString("n");
         }
 
-        var title = task.Length <= TitleLimit ? task : task[..TitleLimit];
-        var full = string.Concat(definition.Name, ": ", title);
+        var full = string.IsNullOrWhiteSpace(title)
+            ? string.Concat(definition.Name, ": ", task.Length <= TitleLimit ? task : task[..TitleLimit])
+            : title;
         if (sessions is null)
         {
             var created = await store.CreateSessionAsync(context.WorkingDirectory, full, ct).ConfigureAwait(false);
@@ -439,6 +713,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
                     ParentSessionId = context.SessionId,
                     AgentKind = definition.Name,
                     Task = task,
+                    ChildDriver = childDriver,
                     WorktreePath = parent?.WorktreePath,
                     ProjectId = parent?.ProjectId,
                 },
