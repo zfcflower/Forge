@@ -17,6 +17,15 @@ namespace Forge.App.ViewModels;
 /// </summary>
 internal sealed record AgentSessionLaunch(SessionInfo Root, int Ordinal, bool IsDraft);
 
+/// <summary>
+/// One reading of an agent session's child instance: the usage and model-streaming time it had when the turn began or ended.
+/// Both counters only grow, so a turn's own share is the difference between two readings of the same instance (see
+/// <see cref="SessionWorkspaceViewModel.AgentTurnStream"/>); the instance is kept so a rebuilt one is never differenced
+/// against its predecessor. A class rather than a struct because the run thread writes the start reading and the UI thread
+/// reads it whole.
+/// </summary>
+internal sealed record AgentSessionCounters(TokenUsage Usage, TimeSpan Stream, object Instance);
+
 /// <summary>The texts an agent-session tab derives that are not localized sentences: the label separator and the default name.</summary>
 internal static class AgentSessionLabel
 {
@@ -70,10 +79,30 @@ internal sealed partial class SessionWorkspaceViewModel
 
     /// <summary>
     /// The terminal event of the tab's own run, written on the run's thread and read at the turn end: it is where this turn's
-    /// usage, elapsed time and outcome come from (forge-core: usage is per instance, so an agent session's numbers are its own
-    /// run's and never the root instance's counters). Reset when each turn begins.
+    /// tokens and its outcome come from (forge-core: usage is per instance, so an agent session's numbers are its own run's
+    /// and never the root instance's counters). Reset when each turn begins.
     /// </summary>
     private AgentSubAgentFinished? agentRunEnded;
+
+    /// <summary>
+    /// The child instance's counters as the running turn began, read from the run's start event (ahead of its first model
+    /// request) or from the instance the tab already holds. The counters only grow, so the turn's own model-streaming time is
+    /// the difference to the reading at its end (see <see cref="AgentTurnStream"/>); null before the first turn.
+    /// </summary>
+    private AgentSessionCounters? agentTurnStartCounters;
+
+    /// <summary>
+    /// The child instance's counters as they were last read. The tab's usage bar is fed from it, and a reading that is
+    /// momentarily unavailable keeps this one instead of dropping the bar to zero.
+    /// </summary>
+    private AgentSessionCounters? agentLastCounters;
+
+    /// <summary>
+    /// Set when the run emitted its own turn-completed event, written on the run's thread before the run ends. That event
+    /// already carries the instance's cumulative usage and stream time to the card and the strip, so the turn end must not
+    /// add the same reading on top of it. Reset when each turn begins.
+    /// </summary>
+    private int agentTurnCompleted;
 
     private bool agentUnread;
 
@@ -205,6 +234,7 @@ internal sealed partial class SessionWorkspaceViewModel
         Interlocked.Exchange(ref lastActivityTicks, turnStartedAt.UtcTicks);
         Interlocked.Exchange(ref runningTools, 0);
         Interlocked.Exchange(ref agentRunEnded, null);
+        Interlocked.Exchange(ref agentTurnCompleted, 0);
         turnToolCalls = 0;
         Transcript.AddUserMessage(text, turnStartedAt, prompt.Attachments);
         var card = Transcript.BeginTurn(turnStartedAt);
@@ -260,6 +290,7 @@ internal sealed partial class SessionWorkspaceViewModel
                     .ResumeUserChildAsync(agentChildSessionId, WorkDir, definition, token)
                     .ConfigureAwait(true);
                 agentInstance = child;
+                BeginAgentCounters();
                 turnNo = await BeginAgentTurnAsync(agentChildSessionId, card.Round).ConfigureAwait(true);
                 turnNumber = turnNo.Value;
                 await live.RunUserChildTurnAsync(child, text, prompt.Attachments, OnAgentSessionEvent, token).ConfigureAwait(true);
@@ -296,7 +327,22 @@ internal sealed partial class SessionWorkspaceViewModel
                 {
                     var number = turnNo ?? card.Round;
                     Instruments.NoteTurnEnded(number);
-                    RecordAgentTurnMetrics(childSessionId, number, definition, error);
+
+                    // This turn's numbers out of the child's own instance: the reading it had when the turn began against the
+                    // one it has now, never the root runtime's counters and never a wall clock. An instance the host no longer
+                    // holds (a stopped run) leaves the stream time at zero and the row's outcome as the run reported it.
+                    var counters = ReadAgentCounters();
+                    var stream = AgentTurnStream(counters);
+                    RecordAgentTurnMetrics(childSessionId, number, definition, error, stream);
+                    if (!disposed && Volatile.Read(ref agentTurnCompleted) == 0)
+                    {
+                        // A run that stopped or failed emits no turn-completed event, so nothing has shown its spend or its
+                        // streaming time yet: the instance reading fills that in. When the event did come it is the card's
+                        // and the strip's source, and adding the same reading again would count the turn twice.
+                        NoteAgentTurnUsage(counters);
+                        NoteAgentTurnStream(counters, stream);
+                    }
+
                     if (turnNo is not null)
                     {
                         await CompleteAgentTurnAsync(childSessionId, number).ConfigureAwait(true);
@@ -366,11 +412,13 @@ internal sealed partial class SessionWorkspaceViewModel
 
     /// <summary>
     /// Hands the child's turn to the same metrics writer the root session uses, keyed by the child's own session id and with
-    /// the numbers of its own run: the tokens and the elapsed time are the ones its <see cref="AgentSubAgentFinished"/> carries
-    /// (forge-core: usage is per instance), so the root instance's counters are never read here - charging the child with
-    /// them would count the root's spend a second time.
+    /// the numbers of its own run: the tokens are the ones its <see cref="AgentSubAgentFinished"/> carries (forge-core: usage is
+    /// per instance), so the root instance's counters are never read here - charging the child with them would count the
+    /// root's spend a second time. The stream time is the instance's own difference over the turn
+    /// (<paramref name="streamTime"/>): the column records the model's streaming and never the run's wall-clock span, and a
+    /// reading that was gone writes 0, which is a fact the table can hold (NOT NULL, no fallback).
     /// </summary>
-    private void RecordAgentTurnMetrics(string childSessionId, int turn, AgentDefinition definition, LocText? error)
+    private void RecordAgentTurnMetrics(string childSessionId, int turn, AgentDefinition definition, LocText? error, TimeSpan streamTime)
     {
         if (metricsRecorder is not { Enabled: true } recorder)
         {
@@ -395,12 +443,11 @@ internal sealed partial class SessionWorkspaceViewModel
                 DateTimeOffset.UtcNow,
                 outcome,
                 run?.Error ?? turnRootFailure,
-                // The run's own numbers as the difference against an empty baseline, and its elapsed time in the column a root
-                // turn fills with the model's streaming time: a sub-agent run is measured as one span from spawn to finish
-                // (queueing included), and that span is the only duration its finished event reports.
+                // The run's own tokens as the difference against an empty baseline, and this turn's model-streaming time as
+                // the difference between the child instance's two readings (empty baseline: the difference is the span).
                 run?.Usage ?? TokenUsage.Empty,
                 TokenUsage.Empty,
-                run?.Elapsed ?? TimeSpan.Zero,
+                streamTime,
                 TimeSpan.Zero,
                 turnToolCalls,
                 definition.Model.ProviderId is { Length: > 0 } declared
@@ -415,6 +462,105 @@ internal sealed partial class SessionWorkspaceViewModel
             // The writer promises never to throw, but a row is never worth a turn: this is the belt to that suspender.
             AppLogs.Usage.ZLogWarning($"agent session metrics row not queued: {exception.GetType().Name}: {exception.Message}");
         }
+    }
+
+    /// <summary>
+    /// The instance id of the tab's child: the one its run announced (written before the run's first request, so it is also
+    /// what the run thread reads), else the one the tab holds for a resumed session that has not run here yet.
+    /// </summary>
+    private string? AgentChildAgentId => Volatile.Read(ref agentAgentId) ?? agentInstance?.Id;
+
+    /// <summary>
+    /// Takes the reading a turn is measured against: the child instance's cumulative counters as the run begins. The run's
+    /// start event is the precise moment (it precedes the first model request); a later turn also reads it here, so a host
+    /// that announces no start still measures the turn against the right reading.
+    /// </summary>
+    private void BeginAgentCounters()
+    {
+        if (ReadAgentCounters() is { } reading)
+        {
+            Volatile.Write(ref agentTurnStartCounters, reading);
+        }
+    }
+
+    /// <summary>
+    /// The child instance's cumulative counters, or null when this host no longer holds it (a stopped run, a released
+    /// instance). Every successful reading is kept as the last one, so the tab's usage bar can show it rather than a zero.
+    /// </summary>
+    private AgentSessionCounters? ReadAgentCounters()
+    {
+        if (runtime is { } live && live.TryReadAgentCounters(AgentChildAgentId, out var counters) && counters.Instance is { } instance)
+        {
+            var reading = new AgentSessionCounters(counters.Usage, counters.Stream, instance);
+            Volatile.Write(ref agentLastCounters, reading);
+            return reading;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// This turn's model-streaming time: the difference between the two readings of the same instance. Zero when either
+    /// reading is missing or belongs to another instance - a turn's stream time is never the instance's lifetime and never the
+    /// wall clock, so nothing is a better answer than a made-up one.
+    /// </summary>
+    private TimeSpan AgentTurnStream(AgentSessionCounters? end)
+    {
+        var start = Volatile.Read(ref agentTurnStartCounters);
+        return end is { } streamed
+               && start is { } began
+               && ReferenceEquals(streamed.Instance, began.Instance)
+               && streamed.Stream > began.Stream
+            ? streamed.Stream - began.Stream
+            : TimeSpan.Zero;
+    }
+
+    /// <summary>
+    /// Feeds the tab's own usage bar from the child instance, never from the root runtime's counters: this tab runs on the
+    /// root's runtime, but the spend it shows is the child's. What this view already counted - the turn-completed events it
+    /// saw - is the baseline, so a run that ended without one (a stop, a failure) still shows what it spent; a reading that is
+    /// gone adds nothing, and the bar keeps the last numbers it had instead of dropping to zero.
+    /// </summary>
+    private void NoteAgentTurnUsage(AgentSessionCounters? counters)
+    {
+        if ((counters ?? Volatile.Read(ref agentLastCounters)) is not { } reading)
+        {
+            return;
+        }
+
+        var counted = agentUsage.TryGetValue("root", out var stored) ? stored : TokenUsage.Empty;
+        var delta = new TokenUsage(
+            Math.Max(0, reading.Usage.InputTokens - counted.InputTokens),
+            Math.Max(0, reading.Usage.OutputTokens - counted.OutputTokens),
+            Math.Max(0, reading.Usage.CacheReadTokens - counted.CacheReadTokens),
+            Math.Max(0, reading.Usage.CacheWriteTokens - counted.CacheWriteTokens),
+            Math.Max(0, reading.Usage.CacheWrite1hTokens - counted.CacheWrite1hTokens));
+        if (delta.InputTokens == 0 && delta.OutputTokens == 0 && delta.CacheReadTokens == 0 && delta.CacheWriteTokens == 0
+            && delta.CacheWrite1hTokens == 0)
+        {
+            return;
+        }
+
+        // The same per-agent bookkeeping a turn-completed event does, on the instance's cumulative scale: an event still queued
+        // for the UI thread then finds nothing left to add, and the next one differences from this reading.
+        agentUsage["root"] = reading.Usage;
+        Instruments.AddTurn("root", delta);
+    }
+
+    /// <summary>
+    /// Puts this turn's model-streaming time on the tab's turn card when the run emitted no turn-completed event of its own (a
+    /// stop or a failure emits none), which would otherwise leave the divider without an output rate. The counter the event
+    /// would difference from is kept on the instance's cumulative scale, so the next turn's event starts from the right place.
+    /// </summary>
+    private void NoteAgentTurnStream(AgentSessionCounters? counters, TimeSpan stream)
+    {
+        if (counters is not { } reading || stream <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        agentStream["root"] = reading.Stream;
+        turnCard?.NoteStream(stream);
     }
 
     /// <summary>
@@ -435,6 +581,11 @@ internal sealed partial class SessionWorkspaceViewModel
             {
                 Volatile.Write(ref agentAgentId, started.ChildId);
             }
+
+            // This turn's baseline, still ahead of the run's first model request: whatever the instance has streamed so far is
+            // everything before this turn, so the row's stream time is the difference to the reading at the turn's end. A
+            // draft's instance is new and reads zero, exactly like the root's first turn.
+            BeginAgentCounters();
 
             // The draft's first checkpoint is keyed by the row this run just created, so the id is handed over here, on the
             // run's thread and before its first request (see RunAgentSessionTurnAsync).
@@ -461,6 +612,13 @@ internal sealed partial class SessionWorkspaceViewModel
             if (value is AgentSubAgentQueued or AgentSubAgentRunning)
             {
                 return;
+            }
+
+            if (value is AgentTurnCompleted)
+            {
+                // The run reports its own cumulative counters: the card and the strip take this turn's numbers from that event
+                // (queued to the UI thread), so the turn end must not add the instance reading on top of it.
+                Interlocked.Exchange(ref agentTurnCompleted, 1);
             }
 
             OnAgentEvent(value with { AgentId = "root" });

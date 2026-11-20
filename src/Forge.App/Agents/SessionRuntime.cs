@@ -945,6 +945,32 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         }
     }
 
+    /// <summary>
+    /// One instance this host holds - the root's, or a user-driven child's - with its cumulative counters, read live (they
+    /// only move on that instance's own thread, so a reading before a run and one after it are a turn's share). False when
+    /// the host is not built or no longer holds that instance: a caller then keeps its last reading instead of a zero.
+    /// </summary>
+    internal bool TryReadAgentCounters(string? agentId, out RootCounters counters)
+    {
+        if (!string.IsNullOrEmpty(agentId))
+        {
+            AgentHost? live;
+            lock (gate)
+            {
+                live = host;
+            }
+
+            if (live is not null && live.SubAgents.TryGetInstance(agentId, out var instance))
+            {
+                counters = new RootCounters(instance.Usage, instance.StreamElapsed, instance);
+                return true;
+            }
+        }
+
+        counters = RootCounters.None;
+        return false;
+    }
+
     private async Task<(AgentHost Host, AgentInstance Agent)> ResolveAsync()
     {
         AgentHost built;
