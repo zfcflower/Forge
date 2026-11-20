@@ -30,15 +30,6 @@ internal interface ISessionInstrumentSources
     /// <summary>What is known about the model the composer shows, in the context of the provider that serves it.</summary>
     ModelMetadata ModelMetadata(string modelId, string? providerId = null);
 
-    /// <summary>True when a VS Code executable could be resolved, so the menu item is only offered when it works.</summary>
-    bool HasVsCode { get; }
-
-    /// <summary>Opens one folder in VS Code; a failure is traced, never thrown at the UI.</summary>
-    void OpenInVsCode(string path);
-
-    /// <summary>Reveals one folder in the platform file manager.</summary>
-    void OpenInExplorer(string path);
-
     /// <summary>
     /// The main turns a session already recorded: how many it ran and how long they took, summed for the usage summary.
     /// The source is <c>turn_metrics</c> — every turn, a failed or unreported one included — and a database without that
@@ -300,21 +291,6 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
         });
     }
 
-    public void OpenInExplorer(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        var start = OperatingSystem.IsWindows()
-            ? new ProcessStartInfo { FileName = "explorer.exe", Arguments = "\"" + path + "\"", UseShellExecute = true }
-            : OperatingSystem.IsMacOS()
-                ? new ProcessStartInfo { FileName = "open", Arguments = "\"" + path + "\"", UseShellExecute = true }
-                : new ProcessStartInfo { FileName = "xdg-open", Arguments = "\"" + path + "\"", UseShellExecute = true };
-        TryStart(start);
-    }
-
     /// <summary>
     /// Reads the session's recorded turns and sums them. A store that cannot be read is an empty history, not an error:
     /// the summary then reports what this window watched instead of failing to open.
@@ -394,8 +370,6 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
 {
     public static EmptySessionInstrumentSources Instance { get; } = new();
 
-    public bool HasVsCode => false;
-
     public bool McpFailed() => false;
 
     public event Action? McpStateChanged
@@ -405,14 +379,6 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
     }
 
     public ModelMetadata ModelMetadata(string modelId, string? providerId = null) => Abstractions.ModelMetadata.Unknown;
-
-    public void OpenInVsCode(string path)
-    {
-    }
-
-    public void OpenInExplorer(string path)
-    {
-    }
 
     public Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct, int? maxTurnExclusive = null) =>
         Task.FromResult(SessionTurnHistory.Empty);

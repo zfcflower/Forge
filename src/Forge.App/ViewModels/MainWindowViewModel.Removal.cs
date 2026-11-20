@@ -214,24 +214,14 @@ internal sealed partial class MainWindowViewModel
         }
 
         RemovalOutcome outcome;
-        SessionInfo? archived = null;
+        List<SessionInfo> archived = [];
         try
         {
-            if (plan.Active is { } toArchive)
+            var (archivedSessions, archiveError) = await ArchiveWorkspaceSessionsAsync(target.Directory).ConfigureAwait(true);
+            archived = archivedSessions;
+            if (archiveError is not null)
             {
-                var catalog = composition.Catalog;
-                try
-                {
-                    await Task.Run(() => catalog.SetStatusAsync(toArchive.Id, SessionStatus.Archived, CancellationToken.None), CancellationToken.None)
-                        .ConfigureAwait(true);
-                }
-                catch (Exception exception) when (exception is not OutOfMemoryException)
-                {
-                    return await FailAsync(RemovalStrings.ArchiveFailed(exception.Message)).ConfigureAwait(true);
-                }
-
-                archived = toArchive;
-                OnSessionArchived(toArchive.Id);
+                return await FailAsync(RemovalStrings.ArchiveFailed(archiveError)).ConfigureAwait(true);
             }
 
             if (!plan.Missing)
@@ -252,7 +242,7 @@ internal sealed partial class MainWindowViewModel
         if (outcome.Error is { } error)
         {
             // The archive is not rolled back (7.3 step 1): say it happened and why the directory stayed.
-            failure = await FailAsync(archived is null ? error : RemovalStrings.ArchivedNotRemoved(archived.Title, error)).ConfigureAwait(true);
+            failure = await FailAsync(archived.Count == 0 ? error : RemovalStrings.ArchivedNotRemoved(archived[0].Title, error)).ConfigureAwait(true);
         }
 
         if (report)
@@ -261,6 +251,62 @@ internal sealed partial class MainWindowViewModel
         }
 
         return failure;
+    }
+
+    /// <summary>
+    /// Archives every live session of the workspace before its directory goes away. Archiving a root hands the workspace to
+    /// its newest agent session, so the loop archives that one next and stops only when the branch has no unarchived session
+    /// left - which is exactly the condition the removal itself needs. Returns the sessions it archived, or the reason the
+    /// chain stopped (the removal then keeps the directory).
+    /// </summary>
+    private async Task<(List<SessionInfo> Archived, string? Error)> ArchiveWorkspaceSessionsAsync(string directory)
+    {
+        var catalog = composition.Catalog;
+        var archived = new List<SessionInfo>();
+        while (true)
+        {
+            SessionInfo? next;
+            try
+            {
+                IReadOnlyList<SessionInfo> live = await BackgroundRead.RunAsync(
+                        token => catalog.QueryAsync(new SessionQuery { Status = SessionStatus.Active }, token),
+                        CancellationToken.None)
+                    .ConfigureAwait(true);
+                next = live.FirstOrDefault(session => RemovalFlow.SameDirectory(RemovalFlow.DirectoryOf(session), directory));
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                return (archived, exception.Message);
+            }
+
+            if (next is null)
+            {
+                return (archived, null);
+            }
+
+            try
+            {
+                // A root is archived through the handover, so its successor is promoted in the same transaction; an agent
+                // session (one whose root is already archived) is archived on its own.
+                if (next.ParentSessionId is null)
+                {
+                    await BackgroundRead.RunAsync(token => catalog.ArchiveAndPromoteAsync(next.Id, null, token), CancellationToken.None)
+                        .ConfigureAwait(true);
+                }
+                else
+                {
+                    await BackgroundRead.RunAsync(token => catalog.SetStatusAsync(next.Id, SessionStatus.Archived, token), CancellationToken.None)
+                        .ConfigureAwait(true);
+                }
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                return (archived, exception.Message);
+            }
+
+            archived.Add(next);
+            OnSessionArchived(next.Id);
+        }
     }
 
     /// <summary>

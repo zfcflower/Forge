@@ -162,6 +162,18 @@ public interface ISessionCatalog
     Task<SessionInfo> HandoverAsync(string oldSessionId, HandoverTarget target, CancellationToken ct) =>
         throw new NotSupportedException(nameof(HandoverAsync));
 
+    /// <summary>
+    /// Archives a root session and hands its workspace to one of its user-driven agent sessions (a child with
+    /// <c>child_driver = "user"</c>), all in one transaction. The root must still be Active and parentless, else
+    /// <see cref="SessionNotActiveException"/>; everything else rolls back on failure.
+    /// <para>The promoted session, <paramref name="promoteSessionId"/> (an Active agent session of that root) or the root's
+    /// most recently active one when it is null, becomes the workspace's root (no parent, no child driver, still Active);
+    /// the archived root is demoted to an archived agent session of it, as are the root's other Active agent sessions.
+    /// With no agent session to promote the root is archived alone and null is returned.</para>
+    /// </summary>
+    Task<SessionInfo?> ArchiveAndPromoteAsync(string rootSessionId, string? promoteSessionId, CancellationToken ct) =>
+        throw new NotSupportedException(nameof(ArchiveAndPromoteAsync));
+
     /// <summary>Sets Deleted + <c>deleted_at</c> on the sessions and all their descendants in one transaction; returns how many rows changed.</summary>
     Task<int> SoftDeleteAsync(IReadOnlyList<string> sessionIds, CancellationToken ct) =>
         throw new NotSupportedException(nameof(SoftDeleteAsync));

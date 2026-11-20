@@ -559,7 +559,12 @@ internal sealed class RemovalFlow(
         }
 
         var directory = DirectoryOf(session);
-        if (RootsAt(directory, all).Any(other => !string.Equals(other.Id, session.Id, StringComparison.Ordinal)))
+
+        // A branch keeps its directory while any session of it is still unarchived - root or agent session, not just a second
+        // root: an agent session that runs in the workspace needs the folder even after the root it hung under was archived.
+        if (all.Any(other => !string.Equals(other.Id, session.Id, StringComparison.Ordinal)
+                             && other.Status == SessionStatus.Active
+                             && SameDirectory(DirectoryOf(other), directory)))
         {
             return DirectoryFate.Shared;
         }

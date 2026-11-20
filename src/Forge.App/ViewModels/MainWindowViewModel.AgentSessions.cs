@@ -202,7 +202,6 @@ internal sealed partial class MainWindowViewModel
             TurnGate = token => CheckTurnAsync(root.Id, token),
         };
         created = session;
-        ApplyProject(session);
         session.AgentSessionCreated += OnAgentSessionCreated;
         session.TurnStarted += OnAgentSessionTurnStarted;
         session.AgentSessionTurnEnded += OnAgentSessionTurnEnded;

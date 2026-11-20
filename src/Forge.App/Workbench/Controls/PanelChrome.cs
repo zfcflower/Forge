@@ -699,7 +699,9 @@ internal sealed class PanelChrome : TemplatedControl
         PinTooltip = ShellStrings.AutoHide;
 
         var minimized = model.IsMinimized;
-        MinimizeIcon = WorkbenchIcons.Find(this, minimized ? "IconPanelRestore" : "IconMinimize");
+        // The restore glyph is the same FIS arrow_maximize_vertical the files panel's "expand all" draws, so the one shape
+        // lives in one key rather than being copied a second time under a panel-specific name.
+        MinimizeIcon = WorkbenchIcons.Find(this, minimized ? "IconArrowMaximizeVertical" : "IconMinimize");
         MinimizeTooltip = minimized ? ShellStrings.RestorePanel : ShellStrings.MinimizePanel;
         PseudoClasses.Set(":minimized", minimized);
     }

@@ -58,6 +58,9 @@ internal static class ProjectStrings
     public const string RenameKey = "project.rename";
     public const string ArchiveKey = "project.archive";
     public const string RevealInExplorerKey = "project.reveal";
+    public const string OpenInVsCodeKey = "project.openVscode";
+    public const string PromoteToMainKey = "project.promoteToMain";
+    public const string PromotedToMainKey = "project.promotedToMain";
     public const string RemoveProjectKey = "project.remove";
     public const string OpenKey = "project.open";
     public const string OpenSessionNameKey = "project.openSessionName";
@@ -102,6 +105,9 @@ internal static class ProjectStrings
         Loc.Register(RenameKey, "重命名", "Rename");
         Loc.Register(ArchiveKey, "归档", "Archive");
         Loc.Register(RevealInExplorerKey, "在资源管理器中打开", "Reveal in Explorer");
+        Loc.Register(OpenInVsCodeKey, "在 VS Code 中打开", "Open in VS Code");
+        Loc.Register(PromoteToMainKey, "晋升为主会话", "Promote to main session");
+        Loc.Register(PromotedToMainKey, "“{0}”现在是这个工作区的主会话。", "\"{0}\" is the main session of this workspace now.");
         Loc.Register(RemoveProjectKey, "移除项目(仅取消注册)", "Remove project (unregisters only)");
         Loc.Register(OpenKey, "打开", "Open");
         Loc.Register(OpenSessionNameKey, "打开会话", "Open session");
@@ -222,6 +228,13 @@ internal static class ProjectStrings
     public static string Archive => Loc.Instance[ArchiveKey];
 
     public static string RevealInExplorer => Loc.Instance[RevealInExplorerKey];
+
+    public static string OpenInVsCode => Loc.Instance[OpenInVsCodeKey];
+
+    public static string PromoteToMain => Loc.Instance[PromoteToMainKey];
+
+    /// <summary>The tree's status line after an archive handed the workspace to another session.</summary>
+    public static string PromotedToMain(string session) => Loc.Instance.Format(PromotedToMainKey, session);
 
     public static string RemoveProject => Loc.Instance[RemoveProjectKey];
 

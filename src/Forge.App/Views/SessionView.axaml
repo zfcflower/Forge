@@ -165,19 +165,18 @@
               Classes="composer-card"
               Classes.focused="{Binding #Input.IsKeyboardFocusWithin}">
         <Grid RowDefinitions="Auto,Auto">
-          <!-- The strip: counters and the workspace button on the left, the context readout on the right. The working
-               directory is not shown here any more - the project tree on the left already names the session; the full path
-               stays in the workspace button's tooltip. -->
+          <!-- The strip: the running counters on the left, the context readout on the right. Neither the working directory
+               nor the branch is shown here: the project tree on the left already names both, and a chip for either repeated a
+               value the user already sees twice. -->
           <Border x:Name="InstrumentStrip"
                   Grid.Row="0"
                   Classes="instrument-strip"
                   SizeChanged="OnInstrumentStripSizeChanged">
             <Grid ColumnDefinitions="Auto,*,Auto">
               <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <!-- No status dot and no path here: the project tree already carries both the session and its state, and
-                     the path repeated the workspace button's own folder name. -->
-                <!-- Only the git markers: the branch is named by the workspace button and the project tree, so a chip for it
-                     repeated a value the user already sees twice. -->
+                <!-- Only the git markers: no status dot, no path and no branch - the project tree already carries the
+                     session, its state and the branch it runs on, so a chip for any of them repeated a value the user
+                     already sees twice. -->
                 <StackPanel x:Name="StripGit" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <TextBlock Classes="instrument-meta"
                              Text="{Binding Instruments.AheadBehindText}"
@@ -238,45 +237,6 @@
                                  AutomationProperties.AutomationId="strip-subagents-count" />
                     </Border>
                   </StackPanel>
-                </Button>
-
-                <Border Classes="instrument-divider" />
-
-                <!-- The workspace button names the session's working directory; the menu offers the project and the
-                     workspace separately, because they are two different folders for a worktree session. -->
-                <Button x:Name="StripWorkspace"
-                        Classes="instrument-project"
-                        ToolTip.Tip="{Binding Instruments.WorkspaceTooltip}"
-                        AutomationProperties.AutomationId="strip-workspace"
-                        AutomationProperties.Name="{Binding Instruments.WorkspaceName}">
-                  <StackPanel Orientation="Horizontal" Spacing="6">
-                    <wc:FluentIcon Data="{StaticResource IconFolder}" Width="14" Height="14" />
-                    <TextBlock Text="{Binding Instruments.WorkspaceName}"
-                               MaxWidth="160"
-                               TextWrapping="NoWrap"
-                               TextTrimming="CharacterEllipsis" />
-                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
-                  </StackPanel>
-                  <Button.Flyout>
-                    <MenuFlyout Placement="BottomEdgeAlignedRight">
-                      <MenuItem Header="{Binding [session.strip.project.vscode], Source={x:Static loc:Loc.Instance}}"
-                                Command="{Binding Instruments.OpenProjectInVsCodeCommand}"
-                                IsVisible="{Binding Instruments.CanOpenProjectInVsCode}"
-                                AutomationProperties.AutomationId="strip-project-vscode" />
-                      <MenuItem Header="{Binding [session.strip.workspace.vscode], Source={x:Static loc:Loc.Instance}}"
-                                Command="{Binding Instruments.OpenWorkspaceInVsCodeCommand}"
-                                IsVisible="{Binding Instruments.CanOpenWorkspaceInVsCode}"
-                                AutomationProperties.AutomationId="strip-workspace-vscode" />
-                      <MenuItem Header="{Binding [session.strip.project.explorer], Source={x:Static loc:Loc.Instance}}"
-                                Command="{Binding Instruments.OpenProjectInExplorerCommand}"
-                                IsVisible="{Binding Instruments.CanOpenProjectInExplorer}"
-                                AutomationProperties.AutomationId="strip-project-explorer" />
-                      <MenuItem Header="{Binding [session.strip.workspace.explorer], Source={x:Static loc:Loc.Instance}}"
-                                Command="{Binding Instruments.OpenWorkspaceInExplorerCommand}"
-                                IsVisible="{Binding Instruments.CanOpenWorkspaceInExplorer}"
-                                AutomationProperties.AutomationId="strip-workspace-explorer" />
-                    </MenuFlyout>
-                  </Button.Flyout>
                 </Button>
               </StackPanel>
 

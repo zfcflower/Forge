@@ -136,7 +136,16 @@
                                    Foreground="{DynamicResource TextMutedBrush}"
                                    IsVisible="{Binding IsAutomationSession}"
                                    ToolTip.Tip="{Binding [automations.session.createdBy], Source={x:Static loc:Loc.Instance}}" />
-                    <Ellipse Grid.Column="5" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
+                    <!-- A running session's dot is centred on the same 11 px-from-the-edge point as a branch row's trailing
+                         button, so the two columns line up; the row keeps its 24 px surface. -->
+                    <Panel Grid.Column="5"
+                           Width="22"
+                           VerticalAlignment="Stretch"
+                           IsVisible="{Binding IsRunning}">
+                      <Ellipse Classes="status-dot running"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    </Panel>
                     <!-- A repository project without a remote: one click pairs it with one (a URL, or a new GitHub repository
                          through gh); the button is gone once a remote exists. -->
                     <Button Grid.Column="6"
@@ -163,7 +172,9 @@
                           ToolTip.Tip="{Binding NewSessionTooltip}"
                           AutomationProperties.AutomationId="project-new-session"
                           AutomationProperties.Name="{Binding NewSessionTooltip}">
-                    <wc:FluentIcon Data="{Binding NewSessionGlyph}" Width="12" Height="12" />
+                    <wc:FluentIcon Data="{Binding NewSessionGlyph}"
+                                   Width="{Binding NewSessionGlyphSize}"
+                                   Height="{Binding NewSessionGlyphSize}" />
                   </Button>
                 </Grid>
                 <!-- Agent rows: icon first, then title, the chevron and the grey status text. No guide lines. The icon's left
@@ -197,11 +208,11 @@
                                    HorizontalAlignment="Center" />
                     <!-- A sub-agent's state is a mark, not a caption: a coloured dot while it is queued, running or ended
                          badly, a green check once it finished fine. The words stay in the tooltip. -->
-                    <!-- The mark stops short of the row's right edge, so it reads as part of the title rather than as a
-                         column pinned to the panel edge, and keeps a fixed gap from the text before it. -->
+                    <!-- The mark sits in the same 22 px right-hand slot a sibling row's trailing button occupies, so the
+                         right rail of the tree is one straight column from the project row down to the last sub-agent. -->
                     <Panel Grid.Column="2"
-                           VerticalAlignment="Center"
-                           Margin="0,0,10,0"
+                           Width="22"
+                           VerticalAlignment="Stretch"
                            IsVisible="{Binding HasStatusGlyph}"
                            ToolTip.Tip="{Binding StatusText}">
                       <Ellipse Classes="status-dot"
@@ -210,9 +221,11 @@
                                Classes.agent-failed="{Binding IsAgentFailed}"
                                Classes.agent-stopped="{Binding IsAgentStopped}"
                                Classes.agent-ended="{Binding IsAgentEndedGlyph}"
+                               HorizontalAlignment="Center"
                                IsVisible="{Binding ShowsStatusDot}" />
                       <wc:FluentIcon Classes="status-check"
                                      Data="{StaticResource IconCheck}"
+                                     HorizontalAlignment="Center"
                                      IsVisible="{Binding ShowsStatusCheck}" />
                     </Panel>
                   </Grid>
@@ -234,12 +247,13 @@
                Text="{Binding StatusText}" />
 
     <!-- One flat, virtualized row list: expanding or collapsing a row splices only its subtree. Projects are added from
-         the panel's title bar, so the body holds nothing but the tree. -->
+         the panel's title bar, so the body holds nothing but the tree. The right padding is 6 px wider than the rest: the
+         overlay scrollbar gets its own lane instead of sitting on top of a row's trailing button. -->
     <ListBox x:Name="TreeList"
              Grid.Row="1"
              ItemsSource="{Binding Rows}"
              ItemTemplate="{StaticResource TreeNodeTemplate}"
-             Padding="8"
+             Padding="8,8,14,8"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
              AutomationProperties.AutomationId="project-tree"
              AutomationProperties.Name="{Binding [project.treeName], Source={x:Static loc:Loc.Instance}}">

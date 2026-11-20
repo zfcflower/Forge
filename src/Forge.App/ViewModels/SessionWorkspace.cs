@@ -668,7 +668,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 "root",
                 null,
                 SessionStrings.MainAgentTitle,
-                SessionStrings.MainAgentTitle,
                 IsRunning ? SessionStrings.SubAgentRunning : string.Empty,
                 IsRunning,
                 true),
@@ -689,7 +688,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private static AgentNodeSnapshot SnapshotOf(SubAgentViewModel agent) => new(
         agent.AgentId,
         agent.ParentAgentId,
-        agent.Kind,
         agent.Task,
         agent.StatusText,
         agent.IsLive,

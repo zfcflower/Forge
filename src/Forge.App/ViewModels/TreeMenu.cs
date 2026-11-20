@@ -12,6 +12,7 @@ internal enum TreeMenuKey
     LinkWorkspace,
     RenameProject,
     Reveal,
+    OpenInVsCode,
     CloseProject,
     NewSession,
     NewAgentSession,
@@ -27,6 +28,7 @@ internal enum TreeMenuKey
     PurgeAll,
     RenameSession,
     Archive,
+    Promote,
     RemoveSession,
     View,
     Continue,
@@ -97,6 +99,12 @@ internal sealed record TreeRowState(TreeRowKind Kind)
     /// <summary>A merge or rebase is in progress in the checkout (read at refresh).</summary>
     public bool MergeOrRebase { get; init; }
 
+    /// <summary>The row is an agent session (a user-opened child session of a root), not a root session.</summary>
+    public bool IsAgentSession { get; init; }
+
+    /// <summary>A VS Code executable was resolved, so "open in VS Code" is worth offering; without one the entry is left out.</summary>
+    public bool CanOpenInVsCode { get; init; }
+
     public bool HeadOffBranch => Head is GitHeadKind.Detached or GitHeadKind.UnbornBranch;
 }
 
@@ -122,16 +130,8 @@ internal static class TreeMenu
         ArgumentNullException.ThrowIfNull(row);
         var entries = row.Kind switch
         {
-            TreeRowKind.RepositoryProject =>
-            [
-                new(TreeMenuKey.NewWorkspace), new(TreeMenuKey.LinkWorkspace), TreeMenuEntry.Divider,
-                new(TreeMenuKey.RenameProject), new(TreeMenuKey.Reveal), TreeMenuEntry.Divider,
-                new(TreeMenuKey.CloseProject),
-            ],
-            TreeRowKind.PlainProject =>
-            [
-                new(TreeMenuKey.RenameProject), new(TreeMenuKey.Reveal), TreeMenuEntry.Divider, new(TreeMenuKey.CloseProject),
-            ],
+            TreeRowKind.RepositoryProject => Project(row, repository: true),
+            TreeRowKind.PlainProject => Project(row, repository: false),
             TreeRowKind.RootCheckout => RootCheckout(row),
             TreeRowKind.Workspace => Workspace(row),
             TreeRowKind.RecycledWorkspace =>
@@ -141,9 +141,9 @@ internal static class TreeMenu
                 new(TreeMenuKey.PurgeAll),
             ],
             TreeRowKind.ActiveSession => ActiveSession(row),
-            // A session the user opened under a root: it is renamed here and nowhere else; archiving and removal follow the
-            // root, so the row offers no entries of its own for them.
-            TreeRowKind.AgentSession => [Gate(TreeMenuKey.RenameSession, WorkspaceBlock(row))],
+            // A session the user opened under a root stands beside it: it is renamed and archived here, and promoted to the
+            // workspace's root from here; removal follows its own archive, so an active row never offers it.
+            TreeRowKind.AgentSession => AgentSession(row),
             TreeRowKind.HistorySession => HistorySession(row),
             TreeRowKind.RemovedSession =>
             [
@@ -167,12 +167,31 @@ internal static class TreeMenu
         return row.Kind is TreeRowKind.RootCheckout or TreeRowKind.Workspace ? First(row) : [];
     }
 
+    private static List<TreeMenuEntry> Project(TreeRowState row, bool repository)
+    {
+        var entries = new List<TreeMenuEntry>();
+        if (repository)
+        {
+            entries.Add(new(TreeMenuKey.NewWorkspace));
+            entries.Add(new(TreeMenuKey.LinkWorkspace));
+            entries.Add(TreeMenuEntry.Divider);
+        }
+
+        entries.Add(new(TreeMenuKey.RenameProject));
+        entries.Add(new(TreeMenuKey.Reveal));
+        AddOpenInVsCode(entries, row);
+        entries.Add(TreeMenuEntry.Divider);
+        entries.Add(new(TreeMenuKey.CloseProject));
+        return entries;
+    }
+
     private static List<TreeMenuEntry> RootCheckout(TreeRowState row)
     {
         var entries = First(row);
         entries.Add(TreeMenuEntry.Divider);
         AddAbort(entries, row);
         entries.Add(Gate(TreeMenuKey.Reveal, row.DirectoryMissing ? LifecycleStrings.DirectoryMissing : null));
+        AddOpenInVsCode(entries, row);
         return entries;
     }
 
@@ -193,6 +212,7 @@ internal static class TreeMenu
         {
             // A stale worktree: the folder is there to reveal, nothing that runs git in it can work; removal stays.
             entries.Add(new(TreeMenuKey.Reveal));
+            AddOpenInVsCode(entries, row);
             entries.Add(TreeMenuEntry.Divider);
             entries.Add(Gate(TreeMenuKey.RemoveWorkspace, OperationBlock(row)));
             return entries;
@@ -214,6 +234,7 @@ internal static class TreeMenu
         }
 
         entries.Add(new(TreeMenuKey.Reveal));
+        AddOpenInVsCode(entries, row);
         entries.Add(TreeMenuEntry.Divider);
         entries.Add(Gate(TreeMenuKey.RemoveWorkspace, waits));
         return entries;
@@ -258,29 +279,45 @@ internal static class TreeMenu
         // Handing over / an operation / a conflict stop everything; busy stops what would pull the session away (5.3).
         var block = WorkspaceBlock(row);
         var waits = block ?? BusyReason(row);
-        var entries = new List<TreeMenuEntry>(6) { Gate(TreeMenuKey.RenameSession, block) };
+        var entries = new List<TreeMenuEntry>(3) { Gate(TreeMenuKey.RenameSession, block) };
         if (row.InRepository)
         {
             entries.Add(Gate(TreeMenuKey.ForkInherit, waits));
         }
 
+        // No removal entry: only an archived (history) session can be removed, so the archive above is what the row offers.
         entries.Add(Gate(TreeMenuKey.Archive, waits));
-        entries.Add(TreeMenuEntry.Divider);
-        entries.Add(Gate(TreeMenuKey.RemoveSession, waits));
         return entries;
+    }
+
+    /// <summary>An agent session beside its root: rename, promote it to the workspace's root, or archive it.</summary>
+    private static List<TreeMenuEntry> AgentSession(TreeRowState row)
+    {
+        var block = WorkspaceBlock(row);
+        var waits = block ?? BusyReason(row);
+        return
+        [
+            Gate(TreeMenuKey.RenameSession, block),
+            Gate(TreeMenuKey.Promote, waits),
+            TreeMenuEntry.Divider,
+            Gate(TreeMenuKey.Archive, waits),
+        ];
     }
 
     private static List<TreeMenuEntry> HistorySession(TreeRowState row)
     {
         var block = WorkspaceBlock(row);
-        return
-        [
-            new(TreeMenuKey.View, IsDefault: true),
-            Gate(TreeMenuKey.Continue, row.DirectoryMissing ? LifecycleStrings.DirectoryMissing : row.StaleReason),
-            Gate(TreeMenuKey.RenameSession, block),
-            TreeMenuEntry.Divider,
-            Gate(TreeMenuKey.RemoveSession, block),
-        ];
+        var entries = new List<TreeMenuEntry> { new(TreeMenuKey.View, IsDefault: true) };
+        if (!row.IsAgentSession)
+        {
+            // Only a root session continues (it resumes the workspace); an agent session's archived row is read-only.
+            entries.Add(Gate(TreeMenuKey.Continue, row.DirectoryMissing ? LifecycleStrings.DirectoryMissing : row.StaleReason));
+        }
+
+        entries.Add(Gate(TreeMenuKey.RenameSession, block));
+        entries.Add(TreeMenuEntry.Divider);
+        entries.Add(Gate(TreeMenuKey.RemoveSession, block));
+        return entries;
     }
 
     /// <summary>"Abort the merge" while the workspace is conflicted (6.6 step 5); refused only while another operation runs.</summary>
@@ -289,6 +326,18 @@ internal static class TreeMenu
         if (row.Conflicted)
         {
             entries.Add(Gate(TreeMenuKey.AbortMerge, row.Operating ? HandoverStrings.BusyWorkspaceOperating : null));
+        }
+    }
+
+    /// <summary>
+    /// "Open in VS Code" right after "reveal", for a project or workspace row whose directory exists. Without a resolvable VS Code
+    /// executable the entry is left out rather than greyed: there is nothing the user could do to make it work from here.
+    /// </summary>
+    private static void AddOpenInVsCode(List<TreeMenuEntry> entries, TreeRowState row)
+    {
+        if (row.CanOpenInVsCode && !row.DirectoryMissing)
+        {
+            entries.Add(new(TreeMenuKey.OpenInVsCode));
         }
     }
 
@@ -340,6 +389,7 @@ internal static class TreeMenu
         TreeMenuKey.LinkWorkspace => TreeMenuStrings.LinkWorkspace,
         TreeMenuKey.RenameProject => TreeMenuStrings.RenameProject,
         TreeMenuKey.Reveal => ProjectStrings.RevealInExplorer,
+        TreeMenuKey.OpenInVsCode => ProjectStrings.OpenInVsCode,
         TreeMenuKey.CloseProject => RemovalStrings.MenuCloseProject,
         TreeMenuKey.NewSession => ProjectStrings.NewSession,
         TreeMenuKey.NewAgentSession => AgentSessionStrings.MenuNew,
@@ -355,6 +405,7 @@ internal static class TreeMenu
         TreeMenuKey.PurgeAll => RemovalStrings.MenuPurgeAll,
         TreeMenuKey.RenameSession => ProjectStrings.Rename,
         TreeMenuKey.Archive => ProjectStrings.Archive,
+        TreeMenuKey.Promote => ProjectStrings.PromoteToMain,
         TreeMenuKey.RemoveSession => RemovalStrings.MenuRemoveSession,
         TreeMenuKey.View => TreeMenuStrings.ViewReadOnly,
         TreeMenuKey.Continue => TreeMenuStrings.ContinueSession,

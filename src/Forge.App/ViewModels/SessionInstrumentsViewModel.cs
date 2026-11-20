@@ -70,9 +70,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private int? triggerTokens;
     private ContextLevel contextLevel;
     private string aheadBehind = string.Empty;
-    private string projectName = string.Empty;
-    private string? projectRoot;
-    private bool projectIsGeneral;
     private bool disposed;
 
     /// <summary>The turns the session already recorded, read once per strip from <c>turn_metrics</c> (else its checkpoints).</summary>
@@ -114,121 +111,11 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
         OpenInspectorCommand = new RelayCommand(() => this.openInspector?.Invoke(), () => CanOpenInspector);
 
-        OpenProjectInVsCodeCommand = new RelayCommand(
-            () => OpenInVsCode(projectRoot),
-            () => CanOpenProjectInVsCode);
-        OpenWorkspaceInVsCodeCommand = new RelayCommand(
-            () => OpenInVsCode(WorkspacePath),
-            () => CanOpenWorkspaceInVsCode);
-        OpenProjectInExplorerCommand = new RelayCommand(
-            () => OpenInExplorer(projectRoot),
-            () => CanOpenProjectInExplorer);
-        OpenWorkspaceInExplorerCommand = new RelayCommand(
-            () => OpenInExplorer(WorkspacePath),
-            () => CanOpenWorkspaceInExplorer);
-
         Loc.Instance.LanguageChanged += OnLanguageChanged;
         this.sources.McpStateChanged += OnMcpStateChanged;
         mcpFailed = this.sources.McpFailed();
         RaiseQuota();
         RefreshTurnHistory();
-    }
-
-    // ---------------------------------------------------------------- workspace and project
-
-    /// <summary>The session's working directory: for a repository session its worktree, otherwise the scratch folder.</summary>
-    public string WorkspacePath => session.WorkspacePath;
-
-    /// <summary>
-    /// The last path segment, which is what distinguishes two sessions of one repository; the strip shows this instead of
-    /// the full path, and the whole path stays in the tooltip.
-    /// </summary>
-    public string WorkspaceName
-    {
-        get
-        {
-            var path = session.WorkspacePath;
-            var trimmed = path.TrimEnd('\\', '/');
-            var cut = trimmed.LastIndexOfAny(['\\', '/']);
-            return cut >= 0 && cut < trimmed.Length - 1 ? trimmed[(cut + 1)..] : trimmed;
-        }
-    }
-
-    public string WorkspaceTooltip => InstrumentsStrings.WorkspaceTooltip(session.WorkspacePath);
-
-    public string ProjectName => projectName;
-
-    public bool HasProject => projectName.Length > 0;
-
-    /// <summary>
-    /// True when the session's project is the general (scratch) workspace rather than a registered repository: the general
-    /// area is not a project the user picks, so the breadcrumb leaves that segment out instead of inventing one.
-    /// </summary>
-    public bool IsGeneralProject => projectIsGeneral;
-
-    /// <summary>A project the user can point at in the tree: a registered repository, not the general workspace.</summary>
-    public bool HasRepositoryProject => HasProject && !projectIsGeneral;
-
-    /// <summary>The repository root checkout path, when the session belongs to a repository project (wave W16b).</summary>
-    public string? ProjectRoot => projectRoot;
-
-    /// <summary>The menu item is only offered when a VS Code shim was resolved, so it can never be a dead entry.</summary>
-    public bool CanOpenWorkspaceInVsCode => sources.HasVsCode;
-
-    public bool CanOpenProjectInVsCode => projectRoot is not null && sources.HasVsCode;
-
-    public bool CanOpenWorkspaceInExplorer => true;
-
-    public bool CanOpenProjectInExplorer => projectRoot is not null;
-
-    public RelayCommand OpenProjectInVsCodeCommand { get; }
-
-    public RelayCommand OpenWorkspaceInVsCodeCommand { get; }
-
-    public RelayCommand OpenProjectInExplorerCommand { get; }
-
-    public RelayCommand OpenWorkspaceInExplorerCommand { get; }
-
-    /// <summary>
-    /// The project the session belongs to. The window pushes it, because the project registry is read in the background and
-    /// a session opened from a restored tab can exist before that read lands.
-    /// </summary>
-    public void SetProject(string? name, string? root, bool isGeneral = false)
-    {
-        var nextName = name ?? string.Empty;
-        var nextRoot = string.IsNullOrWhiteSpace(root) ? null : root;
-        if (string.Equals(projectName, nextName, StringComparison.Ordinal) &&
-            string.Equals(projectRoot, nextRoot, StringComparison.Ordinal) &&
-            projectIsGeneral == isGeneral)
-        {
-            return;
-        }
-
-        projectName = nextName;
-        projectRoot = nextRoot;
-        projectIsGeneral = isGeneral;
-        OnPropertyChanged(nameof(ProjectName));
-        OnPropertyChanged(nameof(HasProject));
-        OnPropertyChanged(nameof(IsGeneralProject));
-        OnPropertyChanged(nameof(HasRepositoryProject));
-        RaiseOpenTargets();
-    }
-
-    /// <summary>Opens a folder in VS Code; a missing target or shim simply does nothing.</summary>
-    private void OpenInVsCode(string? path)
-    {
-        if (!string.IsNullOrWhiteSpace(path))
-        {
-            sources.OpenInVsCode(path);
-        }
-    }
-
-    private void OpenInExplorer(string? path)
-    {
-        if (!string.IsNullOrWhiteSpace(path))
-        {
-            sources.OpenInExplorer(path);
-        }
     }
 
     // ---------------------------------------------------------------- left half: git and the session's own state
@@ -982,19 +869,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         sources.McpStateChanged -= OnMcpStateChanged;
     }
 
-    /// <summary>Re-reads what the four "open …" menu items can do; the project arrives after the strip already exists.</summary>
-    private void RaiseOpenTargets()
-    {
-        OnPropertyChanged(nameof(CanOpenWorkspaceInVsCode));
-        OnPropertyChanged(nameof(CanOpenProjectInVsCode));
-        OnPropertyChanged(nameof(CanOpenWorkspaceInExplorer));
-        OnPropertyChanged(nameof(CanOpenProjectInExplorer));
-        OpenProjectInVsCodeCommand.NotifyCanExecuteChanged();
-        OpenWorkspaceInVsCodeCommand.NotifyCanExecuteChanged();
-        OpenProjectInExplorerCommand.NotifyCanExecuteChanged();
-        OpenWorkspaceInExplorerCommand.NotifyCanExecuteChanged();
-    }
-
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         // A notification from another thread belongs to a window that is gone; re-reading here would touch
@@ -1009,7 +883,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(ContextTooltip));
         OnPropertyChanged(nameof(UsageTooltip));
         RaiseQuota();
-        OnPropertyChanged(nameof(WorkspaceTooltip));
         OnPropertyChanged(nameof(ResourcesLabel));
         OnPropertyChanged(nameof(ResourcesTooltip));
     }

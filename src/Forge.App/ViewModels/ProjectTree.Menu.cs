@@ -38,6 +38,16 @@ internal sealed partial class TreeNodeViewModel
         OnPropertyChanged(nameof(NewAgentSessionCommand));
     }
 
+    /// <summary>"Promote to main session…" of an agent-session row: it becomes the workspace's root, the root it ran under is archived.</summary>
+    public ICommand? PromoteCommand { get; private set; }
+
+    /// <summary>Replaces the promote entry of a reused node; null hides the entry.</summary>
+    public void SetPromoteCommand(ICommand? command)
+    {
+        PromoteCommand = command;
+        OnPropertyChanged(nameof(PromoteCommand));
+    }
+
     /// <summary>"Link an existing workspace…" on a repository project row (7.10).</summary>
     public ICommand? LinkWorkspaceCommand { get; private set; }
 
@@ -49,6 +59,9 @@ internal sealed partial class TreeNodeViewModel
 
     /// <summary>"Continue this session…" on an archived session row (6.2).</summary>
     public ICommand? ContinueCommand { get; private set; }
+
+    /// <summary>"Open in VS Code" of a project or workspace row; null when no VS Code executable was resolved.</summary>
+    public ICommand? OpenInVsCodeCommand { get; private set; }
 
     /// <summary>The checkout is sparse (7.9): the row shows a read-only mark.</summary>
     public bool IsSparse
@@ -67,12 +80,18 @@ internal sealed partial class TreeNodeViewModel
     }
 
     /// <summary>Replaces the commands only the generated menu reaches; null leaves the entry without a command (disabled).</summary>
-    public void SetMenuCommands(ICommand? linkWorkspace, ICommand? replaceSession, ICommand? renameBranch, ICommand? continueSession)
+    public void SetMenuCommands(
+        ICommand? linkWorkspace,
+        ICommand? replaceSession,
+        ICommand? renameBranch,
+        ICommand? continueSession,
+        ICommand? openInVsCode)
     {
         LinkWorkspaceCommand = linkWorkspace;
         ReplaceSessionCommand = replaceSession;
         RenameBranchCommand = renameBranch;
         ContinueCommand = continueSession;
+        OpenInVsCodeCommand = openInVsCode;
     }
 
     /// <summary>The generated menu of this row in the current language; empty for a row without a menu.</summary>
@@ -160,6 +179,8 @@ internal sealed partial class TreeNodeViewModel
         TreeMenuKey.RestoreWorkspace or TreeMenuKey.Restore => RestoreCommand,
         TreeMenuKey.PurgeAll or TreeMenuKey.Purge => PurgeCommand,
         TreeMenuKey.Archive => ArchiveCommand,
+        TreeMenuKey.Promote => PromoteCommand,
+        TreeMenuKey.OpenInVsCode => OpenInVsCodeCommand,
         TreeMenuKey.View => OpenCommand,
         TreeMenuKey.Continue => ContinueCommand,
         _ => null,
@@ -616,6 +637,7 @@ internal sealed partial class ProjectTreeViewModel
         ICommand? replace = null;
         ICommand? renameBranch = null;
         ICommand? continueSession = null;
+        ICommand? openInVsCode = null;
         switch (plan.Kind)
         {
             case TreeNodeKind.Project when IsRepository(plan.Project):
@@ -624,9 +646,14 @@ internal sealed partial class ProjectTreeViewModel
                     ct => LinkWorkspace?.Invoke(project, ct) ?? Task.CompletedTask,
                     () => LinkWorkspace is not null,
                     OnFailed);
+                openInVsCode = OpenInVsCodeCommandFor(project.RootPath);
+                break;
+            case TreeNodeKind.Project:
+                openInVsCode = OpenInVsCodeCommandFor(plan.WorktreePath);
                 break;
             case TreeNodeKind.Worktree when plan.RowMark is TreeRowMark.None or TreeRowMark.Unverified && plan.Project is { } owner:
                 var directory = plan.WorktreePath;
+                openInVsCode = OpenInVsCodeCommandFor(directory);
                 if (plan.ActiveSession is { } agentHolder && NewAgentSession is { } openAgent)
                 {
                     // The entry hangs under the workspace's active root session; without one it stays, greyed, and says so.
@@ -676,11 +703,17 @@ internal sealed partial class ProjectTreeViewModel
                 break;
         }
 
-        node.SetMenuCommands(link, replace, renameBranch, continueSession);
+        node.SetMenuCommands(link, replace, renameBranch, continueSession, openInVsCode);
         node.IsPlainProject = plan.Kind == TreeNodeKind.Project && !IsRepository(plan.Project);
         node.IsSparse = plan.GitState?.IsSparse == true;
         node.MenuState = MenuStateFactory(plan);
     }
+
+    /// <summary>The row's "open in VS Code"; null when the shell resolved no executable, so the entry is never a dead one.</summary>
+    private ICommand? OpenInVsCodeCommandFor(string path) =>
+        HasVsCode && OpenInVsCode is { } open && !string.IsNullOrWhiteSpace(path)
+            ? new RelayCommand(() => open(path))
+            : null;
 
     /// <summary>A Forge workspace of a repository project other than its root checkout.</summary>
     private bool IsLinkedWorkspace(TreeNodePlan plan, ProjectInfo project) =>
@@ -697,7 +730,10 @@ internal sealed partial class ProjectTreeViewModel
         switch (plan.Kind)
         {
             case TreeNodeKind.Project when plan.Project is { } project:
-                var projectRow = new TreeRowState(IsRepository(project) ? TreeRowKind.RepositoryProject : TreeRowKind.PlainProject);
+                var projectRow = new TreeRowState(IsRepository(project) ? TreeRowKind.RepositoryProject : TreeRowKind.PlainProject)
+                {
+                    CanOpenInVsCode = HasVsCode,
+                };
                 return () => projectRow;
             case TreeNodeKind.Worktree when plan.RowMark == TreeRowMark.Recycled:
                 var recycledDirectory = plan.WorktreePath;
@@ -718,6 +754,7 @@ internal sealed partial class ProjectTreeViewModel
                     DirectoryMissing = plan.RowMark == TreeRowMark.Missing,
                     StaleReason = StaleText(plan.RowMark, plan.PrunableReason),
                     MergeOrRebase = plan.GitState?.MergeOrRebase == true,
+                    CanOpenInVsCode = HasVsCode,
                 };
                 return () => facts with
                 {
@@ -727,8 +764,34 @@ internal sealed partial class ProjectTreeViewModel
                     Conflicted = Conflicted(directory),
                 };
             case TreeNodeKind.AgentSession when plan.Session is { } agentSession:
-                var agentFacts = new TreeRowState(TreeRowKind.AgentSession) { SessionTitle = agentSession.Title };
-                return () => agentFacts with { Operating = Operating(DirectoryOf(agentSession)) };
+                // A live agent session keeps the agent-row menu (rename / promote / archive); once it is archived or removed it
+                // is a history row: read-only, renameable and removable, but neither promoted nor archived again.
+                var agentKind = agentSession.Status switch
+                {
+                    SessionStatus.Active => TreeRowKind.AgentSession,
+                    SessionStatus.Archived or SessionStatus.Deleted => TreeRowKind.HistorySession,
+                    _ => TreeRowKind.None,
+                };
+                if (agentKind == TreeRowKind.None)
+                {
+                    return null;
+                }
+
+                var agentFacts = new TreeRowState(agentKind)
+                {
+                    SessionTitle = agentSession.Title,
+                    IsAgentSession = true,
+                };
+                var agentRootId = agentSession.ParentSessionId ?? string.Empty;
+                return () => agentFacts with
+                {
+                    // Promoting archives the root, so the root's own busy sources block it as much as this row's do.
+                    Busy = agentKind == TreeRowKind.AgentSession
+                        ? [.. BusyOf(agentSession.Id), .. BusyOf(agentRootId)]
+                        : [],
+                    HandingOver = agentKind == TreeRowKind.AgentSession && (HandingOver(agentSession.Id) || HandingOver(agentRootId)),
+                    Operating = Operating(DirectoryOf(agentSession)),
+                };
             case TreeNodeKind.Session when plan.Session is { ParentSessionId: null } session:
                 var sessionDirectory = DirectoryOf(session);
                 var kind = session.Status switch

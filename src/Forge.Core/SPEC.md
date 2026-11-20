@@ -42,6 +42,7 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 - 可选 Agent 种类:除主 Agent 外的内置 Agent 与带 `tools` 白名单的用户 Agent;白名单含 `git_branch`/`git_sync`/任一 `pr_*` 的不可选(只有根会话改 git)。初始上下文空白。
 - 存储:`sessions` 新增 `child_driver TEXT NULL`(NULL = 模型派生,`'user'` = Agent 会话),直接写进建表脚本、**不做迁移**(产品未发布,旧库删库重建)。检查点与每轮指标按**子会话 id** 写,轮次独立从 1 编号;根与 Agent 会话回合时间重叠时双方的轮次 diff 互含(整树快照),是已知限制。
 - 回合前校验与根一致(根仍 `Active`、无合并冲突、无工作区操作中);根的忙判定包含 Agent 会话的回合、排队消息与未送达插话。**在根标签按停止时连带停**:根回合、它名下正在跑的回合与已投递未开跑的消息一并取消(子会话标签自己的停止只停它自己)。根被接手、归档后 Agent 会话随之只读,不迁移、不复制;软删/彻底删除沿用子会话级联。
+- **归档即换手(`ISessionCatalog.ArchiveAndPromoteAsync(rootSessionId, promoteSessionId?, ct)`,一个 savepoint 事务,2026-11-20)**:归档 root 时把工作区交给一个 `child_driver='user'` 的 Active 子会话——指定的 `promoteSessionId`(必须是该 root 的 Active Agent 会话,否则 `InvalidOperationException`)或按 `last_active_ticks DESC, id` 最近的那个;root 先转 `Archived` 并改挂到继任者下、`child_driver='user'`(降级成归档的 Agent 会话),继任者清空 `parent_session_id`/`child_driver` 成为 root(状态保持 `Active`、仍占同一个 `occupancy_key`),root 其余 Active 的 Agent 会话改挂到继任者下(否则它们成了归档父会话下的只读孤儿);没有继任者时只归档 root 并返回 null。root 不是 `Active` 时抛 `SessionNotActiveException`,子会话不是继任者时抛 `InvalidOperationException`,失败整体回滚。`SetStatusAsync` 仍是原始状态写,不隐式换手。
 - 用量按**实例**:Agent 会话每一轮的 token 取该轮 `AgentSubAgentFinished.Usage`(事件本就带每 run 的用量增量);**流式时长取该实例 `StreamElapsed` 的增量**,`Finished.Elapsed` 是整轮墙钟(含工具时间)不能当 `stream_ms`。不要复用只读根实例的 `ReadRootCounters`——否则会把根的 token 再记一遍。UI 一轮之外的实时读数经按实例的访问器;轮次指标不依赖它。
 - 计划与步骤:`todo` 按会话 id,Agent 会话自然有独立清单;其步骤标完成不提交、门禁 `NotApplicable`(现有“有父会话即子 Agent”规则),改动由根会话的下一次步骤提交带走并由根的门禁把关;不参与 `pr_create` 的步骤闸门。
 

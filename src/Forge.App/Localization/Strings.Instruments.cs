@@ -56,11 +56,6 @@ internal static class InstrumentsStrings
     public const string CacheTtlKey = "session.strip.cache.ttl";
     public const string CacheTtlTooltipKey = "session.strip.cache.ttl.tooltip";
 
-    public const string WorkspaceTooltipKey = "session.strip.workspace.tooltip";
-    public const string ProjectVsCodeKey = "session.strip.project.vscode";
-    public const string WorkspaceVsCodeKey = "session.strip.workspace.vscode";
-    public const string ProjectExplorerKey = "session.strip.project.explorer";
-    public const string WorkspaceExplorerKey = "session.strip.workspace.explorer";
     public const string ResourcesKey = "session.strip.resources";
 
     public const string ApprovalsSectionTitleKey = "settings.approvals.title";
@@ -228,16 +223,6 @@ internal static class InstrumentsStrings
               + (minutes % 60).ToString("00", CultureInfo.InvariantCulture) + "m";
     }
 
-    public static string WorkspaceTooltip(string path) => Loc.Instance.Format(WorkspaceTooltipKey, path);
-
-    public static string ProjectVsCode => Loc.Instance[ProjectVsCodeKey];
-
-    public static string WorkspaceVsCode => Loc.Instance[WorkspaceVsCodeKey];
-
-    public static string ProjectExplorer => Loc.Instance[ProjectExplorerKey];
-
-    public static string WorkspaceExplorer => Loc.Instance[WorkspaceExplorerKey];
-
     public static string Resources => Loc.Instance[ResourcesKey];
 
     /// <summary>The value of a section title key; <c>SettingsSection</c> wants the <c>...Key</c> constant, not this.</summary>
@@ -358,11 +343,6 @@ internal static class InstrumentsStrings
             "限流（短期限流，不是订阅额度窗口）：请求 {0}，令牌 {1}；{2}",
             "Rate limit (short-term throttling, not a subscription window): requests {0}, tokens {1}; {2}");
 
-        Loc.Register(WorkspaceTooltipKey, "工作区：{0}", "Workspace: {0}");
-        Loc.Register(ProjectVsCodeKey, "在 VS Code 中打开项目", "Open project in VS Code");
-        Loc.Register(WorkspaceVsCodeKey, "在 VS Code 中打开工作区", "Open workspace in VS Code");
-        Loc.Register(ProjectExplorerKey, "在资源管理器中打开项目", "Reveal project in Explorer");
-        Loc.Register(WorkspaceExplorerKey, "在资源管理器中打开工作区", "Reveal workspace in Explorer");
         Loc.Register(ResourcesKey, "资源", "Resources");
 
         Loc.Register(ApprovalsSectionTitleKey, "审批", "Approvals");

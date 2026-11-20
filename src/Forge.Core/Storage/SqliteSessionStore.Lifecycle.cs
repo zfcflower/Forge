@@ -46,6 +46,18 @@ public sealed partial class SqliteSessionStore
     }
 
     /// <inheritdoc />
+    public async Task<SessionInfo?> ArchiveAndPromoteAsync(string rootSessionId, string? promoteSessionId, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(rootSessionId, nameof(rootSessionId));
+        if (promoteSessionId is not null)
+        {
+            StoragePaths.SafeSegment(promoteSessionId, nameof(promoteSessionId));
+        }
+
+        return await EnqueueAsync(new ArchiveAndPromoteOp(this, rootSessionId, promoteSessionId, ct), ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<SessionInfo> HandoverAsync(string oldSessionId, HandoverTarget target, CancellationToken ct)
     {
         StoragePaths.SafeSegment(oldSessionId, nameof(oldSessionId));
@@ -725,6 +737,133 @@ public sealed partial class SqliteSessionStore
             revisions.Parameters.AddWithValue("$to", to);
             revisions.Parameters.AddWithValue("$from", from);
             await revisions.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Archive a root and hand the workspace to one of its user-driven agent sessions (forge-app "Agent 会话"): demote the
+    /// archived root to an archived agent session of the promoted one, promote that session to root, and move the root's
+    /// other Active agent sessions under it, all under one savepoint.
+    /// </summary>
+    private sealed class ArchiveAndPromoteOp(
+        SqliteSessionStore store,
+        string rootSessionId,
+        string? promoteSessionId,
+        CancellationToken ct) : WriteOp<SessionInfo?>(ct)
+    {
+        public override bool UsesSavepoint => true;
+
+        protected override async ValueTask<SessionInfo?> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences)
+        {
+            string status;
+            bool root;
+            await using (var read = Command(connection, transaction, "SELECT status, parent_session_id IS NULL FROM sessions WHERE id = $id"))
+            {
+                read.Parameters.AddWithValue("$id", rootSessionId);
+                await using var reader = await read.ExecuteReaderAsync(CancellationToken.None).ConfigureAwait(false);
+                if (!await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false))
+                {
+                    throw new InvalidOperationException($"Session {rootSessionId} does not exist.");
+                }
+
+                status = reader.GetString(0);
+                root = reader.GetInt64(1) != 0;
+            }
+
+            if (status != StorageSchema.StatusActive)
+            {
+                throw new SessionNotActiveException(rootSessionId);
+            }
+
+            if (!root)
+            {
+                throw new InvalidOperationException($"Session {rootSessionId} is an agent session; only a root session hands its workspace over.");
+            }
+
+            // The successor: the requested agent session, or the root's most recently active one (`last_active_ticks` is the
+            // column `LastActiveAt` is stored in, so the order is the one the store reads sessions back in).
+            string successor;
+            await using (var candidate = Command(
+                connection,
+                transaction,
+                $$"""
+                SELECT id FROM sessions
+                WHERE parent_session_id = $root AND child_driver = '{{StorageSchema.ChildDriverUser}}' AND status = 'Active'
+                  {{(promoteSessionId is null ? string.Empty : "AND id = $promote")}}
+                ORDER BY last_active_ticks DESC, id
+                LIMIT 1
+                """))
+            {
+                candidate.Parameters.AddWithValue("$root", rootSessionId);
+                if (promoteSessionId is not null)
+                {
+                    candidate.Parameters.AddWithValue("$promote", promoteSessionId);
+                }
+
+                var found = await candidate.ExecuteScalarAsync(CancellationToken.None).ConfigureAwait(false) as string;
+                if (found is null)
+                {
+                    if (promoteSessionId is not null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Session {promoteSessionId} is not an active agent session of {rootSessionId}.");
+                    }
+
+                    // Nothing runs under it any more: the root is archived on its own, exactly like a plain archive.
+                    await using var alone = Command(
+                        connection,
+                        transaction,
+                        "UPDATE sessions SET status = 'Archived' WHERE id = $root AND status = 'Active'");
+                    alone.Parameters.AddWithValue("$root", rootSessionId);
+                    await alone.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+                    return null;
+                }
+
+                successor = found;
+            }
+
+            // 1. Demote and archive the root. It stops holding the workspace here: its parent link takes it out of the
+            //    occupancy index, which is what lets step 2 promote the successor to a root.
+            await using (var demote = Command(
+                connection,
+                transaction,
+                $"UPDATE sessions SET status = 'Archived', parent_session_id = $child, child_driver = '{StorageSchema.ChildDriverUser}' WHERE id = $root AND status = 'Active'"))
+            {
+                demote.Parameters.AddWithValue("$child", successor);
+                demote.Parameters.AddWithValue("$root", rootSessionId);
+                if (await demote.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false) != 1)
+                {
+                    throw new SessionNotActiveException(rootSessionId);
+                }
+            }
+
+            // 2. Promote the successor: no parent, no child driver; its status is already Active.
+            await using (var promote = Command(
+                connection,
+                transaction,
+                "UPDATE sessions SET parent_session_id = NULL, child_driver = NULL WHERE id = $child AND parent_session_id = $root"))
+            {
+                promote.Parameters.AddWithValue("$child", successor);
+                promote.Parameters.AddWithValue("$root", rootSessionId);
+                if (await promote.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false) != 1)
+                {
+                    throw new InvalidOperationException($"Session {successor} could not be promoted.");
+                }
+            }
+
+            // 3. The root's remaining agent sessions belong to the new root from now on; leaving them parented to the archived
+            //    row would make them read-only orphans nobody can reach from the tree.
+            await using (var adopt = Command(
+                connection,
+                transaction,
+                $"UPDATE sessions SET parent_session_id = $child WHERE parent_session_id = $root AND child_driver = '{StorageSchema.ChildDriverUser}' AND status = 'Active'"))
+            {
+                adopt.Parameters.AddWithValue("$child", successor);
+                adopt.Parameters.AddWithValue("$root", rootSessionId);
+                await adopt.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            return await store.ReadSessionAsync(connection, transaction, successor).ConfigureAwait(false);
         }
     }
 

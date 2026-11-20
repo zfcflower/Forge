@@ -142,9 +142,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// <summary>Automation id (and header tool id) of the general-chats panel's "new chat" button.</summary>
     private const string NewGeneralSessionToolId = "new-general-session";
 
-    /// <summary>Automation id (and header tool id) of the general-chats panel's refresh button.</summary>
-    private const string RefreshGeneralChatsToolId = "refresh-general-chats";
-
     /// <summary>Automation id (and header tool id) of the project panel's refresh button.</summary>
     private const string RefreshProjectsToolId = "refresh-projects";
 
@@ -163,8 +160,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly Dictionary<string, string> projectRoots = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> projectNames = new(StringComparer.Ordinal);
 
-    /// <summary>Which projects are the general workspace: its sessions get no project segment in the breadcrumb.</summary>
-    private readonly HashSet<string> generalProjects = new(StringComparer.Ordinal);
     private readonly SessionInstrumentSources instruments;
     private readonly DispatcherTimer clock;
     private readonly DispatcherTimer layoutSaveTimer;
@@ -183,7 +178,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private PanelToolButton? addProjectTool;
     private PanelToolButton? refreshProjectsTool;
     private PanelToolButton? newGeneralSessionTool;
-    private PanelToolButton? refreshGeneralChatsTool;
     private SessionWorkspaceViewModel? activeSession;
     private FinishedSubAgentsViewModel? watchedFinishedMenu;
     private IDialogService? dialogs;
@@ -228,6 +222,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         };
         Projects.SessionArchived = OnSessionArchived;
         Projects.ArchiveGuard = ConfirmArchiveAsync;
+        Projects.HasVsCode = instruments.HasVsCode;
+        Projects.OpenInVsCode = instruments.OpenInVsCode;
         Projects.NewAgentSession = OpenAgentSessionAsync;
         Projects.OpenAgentSession = OpenAgentSessionByIdAsync;
         Projects.IsAgentSessionUnread = IsAgentSessionUnread;
@@ -257,6 +253,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             OpenSubAgent = OpenSubAgentTabAsync,
             SessionArchived = OnSessionArchived,
             ArchiveGuard = ConfirmArchiveAsync,
+            HasVsCode = instruments.HasVsCode,
+            OpenInVsCode = instruments.OpenInVsCode,
             OpenAgentSession = OpenAgentSessionByIdAsync,
             IsAgentSessionUnread = IsAgentSessionUnread,
             SessionRenamed = OnSessionRenamed,
@@ -322,17 +320,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             ShowChangesCommand);
         Workbench.FilesPanel.HeaderTools.Add(openChangesTool);
         // Each left-column panel keeps its own tools in its title bar: the panel chrome owns the bar, so a toolbar inside the
-        // body would read as a second, broken title row. General chats add a chat, projects add a project.
+        // body would read as a second, broken title row. General chats add a chat, projects add a project and refresh the tree.
         addProjectTool = CreateAddProjectTool();
         refreshProjectsTool = CreateRefreshProjectsTool();
         newGeneralSessionTool = CreateNewGeneralSessionTool();
         Workbench.ProjectPanel.HeaderTools.Add(addProjectTool);
         Workbench.ProjectPanel.HeaderTools.Add(refreshProjectsTool);
-        refreshGeneralChatsTool = CreateRefreshGeneralChatsTool();
         if (Workbench.GeneralPanel is { } generalPanel)
         {
             generalPanel.HeaderTools.Add(newGeneralSessionTool);
-            generalPanel.HeaderTools.Add(refreshGeneralChatsTool);
         }
         Workbench.BottomTabs.HeaderTools.Add(emptyFinishedMenu);
         Workbench.BottomTabs.HeaderTools.Add(newTerminalButton);
@@ -748,22 +744,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                     {
                         projectRoots.Clear();
                         projectNames.Clear();
-                        generalProjects.Clear();
                         foreach (var project in projects)
                         {
                             projectRoots[project.Id] = project.RootPath;
                             projectNames[project.Id] = project.Name;
-                            if (project.Kind == ProjectKind.General)
-                            {
-                                generalProjects.Add(project.Id);
-                            }
-                        }
-
-                        // Restored tabs are built before this read lands, so their strips get the project here instead of
-                        // never: the project button is the only place the session's repository is named.
-                        foreach (var session in sessions.Values)
-                        {
-                            ApplyProject(session);
                         }
                     });
                 }
@@ -1040,7 +1024,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         session.BecameReadOnly += OnSessionBecameReadOnly;
-        ApplyProject(session);
         session.TurnCompleted += OnTurnCompleted;
         if (!readOnly)
         {
@@ -2412,10 +2395,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             IsAccent = true,
         };
 
-    /// <summary>The general-chats panel's refresh tool.</summary>
-    private PanelToolButton CreateRefreshGeneralChatsTool() =>
-        new(RefreshGeneralChatsToolId, ProjectStrings.RefreshProjectsName, "IconRefresh", GeneralChats.RefreshCommand);
-
     /// <summary>
     /// Replaces the left column's header tools in place, keeping their positions in the two title bars: a language switch
     /// rebuilds each tool because its tooltip is a resolved string.
@@ -2445,12 +2424,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             newGeneralSessionTool = CreateNewGeneralSessionTool();
             generalTools[sessionIndex] = newGeneralSessionTool;
-        }
-
-        if (refreshGeneralChatsTool is { } chatsTool && generalTools.IndexOf(chatsTool) is var chatsIndex && chatsIndex >= 0)
-        {
-            refreshGeneralChatsTool = CreateRefreshGeneralChatsTool();
-            generalTools[chatsIndex] = refreshGeneralChatsTool;
         }
     }
 
@@ -3155,16 +3128,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         settingsWindow = null;
         Settings.IsOpen = false;
-    }
-
-    /// <summary>Gives one session's strip the project it belongs to, from the cache the registry read fills.</summary>
-    private void ApplyProject(SessionWorkspaceViewModel session)
-    {
-        var projectId = session.Info.ProjectId;
-        var name = projectId is { } named && projectNames.TryGetValue(named, out var foundName) ? foundName : null;
-        var root = projectId is { } rooted && projectRoots.TryGetValue(rooted, out var foundRoot) ? foundRoot : null;
-        var isGeneral = projectId is { } general && generalProjects.Contains(general);
-        session.Instruments.SetProject(name, root, isGeneral);
     }
 
     /// <summary>Hands the active session's strip the Git panel's live branch, ahead/behind and CI marker.</summary>

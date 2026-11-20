@@ -146,7 +146,7 @@
            Subtle is a static inset (gutter, inline code, code block), Hover and Selected are the two row states,
            Input is the composer's input band. -->
       <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#FAFAFA" />
-      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#F2F5F6" />
+      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#F6F9FA" />
       <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#F4F7F8" />
       <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#EDF3F4" />
@@ -175,7 +175,7 @@
       <!-- Extension: dividers and chrome. A colour specification does not model a 1 px line, so the neutral ramp is
            extended two steps below the darkest surface; the existing rule that an icon button's hover equals the
            divider and its pressed state equals the stronger outline is preserved by using the two same values. -->
-      <SolidColorBrush x:Key="BorderBrush" Color="#D8DEE1" />
+      <SolidColorBrush x:Key="BorderBrush" Color="#CFD7DA" />
       <SolidColorBrush x:Key="BorderStrongBrush" Color="#C3CDD0" />
       <!-- One chrome colour: the window header row, every panel title bar (and the tab strip drawn on it), the dock
            strips and a floated panel's own title bar. One step below the darkest surface, so chrome never borrows the
@@ -188,7 +188,7 @@
            the closed state is the one that has to be found). One step stronger than a divider, because it is a control's
            only affordance at 3px wide. -->
       <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#B7C2C6" />
-      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#D8DEE1" />
+      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#CFD7DA" />
       <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#C3CDD0" />
 
       <!-- Extension: the modal scrim. One token instead of four literals in four views. -->
@@ -254,7 +254,7 @@
       <SolidColorBrush x:Key="BrandTintBrush" Color="#0D3F3E" />
 
       <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#121617" />
-      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#161B1D" />
+      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#181E20" />
       <SolidColorBrush x:Key="CardBackgroundBrush" Color="#1C2224" />
       <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#242C2E" />
       <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#293235" />
@@ -279,13 +279,13 @@
       <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#17413F" />
       <SolidColorBrush x:Key="SelectionForegroundBrush" Color="#B8F0EA" />
 
-      <SolidColorBrush x:Key="BorderBrush" Color="#313B3E" />
-      <SolidColorBrush x:Key="BorderStrongBrush" Color="#3C474A" />
+      <SolidColorBrush x:Key="BorderBrush" Color="#3A4447" />
+      <SolidColorBrush x:Key="BorderStrongBrush" Color="#465256" />
       <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#0D1213" />
       <SolidColorBrush x:Key="CountBadgeBrush" Color="#2C3538" />
       <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#556468" />
-      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#313B3E" />
-      <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#3C474A" />
+      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#3A4447" />
+      <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#465256" />
 
       <SolidColorBrush x:Key="BackdropScrimBrush" Color="#5A000000" />
 

@@ -148,8 +148,8 @@
     </DataTemplate>
   </UserControl.Resources>
 
-  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" Background="Transparent">
-    <Border Grid.Row="2" Classes="toolbar">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" Background="Transparent">
+    <Border Grid.Row="0" Classes="toolbar">
       <Grid ColumnDefinitions="*,Auto">
         <!-- Each tab carries its own count: the panel no longer spells both numbers out in a summary after the buttons. A
              badge is never hidden, so an idle session reads "已改动 0" rather than leaving the reader to guess. -->
@@ -201,11 +201,11 @@
                 AutomationProperties.AutomationId="changed-fold-toggle"
                 AutomationProperties.Name="{Binding FoldingToggleText}">
           <Panel>
-            <wc:FluentIcon Data="{StaticResource IconCollapseAll}"
+            <wc:FluentIcon Data="{StaticResource IconArrowMinimizeVertical}"
                            Width="14"
                            Height="14"
                            IsVisible="{Binding IsChangedUnfolded}" />
-            <wc:FluentIcon Data="{StaticResource IconExpandAll}"
+            <wc:FluentIcon Data="{StaticResource IconArrowMaximizeVertical}"
                            Width="14"
                            Height="14"
                            IsVisible="{Binding IsChangedFolded}" />
@@ -214,7 +214,7 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="3"
+    <Border Grid.Row="1"
             Classes="toolbar"
             Padding="6,4"
             IsVisible="{Binding ShowSharedChanges}">
@@ -404,7 +404,7 @@
 
     <!-- A stopped rebase/merge is the one blocking state this panel owns: it says what stopped and opens the files it
          stopped on (the same files carry U in the 已改动 tree). Continue/Abort are the only writes here besides sync. -->
-    <Border Grid.Row="4"
+    <Border Grid.Row="2"
             Classes="git-banner"
             IsVisible="{Binding Git.HasOperation}"
             AutomationProperties.AutomationId="git-operation">
@@ -447,7 +447,7 @@
     </Border>
 
     <ListBox x:Name="TreeList"
-             Grid.Row="5"
+             Grid.Row="3"
              IsVisible="{Binding IsAllTab}"
              ItemsSource="{Binding Rows}"
              ItemTemplate="{StaticResource FileNodeTemplate}"
@@ -463,7 +463,7 @@
     </ListBox>
 
     <ListBox x:Name="ChangedDiffList"
-             Grid.Row="5"
+             Grid.Row="3"
              IsVisible="{Binding ShowSharedChanges}"
              ItemsSource="{Binding ChangedRows}"
              ItemTemplate="{StaticResource ChangedNodeTemplate}"
@@ -479,7 +479,7 @@
     </ListBox>
 
     <ListBox x:Name="ChangedList"
-             Grid.Row="5"
+             Grid.Row="3"
              IsVisible="{Binding ShowFallbackChanges}"
              ItemsSource="{Binding Changes}"
              SelectionChanged="OnChangedSelection"
@@ -509,9 +509,10 @@
     </ListBox>
 
 
-    <!-- Row 2 of the header: how this branch ships. Two controls only — publish (before the first push) and 提交目标, whose
-         menu lists the ways out. The branch name is one row above; it is never repeated here. -->
-    <Border Grid.Row="1"
+    <!-- The second of the two git rows at the bottom of the panel: how this branch ships. Two controls only - publish
+         (before the first push) and 提交目标, whose menu lists the ways out. The branch name is one row above; it is never
+         repeated here. -->
+    <Border Grid.Row="5"
             Classes="git-ship"
             IsVisible="{Binding Git.HasRepository}"
             AutomationProperties.AutomationId="git-ship-row">
@@ -587,9 +588,11 @@
         </Button>
       </Grid>
     </Border>
-    <!-- The git row: the branch of the active session at the left, the three sync verbs at the right, and the numbers on
+    <!-- The bottom git block (branch row over ship row): readouts and sync verbs sit under the file list, not on top of it -
+         the list is what the panel is for, and a header of two git rows pushed it down on every session with a repository.
+         This row carries the branch of the active session at the left, the three sync verbs at the right, and the numbers on
          the two verbs that change something. Fetch carries no number because it only makes the others current. -->
-    <Border Grid.Row="0"
+    <Border Grid.Row="4"
             Classes="git-row"
             Classes.bad="{Binding Git.MessageIsError}"
             IsVisible="{Binding Git.HasRepository}"

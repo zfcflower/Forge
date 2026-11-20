@@ -105,13 +105,15 @@
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
-  <!-- The 提交目标 row under the git row: two pills, no labels, so the branch name above keeps its width. -->
+  <!-- The 提交目标 row under the git row: two pills, no labels, so the branch name above keeps its width. Both rows sit at
+       the bottom of the file panel now, so this one carries the divider on its own top edge - between the two rows - instead
+       of one on the panel's bottom edge, where nothing is below to separate from. -->
   <Style Selector="Border.git-ship">
     <Setter Property="Height" Value="28" />
     <Setter Property="Padding" Value="8,0" />
     <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
   </Style>
 
   <Style Selector="TextBlock.git-ship-hint">

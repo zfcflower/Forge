@@ -6,13 +6,16 @@ using Avalonia.Media;
 
 namespace Forge.App.Workbench.Controls;
 
-/// <summary>The text of a strip button: one 12 px line, trimmed, so a long title does not stretch the strip.</summary>
+/// <summary>The text of a strip button: one 12 px semi-bold line, trimmed, so a long title does not stretch the strip.</summary>
 internal static class WorkbenchStripText
 {
     public static TextBlock Label(string title) => new()
     {
         Text = title,
         FontSize = 12,
+        // Rotated 90 degrees on the window edge, the label is the strip's only content: one weight up from the panel
+        // titles keeps it readable without turning into the Bold the title bars use.
+        FontWeight = FontWeight.SemiBold,
         TextWrapping = TextWrapping.NoWrap,
         TextTrimming = TextTrimming.CharacterEllipsis,
         MaxWidth = 180,

@@ -91,6 +91,9 @@ public sealed class LoggingSessionStore(ISessionStore inner, JsonlEventLog log) 
     Task<SessionInfo> ISessionCatalog.HandoverAsync(string oldSessionId, HandoverTarget target, CancellationToken ct) =>
         Catalog.HandoverAsync(oldSessionId, target, ct);
 
+    Task<SessionInfo?> ISessionCatalog.ArchiveAndPromoteAsync(string rootSessionId, string? promoteSessionId, CancellationToken ct) =>
+        Catalog.ArchiveAndPromoteAsync(rootSessionId, promoteSessionId, ct);
+
     Task<int> ISessionCatalog.SoftDeleteAsync(IReadOnlyList<string> sessionIds, CancellationToken ct) =>
         Catalog.SoftDeleteAsync(sessionIds, ct);
 

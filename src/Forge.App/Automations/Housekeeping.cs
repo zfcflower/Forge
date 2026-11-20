@@ -222,9 +222,16 @@ internal sealed class HousekeepingRunner(
                 continue;
             }
 
-            if (await catalog.SetStatusAsync(session.Id, SessionStatus.Archived, ct).ConfigureAwait(false))
+            // The archive hands the workspace to the root's newest agent session when it has one (forge-core
+            // `ArchiveAndPromoteAsync`); either way the root itself leaves Active. One failing session does not stop the rest.
+            try
             {
+                await catalog.ArchiveAndPromoteAsync(session.Id, null, ct).ConfigureAwait(false);
                 archived.Add(session.Id);
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+            {
+                AppLogs.Housekeeping.ZLogWarning($"archive of '{session.Id}' failed: {exception.Message}");
             }
         }
 
