@@ -28,6 +28,14 @@ internal static class AgentSessionStrings
     public const string OpenFailedKey = "agentSession.openFailed";
     public const string RootNotActiveKey = "agentSession.rootNotActive";
 
+    // ---------------------------------------------------------------- session messaging (授权通信 / 回程回执)
+    public const string MentionBadgeKey = "agentSession.mention.badge";
+    public const string AuthorizationGrantedKey = "agentSession.authorization.granted";
+    public const string AuthorizationRevokeKey = "agentSession.authorization.revoke";
+    public const string AuthorizationRevokeTipKey = "agentSession.authorization.revokeTip";
+    public const string DeliveredFromKey = "agentSession.delivery.from";
+    public const string ReplyCopyKey = "agentSession.reply.copy";
+
     public static string MenuNew => Loc.Instance[MenuNewKey];
 
     public static string NoRoot => Loc.Instance[NoRootKey];
@@ -46,6 +54,24 @@ internal static class AgentSessionStrings
 
     public static string OpenFailed(string reason) => Loc.Instance.Format(OpenFailedKey, reason);
 
+    /// <summary>The badge of the <c>@</c> picker's session group: it says a row is a session, not a file.</summary>
+    public static string MentionBadge => Loc.Instance[MentionBadgeKey];
+
+    /// <summary>The revocable mark the input area shows for a granted target ("已授权:X").</summary>
+    public static string AuthorizationGranted(string target) => Loc.Instance.Format(AuthorizationGrantedKey, target);
+
+    public static string AuthorizationRevoke => Loc.Instance[AuthorizationRevokeKey];
+
+    public static string AuthorizationRevokeTip(string target) => Loc.Instance.Format(AuthorizationRevokeTipKey, target);
+
+    /// <summary>
+    /// The notice a delivered message leaves in the target's transcript: who sent it and that its reply arrives later, so a
+    /// turn the user did not type is never mistaken for one they did.
+    /// </summary>
+    public static LocText DeliveredFrom(string from) => new(DeliveredFromKey, from);
+
+    public static string ReplyCopy => Loc.Instance[ReplyCopyKey];
+
     [ModuleInitializer]
     internal static void Register()
     {
@@ -58,5 +84,11 @@ internal static class AgentSessionStrings
         Loc.Register(KindFallbackKey, "这个会话原来跑的「{0}」现在不能作为 Agent 会话运行，改用「{1}」。", "This session ran as \"{0}\", which can no longer drive an agent session; it now runs as \"{1}\".");
         Loc.Register(OpenFailedKey, "打不开这个 Agent 会话:{0}", "Could not open this agent session: {0}");
         Loc.Register(RootNotActiveKey, "根会话「{0}」已不是活动状态,它的 Agent 会话不能再起回合。", "The root session \"{0}\" is no longer active, so its agent sessions cannot start a turn.");
+        Loc.Register(MentionBadgeKey, "会话", "Session");
+        Loc.Register(AuthorizationGrantedKey, "已授权：{0}", "Authorized: {0}");
+        Loc.Register(AuthorizationRevokeKey, "撤销", "Revoke");
+        Loc.Register(AuthorizationRevokeTipKey, "撤销对「{0}」的投递授权", "Revoke the delivery authorization for \"{0}\"");
+        Loc.Register(DeliveredFromKey, "来自「{0}」的投递(回执稍后到达)", "Delivered by \"{0}\" (its receipt arrives later)");
+        Loc.Register(ReplyCopyKey, "复制回执", "Copy the receipt");
     }
 }

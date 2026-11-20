@@ -197,6 +197,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     public MainWindowViewModel(AppComposition composition)
     {
         this.composition = composition;
+        // The session hosts read this when a message_session delivery happens; installing it before any runtime exists means
+        // the very first host already has the seam.
+        InitializeSessionMessages();
         layoutState = new LayoutStateLoader(composition.UiState);
         reviews = composition.Workspace?.Reviews ?? new ReviewStore(composition.Paths.ReviewsDirectory);
 
@@ -1007,6 +1010,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         var readOnly = info.Status != SessionStatus.Active;
         var catalog = composition.Catalog;
+        SessionWorkspaceViewModel? created = null;
         var session = new SessionWorkspaceViewModel(
             info,
             readOnly ? null : composition.Runtimes.Get(info),
@@ -1017,12 +1021,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             instrumentSources: instruments,
             preferences: composition.Preferences,
             openInspector: OpenInspector,
-            openSession: () => ActivateSessionTab(info.Id))
+            openSession: () => ActivateSessionTab(info.Id),
+            sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created))
         {
             ChildQuery = readOnly
                 ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)
                 : null,
         };
+        created = session;
         if (readOnly)
         {
             AttachReadOnlyCommands(session);
@@ -1108,6 +1114,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// <summary>A live tab found taken over at turn start: its runtime goes, the tab stays as a read-only view.</summary>
     private void OnSessionBecameReadOnly(SessionWorkspaceViewModel session)
     {
+        // The root left Active: every authorization of its tree dies with that (forge-core "session messaging"). Revoked before the
+        // runtime is released, while the host that holds the table is still there.
+        RevokeSessionMessagesOf(session);
         composition.Runtimes.Release(session.SessionId);
         AttachReadOnlyCommands(session);
         _ = RefreshTreesAfterLifecycleAsync();
@@ -2153,6 +2162,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// </summary>
     private void OnSessionArchived(string sessionId)
     {
+        // A target that was archived takes its grants with it (forge-core "session messaging": a grant lives until the target session ends).
+        OnMessageTargetClosed(sessionId);
         terminals.OnSessionArchived(sessionId);
         CloseAgentSessionTabs(sessionId);
         CloseSessionTab(sessionId);
@@ -2479,15 +2490,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        // An agent-session tab that is on screen has nothing unread: the mark it may carry goes now, and its tree row with it.
-        if (session.IsAgentSession)
+        // The tab that is on screen has nothing unread: the mark it may carry goes now - an agent session's ended turn and a
+        // receipt another session delivered to a root both raise the same one - and its tree row with it.
+        var wasUnread = session.HasAgentUnread;
+        session.MarkAgentSeen();
+        if (wasUnread)
         {
-            var wasUnread = session.HasAgentUnread;
-            session.MarkAgentSeen();
-            if (wasUnread)
-            {
-                RefreshTreeAgents();
-            }
+            RefreshTreeAgents();
         }
 
         if (!ReferenceEquals(session, activeSession))

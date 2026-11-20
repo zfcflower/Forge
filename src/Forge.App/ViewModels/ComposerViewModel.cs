@@ -344,6 +344,7 @@ internal sealed class QueuedMessageViewModel : ObservableObject
         : this(prompt.Text, isInterjection, remove, prompt.Attachments)
     {
         Orchestration = prompt.Orchestration;
+        Mentions = prompt.Mentions;
     }
 
     public string Text { get; }
@@ -359,8 +360,11 @@ internal sealed class QueuedMessageViewModel : ObservableObject
         : Attachments.All(static block => block is ImageBlock) ? ImageStrings.Count(Attachments.Count)
         : AttachmentStrings.Count(Attachments.Count);
 
-    /// <summary>The message as it will be sent.</summary>
-    public ComposerPrompt Prompt => new(Text, Attachments, Orchestration);
+    /// <summary>The message as it will be sent, its session mentions included.</summary>
+    public ComposerPrompt Prompt => new(Text, Attachments, Orchestration) { Mentions = Mentions };
+
+    /// <summary>The session mentions the message carries (see <see cref="ComposerPrompt.Mentions"/>).</summary>
+    public IReadOnlyList<SessionMention> Mentions { get; } = [];
 
     /// <summary>The orchestration the message was composed with; it is applied when the message is finally sent.</summary>
     public OrchestrationChoice Orchestration { get; }
@@ -394,7 +398,26 @@ internal sealed record ComposerPrompt(string Text, IReadOnlyList<ContentBlock> A
     public static ComposerPrompt FromText(string text) => new(text, []);
 
     public bool IsEmpty => string.IsNullOrWhiteSpace(Text) && Attachments.Count == 0;
+
+    /// <summary>
+    /// The session mentions the user picked in the <c>@</c> picker and that are still in <see cref="Text"/>. They are what
+    /// authorizes delivery (forge-core "session messaging"), so they travel with the message through the queue, an interjection and a
+    /// redirect exactly like its attachments do.
+    /// </summary>
+    public IReadOnlyList<SessionMention> Mentions { get; init; } = [];
 }
+
+/// <summary>
+/// One session the composer's <c>@</c> picker offers (forge-app "session mentions"): the sessions an agent-session tab may reach
+/// are its root, and a root session's are the agent sessions the user opened under it.
+/// </summary>
+internal sealed record SessionMentionTarget(string SessionId, string Name);
+
+/// <summary>
+/// A session mention the user picked: the token inserted into the draft, the session it names, and the name to show. Only a
+/// mention that came from the picker exists as one of these - a typed <c>@name</c> is plain text and authorizes nothing.
+/// </summary>
+internal sealed record SessionMention(string SessionId, string Name, string Token);
 
 /// <summary>
 /// The unsent composer state a replacing view takes over ("continue"): the draft text, the queued messages and the
@@ -420,6 +443,12 @@ internal sealed class ComposerSuggestionItem : ObservableObject
 
     /// <summary>What is inserted after the trigger character.</summary>
     public string Value { get; }
+
+    /// <summary>
+    /// The session this row stands for, when the row is one of the <c>@</c> picker's session entries; null for a file or a
+    /// slash command. Picking such a row is what turns into an authorization (see <see cref="SessionMention"/>).
+    /// </summary>
+    public string? SessionId { get; init; }
 
     public string Title { get; }
 
@@ -506,6 +535,15 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     private IReadOnlyList<string>? files;
     private Task? filesLoading;
     private ComposerToken token = ComposerToken.None;
+
+    /// <summary>The sessions the <c>@</c> picker offers (the root's agent sessions, or the root of an agent-session tab).</summary>
+    private IReadOnlyList<SessionMentionTarget> sessionMentions = [];
+
+    /// <summary>
+    /// Sessions the user picked in the <c>@</c> picker and has not sent yet, with the token that was inserted for them. A
+    /// mention only counts while its token is still in the draft, so deleting the text forgets it.
+    /// </summary>
+    private readonly List<SessionMention> pickedMentions = [];
     private string lastText = string.Empty;
     private int lastCaret;
     private int selectedSuggestion = -1;
@@ -1100,6 +1138,20 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 
                 break;
             case ComposerTokenKind.Mention:
+                // The "sessions" group: what may be addressed at all (forge-core "session messaging" - only a mention picked here
+                // authorizes; typed text does not). A file row below is still the ordinary workspace-file pick.
+                foreach (var target in ComposerSuggestions.FilterSessions(sessionMentions, token.Query))
+                {
+                    items.Add(new ComposerSuggestionItem(
+                        target.Name,
+                        target.Name,
+                        string.Empty,
+                        AgentSessionStrings.MentionBadge)
+                    {
+                        SessionId = target.SessionId,
+                    });
+                }
+
                 if (files is null)
                 {
                     filesLoading ??= LoadFilesAsync();
@@ -1183,8 +1235,60 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         }
 
         var result = ComposerSuggestions.Apply(lastText, token, item.Value);
+        if (item.SessionId is { Length: > 0 } sessionId)
+        {
+            // Picking a session is the whole authorization ritual: the token it inserts is what the send carries, and the
+            // mention record is what the session turns into a grant when the message goes out.
+            pickedMentions.RemoveAll(mention => string.Equals(mention.SessionId, sessionId, StringComparison.Ordinal));
+            pickedMentions.Add(new SessionMention(sessionId, item.Title, "@" + item.Value));
+            OnPropertyChanged(nameof(PickedMentionCount));
+        }
+
         CloseSuggestions();
         return result;
+    }
+
+    /// <summary>How many session mentions the draft carries (the input area hints at them until they are sent).</summary>
+    public int PickedMentionCount => pickedMentions.Count;
+
+    /// <summary>
+    /// Replaces the sessions the <c>@</c> picker offers; the popup refills at once when it is open on a mention token, so a
+    /// session that appeared or vanished shows without the user retyping the <c>@</c>.
+    /// </summary>
+    public void SetSessionMentions(IReadOnlyList<SessionMentionTarget> targets)
+    {
+        sessionMentions = targets ?? [];
+        if (token.Kind == ComposerTokenKind.Mention)
+        {
+            UpdateSuggestions(lastText, lastCaret);
+        }
+    }
+
+    /// <summary>
+    /// The session mentions the outgoing message still carries: a mention whose token the user deleted (or edited away) is
+    /// dropped, and every mention is taken out of the pending set because this message is what carries it. Called once per
+    /// send, queue, interjection or redirect - the same moment the draft leaves the composer.
+    /// </summary>
+    public IReadOnlyList<SessionMention> TakeMentions(string text)
+    {
+        if (pickedMentions.Count == 0)
+        {
+            return [];
+        }
+
+        var source = text ?? string.Empty;
+        List<SessionMention> taken = [];
+        foreach (var mention in pickedMentions)
+        {
+            if (source.Contains(mention.Token, StringComparison.Ordinal))
+            {
+                taken.Add(mention);
+            }
+        }
+
+        pickedMentions.Clear();
+        OnPropertyChanged(nameof(PickedMentionCount));
+        return taken;
     }
 
     /// <summary>Closes the picker; <paramref name="dismissed"/> (Escape) keeps it closed while the caret stays in the token.</summary>

@@ -71,15 +71,25 @@ public sealed class ToolRegistry : IToolRegistry
     /// Tools visible to one agent: its definition's allow-list (null means everything) minus the sub-agent
     /// tools once the depth limit is reached. Only the root agent (<paramref name="isRoot"/>) may see the extension tools:
     /// for any sub-agent they are dropped even when the allow-list is null or names them.
+    /// <para><c>message_session</c> is the other way round: only the root and the sessions the user drives
+    /// (<paramref name="canMessage"/>) may see it, and a model-spawned child drops it even when its allow-list names it - the
+    /// model's only channel to a user session is the user's own <c>@</c> mention.</para>
     /// </summary>
-    public ToolRegistry Select(IReadOnlyList<string>? toolNames, bool canSpawn, IReadOnlyList<string> subAgentTools, bool isRoot = true)
+    public ToolRegistry Select(
+        IReadOnlyList<string>? toolNames,
+        bool canSpawn,
+        IReadOnlyList<string> subAgentTools,
+        bool isRoot = true,
+        bool canMessage = false)
     {
         var selected = new List<ITool>(Tools.Count);
         if (toolNames is null)
         {
             foreach (var tool in Tools)
             {
-                if ((canSpawn || !IsSubAgentTool(tool, subAgentTools)) && (isRoot || !IsExtensionTool(tool.Definition.Name)))
+                if ((canSpawn || !IsSubAgentTool(tool, subAgentTools))
+                    && (isRoot || !IsExtensionTool(tool.Definition.Name))
+                    && (canMessage || !IsSessionMessageTool(tool.Definition.Name)))
                 {
                     selected.Add(tool);
                 }
@@ -95,11 +105,19 @@ public sealed class ToolRegistry : IToolRegistry
                 allowed.UnionWith(subAgentTools);
             }
 
+            if (canMessage)
+            {
+                // The same rule for the delivery tool: a session kind's whitelist is about its own work, not about the one
+                // constant channel the root and the sessions the user drives always hold.
+                allowed.Add(SessionReplies.ToolName);
+            }
+
             foreach (var tool in Tools)
             {
                 var name = tool.Definition.Name;
                 if (allowed.Contains(name) && (canSpawn || !IsSubAgentTool(tool, subAgentTools))
-                    && (isRoot || !IsExtensionTool(name)))
+                    && (isRoot || !IsExtensionTool(name))
+                    && (canMessage || !IsSessionMessageTool(name)))
                 {
                     selected.Add(tool);
                 }
@@ -112,6 +130,9 @@ public sealed class ToolRegistry : IToolRegistry
     private static bool IsExtensionTool(string name) =>
         name is ExtensionToolNames.List or ExtensionToolNames.Create or ExtensionToolNames.Update
             or ExtensionToolNames.Disable or ExtensionToolNames.Delete;
+
+    private static bool IsSessionMessageTool(string name) =>
+        string.Equals(name, SessionReplies.ToolName, StringComparison.Ordinal);
 
     private static bool IsSubAgentTool(ITool tool, IReadOnlyList<string> names)
     {

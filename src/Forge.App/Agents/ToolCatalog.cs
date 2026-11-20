@@ -28,7 +28,12 @@ internal static class ToolCatalog
     /// </summary>
     private static readonly FrozenSet<string> Required = FrozenSet.Create(
         StringComparer.Ordinal,
-        [ReadArtifactTool.Name, SubAgentSteerTool.Name, SubAgentFollowUpTool.Name, SubAgentStopTool.Name, SkillTool.Name]);
+        [
+            ReadArtifactTool.Name, SubAgentSteerTool.Name, SubAgentFollowUpTool.Name, SubAgentStopTool.Name, SkillTool.Name,
+            // The one channel between a root and the sessions the user drove under it (forge-core "session messaging"): switching it
+            // off would leave "the user @-mentioned the session" with no way to act on it.
+            Forge.Abstractions.SessionReplies.ToolName,
+        ]);
 
     private static readonly FrozenDictionary<string, string> CoreGroups = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -42,6 +47,7 @@ internal static class ToolCatalog
         [SubAgentFollowUpTool.Name] = ToolGroups.Agents,
         [SubAgentStopTool.Name] = ToolGroups.Agents,
         [RequestReviewTool.Name] = ToolGroups.Agents,
+        [Forge.Abstractions.SessionReplies.ToolName] = ToolGroups.Session,
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>The names Core's own built-in tools use, plus <c>run_code</c>: a plugin tool may not take one of them on the

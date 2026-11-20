@@ -139,7 +139,9 @@ public sealed class AgentLoop(AgentLoopServices services)
             instance.Definition.ToolNames,
             instance.Depth < services.Options.MaxSubAgentDepth,
             services.SubAgentToolNames,
-            instance.Depth == 0);
+            instance.Depth == 0,
+            // Only the root and the sessions the user drives hold the delivery tool; a model-spawned child never does.
+            instance.Depth == 0 || instance.IsUserSession);
         var provider = services.Providers(instance.Definition.Model);
 
         await ResolveCacheStateAsync(instance, ct).ConfigureAwait(false);
@@ -1115,7 +1117,8 @@ public sealed class AgentLoop(AgentLoopServices services)
         IReadOnlyList<string>? toolNames,
         bool canSpawn,
         IReadOnlyList<string> subAgentTools,
-        bool isRoot)
+        bool isRoot,
+        bool canMessage)
     {
         private Selected? selected;
 
@@ -1147,7 +1150,7 @@ public sealed class AgentLoop(AgentLoopServices services)
                 return cached;
             }
 
-            var fresh = new Selected(published.Version, published.Tools.Select(toolNames, canSpawn, subAgentTools, isRoot));
+            var fresh = new Selected(published.Version, published.Tools.Select(toolNames, canSpawn, subAgentTools, isRoot, canMessage));
             Volatile.Write(ref selected, fresh);
             return fresh;
         }

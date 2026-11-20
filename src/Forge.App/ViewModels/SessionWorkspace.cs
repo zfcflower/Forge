@@ -199,7 +199,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         AppPreferences? preferences = null,
         Action? openInspector = null,
         Action? openSession = null,
-        AgentSessionLaunch? agentSession = null)
+        AgentSessionLaunch? agentSession = null,
+        Func<IReadOnlyList<SessionMentionTarget>>? sessionMentions = null)
     {
         Info = session;
         this.agentSession = agentSession;
@@ -268,7 +269,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (runtime is not null)
         {
             runtime.PromptsStaleChanged += OnRuntimePromptsStaleChanged;
+            // The host can be built (and its grants written) after this tab was opened: the marks follow the table.
+            runtime.SessionGrantsChanged += OnSessionGrantsChanged;
         }
+
+        // The @ picker's session group (forge-core "session messaging"): what this tab may address, owned by the shell because it is
+        // the side that knows every open and stored session of the root.
+        SetSessionMentionSource(sessionMentions);
     }
 
     public SessionInfo Info { get; private set; }
@@ -284,6 +291,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     /// <summary>Raised on the UI thread when <see cref="PromptsStale"/> may have changed.</summary>
     internal event Action? PromptsStaleChanged;
+
+    /// <summary>The grant table moved (a pick applied when the host was built, or a revoke): re-read the input area's marks.</summary>
+    private void OnSessionGrantsChanged() => Forge.App.Approval.UiThreadDispatcher.Instance.Post(RefreshSessionAuthorizations);
 
     private void OnRuntimePromptsStaleChanged() => Forge.App.Approval.UiThreadDispatcher.Instance.Post(() =>
     {
@@ -314,12 +324,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     /// <summary>
     /// The tab's label. The session tab's marker is not part of it: the tab strip draws that one as a chat bubble icon for
-    /// session tabs, so the title stays plain text for tooltips, automation and window titles. An agent-session tab adds the
-    /// unread mark in front of the root's title and its own name.
+    /// session tabs, so the title stays plain text for tooltips, automation and window titles. The unread mark goes in front
+    /// of any session's label: an ended agent-session turn and a receipt another session delivered to a root raise the same
+    /// one, and <see cref="Title"/> already spells an agent session's own label.
     /// </summary>
-    public string TabTitle => agentSession is not null
-        ? (agentUnread ? AgentSessionLabel.UnreadMark : string.Empty) + Title
-        : Info.Title;
+    public string TabTitle => (agentUnread ? AgentSessionLabel.UnreadMark : string.Empty) + Title;
 
     public string WorkDir => Info.WorkspacePath;
 
@@ -508,6 +517,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (runtime is not null)
         {
             runtime.PromptsStaleChanged -= OnRuntimePromptsStaleChanged;
+            runtime.SessionGrantsChanged -= OnSessionGrantsChanged;
         }
 
         runtime = null;
@@ -770,6 +780,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             // owners have to hear about it: without this a restored session kept no agent rows until something else
             // refreshed the whole tree.
             SubAgentsChanged?.Invoke();
+
+            // The grants live in the host's memory, so a reopened tab of the same root reads back the marks it had; a tab
+            // whose host was never built shows none, which is exactly what a restart means for this table.
+            RefreshSessionAuthorizations();
+            OnPropertyChanged(nameof(HasSessionAuthorizations));
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
@@ -1015,7 +1030,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         var text = draft.Trim();
         Draft = string.Empty;
-        return new ComposerPrompt(Composer.ExpandCommand(text), Composer.TakeAttachments(), Composer.TakeOrchestration());
+        // The session mentions the user picked travel with the message (queue, interjection and redirect alike) and are the
+        // whole authorization for it: a mention taken here is a grant, one the user deleted from the text is not.
+        var mentions = Composer.TakeMentions(text);
+        AuthorizeMentions(mentions);
+        return new ComposerPrompt(Composer.ExpandCommand(text), Composer.TakeAttachments(), Composer.TakeOrchestration())
+        {
+            Mentions = mentions,
+        };
     }
 
     private bool HasSendableQueue() => queued.Any(message => !message.IsInterjection);
@@ -1511,6 +1533,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             for (var i = undelivered.Count - 1; i >= 0; i--)
             {
                 var leftover = undelivered[i];
+                if (SessionReplyViewModel.IsReply(leftover.Text))
+                {
+                    // A receipt the running turn did not reach its boundary for: it lands in the transcript as an unread
+                    // message. It must never become the next queued turn - that is the unattended A->B->A loop.
+                    ShowSessionReply(leftover.Text, unseen: true);
+                    continue;
+                }
+
                 queued.Insert(
                     0,
                     new QueuedMessageViewModel(
@@ -2060,6 +2090,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             OnQueueChanged();
         }
 
+        if (SessionReplyViewModel.IsReply(interjected.Text))
+        {
+            // A session reply that reached this turn at its tool-batch boundary: the model reads it as a user message (the
+            // loop persisted it), and the transcript shows it as the card it is rather than as a plain interjected notice.
+            ShowSessionReply(interjected.Text, unseen: false);
+            return;
+        }
+
         Card(interjected.AgentId)?.AddNotice(SessionStrings.ComposerInterjectedNotice(interjected.Text, attachments));
     }
 
@@ -2365,6 +2403,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (runtime is not null)
         {
             runtime.PromptsStaleChanged -= OnRuntimePromptsStaleChanged;
+            runtime.SessionGrantsChanged -= OnSessionGrantsChanged;
         }
 
         ClearLiveTools();
@@ -2400,6 +2439,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         OnPropertyChanged(nameof(ReadOnlyBanner));
         OnPropertyChanged(nameof(ContinueLabel));
         OnPropertyChanged(nameof(SubAgentLabel));
+        foreach (var mark in SessionAuthorizations)
+        {
+            mark.RefreshText();
+        }
         OnPropertyChanged(nameof(SubAgentToggleName));
         OnPropertyChanged(nameof(SubAgentToggleTooltip));
         Transcript.RefreshText();

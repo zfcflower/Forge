@@ -101,6 +101,14 @@ internal sealed record AgentRuntimeServices(
     /// <summary>Where <c>request_review</c> records each finished review (handed to <c>AgentHostOptions.ReviewConclusions</c>). Null: nothing is recorded.</summary>
     public IReviewConclusionStore? ReviewConclusions { get; set; }
 
+    /// <summary>
+    /// The window's side of session-to-session delivery (forge-core "session messaging"): running a root turn, the checkpoint numbering
+    /// of a delivered user-session turn, a turn's change line and the receipt's way into a transcript. Handed to
+    /// <see cref="AgentHostOptions.SessionMessages"/> as a lookup because the window is created after this record is built;
+    /// null leaves the host without the app behind it (scripts, tests).
+    /// </summary>
+    public Func<ISessionMessageEndpoint?>? SessionMessages { get; set; }
+
     /// <summary>Where the step review ledger is persisted (handed to <c>AgentHostOptions.StepReviewStore</c>). Null: in memory only.</summary>
     public IStepReviewStore? StepReviewStore { get; set; }
 
@@ -749,6 +757,179 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         return control.Stop(agentId, reason) == SubAgentControlResult.Accepted;
     }
 
+    // ---------------------------------------------------------------- session messaging / reply receipts
+
+    /// <summary>The host's mailboxes and grants; null until the host is built, which is when the first turn needs it.</summary>
+    internal SessionMessenger? SessionMessaging
+    {
+        get
+        {
+            lock (gate)
+            {
+                return host?.SessionMessaging;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The user picked <paramref name="targetSessionId"/> in the composer's <c>@</c> picker of
+    /// <paramref name="initiatorSessionId"/>: record the pair in the host's grant table (forge-core "session messaging").
+    /// <para>The host may not exist yet - the very first message of a session is composed before its first turn builds one -
+    /// so a grant that cannot be written now is kept and applied the moment the host exists. The grant is never dropped:
+    /// the user's pick is the authorization, and the message that carries it is already on its way.</para>
+    /// </summary>
+    internal void GrantSessionMessage(string initiatorSessionId, string targetSessionId, string targetName)
+    {
+        if (string.IsNullOrEmpty(initiatorSessionId) || string.IsNullOrEmpty(targetSessionId))
+        {
+            return;
+        }
+
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        if (built is null || !TryGrant(built, initiatorSessionId, targetSessionId, targetName))
+        {
+            lock (gate)
+            {
+                pendingGrants.Add((initiatorSessionId, targetSessionId, targetName ?? string.Empty));
+            }
+        }
+    }
+
+    /// <summary>Grants waiting for this session's host to be built; applied in <see cref="ResolveAsync"/> right after it is.</summary>
+    private readonly List<(string Initiator, string Target, string Name)> pendingGrants = [];
+
+    /// <summary>Raised after grants moved (a queued grant applied, a revoke): the tabs refresh their input marks.</summary>
+    internal event Action? SessionGrantsChanged;
+
+    private static bool TryGrant(AgentHost host, string initiator, string target, string name)
+    {
+        try
+        {
+            return host.SessionMessaging.Grant(initiator, target, name) is not null;
+        }
+        catch (InvalidOperationException)
+        {
+            // The host exists but has no root yet: the grant waits like the ones taken before the build.
+            return false;
+        }
+    }
+
+    /// <summary>Applies the grants taken before this session's host existed. Caller does not hold <see cref="gate"/>.</summary>
+    private void ApplyPendingGrants(AgentHost built)
+    {
+        (string Initiator, string Target, string Name)[] waiting;
+        lock (gate)
+        {
+            if (pendingGrants.Count == 0)
+            {
+                return;
+            }
+
+            waiting = [.. pendingGrants];
+            pendingGrants.Clear();
+        }
+
+        foreach (var grant in waiting)
+        {
+            if (!TryGrant(built, grant.Initiator, grant.Target, grant.Name))
+            {
+                // Still no root: keep it for the next boundary instead of losing the user's pick.
+                lock (gate)
+                {
+                    pendingGrants.Add(grant);
+                }
+            }
+        }
+
+        SessionGrantsChanged?.Invoke();
+    }
+
+    /// <summary>The pairs <paramref name="initiatorSessionId"/> holds, for the input area's revocable marks.</summary>
+    internal IReadOnlyList<SessionGrant> SessionMessageGrants(string initiatorSessionId) =>
+        SessionMessaging?.Authorizations.GrantsOf(initiatorSessionId) ?? [];
+
+    /// <summary>
+    /// The user pressed the revoke button of one mark: that one pair goes (the same target may still be granted to another
+    /// session of the tree). False when the host is not built or the pair was never granted.
+    /// </summary>
+    internal bool RevokeSessionMessage(string initiatorSessionId, string targetSessionId)
+    {
+        var revoked = SessionMessaging?.Authorizations.Revoke(initiatorSessionId, targetSessionId) ?? false;
+        if (revoked)
+        {
+            SessionGrantsChanged?.Invoke();
+        }
+
+        return revoked;
+    }
+
+    /// <summary>Withdraws every grant that names <paramref name="targetSessionId"/> as its target (it was archived or closed).</summary>
+    internal int RevokeTargetSessionMessages(string targetSessionId) =>
+        SessionMessaging?.Authorizations.RevokeTarget(targetSessionId) ?? 0;
+
+    /// <summary>Withdraws every grant of this root's tree (it left <see cref="SessionStatus.Active"/>).</summary>
+    internal int RevokeRootSessionMessages() =>
+        SessionMessaging?.Authorizations.RevokeRoot(SessionId) ?? 0;
+
+    /// <summary>
+    /// Hands one receipt to the running turn of <paramref name="sessionId"/> - the root's or a user-driven child's - so the
+    /// loop delivers it at the next tool-batch boundary (forge-core "reply receipt"). False when no turn of that session runs, in
+    /// which case the receipt goes to the transcript instead (never into a new turn).
+    /// </summary>
+    internal bool TryInterjectSessionMessage(string sessionId, string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        if (string.Equals(sessionId, SessionId, StringComparison.Ordinal))
+        {
+            return TryInterject(text);
+        }
+
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        if (built?.FindUserChild(sessionId) is not { } child)
+        {
+            return false;
+        }
+
+        child.Interject(text);
+        return true;
+    }
+
+    /// <summary>
+    /// Adds one message to a session's history without running a turn (a receipt that arrived while it was idle). The
+    /// caller checked that no turn of that session is running.
+    /// </summary>
+    internal async Task AppendSessionMessageAsync(string sessionId, string text, CancellationToken ct)
+    {
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        if (built is null)
+        {
+            // Nothing is loaded: write the message into the store so the next resume reads it like any other user message.
+            await services.Store.AppendAsync(sessionId, ChatMessage.User(text), null, ct).ConfigureAwait(false);
+            return;
+        }
+
+        await built.AppendSessionMessageAsync(sessionId, text, ct).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// The host of this session, building it (and resuming the root) when it does not exist yet. Used before a user session
     /// starts, so the runtime is loaded without the root's tab being opened or brought to the front.
@@ -1024,6 +1205,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 RefreshPullRequestTools(host);
                 RefreshMcpTools(host);
                 ApplyCompaction(host);
+                ApplyPendingGrants(host);
                 return (host, root);
             }
 
@@ -1055,9 +1237,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 listenedClient = client;
                 client.ToolsChanged += OnToolsChanged;
             }
-
-            return (host, agent);
         }
+
+        // The host now has its root, so the grants the user picked before it existed can be written.
+        ApplyPendingGrants(built);
+
+        return (built, agent);
     }
 
     /// <summary>
@@ -1509,6 +1694,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 ReviewConclusions = services.ReviewConclusions,
                 StepReviewStore = services.StepReviewStore,
                 Artifacts = services.Artifacts,
+                SessionMessages = services.SessionMessages,
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),
                 Options = new AgentOptions
@@ -2165,6 +2351,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         {
             [TodoTool.Name] = ApprovalMode.Allow,
             [AskUserTool.Name] = ApprovalMode.Allow,
+
+            // Delivering a session message is what the user's own @ mention authorized: the approval card belongs to the
+            // target's tools, which go through this session's policy like every other call of that turn (forge-core
+            // "session messaging": the delivery itself raises no approval card).
+            [SessionReplies.ToolName] = ApprovalMode.Allow,
 
             // Read-only, but a prompt-injected URL or query can carry workspace content out, so these always ask.
             [Forge.Core.Tools.Web.WebFetchTool.Name] = ApprovalMode.Ask,

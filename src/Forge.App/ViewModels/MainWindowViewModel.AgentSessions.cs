@@ -178,6 +178,7 @@ internal sealed partial class MainWindowViewModel
                 Status = SessionStatus.Active,
             }
             : info;
+        SessionWorkspaceViewModel? created = null;
         var session = new SessionWorkspaceViewModel(
             target,
             composition.Runtimes.Get(root),
@@ -189,12 +190,14 @@ internal sealed partial class MainWindowViewModel
             preferences: composition.Preferences,
             openInspector: OpenInspector,
             openSession: () => ActivateAgentSessionTab(info.Id),
-            agentSession: new AgentSessionLaunch(root, ordinal, isDraft))
+            agentSession: new AgentSessionLaunch(root, ordinal, isDraft),
+            sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created))
         {
             // The turn check is the root's (6.3): an agent session may not run under a root the store no longer holds as
             // active, in a workspace that is operating, or in a merge conflict.
             TurnGate = token => CheckTurnAsync(root.Id, token),
         };
+        created = session;
         ApplyProject(session);
         session.AgentSessionCreated += OnAgentSessionCreated;
         session.TurnStarted += OnAgentSessionTurnStarted;
@@ -277,6 +280,13 @@ internal sealed partial class MainWindowViewModel
         {
             // The draft became a row: it no longer counts as one of the pending drafts of its root.
             ReleaseAgentDraft(root.Id);
+        }
+
+        if (session.AgentSessionRoot is { } createdRoot)
+        {
+            // The new row is a session the root's @ picker can offer from now on.
+            mentionTargets.Remove(createdRoot.Id);
+            RefreshSessionMentionsOf(createdRoot.Id);
         }
 
         if (ReferenceEquals(session, activeSession))
@@ -394,6 +404,10 @@ internal sealed partial class MainWindowViewModel
             openTabs.Remove(childId);
             sessions.Remove(childId);
             session.TabTitleChanged -= OnSessionTitleChanged;
+            // A closed agent session takes every grant that named it as its target with it (forge-core "session messaging": a grant lives
+            // until the target session ends): closing the tab is how the user ends that session here.
+            OnMessageTargetClosed(childId);
+            RefreshSessionMentionsOf(root?.Id ?? childId);
         }
         else if (root is not null)
         {

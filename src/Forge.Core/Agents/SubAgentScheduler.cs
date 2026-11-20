@@ -670,7 +670,11 @@ public sealed class SubAgentScheduler : ISubAgentControl
             sessionId,
             workingDirectory,
             depth,
-            composer.Compose(new PromptInput(layers, definition.Prompt, null)));
+            composer.Compose(new PromptInput(layers, definition.Prompt, null)))
+        {
+            // The tool surface reads this: only a user-driven session may deliver session messages (its root may too).
+            IsUserSession = owner == AgentOwner.User,
+        };
 
     private AgentInstance? FindUserSession(string sessionId)
     {

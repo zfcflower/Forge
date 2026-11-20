@@ -122,6 +122,15 @@ public sealed record AgentHostOptions
     /// <see cref="FirstRequestCacheReport.ToString"/> to <see cref="System.Diagnostics.Trace"/>, the host's diagnostics channel.
     /// </summary>
     public Action<FirstRequestCacheReport>? CacheDiagnostics { get; init; }
+
+    /// <summary>
+    /// The app's side of session-to-session delivery (forge-core "授权通信"): running a root session's turn, the checkpoint
+    /// numbering of a user session's delivered turn, the change line of a turn, and the receipt's way back into a transcript.
+    /// Core cannot do any of those itself, so <c>message_session</c> reaches them through this seam. Read at delivery time
+    /// (the window installs it after the host settings are built); null leaves the tool answering that nothing is connected,
+    /// which is what a host without an app behind it - a script or a test - looks like.
+    /// </summary>
+    public Func<ISessionMessageEndpoint?>? SessionMessages { get; init; }
 }
 
 /// <summary>
@@ -138,12 +147,19 @@ public sealed class AgentHost
     private readonly ToolSurface toolSurface;
     private readonly AgentLoop loop;
     private readonly ISessionStore? store;
+    private readonly SessionMessenger messenger;
 
     /// <summary>
     /// The root session this host belongs to, recorded when the root agent is created or resumed: user-driven sessions
     /// start under it, and their start events name it as the parent. One host carries one main session.
     /// </summary>
     private RootSession? rootSession;
+
+    /// <summary>
+    /// The root instance itself, kept so a message that arrives outside a turn (a receipt) can join the history the next
+    /// turn sends. Null until the root is created or resumed.
+    /// </summary>
+    private AgentInstance? rootInstance;
 
     public AgentHost(AgentHostOptions options)
     {
@@ -194,6 +210,18 @@ public sealed class AgentHost
         builtIns.Add(new SubAgentSteerTool(scheduler.ModelControl));
         builtIns.Add(new SubAgentFollowUpTool(scheduler.ModelControl));
         builtIns.Add(new SubAgentStopTool(scheduler.ModelControl));
+
+        // The one channel between a root and the sessions the user drove under it: its grants, its dispatch queues and its
+        // receipts. The tool is part of every host's fixed segment (a constant cost in the cached prefix) and answers by
+        // itself for a host whose app seam is missing.
+        messenger = new SessionMessenger(
+            () => Volatile.Read(ref rootSession) is { } root ? new SessionAnchor(root.SessionId, root.WorkingDirectory) : null,
+            scheduler,
+            options.Store,
+            options.Artifacts,
+            options.SessionMessages ?? (static () => null),
+            RunUserChildTurnAsync);
+        builtIns.Add(new MessageSessionTool(messenger));
 
         if (options.Reviews is { } reviews)
         {
@@ -271,6 +299,13 @@ public sealed class AgentHost
     public ISubAgentControl SubAgentControl => scheduler;
 
     public ToolRegistry Tools => toolSurface.Tools;
+
+    /// <summary>
+    /// This host's session-to-session mailboxes and the user's grants (forge-core "授权通信"): the app writes a grant when the
+    /// user picks a session in the composer's <c>@</c> picker and revokes it when the target ends, the root leaves Active or
+    /// the user presses the mark's revoke button.
+    /// </summary>
+    public SessionMessenger SessionMessaging => messenger;
 
     /// <summary>
     /// Stops one running tool call of this host's tree - the root's or any sub-agent's, keyed by the agent id and call id of
@@ -390,6 +425,41 @@ public sealed class AgentHost
         scheduler.TryGetUserSession(sessionId, out var instance) ? instance : null;
 
     /// <summary>
+    /// Delivers one message to a session outside a delivery's own turn (forge-core "reply receipt": a receipt that arrived while
+    /// the session was idle lands in the transcript as an unread message). It never runs a turn: an idle session gets the
+    /// message appended to its history - written to the store and to the live instance's context, so the very next turn reads
+    /// it exactly like a message the user typed - and a session that is inside a turn gets it through
+    /// <see cref="AgentInstance.Interject(string)"/>, which the loop delivers at that turn's next tool-batch boundary. The
+    /// running loop owns the history, so nothing is appended behind its back.
+    /// </summary>
+    public async Task AppendSessionMessageAsync(string sessionId, string text, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(text);
+        AgentInstance? instance = null;
+        if (Volatile.Read(ref rootSession) is { } anchor && string.Equals(anchor.SessionId, sessionId, StringComparison.Ordinal))
+        {
+            instance = Volatile.Read(ref rootInstance);
+        }
+        else if (scheduler.TryGetUserSession(sessionId, out var child))
+        {
+            instance = child;
+        }
+
+        if (instance is { IsRunning: true })
+        {
+            instance.Interject(text);
+            return;
+        }
+
+        var message = ChatMessage.User(text);
+        var seq = store is null
+            ? 0
+            : await store.AppendAsync(sessionId, message, null, ct).ConfigureAwait(false);
+        instance?.Add(message, seq);
+    }
+
+    /// <summary>
     /// Stops every run of a user-driven session this host owns - queued or running - and returns how many were stopped. The
     /// root session's own turn is not touched: the shell stops that one and calls this for the sessions under it when the
     /// user presses stop on the root.
@@ -443,7 +513,8 @@ public sealed class AgentHost
             instance.Definition.ToolNames,
             instance.Depth < options.MaxSubAgentDepth,
             SubAgentTools.Names,
-            instance.Depth == 0);
+            instance.Depth == 0,
+            instance.Depth == 0 || instance.IsUserSession);
         return PromptFingerprint.Compute(instance.Prompt.StablePrefix, registry.Definitions);
     }
 
@@ -464,6 +535,7 @@ public sealed class AgentHost
             composer.Compose(new PromptInput(layers, kind.Prompt, null)));
         // The host now knows its main session: a user-driven child session is started under this one.
         Volatile.Write(ref rootSession, new RootSession(sessionId, directory));
+        Volatile.Write(ref rootInstance, root);
         return root;
     }
 

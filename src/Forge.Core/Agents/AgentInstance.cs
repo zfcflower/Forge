@@ -100,6 +100,19 @@ public sealed class AgentInstance
     /// <summary>Control state of the run driving this instance right now; null for a root agent or a finished sub-agent.</summary>
     internal SubAgentRun? Control { get; set; }
 
+    /// <summary>
+    /// A run is driving this instance right now. Roots have no <see cref="Control"/> and a finished sub-agent has none either,
+    /// so this answers for the instances that carry a run - in practice the user-driven sessions, whose turn a mailbox delivery
+    /// has to wait for (<see cref="SessionMessenger"/>).
+    /// </summary>
+    internal bool IsRunning => Control is not null;
+
+    /// <summary>
+    /// True for a session the user opened under a root (forge-core "Agent 会话"): such a session gets the session-messaging
+    /// tool, while a child the model spawned with <c>spawn_agent</c> does not (depth 2 inherits no authorization either).
+    /// </summary>
+    internal bool IsUserSession { get; init; }
+
     /// <summary>Text produced by this instance so far: the turn in progress when it is streaming, else the last finished turn.</summary>
     internal string PartialText => streaming.Length > 0 ? streaming.ToString() : lastText;
 

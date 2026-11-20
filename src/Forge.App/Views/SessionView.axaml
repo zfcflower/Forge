@@ -6,6 +6,52 @@
              xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.SessionView"
              x:DataType="vm:SessionWorkspaceViewModel">
+  <UserControl.DataTemplates>
+    <!-- One session-to-session receipt (forge-core "reply receipt"): the three lines the target wrote back - header, change line
+         and report - as a card of its own instead of a user bubble. -->
+    <DataTemplate DataType="vm:SessionReplyViewModel" x:DataType="vm:SessionReplyViewModel">
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Kind="User" />
+        <Border Grid.Column="1"
+                Classes="session-reply-card"
+                Margin="0,4,0,6"
+                Padding="10,8"
+                CornerRadius="6"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource BorderBrush}"
+                Background="{DynamicResource SurfaceSubtleBrush}"
+                AutomationProperties.AutomationId="session-reply-card">
+          <StackPanel Spacing="4">
+            <TextBlock Text="{Binding Header}"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding HasHeader}"
+                       AutomationProperties.AutomationId="session-reply-header" />
+            <TextBlock Classes="caption"
+                       Text="{Binding Changes}"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding HasChanges}"
+                       AutomationProperties.AutomationId="session-reply-changes" />
+            <SelectableTextBlock Text="{Binding Report}"
+                                 TextWrapping="Wrap"
+                                 IsVisible="{Binding HasReport}"
+                                 AutomationProperties.AutomationId="session-reply-report" />
+            <StackPanel Orientation="Horizontal" Spacing="4">
+              <views:CopyTextButton Classes="ghost icon"
+                                    Width="26"
+                                    Height="22"
+                                    ToolTip.Tip="{Binding CopyLabel}"
+                                    AutomationProperties.AutomationId="session-reply-copy"
+                                    AutomationProperties.Name="{Binding CopyLabel}">
+                <wc:FluentIcon Data="{StaticResource IconCopy}" Width="13" Height="13" />
+              </views:CopyTextButton>
+              <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding Time}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </DataTemplate>
+  </UserControl.DataTemplates>
   <Grid RowDefinitions="*,Auto,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <Panel Grid.Row="0">
       <views:TranscriptListBox x:Name="Transcript"
@@ -351,9 +397,41 @@
           </Border>
 
           <Border Grid.Row="1" Classes="composer-body">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,10,0,0">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="0,10,0,0">
+              <!-- the session-messaging grants of this session: one revocable mark per target ("Authorized: X") -->
+              <ItemsControl Grid.Row="0"
+                            ItemsSource="{Binding SessionAuthorizations}"
+                            Margin="8,8,8,0"
+                            IsVisible="{Binding HasSessionAuthorizations}"
+                            AutomationProperties.AutomationId="composer-authorizations">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:SessionAuthorizationMarkViewModel">
+                    <Border Classes="queued-chip"
+                            Margin="0,0,6,4"
+                            ToolTip.Tip="{Binding RevokeTip}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <wc:FluentIcon Data="{StaticResource IconSparkle}" Width="12" Height="12" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Text}" VerticalAlignment="Center" />
+                        <Button Classes="icon composer-mini"
+                                Command="{Binding RevokeCommand}"
+                                AutomationProperties.AutomationId="composer-authorization-revoke"
+                                AutomationProperties.Name="{Binding RevokeText}"
+                                ToolTip.Tip="{Binding RevokeTip}">
+                          <wc:FluentIcon Data="{StaticResource IconClose}" Width="10" Height="10" />
+                        </Button>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
               <!-- queued and interjected messages -->
-              <StackPanel Grid.Row="0"
+              <StackPanel Grid.Row="1"
                           Spacing="4"
                           Margin="8,8,8,0"
                           IsVisible="{Binding HasQueued}">
@@ -397,7 +475,7 @@
               </StackPanel>
 
               <!-- attachments of the draft (image thumbnails, file chips), why the last one was refused, and why they block sending -->
-              <StackPanel Grid.Row="1" Spacing="4">
+              <StackPanel Grid.Row="2" Spacing="4">
                 <ItemsControl ItemsSource="{Binding Composer.Attachments}"
                               Margin="8,8,8,0"
                               IsVisible="{Binding Composer.HasImageAttachments}"
@@ -484,7 +562,7 @@
               </StackPanel>
 
               <TextBox x:Name="Input"
-                       Grid.Row="2"
+                       Grid.Row="3"
                        Classes="composer-input"
                        Text="{Binding Draft, Mode=TwoWay}"
                        AcceptsReturn="True"
@@ -497,7 +575,7 @@
                        AutomationProperties.Name="{Binding [session.messageName], Source={x:Static loc:Loc.Instance}}" />
 
               <!-- toolbar: the agent, model and orchestration pickers on the left, send / running menu on the right -->
-              <Grid Grid.Row="3" ColumnDefinitions="*,Auto" Margin="6,0,6,6">
+              <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="6,0,6,6">
                 <views:ComposerToolbar HorizontalAlignment="Left" DataContext="{Binding Composer}" />
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom">

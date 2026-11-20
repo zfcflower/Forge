@@ -423,6 +423,9 @@ internal sealed partial class SessionWorkspaceViewModel
             finally
             {
                 Interlocked.Exchange(ref agentChildCreated, null);
+                // A receipt interjected into this turn that the loop never reached its boundary for: it goes to the
+                // transcript instead of waiting for a turn the user never asked for.
+                TakeUndeliveredReplies();
                 this.turn?.Dispose();
                 this.turn = null;
                 IsRunning = false;
@@ -721,6 +724,10 @@ internal sealed partial class SessionWorkspaceViewModel
             AgentKind = AgentSessionDefinition()?.Name,
             Title = AgentSessionName,
         };
+        // The row exists from now on, so it is the id the picker's mentions are granted under and the one the instance the
+        // run just created is held by (a receipt that arrives before the next turn has to find it).
+        agentInstance ??= runtime?.FindUserChild(childSessionId);
+        FlushDeferredMentions();
         OnPropertyChanged(nameof(SessionId));
         OnPropertyChanged(nameof(TabTitle));
         TabTitleChanged?.Invoke(this, EventArgs.Empty);

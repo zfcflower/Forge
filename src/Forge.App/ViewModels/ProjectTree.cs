@@ -1899,7 +1899,9 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         node.StatusText = plan.StatusText;
         // Replaced with every rebuild: a reused row must not keep the command of a plan that had an active root session.
         node.SetNewAgentSessionCommand(null);
-        node.IsUnread = plan.Kind == TreeNodeKind.AgentSession
+        // A session row (a root's or an agent session's) carries the mark while it has a reply the user has not seen: an
+        // ended agent-session turn and a receipt another session delivered to a root raise the same one.
+        node.IsUnread = plan.Kind is TreeNodeKind.AgentSession or TreeNodeKind.Session
                         && IsAgentSessionUnread?.Invoke(plan.Session?.Id ?? string.Empty) == true;
         node.IsActiveSession = plan.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession
             && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);

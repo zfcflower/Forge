@@ -145,6 +145,27 @@ internal static class ComposerSuggestions
     }
 
     /// <summary>
+    /// The sessions of the <c>@</c> picker's session group matching <paramref name="query"/>, prefix matches first and then
+    /// by name; an empty query lists them all. The group is what makes a mention structured (forge-core "session messaging"), so it is
+    /// ranked ahead of the file rows the same picker shows.
+    /// </summary>
+    public static IReadOnlyList<Forge.App.ViewModels.SessionMentionTarget> FilterSessions(
+        IEnumerable<Forge.App.ViewModels.SessionMentionTarget> targets,
+        string query)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        query ??= string.Empty;
+        return targets
+            .AsValueEnumerable()
+            .Select(target => (Target: target, Rank: Rank(target.Name, query)))
+            .Where(pair => pair.Rank >= 0)
+            .OrderBy(pair => pair.Rank)
+            .ThenBy(pair => pair.Target.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => pair.Target)
+            .ToList();
+    }
+
+    /// <summary>
     /// Up to <paramref name="limit"/> files matching the query: file-name prefix, then file-name substring, then path
     /// substring, then the query's characters in order anywhere in the path (fuzzy). Shorter paths win ties.
     /// </summary>
@@ -186,6 +207,21 @@ internal static class ComposerSuggestions
 
         var inserted = trigger + value + " ";
         return (text[..token.Start] + inserted + after, token.Start + inserted.Length);
+    }
+
+    private static int Rank(string name, string query)
+    {
+        if (query.Length == 0)
+        {
+            return 0;
+        }
+
+        if (name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        return name.Contains(query, StringComparison.OrdinalIgnoreCase) ? 1 : -1;
     }
 
     private static int SlashRank(SlashEntry entry, string query)

@@ -60,6 +60,15 @@ internal static class TranscriptReplay
             case MessageRole.User:
                 var text = OrchestrationDirective.Strip(TextOf(message, skipAttachments: true));
                 var attachments = AttachmentsOf(message);
+                if (SessionReplyViewModel.IsReply(text))
+                {
+                    // A receipt that landed while the session was idle is stored as a user message (that is what the next
+                    // turn reads); a reopened transcript draws it as the card it was, not as something the user typed.
+                    transcript.AddSessionReply(text, at);
+                    transcript.BeginTurn(at, closePrevious: true);
+                    break;
+                }
+
                 if (text.Length > 0 || attachments.Count > 0)
                 {
                     transcript.AddUserMessage(text, at, attachments);

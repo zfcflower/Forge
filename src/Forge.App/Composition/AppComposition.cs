@@ -181,6 +181,13 @@ internal sealed class AppComposition : IAsyncDisposable
     public Func<string, IAgentMessageHost?> SessionMessageHost { get; set; } = static _ => null;
 
     /// <summary>
+    /// The window's side of session-to-session delivery (forge-core "session messaging"): handed to every session host as
+    /// <see cref="AgentHostOptions.SessionMessages"/>. The window installs itself here when it is constructed; null before
+    /// that (and in a headless composition), which leaves a host's <c>message_session</c> answering that nothing is connected.
+    /// </summary>
+    public Forge.Core.Agents.ISessionMessageEndpoint? SessionMessagingEndpoint { get; set; }
+
+    /// <summary>
     /// What the extension host last reported it registered (plugins, tools, commands), or null before it answered. The
     /// window status bar used to show this; it now has a line in the tools settings section.
     /// </summary>
@@ -702,6 +709,9 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.Mcp = mcp;
         runtimeServices.ToolRouter = toolRouter;
         runtimeServices.Artifacts = artifacts;
+        // Late-bound like the step committer above: the window (which runs the root turns and owns the transcripts) is only
+        // created after this composition, and the host reads the seam when a delivery actually happens.
+        runtimeServices.SessionMessages = () => created?.SessionMessagingEndpoint;
         var runtimes = new AgentRuntimeManager(runtimeServices);
 
         var initialization = InitializeWorkbenchAsync(projects, worktrees, paths, preferences, appearance);

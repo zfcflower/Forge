@@ -1204,6 +1204,21 @@ internal sealed class TranscriptViewModel : ObservableObject
         OnPropertyChanged(nameof(IsEmpty));
     }
 
+    /// <summary>
+    /// One session-to-session receipt as its own card (forge-core "reply receipt"): the initiator's transcript shows the three
+    /// lines the receipt carries - header, change line, report - instead of a plain notice, so a reply that arrived while the
+    /// session was idle reads as a message and not as a system note. It opens a round of its own; it never starts a turn.
+    /// </summary>
+    public void AddSessionReply(string text, DateTimeOffset at)
+    {
+        var reply = new SessionReplyViewModel(text, at);
+        items.Add(reply);
+        var host = new TranscriptRoundViewModel();
+        host.RowList.Add(reply);
+        rounds.Add(host);
+        OnPropertyChanged(nameof(IsEmpty));
+    }
+
     public void AddNotice(LocText text, bool isError = false, TimelineNodeKind kind = TimelineNodeKind.Notice)
     {
         var notice = new NoticeViewModel(text, isError, kind);
