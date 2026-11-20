@@ -35,6 +35,7 @@ internal static class AgentSessionStrings
     public const string AuthorizationRevokeTipKey = "agentSession.authorization.revokeTip";
     public const string DeliveredFromKey = "agentSession.delivery.from";
     public const string ReplyCopyKey = "agentSession.reply.copy";
+    public const string ReplyOpenReportKey = "agentSession.reply.openReport";
 
     public static string MenuNew => Loc.Instance[MenuNewKey];
 
@@ -72,6 +73,17 @@ internal static class AgentSessionStrings
 
     public static string ReplyCopy => Loc.Instance[ReplyCopyKey];
 
+    /// <summary>The receipt card's "open the full report" button: the part of the report the caps cut away lives behind it.</summary>
+    public static string ReplyOpenReport => Loc.Instance[ReplyOpenReportKey];
+
+    /// <summary>
+    /// The wire text <c>SessionReplies.Build</c> writes in front of the artifact id of a report its caps cut away (forge-core
+    /// "reply receipt"). It is <b>not</b> UI copy and is never registered for translation: the model reads the same fixed words
+    /// next turn, so the card only recognises the line to offer the stored report and never shows it as a sentence of its own.
+    /// It lives in this table because a CJK literal belongs in a string table and nowhere else in the App.
+    /// </summary>
+    internal const string ReplyFullReportPointer = "\n完整报告: ";
+
     [ModuleInitializer]
     internal static void Register()
     {
@@ -90,5 +102,6 @@ internal static class AgentSessionStrings
         Loc.Register(AuthorizationRevokeTipKey, "撤销对「{0}」的投递授权", "Revoke the delivery authorization for \"{0}\"");
         Loc.Register(DeliveredFromKey, "来自「{0}」的投递(回执稍后到达)", "Delivered by \"{0}\" (its receipt arrives later)");
         Loc.Register(ReplyCopyKey, "复制回执", "Copy the receipt");
+        Loc.Register(ReplyOpenReportKey, "打开完整报告", "Open the full report");
     }
 }

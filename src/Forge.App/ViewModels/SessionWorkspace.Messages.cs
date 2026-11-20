@@ -27,6 +27,13 @@ internal sealed partial class SessionWorkspaceViewModel
     /// <summary>Replaced by the shell whenever a session of this tree appears, disappears or is renamed.</summary>
     private IReadOnlyList<SessionMentionTarget> sessionMentionTargets = [];
 
+    /// <summary>
+    /// The shell's receipt path, <c>(initiatorSessionId, text)</c>: the window writes a receipt into the session's history and
+    /// then draws the card, which is what a receipt delivered at a turn's tool-batch boundary gets. Null on a standalone view,
+    /// which then draws the card alone.
+    /// </summary>
+    private Action<string, string>? receiptSink;
+
     /// <summary>The grants this session holds, shown above the input as one revocable mark each.</summary>
     public ObservableCollection<SessionAuthorizationMarkViewModel> SessionAuthorizations { get; } = [];
 
@@ -236,9 +243,35 @@ internal sealed partial class SessionWorkspaceViewModel
     }
 
     /// <summary>
-    /// Interjections of a finished user-session turn that the loop never delivered. A receipt among them is not sent as a new
-    /// turn (that is the unattended loop the feature forbids): it goes into the transcript as an unread message instead. The
-    /// root's own leftovers are routed by <c>ScheduleNext</c>, for the same reason.
+    /// Puts one receipt the running turn never reached its boundary for in front of everybody who has to see it: the shell's
+    /// path writes it into the session's history (the next turn's context has it, and a restart replays it as the card) and then
+    /// draws it. <see cref="ShowSessionReply"/> alone only drew it, so the reply stopped at the screen: the next turn answered
+    /// as if it never came, and a restart took the card away. This tab is idle whenever the caller runs (a turn that took its
+    /// receipt at a boundary never leaves one behind), so the shell's append branch is the one that fires.
+    /// </summary>
+    private void DeliverSessionReply(string text)
+    {
+        if (disposed || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        // A draft agent session has no row yet, so there is no id a receipt could be stored under; its leftovers wait until
+        // the session it belongs to exists.
+        var initiator = agentSession is null ? Info.Id : agentChildSessionId;
+        if (receiptSink is { } deliver && initiator is { Length: > 0 })
+        {
+            deliver(initiator, text);
+            return;
+        }
+
+        ShowSessionReply(text, unseen: true);
+    }
+
+    /// <summary>
+    /// Interjections of a finished agent-session turn that the loop never delivered. A receipt among them is not sent as a new
+    /// turn (that is the unattended loop the feature forbids): it goes through the shell's path like the root's leftovers
+    /// (<see cref="DeliverSessionReply"/>). The root instance's own inbox is never read here - it belongs to the root's tab.
     /// </summary>
     internal void TakeUndeliveredReplies()
     {
@@ -257,7 +290,7 @@ internal sealed partial class SessionWorkspaceViewModel
         {
             if (SessionReplyViewModel.IsReply(leftover.Text))
             {
-                ShowSessionReply(leftover.Text, unseen: true);
+                DeliverSessionReply(leftover.Text);
             }
         }
     }

@@ -1022,7 +1022,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             preferences: composition.Preferences,
             openInspector: OpenInspector,
             openSession: () => ActivateSessionTab(info.Id),
-            sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created))
+            sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created),
+            sessionReceipt: DeliverReceipt)
         {
             ChildQuery = readOnly
                 ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)

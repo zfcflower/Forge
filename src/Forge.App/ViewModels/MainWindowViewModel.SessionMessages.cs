@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using Avalonia.Threading;
 using Forge.Abstractions;
@@ -5,6 +6,7 @@ using Forge.App.Agents;
 using Forge.App.Automations;
 using Forge.App.Localization;
 using Forge.App.Logging;
+using Forge.App.Notifications;
 using Forge.Core.Agents;
 using Forge.Workspace;
 using ZLogger;
@@ -32,16 +34,40 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// <summary>Roots whose agent sessions are being read from the store right now, so a burst of calls reads once.</summary>
     private readonly HashSet<string> mentionReads = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The turns Core is driving itself right now, by session id: a delivery to a session whose tab is not open here runs on
+    /// Core's side (<see cref="BeginSessionTurnAsync"/>/<see cref="EndSessionTurnAsync"/> are its whole view of it), so the two
+    /// readings a metrics row needs are taken around it here. Written by Core's delivery thread, hence concurrent.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, DeliveryTurnMetrics> deliveryTurns = new(StringComparer.Ordinal);
+
+    /// <summary>One <c>turn_metrics</c> row of a turn Core drove itself, as far as the App can see it.</summary>
+    private sealed record DeliveryTurnMetrics(int Turn, DateTimeOffset StartedAt, RootCounters Start, string? Provider, string? Model);
+
     /// <summary>Hands this window to the runtimes as their delivery seam; called once when the window is built.</summary>
-    private void InitializeSessionMessages() => composition.SessionMessagingEndpoint = this;
+    private void InitializeSessionMessages()
+    {
+        composition.SessionMessagingEndpoint = this;
+        // A receipt's "open the full report" entry: the card is a leaf and knows nothing of preview tabs or artifact stores.
+        ReceiptReportOpener.Handler = OpenReceiptReport;
+    }
 
     // ---------------------------------------------------------------- ISessionMessageEndpoint
 
     /// <summary>
     /// Whether the session is busy right now (a turn running, queued messages): the tool says "queued" then. Only roots are
     /// asked - a user session's own run state is Core's to see on the instance it drives.
+    /// <para>The tool calls this from a worker thread while <c>sessions</c> and the queue are UI-thread state (a plain
+    /// dictionary and an <c>ObservableCollection</c>), so the reading is marshalled to the UI thread and never made where it
+    /// would race a write. This is what the seam's contract asks of the implementation.</para>
     /// </summary>
     public bool IsBusy(string sessionId) =>
+        Dispatcher.UIThread.CheckAccess()
+            ? IsBusyOnUiThread(sessionId)
+            : Dispatcher.UIThread.Invoke(() => IsBusyOnUiThread(sessionId));
+
+    /// <summary>The busy reading itself; UI thread only (<see cref="IsBusy"/> is its only caller).</summary>
+    private bool IsBusyOnUiThread(string sessionId) =>
         sessions.TryGetValue(sessionId, out var session)
         && (session.IsRunning || session.HasQueued || session.HasPendingComposer);
 
@@ -161,17 +187,111 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
 
     /// <summary>
     /// Opens the checkpoint of a turn Core drives itself (a user session with no tab): the same numbering and the same store
-    /// the session's own tab uses, so the receipt's change line is the child's own turn.
+    /// the session's own tab uses, so the receipt's change line is the child's own turn. The instance reading the turn's
+    /// metrics row will be measured against is taken here, before the run starts (<see cref="RecordDeliveryTurnMetricsAsync"/>).
     /// </summary>
     public async Task<int> BeginSessionTurnAsync(string sessionId, string workingDirectory, CancellationToken ct)
     {
         var next = await composition.Checkpoints.NextTurnNumberAsync(sessionId, ct).ConfigureAwait(false);
         await composition.Checkpoints.BeginAsync(sessionId, next, workingDirectory, ct).ConfigureAwait(false);
+        var reading = await ReadTurnCountersAsync(sessionId).ConfigureAwait(false);
+        deliveryTurns[sessionId] = new DeliveryTurnMetrics(next, DateTimeOffset.UtcNow, reading.Counters, reading.Provider, reading.Model);
         return next;
     }
 
-    public Task EndSessionTurnAsync(string sessionId, int turn, string workingDirectory, CancellationToken ct) =>
-        composition.Checkpoints.CompleteAsync(sessionId, turn, workingDirectory, ct);
+    /// <summary>
+    /// Closes the checkpoint a turn Core drove, and records the metrics row that turn owes <c>turn_metrics</c> (forge-app
+    /// "轮次改动", one row per turn): its tokens are the delivered instance's two readings subtracted, its streaming time is
+    /// the same pair of readings and never a wall clock, and a reading that is gone writes zero rather than a guess. The row
+    /// is written whatever the checkpoint did - a directory that is not a repository records no checkpoint and still a turn.
+    /// </summary>
+    public async Task EndSessionTurnAsync(string sessionId, int turn, string workingDirectory, CancellationToken ct)
+    {
+        try
+        {
+            await composition.Checkpoints.CompleteAsync(sessionId, turn, workingDirectory, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await RecordDeliveryTurnMetricsAsync(sessionId, turn).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Hands one delivered turn's row to the app's background metrics writer.
+    /// <para><b>What this seam knows.</b> Core runs the turn and calls <see cref="EndSessionTurnAsync"/> with no outcome, so the
+    /// row records the turn end the App was told about; a failure inside that run reaches the initiator's receipt, not here.
+    /// The token columns come from the instance's own readings, so a turn the provider reported nothing for keeps them null
+    /// (unknown is never zero), and the stream time is clamped at zero because a counter that went backwards is not negative
+    /// streaming. Tool calls are not counted on this path and stay null.</para>
+    /// </summary>
+    private async Task RecordDeliveryTurnMetricsAsync(string sessionId, int turn)
+    {
+        if (!deliveryTurns.TryRemove(sessionId, out var started) || started.Turn != turn)
+        {
+            return;
+        }
+
+        if (composition.MetricsRecorder is not { Enabled: true } recorder)
+        {
+            return;
+        }
+
+        try
+        {
+            var end = await ReadTurnCountersAsync(sessionId).ConfigureAwait(false);
+            // A rebuilt instance starts from zero: the reading taken before the run means nothing against it, so the turn is
+            // recorded as an unreported one (tokens null, stream 0) instead of differencing two different agents.
+            var same = end.Counters.Instance is { } instance && ReferenceEquals(instance, started.Start.Instance);
+            recorder.Record(TurnMetricsRowFactory.Build(
+                sessionId,
+                turn,
+                started.StartedAt,
+                DateTimeOffset.UtcNow,
+                error: null,
+                rootFailure: null,
+                same ? end.Counters.Usage : TokenUsage.Empty,
+                same ? started.Start.Usage : TokenUsage.Empty,
+                same ? end.Counters.Stream : TimeSpan.Zero,
+                same ? started.Start.Stream : TimeSpan.Zero,
+                toolCalls: null,
+                started.Provider,
+                started.Model));
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // A row is never worth a delivery: the writer promises never to throw, this is the belt to that suspender.
+            AppLogs.Usage.ZLogWarning($"delivered turn metrics row not queued: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The counters of the instance that owns <paramref name="sessionId"/> (a user-driven child of one of this window's
+    /// roots): its cumulative usage and model-streaming time, plus the model it runs, with the instance kept so a rebuilt one
+    /// is never differenced against its predecessor. <see cref="RootCounters.None"/> when the host holds no such instance.
+    /// </summary>
+    private async Task<(RootCounters Counters, string? Provider, string? Model)> ReadTurnCountersAsync(string sessionId)
+    {
+        try
+        {
+            var runtime = await RuntimeOfAsync(sessionId).ConfigureAwait(false);
+            if (runtime?.FindUserChild(sessionId) is not { } child)
+            {
+                return (RootCounters.None, null, null);
+            }
+
+            var (usage, stream) = child.ReadCounters();
+            var model = child.Definition.Model;
+            return (new RootCounters(usage, stream, child),
+                model.ProviderId is { Length: > 0 } provider ? provider : null,
+                model.Model is { Length: > 0 } declared ? declared : null);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Usage.ZLogWarning($"delivered turn counters of '{sessionId}' not read: {exception.GetType().Name}: {exception.Message}");
+            return (RootCounters.None, null, null);
+        }
+    }
 
     /// <summary>
     /// One turn's change line, from the tree hashes <c>turn_checkpoints</c> recorded around it: how many files changed and how
@@ -255,16 +375,19 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
         {
             // No tab of that session is open here: the receipt still has to reach the model, so it goes into the store and a
             // later reopen replays it as the card it is.
+            NoteReceiptArrived(initiatorSessionId);
             await AppendReceiptAsync(null, initiatorSessionId, text).ConfigureAwait(true);
             return;
         }
 
         if (session.TryInterjectSessionMessage(text))
         {
-            // The running turn takes it at its next tool-batch boundary (same round, visible there).
+            // The running turn takes it at its next tool-batch boundary (same round, visible there): the user is looking at
+            // that card already, so nothing is raised for it here.
             return;
         }
 
+        NoteReceiptArrived(initiatorSessionId);
         await AppendReceiptAsync(session, initiatorSessionId, text).ConfigureAwait(true);
         var unseen = !ReferenceEquals(session, activeSession);
         session.ShowSessionReply(text, unseen);
@@ -273,6 +396,65 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
             RefreshTreeAgents();
         }
     }
+
+    /// <summary>
+    /// One toast for a receipt that lands as a message (forge-app "通知"): the card goes into a tab the user may not be looking
+    /// at, and a dot on the tree is easy to miss. Repeated receipts of one session count on the same toast instead of stacking.
+    /// </summary>
+    private void NoteReceiptArrived(string initiatorSessionId) =>
+        composition.Notifications.Notify(
+            NotificationLevel.Info,
+            NotificationsStrings.SessionReplyTitle,
+            NotificationsStrings.SessionReplyBodyText,
+            "session-reply:" + initiatorSessionId);
+
+    /// <summary>
+    /// The receipt card's "open the full report": the part of a report past the receipt's caps lives in an artifact whose id
+    /// the receipt carries. The preview tab opens files, so the stored bytes are written to the temp folder first and opened
+    /// from there - the route the transcript's pictures take. A pointer whose artifact is gone (a purged session) says so
+    /// instead of doing nothing visible.
+    /// </summary>
+    private void OpenReceiptReport(string artifactId) => _ = OpenReceiptReportAsync(artifactId);
+
+    private async Task OpenReceiptReportAsync(string artifactId)
+    {
+        if (string.IsNullOrWhiteSpace(artifactId) || composition.Artifacts is not { } artifacts)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await artifacts.GetInfoAsync(artifactId, CancellationToken.None).ConfigureAwait(true) is not { } info)
+            {
+                NoteMissingReport(artifactId);
+                return;
+            }
+
+            var content = await artifacts.ReadAsync(artifactId, 0, null, CancellationToken.None).ConfigureAwait(true);
+            var path = await Task.Run(() => ReceiptReport.Materialize(info, content), CancellationToken.None).ConfigureAwait(true);
+            if (path is null)
+            {
+                NoteMissingReport(artifactId);
+                return;
+            }
+
+            OpenFile(path, newTab: false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"artifact '{artifactId}' of a receipt not opened: {exception.GetType().Name}: {exception.Message}");
+            NoteMissingReport(artifactId);
+        }
+    }
+
+    /// <summary>One toast for a pointer that leads nowhere; the artifact id is the body, since that is what the receipt names.</summary>
+    private void NoteMissingReport(string artifactId) =>
+        composition.Notifications.Notify(
+            NotificationLevel.Warning,
+            NotificationsStrings.ReceiptReportMissingTitle,
+            LocText.Literal(artifactId),
+            "receipt-report:" + artifactId);
 
     /// <summary>
     /// Writes a receipt into the session's history without a turn. With the session's tab open its runtime also appends it to

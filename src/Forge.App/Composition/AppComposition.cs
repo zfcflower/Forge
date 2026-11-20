@@ -239,6 +239,12 @@ internal sealed class AppComposition : IAsyncDisposable
     public ITurnMetricsStore TurnMetrics => turnMetrics;
 
     /// <summary>
+    /// Where oversized output is stored (tool results Core spills, and the full report a receipt's caps cut away). The receipt
+    /// card's "open the full report" entry reads one artifact through it; set by <see cref="Create"/>.
+    /// </summary>
+    public IArtifactStore? Artifacts { get; private set; }
+
+    /// <summary>
     /// The one turn-metrics writer of the process: a bounded queue and a background task, handed to every session so a turn
     /// end only ever does one struct channel write. Best effort by contract — see <see cref="TurnMetricsRecorder"/>.
     /// </summary>
@@ -755,6 +761,7 @@ internal sealed class AppComposition : IAsyncDisposable
             gitSettings,
             initialization);
         composition.Approvals = approvals;
+        composition.Artifacts = artifacts;
         composition.Network = network;
         composition.NetworkProblem = networkSettings.LoadProblem;
         composition.Updates = updates;

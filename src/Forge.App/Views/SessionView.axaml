@@ -37,6 +37,17 @@
                                  IsVisible="{Binding HasReport}"
                                  AutomationProperties.AutomationId="session-reply-report" />
             <StackPanel Orientation="Horizontal" Spacing="4">
+              <!-- The part of the report the caps cut away lives in the artifact the receipt points at; the button is the way
+                   to it (a receipt that fit whole carries no pointer and gets no button). -->
+              <Button Classes="ghost"
+                      Height="22"
+                      Padding="8,0"
+                      IsVisible="{Binding HasArtifact}"
+                      Command="{Binding OpenReportCommand}"
+                      Content="{Binding OpenReportLabel}"
+                      ToolTip.Tip="{Binding OpenReportLabel}"
+                      AutomationProperties.AutomationId="session-reply-artifact"
+                      AutomationProperties.Name="{Binding OpenReportLabel}" />
               <views:CopyTextButton Classes="ghost icon"
                                     Width="26"
                                     Height="22"

@@ -191,7 +191,8 @@ internal sealed partial class MainWindowViewModel
             openInspector: OpenInspector,
             openSession: () => ActivateAgentSessionTab(info.Id),
             agentSession: new AgentSessionLaunch(root, ordinal, isDraft),
-            sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created))
+            sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created),
+            sessionReceipt: DeliverReceipt)
         {
             // The turn check is the root's (6.3): an agent session may not run under a root the store no longer holds as
             // active, in a workspace that is operating, or in a merge conflict.

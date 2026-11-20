@@ -51,6 +51,8 @@ internal static class NotificationsStrings
     public const string TerminalExitedTitleKey = "notifications.title.terminalExited";
     public const string SaveFailedTitleKey = "notifications.title.saveFailed";
     public const string EditorFailedTitleKey = "notifications.title.editorFailed";
+    public const string SessionReplyTitleKey = "notifications.title.sessionReply";
+    public const string ReceiptReportMissingTitleKey = "notifications.title.receiptReportMissing";
 
     // Bodies that are one sentence of their own.
     public const string ApprovalWaitingBody = "notifications.body.approval";
@@ -59,6 +61,7 @@ internal static class NotificationsStrings
     public const string TerminalExitedBody = "notifications.body.terminalExited";
     public const string PluginWorkflowTerminatedBody = "notifications.body.pluginWorkflowTerminated";
     public const string PluginWorkerDisabledBody = "notifications.body.pluginWorkerDisabled";
+    public const string SessionReplyBody = "notifications.body.sessionReply";
 
     /// <summary>Headline of the "approval waiting" notification.</summary>
     public static LocText ApprovalWaitingTitle => new(ApprovalWaitingTitleKey);
@@ -102,6 +105,12 @@ internal static class NotificationsStrings
     /// <summary>Headline of the "editor failed" notification.</summary>
     public static LocText EditorFailedTitle => new(EditorFailedTitleKey);
 
+    /// <summary>Headline of the "a session reply arrived" notification.</summary>
+    public static LocText SessionReplyTitle => new(SessionReplyTitleKey);
+
+    /// <summary>Headline of the "the full report behind a receipt is gone" notification.</summary>
+    public static LocText ReceiptReportMissingTitle => new(ReceiptReportMissingTitleKey);
+
     /// <summary>One approval card started waiting: which session asked, and for which tool.</summary>
     public static LocText ApprovalWaiting(string session, string tool) => new(ApprovalWaitingBody, session, tool);
 
@@ -114,6 +123,9 @@ internal static class NotificationsStrings
     /// <summary>A terminal process ended on its own, with its exit code.</summary>
     public static LocText TerminalExited(string command, int exitCode) =>
         new(TerminalExitedBody, command, TextFormat.Id(exitCode));
+
+    /// <summary>Body of the "a session reply arrived" notification: where it went.</summary>
+    public static LocText SessionReplyBodyText => new(SessionReplyBody);
 
     /// <summary>Title of the test notification (one real toast the user can look for).</summary>
     public static LocText PermissionTestTitle => new(PermissionTestTitleKey);
@@ -185,8 +197,14 @@ internal static class NotificationsStrings
         Loc.Register(TerminalExitedTitleKey, "终端进程退出", "Terminal process exited");
         Loc.Register(SaveFailedTitleKey, "保存失败", "Save failed");
         Loc.Register(EditorFailedTitleKey, "编辑器操作失败", "Editor failed");
+        Loc.Register(SessionReplyTitleKey, "会话回复已到达", "A session reply arrived");
+        Loc.Register(ReceiptReportMissingTitleKey, "完整报告已不存在", "The full report is gone");
 
         Loc.Register(ApprovalWaitingBody, "{0} 请求执行 {1}", "{0} wants to run {1}");
+        Loc.Register(
+            SessionReplyBody,
+            "回复已放进转录，未读的标签与树行会打点",
+            "The reply is in the transcript; unread tabs and tree rows show a dot");
         Loc.Register(ApprovalWaitingRestoredBody, "「{0}」等待审批", "{0} is waiting for approval");
         Loc.Register(SubAgentFinishedBody, "{0} · {1}", "{0} · {1}");
         Loc.Register(TerminalExitedBody, "{0} · 退出码 {1}", "{0} · exit code {1}");

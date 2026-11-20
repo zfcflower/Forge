@@ -119,7 +119,8 @@ internal static class TurnMetricsRowFactory
     /// accumulates over the turn's calls, so a turn that streamed nothing records zero and a failed turn still records what
     /// it streamed before it failed. <paramref name="error"/> is the same text the turn card shows and
     /// <paramref name="rootFailure"/> the agent's own failure message, which reaches the App only as event text (see
-    /// <see cref="BuildStatus"/>).
+    /// <see cref="BuildStatus"/>); <paramref name="toolCalls"/> is null for a turn the App never watched (a delivery Core
+    /// drove itself), which counts no tools rather than claiming zero.
     /// <para>Stream time has no "unknown": a row whose <c>stream_ms</c> would be missing means the adapter never measured
     /// its calls, which is an adapter defect to be fixed and pinned by tests — never a reason to fall back to the turn's
     /// wall clock here (that clock includes queueing, approvals, tool runs and git snapshots).</para>
@@ -135,7 +136,7 @@ internal static class TurnMetricsRowFactory
         TokenUsage turnStartUsage,
         TimeSpan rootStreamElapsed,
         TimeSpan turnStartElapsed,
-        int toolCalls,
+        int? toolCalls,
         string? provider,
         string? model)
     {

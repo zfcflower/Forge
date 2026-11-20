@@ -200,7 +200,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Action? openInspector = null,
         Action? openSession = null,
         AgentSessionLaunch? agentSession = null,
-        Func<IReadOnlyList<SessionMentionTarget>>? sessionMentions = null)
+        Func<IReadOnlyList<SessionMentionTarget>>? sessionMentions = null,
+        Action<string, string>? sessionReceipt = null)
     {
         Info = session;
         this.agentSession = agentSession;
@@ -276,6 +277,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         // The @ picker's session group (forge-core "session messaging"): what this tab may address, owned by the shell because it is
         // the side that knows every open and stored session of the root.
         SetSessionMentionSource(sessionMentions);
+        // The shell's receipt path (forge-core "reply receipt"): a receipt that arrives at a turn boundary it never reached is
+        // stored and drawn through the very path a delivered one takes, never drawn alone.
+        receiptSink = sessionReceipt;
     }
 
     public SessionInfo Info { get; private set; }
@@ -1524,7 +1528,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     {
         if (!isRunning)
         {
-            var undelivered = runtime?.TakeUndeliveredInterjections() ?? [];
+            // The undelivered interjections are the root instance's inbox, so only the root's own tab may take them: an agent
+            // session's run has its own leftovers, and they are routed by TakeUndeliveredReplies. A child tab that took them
+            // would draw the root's receipts in its own transcript and lose them to the session they belong to.
+            IReadOnlyList<Interjection> undelivered = agentSession is null
+                ? runtime?.TakeUndeliveredInterjections() ?? []
+                : [];
             foreach (var leftover in queued.Where(message => message.IsInterjection).ToList())
             {
                 queued.Remove(leftover);
@@ -1535,9 +1544,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 var leftover = undelivered[i];
                 if (SessionReplyViewModel.IsReply(leftover.Text))
                 {
-                    // A receipt the running turn did not reach its boundary for: it lands in the transcript as an unread
-                    // message. It must never become the next queued turn - that is the unattended A->B->A loop.
-                    ShowSessionReply(leftover.Text, unseen: true);
+                    // A receipt the running turn did not reach its boundary for: it goes through the shell's idle path
+                    // (written to the history, then drawn) and never becomes the next queued turn - that is the unattended
+                    // A->B->A loop. Drawing it alone would lose it to the next turn's context and to a restart.
+                    DeliverSessionReply(leftover.Text);
                     continue;
                 }
 
