@@ -4,14 +4,15 @@ using Forge.Abstractions;
 
 namespace Forge.Workspace;
 
-/// <summary>Marks one local review comment resolved once the agent judged it (apply or push_back).</summary>
+/// <summary>Marks one local review comment of this session resolved once the agent judged it (apply or push_back).</summary>
 internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) : GitToolBase(
     git,
     PrCommentTools.ReviewResolveName,
     "Answer one local review comment. verdict is apply (you changed the code), push_back (you disagree: note is required " +
     "and must give the reasons) or clarify (you cannot judge it yet: note is required and is your question to the reviewer; " +
-    "the comment stays open). apply and push_back also mark the comment resolved. Only comments of this session's worktree " +
-    "that were actually sent to the reviewer can be answered: a draft (never sent) has nobody to answer and is refused. " +
+    "the comment stays open). apply and push_back also mark the comment resolved. Only comments of this session that " +
+    "were actually sent to the reviewer can be answered: a comment written in another session of the same worktree is " +
+    "answered like an unknown id, and a draft (never sent) has nobody to answer and is refused. " +
     "The verdict and note are stored with the comment and shown to the reviewer in the review panel; a later answer " +
     "replaces an earlier one. Read pr_workflow (phase review-comments) first.",
     """
@@ -48,10 +49,11 @@ internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) 
                 IsError: true);
         }
 
-        // Observed, never assumed: the comment is read now.
+        // Observed, never assumed: the comment is read now. One written in another session of the same worktree (the root
+        // session and its agent sessions share one) is answered exactly like a missing id, so its existence does not leak.
         var comment = await reviews.GetAsync(id, ct).ConfigureAwait(false);
         var idText = id.ToString(CultureInfo.InvariantCulture);
-        if (comment is null)
+        if (comment is null || !string.Equals(comment.SessionId, context.SessionId, StringComparison.Ordinal))
         {
             return new ToolResult($"There is no local review comment {idText}. Copy the id from review_comments.", IsError: true);
         }

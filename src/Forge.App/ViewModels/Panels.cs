@@ -2097,8 +2097,9 @@ internal sealed class ReviewEntryViewModel : ObservableObject
 }
 
 /// <summary>
-/// Review comments of the active worktree, read-only for now; click opens the file in the changes document. The summary is
-/// kept as a <see cref="LocText"/>; the rows are refreshed through the panel, never through the static event.
+/// Review comments of the active tab's session, read-only for now; click opens the file in the changes document. A
+/// comment belongs to the session that wrote it, so the sessions sharing one worktree each read only their own. The
+/// summary is kept as a <see cref="LocText"/>; the rows are refreshed through the panel, never through the static event.
 /// </summary>
 internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
 {
@@ -2106,6 +2107,7 @@ internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
     private readonly Action<string> openChange;
     private PanelContext context = PanelContext.Empty;
     private LocText summary = new(InspectorStrings.ReviewNoSession);
+    private int refreshGeneration;
 
     /// <summary>The thread the panel was built on (the UI thread); a language notification from another one is not ours.</summary>
     private readonly int uiThread = Environment.CurrentManagedThreadId;
@@ -2130,18 +2132,17 @@ internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
 
     public void Attach(PanelContext panelContext)
     {
-        var changed = !string.Equals(context.SessionId, panelContext.SessionId, StringComparison.Ordinal);
+        // Always re-read: the rows are one query for one context, and a tab switch must never leave another session's
+        // rows on screen.
         context = panelContext;
-        if (changed)
-        {
-            _ = RefreshAsync(CancellationToken.None);
-        }
+        _ = RefreshAsync(CancellationToken.None);
     }
 
     public void Open(ReviewEntryViewModel entry) => openChange(entry.Path);
 
     public async Task RefreshAsync(CancellationToken ct)
     {
+        var generation = Interlocked.Increment(ref refreshGeneration);
         if (!context.HasSession)
         {
             Items.Clear();
@@ -2152,10 +2153,19 @@ internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
         try
         {
             var workingDirectory = context.WorkingDirectory;
+            var sessionId = context.SessionId;
             var comments = await BackgroundRead.RunAsync(
-                    token => store.QueryAsync(new ReviewQuery { WorkspacePath = workingDirectory }, token),
+                    token => store.QueryAsync(
+                        new ReviewQuery { WorkspacePath = workingDirectory, SessionId = sessionId },
+                        token),
                     ct)
                 .ConfigureAwait(true);
+            if (generation != Volatile.Read(ref refreshGeneration))
+            {
+                // Another context was attached while this read ran: its rows belong to the session that asked for them.
+                return;
+            }
+
             Items.Clear();
             foreach (var comment in comments)
             {

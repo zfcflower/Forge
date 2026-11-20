@@ -118,7 +118,7 @@ public static class PrWorkflowText
         Resolve a thread only after you replied to it with apply or push_back. A clarify thread cannot be resolved; the reviewer answers first. Any comment that arrives after your verdict reply blocks resolving, even one written by the same account (the reviewer and you may share one gh login): read it and answer again. Outdated threads still deserve a verdict.
 
         ## Local comments
-        Comments the user left in the local review pane (review_comments) get the same judgement. Read them with list, decide, make the change, then resolve them with resolve. Only comments that were actually sent can be resolved; a draft has nobody to answer and is refused. There is no pull request reply for these.
+        Comments the user left in the local review pane (review_comments) get the same judgement. Read them with list, decide, make the change, then resolve them with resolve. Only comments that were actually sent can be resolved; a draft has nobody to answer and is refused. A comment belongs to the session that wrote it, and one worktree can host more than one session (the root session and its agent sessions): you only see and answer your own. There is no pull request reply for these.
 
         After pushing, watch the checks again (phase "checks"); changes made for a review can break CI.
         """;

@@ -6,17 +6,20 @@ using Forge.Abstractions;
 namespace Forge.Workspace;
 
 /// <summary>
-/// Lists the local review comments of this session's worktree – the ones the user wrote in the review panel – so the agent
-/// can work through them. Keyed like the review panel: by workspace path (a worktree belongs to exactly one session).
+/// Lists the local review comments written in this session's review panel, so the agent can work through them. A comment
+/// belongs to the session that wrote it, never to the worktree: the root session and its agent sessions share one worktree
+/// and each sees only its own comments, keyed like the review panel by workspace path plus session id.
 /// </summary>
 internal sealed class ReviewCommentsTool(GitCli git, ReviewStore reviews) : GitToolBase(
     git,
     PrCommentTools.ReviewListName,
-    "List the local review comments the user wrote on this session's changes: id, file:lines, whether the user already " +
-    "sent it (a draft is not yet addressed to you: do not act on drafts unless asked), the base commit it was written " +
-    "against, and the text. Unresolved comments only by default; all=true includes resolved ones. Judge every comment " +
-    "first (apply or push_back), then change code, then close each one with review_comment_resolve. Local comments and " +
-    "pull request threads share one flow: read pr_workflow (phase review-comments) first. Read-only.",
+    "List the local review comments the user wrote in this session: id, file:lines, whether the user already sent it " +
+    "(a draft is not yet addressed to you: do not act on drafts unless asked), the base commit it was written against, " +
+    "and the text. A comment belongs to the session that wrote it: another session in the same worktree – the root " +
+    "session and its agent sessions share one – keeps its own comments, which are neither listed here nor answerable " +
+    "from this session. Unresolved comments only by default; all=true includes resolved ones. Judge every comment first " +
+    "(apply or push_back), then change code, then close each one with review_comment_resolve. Local comments and pull " +
+    "request threads share one flow: read pr_workflow (phase review-comments) first. Read-only.",
     """
     {"type":"object","properties":{"all":{"type":"boolean","description":"Also list resolved comments; default false (unresolved only)."}},"additionalProperties":false}
     """,
@@ -31,9 +34,21 @@ internal sealed class ReviewCommentsTool(GitCli git, ReviewStore reviews) : GitT
     {
         GitToolJson.EnsureObject(arguments, "all");
         var all = GitToolJson.Boolean(arguments, "all", false);
+        if (string.IsNullOrWhiteSpace(context.SessionId))
+        {
+            // Without a session the query would lose its scope and list every session's comments in this worktree.
+            return new ToolResult(
+                $"{Definition.Name} needs a session: a local review comment belongs to the session that wrote it.",
+                IsError: true);
+        }
 
         var comments = await reviews.QueryAsync(
-            new ReviewQuery { WorkspacePath = context.WorkingDirectory, Limit = QueryLimit },
+            new ReviewQuery
+            {
+                WorkspacePath = context.WorkingDirectory,
+                SessionId = context.SessionId,
+                Limit = QueryLimit,
+            },
             ct).ConfigureAwait(false);
 
         var unresolved = 0;

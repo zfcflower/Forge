@@ -86,14 +86,14 @@ public sealed class PrCommentTools
     public ITool Resolve { get; }
 
     /// <summary>
-    /// <c>review_comments</c> (read-only): <c>{"all"?: bool}</c> → local review comments of the session's worktree, keyed by
-    /// workspace path like the review panel. Null when no review store was given.
+    /// <c>review_comments</c> (read-only): <c>{"all"?: bool}</c> → local review comments of the session that calls it, keyed
+    /// like the review panel by workspace path plus session id. Null when no review store was given.
     /// </summary>
     public ITool? ReviewComments { get; }
 
     /// <summary>
     /// <c>review_comment_resolve</c> (write): <c>{"id", "verdict": "apply"|"push_back", "note"?}</c> → sets the resolved
-    /// flag; <c>push_back</c> requires a note. Null when no review store was given.
+    /// flag on a comment of the calling session; <c>push_back</c> requires a note. Null when no review store was given.
     /// </summary>
     public ITool? ReviewResolve { get; }
 
