@@ -1440,12 +1440,23 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// Why <paramref name="holder"/> cannot be taken over now (section 2, idle): the busy sources of its open tab, a
-    /// handover already running for it, and the workspace-level states (an operation under way, a merge conflict).
+    /// Why <paramref name="holder"/> cannot be taken over now (section 2, idle): the busy sources of its open tab, the busy
+    /// reasons of the agent sessions running under it (they run turns and write tools in the holder's worktree, and they do so
+    /// whether or not the holder's own tab is open), a handover already running for it, and the workspace-level states (an
+    /// operation under way, a merge conflict). The holder's own reasons come first; a reason shared with its agent sessions
+    /// appears once.
     /// </summary>
     private List<string> HandoverBusyReasons(SessionInfo holder, SessionWorkspaceViewModel? holderView)
     {
         var reasons = new List<string>(holderView?.BusyReasons() ?? []);
+        foreach (var reason in AgentSessionBusyReasons(holder.Id))
+        {
+            if (!reasons.Contains(reason))
+            {
+                reasons.Add(reason);
+            }
+        }
+
         if (handingOver.Contains(holder.Id) && !reasons.Contains(HandoverStrings.BusyHandingOver))
         {
             reasons.Add(HandoverStrings.BusyHandingOver);
@@ -1488,10 +1499,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         RemoveForkWorkspace ??= RemoveForkWorkspaceAsync;
     }
 
-    /// <summary>The busy flags of a session's open tab and a handover running for it; in memory only.</summary>
+    /// <summary>
+    /// The busy flags of a session's open tab, a handover running for it, and the agent sessions under it (their turns, queue
+    /// and interjections live in the same worktree); in memory only.
+    /// </summary>
     private bool IsSessionBusy(string sessionId) =>
         handingOver.Contains(sessionId)
-        || (sessions.TryGetValue(sessionId, out var view) && view.BusyReasons().Count > 0);
+        || (sessions.TryGetValue(sessionId, out var view) && view.BusyReasons().Count > 0)
+        || AgentSessionBusyReasons(sessionId).Count > 0;
 
     /// <summary>
     /// The parallel fork (6.5) of <paramref name="source"/>: reads the live HEAD, changes and sparse config off the UI

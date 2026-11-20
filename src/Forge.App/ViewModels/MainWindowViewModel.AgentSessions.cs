@@ -411,6 +411,35 @@ internal sealed partial class MainWindowViewModel
         return false;
     }
 
+    /// <summary>
+    /// Why the agent sessions under <paramref name="rootSessionId"/> are busy (lifecycle section 2, "the busy reasons are
+    /// merged into the root"): every view of that root - the ones with a tab on screen and the ones whose tab was closed
+    /// while a turn ran (their view lives until that turn ends) - contributes its <see cref="SessionWorkspaceViewModel.BusyReasons"/>
+    /// (a running turn, queued messages, undelivered interjections), each reason once. An open but idle agent session
+    /// contributes nothing: being open is not being busy.
+    /// </summary>
+    private List<string> AgentSessionBusyReasons(string rootSessionId)
+    {
+        var reasons = new List<string>(5);
+        foreach (var session in agentViews.Keys.Concat(agentViewsClosing))
+        {
+            if (!string.Equals(session.AgentSessionRoot?.Id, rootSessionId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (var reason in session.BusyReasons())
+            {
+                if (!reasons.Contains(reason))
+                {
+                    reasons.Add(reason);
+                }
+            }
+        }
+
+        return reasons;
+    }
+
     private async Task RefreshAgentSessionTreesAsync()
     {
         try
