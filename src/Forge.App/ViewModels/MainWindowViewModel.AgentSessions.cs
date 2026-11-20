@@ -264,37 +264,46 @@ internal sealed partial class MainWindowViewModel
     /// <summary>
     /// The first message created the session row: the tab moves to the stored id, the layout starts naming it, and the tree
     /// gets its row (the child session is in the store from now on, so a full refresh is what brings it in).
+    /// <para>The row may land after its tab closed - a draft whose first turn ran on, closed while it did. That view is
+    /// released at its turn's end and belongs in no open table, so only the store-side bookkeeping follows it here.</para>
     /// </summary>
     private void OnAgentSessionCreated(SessionWorkspaceViewModel session, string previousId)
     {
+        var childId = session.AgentChildSessionId!;
+        agentTabs.Remove(previousId);
         if (agentViews.TryGetValue(session, out var tab))
         {
-            agentTabs.Remove(previousId);
-            agentTabs[session.AgentChildSessionId!] = tab;
+            agentTabs[childId] = tab;
             tab.Title = session.TabTitle;
-        }
+            openTabs.Add(childId);
+            sessions[childId] = session;
+            if (session.AgentSessionRoot is { } root)
+            {
+                // The draft became a row: it no longer counts as one of the pending drafts of its root.
+                ReleaseAgentDraft(root.Id);
+            }
 
-        openTabs.Add(session.AgentChildSessionId!);
-        sessions[session.AgentChildSessionId!] = session;
-        if (session.AgentSessionRoot is { } root)
+            if (ReferenceEquals(session, activeSession))
+            {
+                // The tab's id just became the stored one: the panels (review comments, turns, git row) and the question
+                // workbench read the active session's id, so they follow the tab instead of a draft id no row will ever carry.
+                ApplyPanelContext();
+                questionPanels?.OnActiveSessionChanged(session.SessionId);
+            }
+        }
+        else
         {
-            // The draft became a row: it no longer counts as one of the pending drafts of its root.
-            ReleaseAgentDraft(root.Id);
+            // The tab is gone: the id it would have been filed under goes with it, and the view stays out of the active
+            // tables - a disposed view there would answer the tree, the palette and the layout as if a tab were on screen.
+            agentTabs.Remove(childId);
         }
 
         if (session.AgentSessionRoot is { } createdRoot)
         {
-            // The new row is a session the root's @ picker can offer from now on.
+            // The new row is a session the root's @ picker can offer from now on, and the tree draws it whether its tab is
+            // still there or not: the row is in the store.
             mentionTargets.Remove(createdRoot.Id);
             RefreshSessionMentionsOf(createdRoot.Id);
-        }
-
-        if (ReferenceEquals(session, activeSession))
-        {
-            // The tab's id just became the stored one: the panels (review comments, turns, git row) and the question
-            // workbench read the active session's id, so they follow the tab instead of a draft id no row will ever carry.
-            ApplyPanelContext();
-            questionPanels?.OnActiveSessionChanged(session.SessionId);
         }
 
         _ = RefreshAgentSessionTreesAsync();
@@ -348,7 +357,10 @@ internal sealed partial class MainWindowViewModel
     /// <summary>The end of any turn of this tab: a view whose tab was closed while it ran goes here.</summary>
     private void OnAgentSessionViewTurnCompleted(SessionWorkspaceViewModel session) => ReleaseClosedAgentSession(session);
 
-    /// <summary>A turn of a tab that is already closed: the view has nothing left to show, so it goes.</summary>
+    /// <summary>
+    /// A turn of a tab that is already closed ended: the view has nothing left to show, so it unsubscribes and goes - and the
+    /// root's runtime goes with it when that turn was the last thing of the root still using it.
+    /// </summary>
     private void ReleaseClosedAgentSession(SessionWorkspaceViewModel session)
     {
         if (session.IsRunning || !agentViewsClosing.Remove(session))
@@ -356,7 +368,46 @@ internal sealed partial class MainWindowViewModel
             return;
         }
 
+        session.TurnCompleted -= OnAgentSessionViewTurnCompleted;
         session.Dispose();
+        ReleaseRootRuntimeIfUnused(session.AgentSessionRoot);
+    }
+
+    /// <summary>
+    /// The root's runtime goes when nothing of that root needs it any more: none of its agent sessions has a tab on screen, no
+    /// turn of a closed one is still in flight, and its own tab is not open to keep it. A runtime released under a running turn
+    /// takes the host that turn's approvals and <c>ask_user</c> requests go through with it, so those would read as refused or
+    /// cancelled instead of the turn ending on its own.
+    /// </summary>
+    private void ReleaseRootRuntimeIfUnused(SessionInfo? root)
+    {
+        if (root is null || HasAgentSessionsUsingRuntime(root.Id) || sessions.ContainsKey(root.Id))
+        {
+            return;
+        }
+
+        composition.Runtimes.Release(root.Id);
+    }
+
+    /// <summary>
+    /// Whether an agent session of this root still needs the root's runtime: one with a tab on screen, or one whose tab was
+    /// closed while a turn ran - that view is released at its turn's end and holds the runtime until then.
+    /// </summary>
+    private bool HasAgentSessionsUsingRuntime(string rootSessionId) =>
+        HasOpenAgentSessions(rootSessionId) || HasClosingAgentSessions(rootSessionId);
+
+    /// <summary>Whether a turn of a closed agent-session tab of this root is still in flight (its view is not released yet).</summary>
+    private bool HasClosingAgentSessions(string rootSessionId)
+    {
+        foreach (var session in agentViewsClosing)
+        {
+            if (string.Equals(session.AgentSessionRoot?.Id, rootSessionId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task RefreshAgentSessionTreesAsync()
@@ -383,7 +434,9 @@ internal sealed partial class MainWindowViewModel
 
     /// <summary>
     /// A tab is going away: an agent-session tab disposes its own view (a draft one has no store row, so the session path
-    /// would leave it behind), and it must unsubscribe from this window either way.
+    /// would leave it behind), and it must unsubscribe from this window either way. A view whose tab closes while a turn runs
+    /// keeps its <see cref="SessionWorkspaceViewModel.TurnCompleted"/> subscription: closing a tab stops nothing in flight, so
+    /// that turn's end is what releases it (see <see cref="ReleaseClosedAgentSession"/>).
     /// </summary>
     private void DetachAgentSessionTab(TabModel tab)
     {
@@ -396,7 +449,6 @@ internal sealed partial class MainWindowViewModel
         session.AgentSessionCreated -= OnAgentSessionCreated;
         session.AgentSessionTurnEnded -= OnAgentSessionTurnEnded;
         session.TurnStarted -= OnAgentSessionTurnStarted;
-        session.TurnCompleted -= OnAgentSessionViewTurnCompleted;
         agentTabs.Remove(AgentTabKey(session));
         var root = session.AgentSessionRoot;
         if (session.AgentChildSessionId is { } childId)
@@ -415,21 +467,20 @@ internal sealed partial class MainWindowViewModel
             ReleaseAgentDraft(root.Id);
         }
 
-        // The root's runtime is what this tab ran in; it goes when the last agent tab of that root is gone and the root's
-        // own tab is not open to keep it (a closed root tab already left it alone for this tab's sake).
-        if (root is not null && !HasOpenAgentSessions(root.Id) && !sessions.ContainsKey(root.Id))
-        {
-            composition.Runtimes.Release(root.Id);
-        }
-
         if (session.IsRunning)
         {
-            // The turn keeps running (a closed tab stops nothing that is already in flight); the view goes when it ends.
+            // The turn keeps running (a closed tab stops nothing that is already in flight): the view, its subscription and the
+            // root's runtime all stay until that turn ends, which is what then releases them.
             agentViewsClosing.Add(session);
             return;
         }
 
+        session.TurnCompleted -= OnAgentSessionViewTurnCompleted;
         session.Dispose();
+
+        // The root's runtime is what this tab ran in; it goes with the last agent tab of that root, once the root's own tab is
+        // not open to keep it (and never while a turn of another of them is still in flight).
+        ReleaseRootRuntimeIfUnused(root);
     }
 
     /// <summary>Whether the agent session with this child id has a reply the user has not looked at (the tree row's mark).</summary>

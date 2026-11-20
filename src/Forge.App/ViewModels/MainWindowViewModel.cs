@@ -2133,12 +2133,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         UnhookAutomations(session);
         session.Dispose();
-        if (!HasOpenAgentSessions(session.SessionId))
+        if (HasAgentSessionsUsingRuntime(session.SessionId))
         {
-            // The root's runtime is what its agent sessions run in: a closed root tab releases nothing while one of them is
-            // still open, or the child would lose its host mid-conversation.
-            composition.Runtimes.Release(session.SessionId);
+            return;
         }
+
+        // The root's runtime is what its agent sessions run in: a closed root tab releases nothing while one of them still needs
+        // it, or the child would lose its host mid-turn. The last one to finish releases it (ReleaseRootRuntimeIfUnused).
+        composition.Runtimes.Release(session.SessionId);
     }
 
     /// <summary>Whether an open agent-session tab runs under this root.</summary>

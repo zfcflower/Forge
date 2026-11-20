@@ -27,6 +27,12 @@ public sealed class AgentInstance
     private string? cacheTtlInUse;
 
     /// <summary>
+    /// The two cumulative counters as one immutable value: the run driving this instance moves them on its own thread while
+    /// the shell reads them for the usage bar, so they are published and read as a whole (see <see cref="ReadCounters"/>).
+    /// </summary>
+    private volatile Counters counters = new(TokenUsage.Empty, TimeSpan.Zero);
+
+    /// <summary>
     /// The gap since this instance's previous model request, then records this one. The cache-lifetime policy reads the gap; the
     /// state belongs to the instance because what it measures is the pause between two turns of one agent, not of one request.
     /// </summary>
@@ -73,7 +79,17 @@ public sealed class AgentInstance
 
     public ComposedPrompt Prompt { get; }
 
-    public TokenUsage Usage { get; internal set; } = TokenUsage.Empty;
+    public TokenUsage Usage
+    {
+        get => counters.Usage;
+        internal set
+        {
+            // One read of the pair, republished with the new half: a run moves these on its own thread, so a setter never reads
+            // the pair twice and never loses what the other half says.
+            var read = counters;
+            counters = new Counters(value, read.Stream);
+        }
+    }
 
     /// <summary>
     /// The files this instance has read, which <c>write</c> consults before it replaces an existing file (see
@@ -89,7 +105,26 @@ public sealed class AgentInstance
     /// its start snapshot. An attempt that failed or was cancelled before its completion carries no measurement and
     /// adds nothing, which is why this never needs an "unknown" fallback.
     /// </summary>
-    public TimeSpan StreamElapsed { get; internal set; }
+    public TimeSpan StreamElapsed
+    {
+        get => counters.Stream;
+        internal set
+        {
+            var read = counters;
+            counters = new Counters(read.Usage, value);
+        }
+    }
+
+    /// <summary>
+    /// Both cumulative counters as one reading. The run moves them on its own thread, so a reader elsewhere must not see a
+    /// token count of one request beside the streaming time of another, nor a half-written <see cref="TimeSpan"/>: the pair
+    /// travels as one reference, and one read of it is a point in time this instance really had.
+    /// </summary>
+    public (TokenUsage Usage, TimeSpan StreamElapsed) ReadCounters()
+    {
+        var read = counters;
+        return (read.Usage, read.Stream);
+    }
 
     /// <summary>Prompt-cache bookkeeping of this instance (routing key, last fingerprint, first-request report); loop-owned.</summary>
     internal PromptCacheState CacheState { get; } = new();
@@ -203,6 +238,9 @@ public sealed class AgentInstance
         history.AddRange(messages);
         HistoryVersion++;
     }
+
+    /// <summary>One instance's cumulative counters, replaced as a whole: an instance's usage and streaming time never mix two requests.</summary>
+    private sealed record Counters(TokenUsage Usage, TimeSpan Stream);
 }
 
 /// <summary>

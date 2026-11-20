@@ -1153,20 +1153,32 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
     /// <summary>
     /// The current root instance's cumulative counters, read live (they only move on the agent's own thread, and a turn's end
-    /// is read after its event stream finished). <see cref="RootCounters.None"/> before the root exists.
+    /// is read after its event stream finished) and as one value (<see cref="AgentInstance.ReadCounters"/>).
+    /// <see cref="RootCounters.None"/> before the root exists.
     /// </summary>
     internal RootCounters ReadRootCounters()
     {
+        AgentInstance? current;
         lock (gate)
         {
-            return root is { } current ? new RootCounters(current.Usage, current.StreamElapsed, current) : RootCounters.None;
+            current = root;
         }
+
+        if (current is null)
+        {
+            return RootCounters.None;
+        }
+
+        var (usage, stream) = current.ReadCounters();
+        return new RootCounters(usage, stream, current);
     }
 
     /// <summary>
     /// One instance this host holds - the root's, or a user-driven child's - with its cumulative counters, read live (they
-    /// only move on that instance's own thread, so a reading before a run and one after it are a turn's share). False when
-    /// the host is not built or no longer holds that instance: a caller then keeps its last reading instead of a zero.
+    /// only move on that instance's own thread, so a reading before a run and one after it are a turn's share).
+    /// <see cref="AgentInstance.ReadCounters"/> hands the pair over as one value: usage and streaming time can never come from
+    /// two different requests. False when the host is not built or no longer holds that instance: a caller then keeps its last
+    /// reading instead of a zero.
     /// </summary>
     internal bool TryReadAgentCounters(string? agentId, out RootCounters counters)
     {
@@ -1180,7 +1192,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
             if (live is not null && live.SubAgents.TryGetInstance(agentId, out var instance))
             {
-                counters = new RootCounters(instance.Usage, instance.StreamElapsed, instance);
+                var (usage, stream) = instance.ReadCounters();
+                counters = new RootCounters(usage, stream, instance);
                 return true;
             }
         }
