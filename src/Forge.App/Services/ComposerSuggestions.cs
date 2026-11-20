@@ -21,8 +21,44 @@ internal readonly record struct ComposerToken(ComposerTokenKind Kind, int Start,
 /// <summary>
 /// One entry of a slash picker: a command or a skill. <see cref="Path"/> is the skill's <c>SKILL.md</c> (empty for a
 /// command), so the settings page can say where a skill came from without discovering it a second time.
+/// <para><see cref="AllowedTools"/> is the front matter's <c>allowed-tools</c>: the tools the skill declares it is
+/// pre-authorized to use, in declaration order. Null for a command and for a skill that declares none, because no
+/// declaration means no filtering - an unknown tool is not an unavailable one.</para>
 /// </summary>
-internal sealed record SlashEntry(string Name, string Description, bool IsSkill, string Path = "", SkillScope Scope = SkillScope.None, bool IsWorkflow = false);
+internal sealed record SlashEntry(string Name, string Description, bool IsSkill, string Path = "", SkillScope Scope = SkillScope.None, bool IsWorkflow = false, IReadOnlyList<string>? AllowedTools = null)
+{
+    /// <summary>
+    /// Whether <see cref="AllowedTools"/> names a tool the asking session cannot have: a git write (<c>git_sync</c>,
+    /// <c>git_branch</c>) when <paramref name="hasGitWrite"/> is false, or any <c>pr_*</c> tool when
+    /// <paramref name="hasPrTools"/> is false. Only those two families are judged - that is what a sub-session is denied - so a
+    /// skill that declares nothing, or anything else, never needs them.
+    /// </summary>
+    public bool RequiresUnavailable(bool hasGitWrite, bool hasPrTools)
+    {
+        if (AllowedTools is not { Count: > 0 } tools)
+        {
+            return false;
+        }
+
+        foreach (var tool in tools)
+        {
+            if (!hasGitWrite && IsGitWrite(tool))
+            {
+                return true;
+            }
+
+            if (!hasPrTools && tool.StartsWith("pr_", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The two tools that change git state (the write set of the <c>BashPolicy</c> git tools): the root session's alone.</summary>
+    private static bool IsGitWrite(string tool) => tool is "git_sync" or "git_branch";
+}
 
 /// <summary>
 /// The folder a discovered skill came from, as the settings page badges it. <see cref="BuiltIn"/>, <see cref="Global"/> and
@@ -217,9 +253,9 @@ internal static class ComposerSuggestions
 /// Skills the composer's slash picker offers: every <c>SKILL.md</c> one level under <c>.github/skills</c> and
 /// <c>.forge/skills</c> of the workspace, under <c>skills</c> of the user directory, and under the product's materialized
 /// skill root. The name comes from the front matter's <c>name:</c> (else the folder name), the description from
-/// <c>description:</c>. Each entry carries the <see cref="SkillScope"/> of the folder it was found in, and the first folder
-/// that names a skill keeps it — so the scope of a shadowed skill is the scope of the copy that wins, exactly like the
-/// prompts layering.
+/// <c>description:</c>, and the tools the skill declares from <c>allowed-tools</c>. Each entry carries the
+/// <see cref="SkillScope"/> of the folder it was found in, and the first folder that names a skill keeps it — so the scope of
+/// a shadowed skill is the scope of the copy that wins, exactly like the prompts layering.
 /// <para>There are four sources and only three of them belong to the workspace or the user: the fourth is the version
 /// directory <c>BuiltInSkills.Materialize</c> returned, whose subdirectories are the skills the FORGE product ships. It is
 /// appended last, so it has the lowest priority of the four: a workspace or user copy of the same name shadows it.</para>
@@ -295,7 +331,14 @@ internal static class SkillCatalog
                 name = string.IsNullOrWhiteSpace(name) ? Path.GetFileName(folder) : name;
                 if (names.Add(name))
                 {
-                    found.Add(new SlashEntry(name, description ?? string.Empty, IsSkill: true, file, scope, IsWorkflow: HasWorkflowFlag(text)));
+                    found.Add(new SlashEntry(
+                        name,
+                        description ?? string.Empty,
+                        IsSkill: true,
+                        file,
+                        scope,
+                        IsWorkflow: HasWorkflowFlag(text),
+                        AllowedTools: ParseAllowedTools(text)));
                 }
             }
         }
@@ -394,6 +437,57 @@ internal static class SkillCatalog
 
         return (name, description);
     }
+
+    /// <summary>
+    /// The tools a leading <c>---</c> block declares in <c>allowed-tools</c>, the skill standard's space-separated list of
+    /// pre-authorized tools (<c>allowed-tools: Bash(git:*) Bash(gh:*) Read</c>): split on whitespace, in declaration order. A
+    /// folded (<c>&gt;</c>, <c>|</c>) value is joined first and a quote around the whole value is dropped, like the other keys.
+    /// No block, no key or a blank value is an empty list, which is what "declares nothing" looks like.
+    /// </summary>
+    internal static IReadOnlyList<string> ParseAllowedTools(string text)
+    {
+        var lines = (text ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        if (lines.Length == 0 || lines[0].Trim() != "---")
+        {
+            return [];
+        }
+
+        for (var i = 1; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (line.Trim() == "---")
+            {
+                break;
+            }
+
+            var colon = line.Length > 0 && !char.IsWhiteSpace(line[0]) ? line.IndexOf(':', StringComparison.Ordinal) : -1;
+            if (colon <= 0 || !string.Equals(line[..colon].Trim(), "allowed-tools", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = line[(colon + 1)..].Trim();
+            if (value is ">" or ">-" or "|" or "|-" or ">+" or "|+")
+            {
+                var parts = new List<string>();
+                while (i + 1 < lines.Length && lines[i + 1].Trim() != "---" &&
+                       (lines[i + 1].Length == 0 || char.IsWhiteSpace(lines[i + 1][0])))
+                {
+                    i++;
+                    parts.Add(lines[i].Trim());
+                }
+
+                value = string.Join(' ', parts);
+            }
+
+            return SplitTools(Unquote(value));
+        }
+
+        return [];
+    }
+
+    private static string[] SplitTools(string value) =>
+        value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static string Unquote(string value) =>
         value.Length >= 2 && (value[0] == '"' && value[^1] == '"' || value[0] == '\'' && value[^1] == '\'')
