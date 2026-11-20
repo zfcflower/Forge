@@ -47,7 +47,7 @@
 
 ## 13.6 基准
 
-- `tools/Forge.Bench`：无框架、无包，同一循环内交替测量基线与目标、取配对中位差（比值稳定，绝对值噪声可达 1.5–2×）。覆盖 read / write / copy / walk / grep / process / output / concurrency / ratelimit 场景，每个场景自带验收检查；全量 18/18 通过为一次验收。
+- `tools/Forge.Bench`：无框架、无包，同一循环内交替测量基线与目标、取配对中位差（比值稳定，绝对值噪声可达 1.5–2×）。覆盖 read / write / copy / walk / grep / process / output / concurrency / ratelimit / usage / composer / transcript / ledger 场景，每个场景自带验收检查；每条场景族各自全通过为一次验收（`-- ledger` 等过滤跑法见 `Program.cs`，`transcript.*` 与 `composer.*` 需在独立进程里单跑——它们会初始化 Avalonia，与全量循环互斥）。
 - 典型实测（win-x64 32 逻辑核、Release）：
   - `read` 100 MiB 全读 59.8 ms（1.5–1.6 GB/s）；100 MiB 取 100 行 0.071 ms。
   - `write` 1 KiB 原子写 2.67 ms（差距全在 `fsync`）；1 MiB 原子写 4.34 ms（比 BCL 直写快 21%）。
