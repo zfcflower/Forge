@@ -522,12 +522,14 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     /// </summary>
     internal async Task<SubAgentOutcome> StartUserChildAsync(
         AgentDefinition definition,
-        string task,
+        string text,
+        IReadOnlyList<ContentBlock> attachments,
         string? sessionTitle,
         Action<AgentEvent> sink,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(attachments);
         ArgumentNullException.ThrowIfNull(sink);
         // Counted before the host is resolved, exactly like SpawnChildAsync: a prompt reload must not swap the host (and
         // dispose its approval handlers) in between.
@@ -552,7 +554,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             currentUserChild.Value = run;
             try
             {
-                return await Task.Run(() => agentHost.StartUserChildAsync(definition, task, sessionTitle, forward, ct), CancellationToken.None)
+                var message = UserMessage(text, attachments);
+                return await Task.Run(() => agentHost.StartUserChildAsync(definition, message, sessionTitle, forward, ct), CancellationToken.None)
                     .ConfigureAwait(false);
             }
             finally

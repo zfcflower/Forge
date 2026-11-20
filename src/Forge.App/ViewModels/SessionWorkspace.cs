@@ -1651,12 +1651,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 }
                 catch (Exception exception) when (IsCheckpointFailure(exception))
                 {
-                    Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
-                    notifications.Notify(
-                        NotificationLevel.Warning,
-                        NotificationsStrings.TurnFailedTitle,
-                        SessionStrings.CheckpointFailed(exception.Message),
-                        "checkpoint:" + SessionId);
+                    NoteCheckpointFailure(SessionId, exception);
                 }
             }
 
@@ -1698,12 +1693,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     }
                     catch (Exception exception) when (IsCheckpointFailure(exception))
                     {
-                        Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
-                        notifications.Notify(
-                            NotificationLevel.Warning,
-                            NotificationsStrings.TurnFailedTitle,
-                            SessionStrings.CheckpointFailed(exception.Message),
-                            "checkpoint:" + SessionId);
+                        NoteCheckpointFailure(SessionId, exception);
                     }
                 }
             }
@@ -1806,6 +1796,20 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private static bool IsCheckpointFailure(Exception exception) =>
         exception is GitException or InvalidOperationException or IOException or InvalidDataException or ArgumentException or
         DbException or UnauthorizedAccessException;
+
+    /// <summary>
+    /// A checkpoint write or read for <paramref name="sessionId"/> failed: the turn itself goes on, the transcript says so
+    /// inline, and the user is told once as a warning - a turn whose diff went missing is otherwise silent.
+    /// </summary>
+    private void NoteCheckpointFailure(string sessionId, Exception exception)
+    {
+        Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
+        notifications.Notify(
+            NotificationLevel.Warning,
+            NotificationsStrings.TurnFailedTitle,
+            SessionStrings.CheckpointFailed(exception.Message),
+            "checkpoint:" + sessionId);
+    }
 
     private void OnSendFailed(Exception exception)
     {

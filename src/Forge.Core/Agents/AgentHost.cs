@@ -314,20 +314,22 @@ public sealed class AgentHost
     /// with <c>child_driver = "user"</c> and the root session as its parent. The sink receives
     /// <see cref="AgentSubAgentStarted"/> with the root session as parent, then the child's own events, then exactly one
     /// <see cref="AgentSubAgentFinished"/> carrying the run's usage and elapsed time. Returns the child's final text.
+    /// <para>The message is the user's first message as built (text plus its attachments), so a first turn carries its
+    /// images like every later one does through <see cref="RunUserChildTurnAsync"/>.</para>
     /// </summary>
     public Task<SubAgentOutcome> StartUserChildAsync(
         AgentDefinition definition,
-        string task,
+        ChatMessage message,
         string? sessionTitle,
         IAgentEventSink sink,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(sink);
         var root = Volatile.Read(ref rootSession) ?? throw new InvalidOperationException(
             "This host has no root session yet: create or resume the root agent before starting a user session under it.");
-        return scheduler.StartUserSessionAsync(definition, task, sessionTitle, root.SessionId, root.WorkingDirectory, sink, ct);
+        return scheduler.StartUserSessionAsync(definition, message, sessionTitle, root.SessionId, root.WorkingDirectory, sink, ct);
     }
 
     /// <summary>

@@ -1,8 +1,11 @@
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Localization;
+using Forge.App.Logging;
+using Forge.App.Notifications;
 using Forge.Core.Agents;
 using Forge.Core.Providers;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -36,6 +39,10 @@ internal static class AgentSessionLabel
 /// and the stop button goes through the host's <c>SubAgentControl</c> (the same path the model's stop tool takes). Events of
 /// that run arrive under the child's own agent id and are rewritten to <c>root</c> here, so this tab draws them as its own
 /// conversation instead of as a sub-agent row.</para>
+/// <para>Every turn is also the child's own: its checkpoint and its metrics row are keyed by the child's session id and
+/// numbered among the child's turns from 1 (see <see cref="BeginAgentTurnAsync"/> and <see cref="RecordAgentTurnMetrics"/>),
+/// so the "by turn" diff this tab shows is the child's work and its usage numbers are its own run's rather than the root
+/// instance's.</para>
 /// </summary>
 internal sealed partial class SessionWorkspaceViewModel
 {
@@ -53,6 +60,20 @@ internal sealed partial class SessionWorkspaceViewModel
 
     /// <summary>The stored child session's id; null while the tab is still a draft.</summary>
     private string? agentChildSessionId;
+
+    /// <summary>
+    /// The child's session row as the run announced it, completed on the run's thread by the start event: the draft's
+    /// checkpoint has to be keyed by that id, and the run only names it after it has begun (see
+    /// <see cref="RunAgentSessionTurnAsync"/>). Null outside the one turn that creates the row.
+    /// </summary>
+    private TaskCompletionSource<string>? agentChildCreated;
+
+    /// <summary>
+    /// The terminal event of the tab's own run, written on the run's thread and read at the turn end: it is where this turn's
+    /// usage, elapsed time and outcome come from (forge-core: usage is per instance, so an agent session's numbers are its own
+    /// run's and never the root instance's counters). Reset when each turn begins.
+    /// </summary>
+    private AgentSubAgentFinished? agentRunEnded;
 
     private bool agentUnread;
 
@@ -183,7 +204,7 @@ internal sealed partial class SessionWorkspaceViewModel
         turnStartedAt = DateTimeOffset.Now;
         Interlocked.Exchange(ref lastActivityTicks, turnStartedAt.UtcTicks);
         Interlocked.Exchange(ref runningTools, 0);
-        turnStartCounters = RootCounters.None;
+        Interlocked.Exchange(ref agentRunEnded, null);
         turnToolCalls = 0;
         Transcript.AddUserMessage(text, turnStartedAt, prompt.Attachments);
         var card = Transcript.BeginTurn(turnStartedAt);
@@ -195,15 +216,37 @@ internal sealed partial class SessionWorkspaceViewModel
         turn = new CancellationTokenSource();
         var token = turn.Token;
         LocText? error = null;
+
+        // This turn's number in the child's own sequence: its checkpoint and its metrics row are keyed by the child's session
+        // id and numbered from 1 among themselves (forge-core's agent-session decision), so neither the root instance's
+        // counters nor its turn numbering enter here. Null while the draft has no session id to key anything by.
+        int? turnNo = null;
+        TaskCompletionSource<string>? created = null;
         try
         {
             if (agentChildSessionId is null)
             {
                 // The first message is also the session row: nothing exists in the store before it, so a draft that is
-                // closed again leaves nothing behind.
-                var outcome = await live
-                    .StartUserChildAsync(definition, text, AgentSessionName, OnAgentSessionEvent, token)
-                    .ConfigureAwait(true);
+                // closed again leaves nothing behind. The row's id is what the checkpoint is keyed by and the run only names
+                // it on the wire, so the checkpoint opens from the start event - still ahead of the run's first request -
+                // while the run itself is awaited below.
+                created = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Interlocked.Exchange(ref agentChildCreated, created);
+                var running = live.StartUserChildAsync(
+                    definition,
+                    text,
+                    prompt.Attachments,
+                    AgentSessionName,
+                    OnAgentSessionEvent,
+                    token);
+                await Task.WhenAny(created.Task, running).ConfigureAwait(true);
+                if (created.Task.IsCompletedSuccessfully)
+                {
+                    turnNo = await BeginAgentTurnAsync(created.Task.Result, card.Round).ConfigureAwait(true);
+                    turnNumber = turnNo.Value;
+                }
+
+                var outcome = await running.ConfigureAwait(true);
                 if (outcome.IsError)
                 {
                     error = LocText.Literal(outcome.Text);
@@ -217,6 +260,8 @@ internal sealed partial class SessionWorkspaceViewModel
                     .ResumeUserChildAsync(agentChildSessionId, WorkDir, definition, token)
                     .ConfigureAwait(true);
                 agentInstance = child;
+                turnNo = await BeginAgentTurnAsync(agentChildSessionId, card.Round).ConfigureAwait(true);
+                turnNumber = turnNo.Value;
                 await live.RunUserChildTurnAsync(child, text, prompt.Attachments, OnAgentSessionEvent, token).ConfigureAwait(true);
             }
         }
@@ -232,18 +277,143 @@ internal sealed partial class SessionWorkspaceViewModel
         {
             try
             {
+                // A stop the user asked for closes the run instead of raising here, so the card learns it from the run's own
+                // end - the same way its metrics row does - instead of reading as a turn that went through.
+                if (error is null && Volatile.Read(ref agentRunEnded) is { Status: SubAgentStatus.Stopped })
+                {
+                    error = SessionStrings.Stopped;
+                }
+
                 lastTurnError = error;
                 Transcript.EndTurn(DateTimeOffset.Now - turnStartedAt, error);
                 AgentSessionTurnEnded?.Invoke(this);
+
+                // The turn's own numbers, keyed by the child's session id: one metrics row and one closed checkpoint per turn,
+                // on success, failure and cancellation alike. The row the run created is read from the start event rather
+                // than from the tab, which learns its id through the dispatcher and may not have been there yet.
+                var childSessionId = created is { Task.IsCompletedSuccessfully: true } ? created.Task.Result : agentChildSessionId;
+                if (childSessionId is { Length: > 0 })
+                {
+                    var number = turnNo ?? card.Round;
+                    Instruments.NoteTurnEnded(number);
+                    RecordAgentTurnMetrics(childSessionId, number, definition, error);
+                    if (turnNo is not null)
+                    {
+                        await CompleteAgentTurnAsync(childSessionId, number).ConfigureAwait(true);
+                    }
+                }
             }
             finally
             {
+                Interlocked.Exchange(ref agentChildCreated, null);
                 this.turn?.Dispose();
                 this.turn = null;
                 IsRunning = false;
                 TurnCompleted?.Invoke(this);
                 ScheduleNext();
             }
+        }
+    }
+
+    /// <summary>
+    /// Opens this turn's checkpoint under the child's own session id and answers the turn number it was written with: the
+    /// next one neither of the child's two tables has yet, so a reopened tab continues its own sequence instead of colliding
+    /// with a stored turn, and numbered from 1 for a session that never ran. A store or git failure is a notice, never a lost
+    /// turn.
+    /// </summary>
+    private async Task<int> BeginAgentTurnAsync(string childSessionId, int round)
+    {
+        var turn = Math.Max(1, round);
+        if (checkpoints is null)
+        {
+            return turn;
+        }
+
+        try
+        {
+            var next = await BackgroundRead.RunAsync(t => checkpoints.NextTurnNumberAsync(childSessionId, t), CancellationToken.None)
+                .ConfigureAwait(true);
+            turn = Math.Max(turn, next);
+            await Task.Run(() => checkpoints.BeginAsync(childSessionId, turn, WorkDir, CancellationToken.None), CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (IsCheckpointFailure(exception))
+        {
+            NoteCheckpointFailure(childSessionId, exception);
+        }
+
+        return turn;
+    }
+
+    /// <summary>Closes the checkpoint of a turn that ended, on success, failure and cancellation alike.</summary>
+    private async Task CompleteAgentTurnAsync(string childSessionId, int turn)
+    {
+        if (checkpoints is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => checkpoints.CompleteAsync(childSessionId, turn, WorkDir, CancellationToken.None), CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (IsCheckpointFailure(exception))
+        {
+            NoteCheckpointFailure(childSessionId, exception);
+        }
+    }
+
+    /// <summary>
+    /// Hands the child's turn to the same metrics writer the root session uses, keyed by the child's own session id and with
+    /// the numbers of its own run: the tokens and the elapsed time are the ones its <see cref="AgentSubAgentFinished"/> carries
+    /// (forge-core: usage is per instance), so the root instance's counters are never read here - charging the child with
+    /// them would count the root's spend a second time.
+    /// </summary>
+    private void RecordAgentTurnMetrics(string childSessionId, int turn, AgentDefinition definition, LocText? error)
+    {
+        if (metricsRecorder is not { Enabled: true } recorder)
+        {
+            return;
+        }
+
+        try
+        {
+            // The run's own terminal event says how the turn went: a stop the user asked for closes the run instead of raising
+            // here, so the outcome the row records is read from there first and the turn's own error only fills the gap.
+            var run = Interlocked.Exchange(ref agentRunEnded, null);
+            LocText? outcome = run switch
+            {
+                { Status: SubAgentStatus.Stopped } => SessionStrings.Stopped,
+                { Status: SubAgentStatus.Failed, Error: { Length: > 0 } failure } => LocText.Literal(failure),
+                _ => error,
+            };
+            recorder.Record(TurnMetricsRowFactory.Build(
+                childSessionId,
+                turn,
+                turnStartedAt,
+                DateTimeOffset.UtcNow,
+                outcome,
+                run?.Error ?? turnRootFailure,
+                // The run's own numbers as the difference against an empty baseline, and its elapsed time in the column a root
+                // turn fills with the model's streaming time: a sub-agent run is measured as one span from spawn to finish
+                // (queueing included), and that span is the only duration its finished event reports.
+                run?.Usage ?? TokenUsage.Empty,
+                TokenUsage.Empty,
+                run?.Elapsed ?? TimeSpan.Zero,
+                TimeSpan.Zero,
+                turnToolCalls,
+                definition.Model.ProviderId is { Length: > 0 } declared
+                    ? declared
+                    : Composer.ProviderId is { Length: > 0 } chosen
+                        ? chosen
+                        : null,
+                definition.Model.Model));
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The writer promises never to throw, but a row is never worth a turn: this is the belt to that suspender.
+            AppLogs.Usage.ZLogWarning($"agent session metrics row not queued: {exception.GetType().Name}: {exception.Message}");
         }
     }
 
@@ -266,6 +436,13 @@ internal sealed partial class SessionWorkspaceViewModel
                 Volatile.Write(ref agentAgentId, started.ChildId);
             }
 
+            // The draft's first checkpoint is keyed by the row this run just created, so the id is handed over here, on the
+            // run's thread and before its first request (see RunAgentSessionTurnAsync).
+            if (!string.IsNullOrEmpty(started.ChildSessionId))
+            {
+                Volatile.Read(ref agentChildCreated)?.TrySetResult(started.ChildSessionId);
+            }
+
             Forge.App.Approval.UiThreadDispatcher.Instance.Post(() => MaterializeAgentSession(started.ChildSessionId));
             return;
         }
@@ -274,7 +451,14 @@ internal sealed partial class SessionWorkspaceViewModel
         {
             // This tab's own run: its lifecycle ends are the turn's, not a sub-agent row's, and everything else it says is
             // this conversation.
-            if (value is AgentSubAgentFinished or AgentSubAgentQueued or AgentSubAgentRunning)
+            if (value is AgentSubAgentFinished finished)
+            {
+                // Where this turn's metrics row gets its tokens, elapsed time and outcome from (see RecordAgentTurnMetrics).
+                Interlocked.Exchange(ref agentRunEnded, finished);
+                return;
+            }
+
+            if (value is AgentSubAgentQueued or AgentSubAgentRunning)
             {
                 return;
             }

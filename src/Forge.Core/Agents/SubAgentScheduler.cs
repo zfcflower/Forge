@@ -277,10 +277,13 @@ public sealed class SubAgentScheduler : ISubAgentControl
     /// registered as <see cref="AgentOwner.User"/> under the <c>session-&lt;n&gt;</c> namespace, so the model's tools answer
     /// for its id exactly like for one that never existed. The definition is the caller's choice (the app offers the kinds
     /// and models the user picked); this method never looks a kind up in the catalog.
+    /// <para><paramref name="message"/> is the first turn's message as the user sent it - text plus its attachments - so
+    /// the images of a first message reach the child exactly like those of every later one; its typed text is what the
+    /// started event names as the task and what the session row stores on a session without an explicit title.</para>
     /// </summary>
     public async Task<SubAgentOutcome> StartUserSessionAsync(
         AgentDefinition definition,
-        string task,
+        ChatMessage message,
         string? sessionTitle,
         string rootSessionId,
         string workingDirectory,
@@ -288,11 +291,12 @@ public sealed class SubAgentScheduler : ISubAgentControl
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(sink);
         ArgumentException.ThrowIfNullOrWhiteSpace(rootSessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
+        var task = TextOf(message);
         var watch = Stopwatch.StartNew();
         var context = new ToolContext(rootSessionId, workingDirectory, 0);
         var sessionId = await CreateSessionAsync(definition, task, context, ct, sessionTitle, StorageSchema.ChildDriverUser)
@@ -304,7 +308,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
         instance.TryAcquire();
         try
         {
-            return await DriveAsync(instance, ChatMessage.User(task), task, sink, rootSessionId, watch, ct).ConfigureAwait(false);
+            return await DriveAsync(instance, message, task, sink, rootSessionId, watch, ct).ConfigureAwait(false);
         }
         finally
         {
