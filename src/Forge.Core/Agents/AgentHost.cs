@@ -460,11 +460,19 @@ public sealed class AgentHost
     }
 
     /// <summary>
-    /// Stops every run of a user-driven session this host owns - queued or running - and returns how many were stopped. The
-    /// root session's own turn is not touched: the shell stops that one and calls this for the sessions under it when the
-    /// user presses stop on the root.
+    /// Stops every run of a user-driven session this host owns - queued or running - drops the messages their mailboxes still
+    /// owe (queued or in flight, each one answered by a stopped receipt), and returns how many runs were stopped. The root
+    /// session's own turn is not touched: the shell stops that one and calls this for the sessions under it when the user
+    /// presses stop on the root.
     /// </summary>
-    public int StopUserChildren(string? reason = null) => scheduler.StopUserSessions(reason);
+    public int StopUserChildren(string? reason = null)
+    {
+        var stopped = scheduler.StopUserSessions(reason);
+        // The root's stop takes the undelivered messages with it (forge-core "授权通信"): a delivery left in a mailbox would
+        // otherwise open its turn later, on a worktree the user has already taken back.
+        messenger.CancelPending(reason);
+        return stopped;
+    }
 
     /// <summary>
     /// Replaces the externally supplied tools (the <see cref="AgentHostOptions.Tools"/> part; built-in tools such as

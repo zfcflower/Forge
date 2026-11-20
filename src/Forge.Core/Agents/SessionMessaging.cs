@@ -93,17 +93,6 @@ public sealed class SessionAuthorizationTable
         }
     }
 
-    /// <summary>Drops every pair; the table of a released root (a restart is the other way it empties).</summary>
-    public int RevokeAll()
-    {
-        lock (gate)
-        {
-            var removed = grants.Count;
-            grants.Clear();
-            return removed;
-        }
-    }
-
     /// <summary>The pairs <paramref name="initiatorSessionId"/> holds, newest grant last; what the composer's marks show.</summary>
     public IReadOnlyList<SessionGrant> GrantsOf(string? initiatorSessionId)
     {
@@ -218,6 +207,18 @@ public sealed class SessionMessenger
 {
     private const int TaskLabelLimit = 80;
 
+    /// <summary>Why a delivery ended when this root's sessions were stopped before its turn started.</summary>
+    private const string StoppedReason = "会话已停止";
+
+    /// <summary>Why a delivery ended when its target never went idle inside <see cref="IdleWaitLimit"/>.</summary>
+    private const string BusyTooLongReason = "目标长时间忙";
+
+    /// <summary>How long a delivery waits for its target to go idle: far past any one turn, so only a stuck target reaches it.</summary>
+    private static readonly TimeSpan IdleWaitLimit = TimeSpan.FromMinutes(30);
+
+    /// <summary>The pause between two looks at whether a busy target has gone idle.</summary>
+    private static readonly TimeSpan IdlePollInterval = TimeSpan.FromMilliseconds(200);
+
     private readonly Func<SessionAnchor?> anchor;
     private readonly SubAgentScheduler scheduler;
     private readonly ISessionStore? store;
@@ -228,6 +229,12 @@ public sealed class SessionMessenger
     private readonly Dictionary<string, Mailbox> mailboxes = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
     private long dispatchSequence;
+
+    /// <summary>
+    /// Cancelled by <see cref="CancelPending"/> and replaced with a fresh one, so a delivery already handed to a worker learns
+    /// about the root's stop while one queued behind it does not. Guarded by <see cref="gate"/>.
+    /// </summary>
+    private CancellationTokenSource stopGate = new();
 
     internal SessionMessenger(
         Func<SessionAnchor?> anchor,
@@ -279,6 +286,46 @@ public sealed class SessionMessenger
 
     /// <summary>Every grant of this root's tree; the app drops them all when the root leaves Active.</summary>
     public int RevokeRoot(string? rootSessionId) => grants.RevokeRoot(rootSessionId);
+
+    /// <summary>
+    /// Stops every delivery this root's mailboxes still owe (forge-core "授权通信": the root's stop takes the sessions under it
+    /// and the messages already handed to them together): the queued deliveries are dropped and the one a mailbox is running
+    /// right now ends with it, each one answered by a <see cref="SessionReplyStatus.Stopped"/> receipt, and the turns in flight
+    /// get a stop token, so a mailbox whose target is busy returns to the next delivery instead of waiting out
+    /// <see cref="IdleWaitLimit"/>. Thread-safe: the mailboxes drain on background tasks.
+    /// </summary>
+    /// <returns>How many deliveries were stopped.</returns>
+    public int CancelPending(string? reason)
+    {
+        var text = string.IsNullOrWhiteSpace(reason) ? StoppedReason : reason.Trim();
+        List<PendingDelivery> stopped = [];
+        CancellationTokenSource previous;
+        lock (gate)
+        {
+            previous = stopGate;
+            stopGate = new CancellationTokenSource();
+            foreach (var box in mailboxes.Values)
+            {
+                while (box.Queue.Count > 0)
+                {
+                    stopped.Add(box.Queue.Dequeue());
+                }
+
+                if (box.Current is { } running)
+                {
+                    stopped.Add(running);
+                }
+            }
+        }
+
+        previous.Cancel();
+        foreach (var delivery in stopped)
+        {
+            Reply(delivery, Receipt(delivery, new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, text, 0), null));
+        }
+
+        return stopped.Count;
+    }
 
     /// <summary>
     /// <c>message_session</c>'s body: resolve the target by name within this root, check the user's grant, make sure the
@@ -503,6 +550,9 @@ public sealed class SessionMessenger
 
         /// <summary>A worker task was started for this mailbox; exactly one runs at a time.</summary>
         public bool Draining { get; set; }
+
+        /// <summary>The delivery the worker took out of the queue and has not finished yet; <see cref="CancelPending"/> stops it.</summary>
+        public PendingDelivery? Current { get; set; }
     }
 
     private sealed record Target(string SessionId, string Name, bool IsRoot);
@@ -515,7 +565,14 @@ public sealed class SessionMessenger
         string TargetSessionId,
         string TargetName,
         string Message,
-        string TaskLabel);
+        string TaskLabel)
+    {
+        /// <summary>
+        /// Whether the receipt went out; read and written under the messenger's gate, because <see cref="CancelPending"/> and
+        /// the worker that runs the delivery can both reach <see cref="Reply"/> for it.
+        /// </summary>
+        public bool Replied { get; set; }
+    }
 
     /// <summary>Whether a user-driven session is inside a turn right now; false when this host does not hold it.</summary>
     private bool IsUserSessionRunning(string sessionId) =>
@@ -527,6 +584,7 @@ public sealed class SessionMessenger
         while (true)
         {
             PendingDelivery delivery;
+            CancellationToken stop;
             lock (gate)
             {
                 if (box.Queue.Count == 0)
@@ -537,28 +595,40 @@ public sealed class SessionMessenger
                 }
 
                 delivery = box.Queue.Dequeue();
+                box.Current = delivery;
+                stop = stopGate.Token;
             }
 
             try
             {
-                await DeliverAsync(delivery).ConfigureAwait(false);
+                await DeliverAsync(delivery, stop).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
                 // A delivery that blew up still owes the initiator a receipt: the catch above only covers the turn itself,
                 // so a broken seam ends in the same place as a failed turn instead of a silent hole.
-                Deliver(delivery.InitiatorSessionId, Receipt(delivery, new SessionTurnOutcome(
+                Reply(delivery, Receipt(delivery, new SessionTurnOutcome(
                     string.Empty,
                     SessionReplyStatus.Failed,
                     exception.Message,
                     0), null));
             }
+            finally
+            {
+                lock (gate)
+                {
+                    if (ReferenceEquals(box.Current, delivery))
+                    {
+                        box.Current = null;
+                    }
+                }
+            }
         }
     }
 
-    private async Task DeliverAsync(PendingDelivery delivery)
+    private async Task DeliverAsync(PendingDelivery delivery, CancellationToken stop)
     {
-        var outcome = await RunTurnAsync(delivery).ConfigureAwait(false);
+        var outcome = await RunTurnAsync(delivery, stop).ConfigureAwait(false);
         SessionTurnChanges? changes = null;
         if (outcome.Turn > 0 && endpoint() is { } seam)
         {
@@ -572,7 +642,7 @@ public sealed class SessionMessenger
             }
         }
 
-        Deliver(delivery.InitiatorSessionId, await BuildReceiptAsync(delivery, outcome, changes).ConfigureAwait(false));
+        Reply(delivery, await BuildReceiptAsync(delivery, outcome, changes).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -581,7 +651,7 @@ public sealed class SessionMessenger
     /// host that holds it (<see cref="AgentHost.RunUserChildTurnAsync"/>), with the app's checkpoint numbering around it. A
     /// root without a view cannot run at all: Core never starts a root's turn.
     /// </summary>
-    private async Task<SessionTurnOutcome> RunTurnAsync(PendingDelivery delivery)
+    private async Task<SessionTurnOutcome> RunTurnAsync(PendingDelivery delivery, CancellationToken stop)
     {
         var seam = endpoint();
         if (seam is null)
@@ -593,10 +663,16 @@ public sealed class SessionMessenger
         var isRoot = string.Equals(delivery.TargetSessionId, anchor()?.SessionId, StringComparison.Ordinal);
         try
         {
-            if (await seam.RunSessionTurnAsync(request, CancellationToken.None).ConfigureAwait(false) is { } throughTheView)
+            if (await seam.RunSessionTurnAsync(request, stop).ConfigureAwait(false) is { } throughTheView)
             {
                 return throughTheView;
             }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            // The root's sessions were stopped while the delivery waited for the target: the receipt says so instead of
+            // reporting the cancellation as a failure of the turn.
+            return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, StoppedReason, 0);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -615,7 +691,17 @@ public sealed class SessionMessenger
             return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Failed, "the session is no longer loaded", 0);
         }
 
-        await WaitUntilIdleAsync(child).ConfigureAwait(false);
+        if (!await WaitUntilIdleAsync(child, stop).ConfigureAwait(false))
+        {
+            var ended = stop.IsCancellationRequested ? StoppedReason : BusyTooLongReason;
+            return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, ended, 0);
+        }
+
+        if (await RefuseInactiveAsync(child).ConfigureAwait(false) is { } refused)
+        {
+            return refused;
+        }
+
         var turn = 0;
         try
         {
@@ -629,7 +715,7 @@ public sealed class SessionMessenger
         AgentSubAgentFinished? finished = null;
         try
         {
-            await foreach (var value in runUserChildTurn(child, ChatMessage.User(delivery.Message), CancellationToken.None)
+            await foreach (var value in runUserChildTurn(child, ChatMessage.User(delivery.Message), stop)
                                .ConfigureAwait(false))
             {
                 if (value is AgentSubAgentFinished ended)
@@ -637,6 +723,17 @@ public sealed class SessionMessenger
                     finished = ended;
                 }
             }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            // The root's stop reached this turn: the checkpoint still closes, and the delivery ends as stopped rather than
+            // as a failure of the session's work.
+            if (turn > 0)
+            {
+                await EndTurnAsync(seam, child, turn).ConfigureAwait(false);
+            }
+
+            return new SessionTurnOutcome(child.PartialText, SessionReplyStatus.Stopped, StoppedReason, turn);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -680,15 +777,60 @@ public sealed class SessionMessenger
     }
 
     /// <summary>
-    /// Waits until the instance holds no run: a session the user is driving keeps its turn, and the delivery starts right
-    /// after it instead of failing ("目标忙则排队").
+    /// The gate a delivery Core drives itself passes right before it starts the turn (forge-core "回合前校验", the rule the
+    /// root's own turn already follows): the mailbox waited for the target, so the sessions are read again - the user can take
+    /// the root over or archive it, and the target can be closed, while the delivery sits in the queue. A session that left
+    /// <see cref="SessionStatus.Active"/> means no turn at all: the delivery fails saying so, and the grants that can no longer
+    /// hold are dropped instead of surviving into the next delivery.
     /// </summary>
-    private static async Task WaitUntilIdleAsync(AgentInstance child)
+    /// <returns>The refused outcome when the turn must not start, null when it may.</returns>
+    private async Task<SessionTurnOutcome?> RefuseInactiveAsync(AgentInstance child)
     {
+        var rootId = anchor()?.SessionId;
+        var root = rootId is null ? null : await ReadSessionAsync(rootId, CancellationToken.None).ConfigureAwait(false);
+        if (root is not { Status: SessionStatus.Active })
+        {
+            grants.RevokeRoot(rootId);
+            return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Failed, "会话已不再活动（根会话已离开 Active）", 0);
+        }
+
+        var target = await ReadSessionAsync(child.SessionId, CancellationToken.None).ConfigureAwait(false);
+        if (target is not { Status: SessionStatus.Active })
+        {
+            grants.RevokeTarget(child.SessionId);
+            return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Failed, "会话已不再活动（目标会话已归档或关闭）", 0);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Waits until the instance holds no run: a session the user is driving keeps its turn, and the delivery starts right
+    /// after it instead of failing ("目标忙则排队"). Bounded by <see cref="IdleWaitLimit"/> and by the root's stop, because a
+    /// mailbox that never gets there would leave the initiator without the receipt the state line owes it.
+    /// </summary>
+    /// <returns>Whether the target went idle; false when the limit ran out or the root was stopped.</returns>
+    private static async Task<bool> WaitUntilIdleAsync(AgentInstance child, CancellationToken stop)
+    {
+        var waited = Stopwatch.StartNew();
         while (child.IsRunning)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(200), CancellationToken.None).ConfigureAwait(false);
+            if (waited.Elapsed >= IdleWaitLimit)
+            {
+                return false;
+            }
+
+            try
+            {
+                await Task.Delay(IdlePollInterval, stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
         }
+
+        return true;
     }
 
     private async Task<string> BuildReceiptAsync(PendingDelivery delivery, SessionTurnOutcome outcome, SessionTurnChanges? changes)
@@ -799,6 +941,26 @@ public sealed class SessionMessenger
         }
 
         return builder.Append("\n(报告超出上限，转存失败，已截断)").ToString();
+    }
+
+    /// <summary>
+    /// Writes one delivery's receipt exactly once. Two callers can get here for the same delivery - the worker that ran its
+    /// turn and <see cref="CancelPending"/> - and the initiator must read one answer per dispatch number, whichever came first:
+    /// a turn that ended before the stop counts, a stopped delivery does not owe a second line.
+    /// </summary>
+    private void Reply(PendingDelivery delivery, string receipt)
+    {
+        lock (gate)
+        {
+            if (delivery.Replied)
+            {
+                return;
+            }
+
+            delivery.Replied = true;
+        }
+
+        Deliver(delivery.InitiatorSessionId, receipt);
     }
 
     private void Deliver(string initiatorSessionId, string receipt)
