@@ -51,7 +51,7 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 
 **点名只约束“谁先开话头”**:子会话要主动发起,须在子会话里也点名过根;回程**永远自动**(投递即附带一次回程许可),不需要二次点名,但回程不是“再问回去”的通道。深度 2 不继承授权。投递本身不弹审批卡,对方回合内的工具调用照常审批。可通信对象只有根 ↔ 它的 Agent 会话。
 
-**`write` 覆盖检查的读取记录(已定、未实现)。** 每个 `AgentInstance` 持有一份内存读取记录(`路径 → (长度, LastWriteTimeUtc)`,路径按 `WorkspacePath.Normalize` 归一,线程安全),`AgentLoop` 构造 `ToolContext` 时经新属性 `ToolContext.FileVersions`(`Forge.Abstractions` 的 `IFileVersionLedger`;null 时工具不检查,如脚本、插件桥)交给工具;规则见 forge-io「`write` 覆盖检查」。按实例而非会话 id:记录的是“这个 Agent 看到过哪个版本”,同名 Agent 重建后看到的历史可能已被压缩,不能沿用。记录不落盘,实例重建(重启、切换 Agent/模型)即清空。**不设上限、不淘汰**:只增的代价是内存按“读过多少文件”线性增长,而淘汰会让读过的文件突然要求重读;量级由 `tools/Forge.Bench` 实测给出。
+**`write` 覆盖检查的读取记录。** 每个 `AgentInstance` 持有一份内存读取记录(`路径 → (长度, LastWriteTimeUtc)`,路径按 `WorkspacePath.Normalize` 归一,线程安全),`AgentLoop` 构造 `ToolContext` 时经新属性 `ToolContext.FileVersions`(`Forge.Abstractions` 的 `IFileVersionLedger`;null 时工具不检查,如脚本、插件桥)交给工具;规则见 forge-io「`write` 覆盖检查」。按实例而非会话 id:记录的是“这个 Agent 看到过哪个版本”,同名 Agent 重建后看到的历史可能已被压缩,不能沿用。记录不落盘,实例重建(重启、切换 Agent/模型)即清空。**不设上限、不淘汰**:只增的代价是内存按“读过多少文件”线性增长,而淘汰会让读过的文件突然要求重读;量级由 `tools/Forge.Bench` 实测给出。
 
 **会话目录与恢复。** 会话元数据(项目、worktree、分支、父会话、Agent 种类、任务、归档状态、最后活动)是 `sessions` 表的列,`ISessionCatalog` 与 `ISessionStore` 由同一 `SqliteSessionStore` 实现。能力只经 `SessionCatalogs.From` 读取:`LoggingSessionStore` 总实现该接口,须读 `SupportsCatalog`,内层非目录时按无目录处理。子会话带 `ParentSessionId`/`AgentKind`/`Task` 并继承父会话的 worktree 与项目;每回合持久化后 `TouchAsync`,失败不影响循环。`ResumeRootAsync` 用与压缩器相同规则重建上下文(摘要视图 + 未摘要尾部),丢弃孤立首个工具结果与末尾无结果的工具回合。一个 `AgentHost` 对应一个主会话;`AgentScope` 为 AsyncLocal,名额池与 id 计数在实例内,多主会话可并发。
 

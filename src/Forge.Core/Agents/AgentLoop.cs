@@ -856,6 +856,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             AgentName = instance.Definition.Name,
             Tools = tools.Current(),
             YieldSlot = _ => YieldCurrentSlot(ct),
+            FileVersions = instance.FileVersions,
         };
         string? steering = null;
         try

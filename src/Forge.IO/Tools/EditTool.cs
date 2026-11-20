@@ -6,7 +6,9 @@ namespace Forge.IO.Tools;
 /// <summary>
 /// Replaces an exact string in a workspace text file. The read, the replacement and the atomic write back run under one
 /// <see cref="PathGate"/> lease, so a concurrent write of the same path cannot be lost in between. A match count other
-/// than one is reported instead of guessed, unless <c>replace_all</c> asks for every occurrence.
+/// than one is reported instead of guessed, unless <c>replace_all</c> asks for every occurrence. The call is not subject
+/// to the overwrite check - an exact match is its own optimistic check - but it moves the agent's read record forward only
+/// when the file still matched that record (see <see cref="IFileVersionLedger"/>).
 /// </summary>
 public sealed class EditTool : ToolBase
 {
@@ -64,7 +66,12 @@ public sealed class EditTool : ToolBase
 
         using (await PathGate.Shared.AcquireAsync(path, ct).ConfigureAwait(false))
         {
-            var length = new FileInfo(path).Length;
+            var info = new FileInfo(path);
+            var length = info.Length;
+
+            // The state this call writes over, read under the same lease: it is what decides whether the record follows
+            // the edit or has to stand (see the record step below).
+            var before = new FileVersion(length, info.LastWriteTimeUtc.Ticks);
             if (length > limit)
             {
                 return new ToolResult(
@@ -107,6 +114,14 @@ public sealed class EditTool : ToolBase
                 ? text.Replace(oldString, newString, StringComparison.Ordinal)
                 : string.Concat(text.AsSpan(0, first), newString, text.AsSpan(first + oldString.Length));
             await TextFileWriter.WriteAsync(path, replaced, ct).ConfigureAwait(false);
+
+            // Only a write over the state the agent itself had read adopts the new state. Editing over somebody else's
+            // change leaves the old record in place: the agent's context still holds the text before that change, and a
+            // later whole-file write with it has to be refused rather than allowed through a laundered record.
+            if (context.FileVersions is { } ledger && FileVersionCheck.Matches(ledger, path, before))
+            {
+                FileVersionCheck.Record(ledger, path);
+            }
 
             var replacedCount = replaceAll ? occurrences : 1;
             var unit = replacedCount == 1 ? "occurrence" : "occurrences";

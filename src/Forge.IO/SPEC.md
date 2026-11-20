@@ -50,7 +50,7 @@ parent: forge-architecture
 - **编码策略明确。** 嗅探 BOM(UTF-8 / UTF-16LE / UTF-16BE);无 BOM 时按 UTF-8 **严格**解码,且只严格校验前 8 KiB(此后按宽松解码,因为半行截断本就会切在多字节字符中间)。首 8 KiB 含 `0x00` 或严格解码失败的,判为二进制/非 UTF-8 并报错(带字节数),不返回乱码。
 - **`edit` 要求唯一匹配。** 0 次出现、以及多于 1 次又没给 `replace_all`,都返回错误并给出文件行数与前两处行号:猜一处是最坏的结果。读-改-写整段持同一把 `PathGate` 租约,写回走 `AtomicFile`。
 - **`edit` 会把 UTF-16 文件写回 UTF-8。** 这是已知偏差:保留原编码要多一套编码探测与回写路径,而仓库里的文本文件几乎全是 UTF-8。已在工具文档与这里写明,不静默。
-- **`write` 覆盖检查(已定、未实现)。** 防止 Agent 用过期的内容整体覆盖别人(其他 Agent、用户、命令)的改动。依据是调用方 Agent 的读取记录 `ToolContext.FileVersions`(见 forge-core;null 时不检查):`路径 → (长度, LastWriteTimeUtc)`。规则:
+- **`write` 覆盖检查。** 防止 Agent 用过期的内容整体覆盖别人(其他 Agent、用户、命令)的改动。依据是调用方 Agent 的读取记录 `ToolContext.FileVersions`(见 forge-core;null 时不检查):`路径 → (长度, LastWriteTimeUtc)`。规则:
   - `read`(含 `offset`/`limit` 的部分读取)在读**之前** stat 并记录;读的过程中被改则记下的是旧版本,之后的覆盖被拒,偏安全。
   - `write` 覆盖**已存在**的文件:在同一把 `PathGate` 租约内 stat,本 Agent 无记录或记录与磁盘不符即返回错误、不写(两种措辞:“覆盖前请先 read”与“在你上次读取后已被修改,请重新 read”);写成功后记录新状态。新建文件不检查,写后记录。
   - `edit` 不检查(精确匹配本身就是乐观并发);写后**仅当编辑前的磁盘状态与本 Agent 的记录一致**才更新记录,否则保留旧记录——否则 Agent 在 v1 读、别人改成 v2、它 `edit` 成 v3 后记成 v3,再用记忆中的 v1 整体 `write` 就会通过检查。`append` 同 `edit`:不检查,记录按同一条件更新。

@@ -65,9 +65,19 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
             return new ToolResult($"{Definition.Name}: '{display}' is a directory; use `ls` to list it.", IsError: true);
         }
 
-        if (!File.Exists(path))
+        // Stat'ed and recorded before the read: a change during the read leaves the older state behind, so a later
+        // whole-file write is refused instead of silently replacing whatever arrived in between. Without a ledger (a
+        // script, a plugin bridge) the read pays nothing beyond the existence check it always did.
+        var ledger = context.FileVersions;
+        var version = ledger is null ? null : FileVersionCheck.Stat(path);
+        if (version is null && !File.Exists(path))
         {
             return new ToolResult($"{Definition.Name}: '{display}' does not exist.", IsError: true);
+        }
+
+        if (ledger is not null && version is { } state)
+        {
+            ledger.Record(path, state);
         }
 
         try

@@ -76,6 +76,13 @@ public sealed class AgentInstance
     public TokenUsage Usage { get; internal set; } = TokenUsage.Empty;
 
     /// <summary>
+    /// The files this instance has read, which <c>write</c> consults before it replaces an existing file (see
+    /// <see cref="IFileVersionLedger"/>): in memory, cleared when the instance goes away, and one table per instance
+    /// rather than per session id - a rebuilt agent has not seen what its predecessor read.
+    /// </summary>
+    public IFileVersionLedger FileVersions { get; } = new FileVersionLedger();
+
+    /// <summary>
     /// How long the model spent streaming this instance's answers so far: the sum of every completed call's
     /// first-output-increment-to-stream-end measurement (<see cref="MessageCompleted.StreamElapsed"/>), an
     /// instance-cumulative counter exactly like <see cref="Usage"/> - a turn's own share is the difference against
