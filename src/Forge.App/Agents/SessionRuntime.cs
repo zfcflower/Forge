@@ -362,6 +362,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
     public string SessionId => Session.Id;
 
+    /// <summary>
+    /// The <c>settings.json</c> per-agent defaults this runtime's hosts resolve a kind's model with, so a view that has to show
+    /// the same model (the composer's agent chip) reads it through the one source instead of a second store. Null without the
+    /// composition root, exactly like <see cref="AgentRuntimeServices.AgentDefaults"/>.
+    /// </summary>
+    internal Func<string, ModelSettings?>? AgentDefaults => services.AgentDefaults;
+
     /// <summary>Control surface over this host's live sub-agents; null until the host is built.</summary>
     public ISubAgentControl? SubAgentControl
     {

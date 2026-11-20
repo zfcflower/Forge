@@ -239,7 +239,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             skillSource,
             notifications: notifications,
             notificationScope: session.Id,
-            appPreferences: preferences);
+            appPreferences: preferences,
+            // The same settings.json defaults the session's agent hosts resolve a kind's model with, so the agent chip names
+            // the model the instance runs on rather than the session's own.
+            agentDefaults: runtime?.AgentDefaults);
         Composer.AttachmentsChanged += RefreshCanSend;
         if (agentSession is not null)
         {

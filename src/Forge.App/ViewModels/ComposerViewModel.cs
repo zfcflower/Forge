@@ -485,8 +485,10 @@ internal sealed class ComposerSuggestionItem : ObservableObject
 internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 {
     /// <summary>
-    /// The model id a resolved agent kind carries when its template names no model: the runtime substitutes the
-    /// <c>settings.json</c> default for it (see <c>SessionRuntime.ResolveAgentDefaults</c>), so the chip keeps its own model.
+    /// The model id a kind's template carries when it names no model of its own. <see cref="ResolveAgentDefaults"/> replaces it
+    /// with the model <c>settings.json</c> configures for that kind - the same substitution <c>SessionRuntime.ResolveAgentDefaults</c>
+    /// makes for the agent host - so the chip and the instance agree. One that is still there (no resolver, nothing to resolve)
+    /// leaves the chip's own model alone.
     /// </summary>
     private const string ConfiguredModelPlaceholder = "default";
 
@@ -495,6 +497,9 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     private readonly AppPreferences? appPreferences;
     private readonly string workspace;
     private readonly ProviderServices services;
+
+    /// <summary>The <c>settings.json</c> default of one agent kind, the store the session's hosts resolve their kinds with; null leaves the template's own model.</summary>
+    private readonly Func<string, ModelSettings?>? agentDefaults;
     private ProviderCatalog catalog;
     private readonly Func<CancellationToken, Task<IReadOnlyList<string>>> fileSource;
     private readonly Func<IReadOnlyList<SlashEntry>> skillSource;
@@ -567,7 +572,8 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         Func<string?, string, bool>? wireCarries = null,
         INotifications? notifications = null,
         string? notificationScope = null,
-        AppPreferences? appPreferences = null)
+        AppPreferences? appPreferences = null,
+        Func<string, ModelSettings?>? agentDefaults = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(apply);
@@ -577,6 +583,7 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         this.apply = apply;
         this.preferences = preferences;
         this.appPreferences = appPreferences;
+        this.agentDefaults = agentDefaults;
         // The hidden set lives in the preferences, which are edited on the settings page while a composer stays open: the
         // composer only re-filters, it never rebuilds the rows, so a hidden flag costs one property notification.
         if (appPreferences is not null)
@@ -606,8 +613,9 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         Files = [];
 
         var agents = new List<ComposerAgentOption> { new(null) };
-        // Built-ins (possibly overridden by a file) first, then the user's own agents.
-        agents.AddRange(ResolveTemplates().Agents.Select(definition => new ComposerAgentOption(definition)));
+        // Built-ins (possibly overridden by a file) first, then the user's own agents, each already carrying the model its kind
+        // is configured with, so the chip shows what the instance will run on.
+        agents.AddRange(ResolveAgentDefaults(ResolveTemplates()).Select(definition => new ComposerAgentOption(definition)));
         foreach (var agent in agents)
         {
             agent.Selected += OnAgentSelected;
@@ -694,6 +702,9 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
                     Agents.FirstOrDefault(static agent => agent.IsAvailable && string.Equals(agent.Key, AgentSessionKinds.Default, StringComparison.Ordinal))
                     ?? Agents.FirstOrDefault(static agent => agent.IsAvailable)
                     ?? selectedAgent;
+                // The chip lands on that kind's configured model even when it was already the selected row, in which case the
+                // setter above changed nothing and had nothing to follow.
+                FollowAgentModel(selectedAgent.Definition);
             }
             else
             {
@@ -1415,6 +1426,32 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         return templates;
     }
 
+    /// <summary>
+    /// Every kind of the snapshot with the <c>settings.json</c> default for that kind in place of the <c>default</c>
+    /// placeholder, by the rule <c>SessionRuntime.ResolveAgentDefaults</c> applies to the agent host: a kind whose file names a
+    /// model keeps it, and the substitute carries the entry's provider id, so the agent chip holds the model and the provider
+    /// the kind's instance will run with. Without a resolver (a standalone composer) the snapshot is used as it is.
+    /// </summary>
+    private IReadOnlyList<AgentDefinition> ResolveAgentDefaults(PromptTemplateSet templates)
+    {
+        if (agentDefaults is not { } resolve)
+        {
+            return templates.Agents;
+        }
+
+        var resolved = new List<AgentDefinition>(templates.Agents.Count);
+        foreach (var (id, definition, _) in templates.ResolvedAgents)
+        {
+            // The settings key is the template id (the file name), never the kind's display name: "Worker" has no entry.
+            var configured = string.Equals(definition.Model.Model, ConfiguredModelPlaceholder, StringComparison.OrdinalIgnoreCase)
+                ? resolve(id)
+                : null;
+            resolved.Add(configured is null ? definition : definition with { Model = configured });
+        }
+
+        return resolved;
+    }
+
     private IReadOnlyList<SlashEntry> DiscoverSkills() =>
         SkillCatalog.Discover(workspace, AgentRuntimeServices.UserDirectory(), AgentRuntimeServices.ProductSkillsDirectory);
 
@@ -1497,8 +1534,9 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 
     /// <summary>
     /// Moves the model chip onto the model the kind is configured with, on an agent-session tab (forge-app "Agent 会话的界面与
-    /// 接线"). A kind that names no model of its own - the <c>default</c> placeholder every built-in kind uses, which the
-    /// runtime fills from <c>settings.json</c> - leaves the session's model alone.
+    /// 接线"). It runs when the tab enters agent mode and when the agent chip moves to another kind - that is a different
+    /// agent, so it brings its own model - and never on its own afterwards, so a model the user picked on the chip stays.
+    /// A kind left on the <c>default</c> placeholder (nothing resolved it) keeps the session's model.
     /// </summary>
     private void FollowAgentModel(AgentDefinition? kind)
     {
@@ -1507,13 +1545,19 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        var modelName = kind.Model.Model;
-        if (string.IsNullOrWhiteSpace(modelName) || string.Equals(modelName, ConfiguredModelPlaceholder, StringComparison.OrdinalIgnoreCase))
+        var configured = kind.Model;
+        if (string.IsNullOrWhiteSpace(configured.Model) ||
+            string.Equals(configured.Model, ConfiguredModelPlaceholder, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        SwitchModel(modelName, ResolveProviderFor(modelName) ?? providerId);
+        // The resolved default names the provider its settings entry pins, and the host routes the request by it, so the chip
+        // follows that provider instead of whichever connected provider happens to list the model first.
+        var provider = configured.ProviderId is { Length: > 0 } pinned && catalog.Find(pinned) is not null
+            ? pinned
+            : ResolveProviderFor(configured.Model) ?? providerId;
+        SwitchModel(configured.Model, provider);
     }
 
     /// <summary>
