@@ -201,13 +201,16 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Action? openSession = null,
         AgentSessionLaunch? agentSession = null,
         Func<IReadOnlyList<SessionMentionTarget>>? sessionMentions = null,
-        Action<string, string>? sessionReceipt = null)
+        Action<string, string>? sessionReceipt = null,
+        Func<string?>? rootTitle = null)
     {
         Info = session;
         this.agentSession = agentSession;
         // A tab opened from the store starts at the child's stored row: its id and its name are what the tree row shows.
         agentChildSessionId = agentSession is { IsDraft: false } ? session.Id : null;
         agentName = agentSession is { IsDraft: false } ? session.Title : null;
+        agentOrdinal = agentSession?.Ordinal ?? 0;
+        liveRootTitle = rootTitle;
         this.runtime = runtime;
         isReadOnlyView = runtime is null;
         this.checkpoints = checkpoints;
@@ -250,6 +253,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             // with has to be selected before anything reads the definition, and the view's later assignment is a no-op then.
             Composer.IsAgentSession = true;
             SelectAgentSessionKind(session.AgentKind);
+            // A draft's name is the derivation by construction; a row opened from the store is recognised as still carrying its
+            // default name by its shape (the store keeps no "renamed" bit), and from here on the flag alone decides.
+            agentNameIsDerived = agentSession.IsDraft || TryReadDefaultName(session.Title, out agentOrdinal);
+            // A kind switch renames the tab while the name is still the derivation's (see OnComposerPropertyChanged).
+            Composer.PropertyChanged += OnComposerPropertyChanged;
         }
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
         Instruments = new SessionInstrumentsViewModel(
@@ -326,7 +334,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public string SessionId => Info.Id;
 
     public string Title => agentSession is { } launch
-        ? launch.Root.Title + AgentSessionLabel.Separator + AgentSessionName
+        ? CurrentAgentRootTitle(launch) + AgentSessionLabel.Separator + AgentSessionName
         : Info.Title;
 
     /// <summary>
@@ -732,6 +740,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     public void Rename(string title)
     {
+        if (agentSession is not null && agentSelfRenames.Remove(title))
+        {
+            // The store echoing a name this tab wrote itself when the agent kind changed: the name is already on the view, and the
+            // store agreeing with it is not the user renaming anything - the flag that lets the name follow the kind must stay.
+            return;
+        }
+
         Info = Info with { Title = title };
         if (agentSession is not null)
         {

@@ -192,7 +192,10 @@ internal sealed partial class MainWindowViewModel
             openSession: () => ActivateAgentSessionTab(info.Id),
             agentSession: new AgentSessionLaunch(root, ordinal, isDraft),
             sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created),
-            sessionReceipt: DeliverReceipt)
+            sessionReceipt: DeliverReceipt,
+            // The tab's label carries the root's name as a prefix, and the launch only carries a snapshot of it: a root renamed
+            // after this tab was opened has its own tab (when it has one) answer with the title it holds now.
+            rootTitle: () => CurrentRootTitle(root.Id))
         {
             // The turn check is the root's (6.3): an agent session may not run under a root the store no longer holds as
             // active, in a workspace that is operating, or in a merge conflict.
@@ -205,6 +208,7 @@ internal sealed partial class MainWindowViewModel
         session.AgentSessionTurnEnded += OnAgentSessionTurnEnded;
         session.TurnCompleted += OnAgentSessionViewTurnCompleted;
         session.TabTitleChanged += OnAgentSessionTitleChanged;
+        session.AgentNameFollowedKind += OnAgentNameFollowedKind;
         return session;
     }
 
@@ -264,6 +268,38 @@ internal sealed partial class MainWindowViewModel
         }
 
         session.Rename(title);
+    }
+
+    /// <summary>The root's title as it stands now: the root's own tab, when it is open. Null when there is none, and the tab then
+    /// keeps the title its launch carried.</summary>
+    private string? CurrentRootTitle(string rootSessionId) =>
+        sessions.TryGetValue(rootSessionId, out var root) ? root.Info.Title : null;
+
+    /// <summary>
+    /// The tab's name followed an agent-kind switch (forge-app "Agent 会话的界面与接线"): a stored session's row carries the new name
+    /// from now on, so it goes through the same store path a rename takes and the tree row and the <c>@</c> picker follow. A draft has
+    /// no row yet - its name becomes the row's <c>Title</c> when the first message creates it.
+    /// </summary>
+    private void OnAgentNameFollowedKind(SessionWorkspaceViewModel session, string name) => _ = WriteAgentKindNameAsync(session, name);
+
+    private async Task WriteAgentKindNameAsync(SessionWorkspaceViewModel session, string name)
+    {
+        try
+        {
+            if (session.AgentChildSessionId is { Length: > 0 } childId)
+            {
+                await Projects.RenameAsync(childId, name, CancellationToken.None).ConfigureAwait(true);
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The tab keeps the name on screen; the row keeps the old one until the next rename or kind switch.
+            AppLogs.Session.ZLogWarning($"agent session name not stored: {exception.GetType().Name}: {exception.Message}");
+        }
+        finally
+        {
+            session.EndAgentKindRename(name);
+        }
     }
 
     private void ActivateAgentSessionTab(string sessionId)
@@ -501,6 +537,7 @@ internal sealed partial class MainWindowViewModel
         }
 
         session.TabTitleChanged -= OnAgentSessionTitleChanged;
+        session.AgentNameFollowedKind -= OnAgentNameFollowedKind;
         session.AgentSessionCreated -= OnAgentSessionCreated;
         session.AgentSessionTurnEnded -= OnAgentSessionTurnEnded;
         session.TurnStarted -= OnAgentSessionTurnStarted;
@@ -544,13 +581,23 @@ internal sealed partial class MainWindowViewModel
 
     /// <summary>
     /// A session was renamed from the tree: its open tab follows, whether it is the session's own tab or an agent session's
-    /// (the store's Title is what the tab, the tree row and a later reopen all read).
+    /// (the store's Title is what the tab, the tree row and a later reopen all read). A renamed root also re-prefixes the labels of
+    /// its agent sessions ("root › child"): their launch carries a snapshot of it and the root's own tab may well be closed, so the
+    /// new title is pushed to them here.
     /// </summary>
     private void OnSessionRenamed(string sessionId, string title)
     {
         if (sessions.TryGetValue(sessionId, out var session))
         {
             session.Rename(title);
+        }
+
+        foreach (var agent in agentViews.Keys)
+        {
+            if (string.Equals(agent.AgentSessionRoot?.Id, sessionId, StringComparison.Ordinal))
+            {
+                agent.RenameRoot(title);
+            }
         }
 
         // The @ picker keeps the names it read from the store: an agent session renamed while its tab is closed would still

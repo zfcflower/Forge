@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Globalization;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Localization;
@@ -37,7 +39,7 @@ internal static class AgentSessionLabel
 
     /// <summary>The default child name: the agent kind, a space, then the ordinal within the root ("Worker 1").</summary>
     public static string Default(string kind, int ordinal) =>
-        kind + " " + ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        kind + " " + ordinal.ToString(CultureInfo.InvariantCulture);
 }
 
 /// <summary>
@@ -106,23 +108,74 @@ internal sealed partial class SessionWorkspaceViewModel
     /// <summary>The child's own name, the store's <c>Title</c>: the default for its kind and ordinal until the user renames it.</summary>
     private string? agentName;
 
+    /// <summary>
+    /// The ordinal this tab's default name counts with: the shell's number for a draft, and for a tab opened from the store the
+    /// number the stored default name carries (see <see cref="TryReadDefaultName"/>).
+    /// </summary>
+    private int agentOrdinal;
+
+    /// <summary>
+    /// True while <see cref="agentName"/> is still the name the agent kind and the ordinal derive, so a kind switch changes its
+    /// prefix; a name the user typed clears it for good (forge-app "Agent 会话的界面与接线": the default name is
+    /// "&lt;kind&gt; &lt;ordinal&gt;" and the prefix follows the kind, unless the user renamed it).
+    /// </summary>
+    private bool agentNameIsDerived;
+
+    /// <summary>
+    /// Names this tab wrote to the store on its own account (an agent-kind switch). The store echoes a rename back through
+    /// <see cref="Rename"/>, and that echo says nothing about the user: reading it as a rename would end the follow on the very
+    /// first kind switch.
+    /// </summary>
+    private readonly HashSet<string> agentSelfRenames = new(StringComparer.Ordinal);
+
+    /// <summary>The root's title as a rename pushed it here; null until one arrives.</summary>
+    private string? agentRootTitle;
+
+    /// <summary>
+    /// The live root title the shell can answer (the root's own tab, when it is open); null for a standalone view, which then has
+    /// only the snapshot <see cref="AgentSessionLaunch.Root"/> carries.
+    /// </summary>
+    private readonly Func<string?>? liveRootTitle;
+
     /// <summary>True for a tab of a user-driven session under another session's root.</summary>
     public bool IsAgentSession => agentSession is not null;
 
     /// <summary>
-    /// The child's own name. Derived once from the agent kind and the tab's ordinal, then whatever the user renamed it to;
-    /// the store's <c>Title</c> always holds exactly this, so the tree row and a reopened tab read the same name.
+    /// The child's own name. Derived from the agent kind and the tab's ordinal, then whatever the user renamed it to; the store's
+    /// <c>Title</c> always holds exactly this, so the tree row and a reopened tab read the same name.
     /// </summary>
-    public string AgentSessionName => agentName ??=
-        AgentSessionLabel.Default(
-            AgentSessionDefinition()?.Name ?? AgentSessionKinds.Default,
-            agentSession?.Ordinal ?? 1);
+    public string AgentSessionName => agentName ??= AgentSessionLabel.Default(AgentNameKind, agentOrdinal);
+
+    /// <summary>
+    /// The kind the default name's prefix comes from: the one a turn would run on, so the name and the run never disagree.
+    /// </summary>
+    private string AgentNameKind => AgentSessionDefinition()?.Name ?? AgentSessionKinds.Default;
 
     /// <summary>The child session's id once the first message created its row; null while the tab is a draft.</summary>
     public string? AgentChildSessionId => agentChildSessionId;
 
     /// <summary>The root session this tab's child hangs under; null for an ordinary session tab.</summary>
     public SessionInfo? AgentSessionRoot => agentSession?.Root;
+
+    /// <summary>
+    /// The root's title as it stands now. The shell's live root answers first (its own tab, when it is open), the title a rename
+    /// pushed here second - a root whose own tab is closed has no view left to read - and the snapshot the tab was opened with
+    /// last: a renamed root must not keep its old name as the prefix of a child tab's label.
+    /// </summary>
+    private string CurrentAgentRootTitle(AgentSessionLaunch launch) =>
+        liveRootTitle?.Invoke() ?? agentRootTitle ?? launch.Root.Title;
+
+    /// <summary>The root session was renamed: this tab's "root › child" prefix follows it.</summary>
+    internal void RenameRoot(string title)
+    {
+        if (agentSession is null || string.Equals(agentRootTitle, title, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        agentRootTitle = title;
+        RaiseAgentTitleChanged();
+    }
 
     /// <summary>
     /// A reply arrived while this tab was not the one on screen: the tab's label and its tree row carry the mark until the
@@ -135,8 +188,7 @@ internal sealed partial class SessionWorkspaceViewModel
         {
             if (Set(ref agentUnread, value))
             {
-                OnPropertyChanged(nameof(TabTitle));
-                TabTitleChanged?.Invoke(this, EventArgs.Empty);
+                RaiseAgentTitleChanged();
             }
         }
     }
@@ -148,6 +200,13 @@ internal sealed partial class SessionWorkspaceViewModel
     {
         agentUnread = false;
         OnPropertyChanged(nameof(HasAgentUnread));
+        RaiseAgentTitleChanged();
+    }
+
+    /// <summary>The tab's label moved (the child's name, the root's, or the unread mark): the shell re-titles the tab with it.</summary>
+    private void RaiseAgentTitleChanged()
+    {
+        OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(TabTitle));
         TabTitleChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -160,6 +219,13 @@ internal sealed partial class SessionWorkspaceViewModel
 
     /// <summary>The child's run ended: the shell touches the root, marks the tab and refreshes the tree.</summary>
     public event Action<SessionWorkspaceViewModel>? AgentSessionTurnEnded;
+
+    /// <summary>
+    /// The tab's name followed an agent-kind switch. Args are this view and the new name: the shell writes a stored session's row
+    /// through the same store path a rename takes, so the tree row and the <c>@</c> picker read the new name (a draft has no row
+    /// and keeps it here).
+    /// </summary>
+    public event Action<SessionWorkspaceViewModel, string>? AgentNameFollowedKind;
 
     /// <summary>
     /// The agent and model this tab's child runs with right now: the kind the composer's agent chip holds, with the model, the
@@ -235,6 +301,64 @@ internal sealed partial class SessionWorkspaceViewModel
 
         Transcript.AddNotice(LocText.Literal(AgentSessionStrings.KindFallback(kind, Composer.AgentLabel)), isError: true);
     }
+
+    /// <summary>
+    /// Whether a stored title is still the default name the derivation writes ("Worker 1"), answering the ordinal it counts with.
+    /// The store keeps no "renamed" bit, so a tab opened from it recognises its own default name only by that shape - once; the
+    /// flag decides everything after. A title whose prefix is neither the kind the row was created with nor a kind this tab runs
+    /// is a name the user typed.
+    /// </summary>
+    private bool TryReadDefaultName(string? title, out int ordinal)
+    {
+        ordinal = 0;
+        if (title?.LastIndexOf(' ') is not { } cut || cut <= 0)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(title.AsSpan(cut + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var number) || number < 1)
+        {
+            return false;
+        }
+
+        var kind = title[..cut];
+        ordinal = number;
+        return string.Equals(kind, Info.AgentKind, StringComparison.Ordinal)
+            || Composer.Agents.Any(option => string.Equals(option.Key, kind, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The composer's agent kind moved: while the name is still the one the kind and the ordinal derive, its prefix changes with
+    /// it ("Worker 1" becomes "Scout 1", forge-app "Agent 会话的界面与接线"). A name the user typed is never touched. A stored
+    /// session's new name goes to the store through the shell, so the tree row and the <c>@</c> picker follow; a draft keeps it on
+    /// this view and it becomes the row's <c>Title</c> when the first message creates the row.
+    /// </summary>
+    private void OnComposerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!agentNameIsDerived || !string.Equals(e.PropertyName, nameof(ComposerViewModel.SelectedAgent), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var name = AgentSessionLabel.Default(AgentNameKind, agentOrdinal);
+        if (string.Equals(name, AgentSessionName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        agentName = name;
+        OnPropertyChanged(nameof(AgentSessionName));
+        RaiseAgentTitleChanged();
+        if (agentChildSessionId is { Length: > 0 })
+        {
+            // Its own write: the store's echo of this name must not be read as a rename the user made (see Rename).
+            agentSelfRenames.Add(name);
+            AgentNameFollowedKind?.Invoke(this, name);
+        }
+    }
+
+    /// <summary>The store write of a kind switch came back (or failed): its echo is no longer pending.</summary>
+    internal void EndAgentKindRename(string name) => agentSelfRenames.Remove(name);
 
     /// <summary>
     /// The instance this turn runs on: the one the host holds for this tab's session, rebuilt from the store when the composer's
