@@ -37,7 +37,8 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// <summary>
     /// The turns Core is driving itself right now, by session id: a delivery to a session whose tab is not open here runs on
     /// Core's side (<see cref="BeginSessionTurnAsync"/>/<see cref="EndSessionTurnAsync"/> are its whole view of it), so the two
-    /// readings a metrics row needs are taken around it here. Written by Core's delivery thread, hence concurrent.
+    /// readings a metrics row needs are taken around it here, and the close brings the outcome the row records - the only
+    /// report of it such a turn produces. Written by Core's delivery thread, hence concurrent.
     /// </summary>
     private readonly ConcurrentDictionary<string, DeliveryTurnMetrics> deliveryTurns = new(StringComparer.Ordinal);
 
@@ -204,8 +205,16 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// "轮次改动", one row per turn): its tokens are the delivered instance's two readings subtracted, its streaming time is
     /// the same pair of readings and never a wall clock, and a reading that is gone writes zero rather than a guess. The row
     /// is written whatever the checkpoint did - a directory that is not a repository records no checkpoint and still a turn.
+    /// <paramref name="status"/> and <paramref name="reason"/> are the outcome Core reports here and nowhere else: the row
+    /// records them, so a failed or stopped delivery leaves a failed or stopped row instead of a completed one.
     /// </summary>
-    public async Task EndSessionTurnAsync(string sessionId, int turn, string workingDirectory, CancellationToken ct)
+    public async Task EndSessionTurnAsync(
+        string sessionId,
+        int turn,
+        SessionReplyStatus status,
+        string? reason,
+        string workingDirectory,
+        CancellationToken ct)
     {
         try
         {
@@ -213,19 +222,20 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
         }
         finally
         {
-            await RecordDeliveryTurnMetricsAsync(sessionId, turn).ConfigureAwait(false);
+            await RecordDeliveryTurnMetricsAsync(sessionId, turn, status, reason).ConfigureAwait(false);
         }
     }
 
     /// <summary>
     /// Hands one delivered turn's row to the app's background metrics writer.
-    /// <para><b>What this seam knows.</b> Core runs the turn and calls <see cref="EndSessionTurnAsync"/> with no outcome, so the
-    /// row records the turn end the App was told about; a failure inside that run reaches the initiator's receipt, not here.
-    /// The token columns come from the instance's own readings, so a turn the provider reported nothing for keeps them null
-    /// (unknown is never zero), and the stream time is clamped at zero because a counter that went backwards is not negative
-    /// streaming. Tool calls are not counted on this path and stay null.</para>
+    /// <para><b>What this seam knows.</b> Core runs the turn and calls <see cref="EndSessionTurnAsync"/> with the outcome the
+    /// run reached, so the row records that outcome instead of assuming a completed turn, and its error column gets the
+    /// reason that came with it - null when it came with none, because the App never makes one up. Everything the App cannot
+    /// know about a turn it never watched is left out rather than zeroed: tool calls stay null and a turn that did not
+    /// complete keeps its token columns null. The streaming time is still written on every row, as the difference of the
+    /// instance's own two readings clamped at zero (a counter that went backwards is not negative streaming).</para>
     /// </summary>
-    private async Task RecordDeliveryTurnMetricsAsync(string sessionId, int turn)
+    private async Task RecordDeliveryTurnMetricsAsync(string sessionId, int turn, SessionReplyStatus status, string? reason)
     {
         if (!deliveryTurns.TryRemove(sessionId, out var started) || started.Turn != turn)
         {
@@ -243,13 +253,13 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
             // A rebuilt instance starts from zero: the reading taken before the run means nothing against it, so the turn is
             // recorded as an unreported one (tokens null, stream 0) instead of differencing two different agents.
             var same = end.Counters.Instance is { } instance && ReferenceEquals(instance, started.Start.Instance);
-            recorder.Record(TurnMetricsRowFactory.Build(
+            recorder.Record(TurnMetricsRowFactory.BuildForOutcome(
                 sessionId,
                 turn,
                 started.StartedAt,
                 DateTimeOffset.UtcNow,
-                error: null,
-                rootFailure: null,
+                TurnMetricsRowFactory.StatusOf(status),
+                error: reason,
                 same ? end.Counters.Usage : TokenUsage.Empty,
                 same ? started.Start.Usage : TokenUsage.Empty,
                 same ? end.Counters.Stream : TimeSpan.Zero,

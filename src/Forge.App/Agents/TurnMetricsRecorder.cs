@@ -124,6 +124,8 @@ internal static class TurnMetricsRowFactory
     /// <para>Stream time has no "unknown": a row whose <c>stream_ms</c> would be missing means the adapter never measured
     /// its calls, which is an adapter defect to be fixed and pinned by tests — never a reason to fall back to the turn's
     /// wall clock here (that clock includes queueing, approvals, tool runs and git snapshots).</para>
+    /// <para>This is the entry for a turn the App watched run: the outcome is derived from <paramref name="error"/> and
+    /// <paramref name="rootFailure"/>. A caller that already knows the outcome uses <see cref="BuildForOutcome"/>.</para>
     /// </summary>
     public static TurnMetricsRow Build(
         string sessionId,
@@ -138,9 +140,89 @@ internal static class TurnMetricsRowFactory
         TimeSpan turnStartElapsed,
         int? toolCalls,
         string? provider,
+        string? model) =>
+        BuildRow(
+            sessionId,
+            turn,
+            startedAt,
+            endedAt,
+            BuildStatus(error, rootFailure),
+            BuildError(error, rootFailure),
+            rootInstanceUsage,
+            turnStartUsage,
+            rootStreamElapsed,
+            turnStartElapsed,
+            toolCalls,
+            provider,
+            model);
+
+    /// <summary>
+    /// Builds one row from the outcome Core reported through the delivery seam: a turn Core drove itself has no
+    /// <see cref="LocText"/> in hand and no view to read one from, only the status its receipt carries, so the status is
+    /// handed over instead of derived — a failed or stopped delivery must not read as a completed turn.
+    /// <paramref name="error"/> is what came with that outcome and null when it came with nothing: the App never makes an
+    /// error up. The token columns follow the same rule as <see cref="Build"/> (a turn that did not complete measured no
+    /// tokens worth keeping), and the streaming time is written whatever the outcome.
+    /// </summary>
+    public static TurnMetricsRow BuildForOutcome(
+        string sessionId,
+        int turn,
+        DateTimeOffset startedAt,
+        DateTimeOffset endedAt,
+        TurnMetricStatus status,
+        string? error,
+        TokenUsage rootInstanceUsage,
+        TokenUsage turnStartUsage,
+        TimeSpan rootStreamElapsed,
+        TimeSpan turnStartElapsed,
+        int? toolCalls,
+        string? provider,
+        string? model) =>
+        BuildRow(
+            sessionId,
+            turn,
+            startedAt,
+            endedAt,
+            status,
+            error,
+            rootInstanceUsage,
+            turnStartUsage,
+            rootStreamElapsed,
+            turnStartElapsed,
+            toolCalls,
+            provider,
+            model);
+
+    /// <summary>
+    /// The row status of an outcome Core reported through the delivery seam. <see cref="SessionReplyStatus"/> has exactly the
+    /// three endings a delivery has; <see cref="TurnMetricStatus.Limit"/> stays unreachable through this seam for the same
+    /// reason it is unreachable in <see cref="BuildStatus"/> (Core reports a limit as a plain failure). A member added to that
+    /// enum throws here instead of reading as a completed turn.
+    /// </summary>
+    public static TurnMetricStatus StatusOf(SessionReplyStatus status) => status switch
+    {
+        SessionReplyStatus.Completed => TurnMetricStatus.Completed,
+        SessionReplyStatus.Failed => TurnMetricStatus.Failed,
+        SessionReplyStatus.Stopped => TurnMetricStatus.Stopped,
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "A reply status added to the enum must be mapped here explicitly."),
+    };
+
+    /// <summary>The one row shape both entry points share: an outcome already decided, and a token block only a completed turn fills.</summary>
+    private static TurnMetricsRow BuildRow(
+        string sessionId,
+        int turn,
+        DateTimeOffset startedAt,
+        DateTimeOffset endedAt,
+        TurnMetricStatus status,
+        string? error,
+        TokenUsage rootInstanceUsage,
+        TokenUsage turnStartUsage,
+        TimeSpan rootStreamElapsed,
+        TimeSpan turnStartElapsed,
+        int? toolCalls,
+        string? provider,
         string? model)
     {
-        var status = BuildStatus(error, rootFailure);
         int? input = null, output = null, cacheRead = null, cacheWrite = null, cacheWrite1h = null;
         if (status is TurnMetricStatus.Completed)
         {
@@ -167,7 +249,7 @@ internal static class TurnMetricsRowFactory
             status,
             provider,
             model,
-            BuildError(error, rootFailure),
+            error,
             input,
             output,
             cacheRead,

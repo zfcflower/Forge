@@ -71,7 +71,7 @@ public sealed class SessionMessagingTests
 
         public Task<int> BeginSessionTurnAsync(string sessionId, string workingDirectory, CancellationToken ct) => Task.FromResult(1);
 
-        public Task EndSessionTurnAsync(string sessionId, int turn, string workingDirectory, CancellationToken ct) => Task.CompletedTask;
+        public Task EndSessionTurnAsync(string sessionId, int turn, SessionReplyStatus status, string? reason, string workingDirectory, CancellationToken ct) => Task.CompletedTask;
 
         public Task<SessionTurnChanges?> ReadChangesAsync(string sessionId, int turn, CancellationToken ct) =>
             Task.FromResult<SessionTurnChanges?>(new SessionTurnChanges(2, 5, 3));

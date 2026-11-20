@@ -170,8 +170,22 @@ public interface ISessionMessageEndpoint
     /// </summary>
     Task<int> BeginSessionTurnAsync(string sessionId, string workingDirectory, CancellationToken ct);
 
-    /// <summary>Closes the checkpoint opened by <see cref="BeginSessionTurnAsync"/>, on success, failure and stop alike.</summary>
-    Task EndSessionTurnAsync(string sessionId, int turn, string workingDirectory, CancellationToken ct);
+    /// <summary>
+    /// Closes the checkpoint opened by <see cref="BeginSessionTurnAsync"/>, on success, failure and stop alike, and reports
+    /// how the turn ended: a turn Core drives itself has no other reporter, so this call is the only way its outcome reaches
+    /// <c>turn_metrics</c> - a failure or a stop that never arrives here would leave the row reading as a completed turn.
+    /// </summary>
+    /// <param name="status">How the turn ended. Used only while closing this checkpoint: it decides the status of the turn's
+    /// metrics row (completed, failed or stopped) and never the checkpoint's own write.</param>
+    /// <param name="reason">The failure or stop text the receipt carries; null for a turn that went through. Recorded as the
+    /// row's error, and nothing is made up for a row that has none.</param>
+    Task EndSessionTurnAsync(
+        string sessionId,
+        int turn,
+        SessionReplyStatus status,
+        string? reason,
+        string workingDirectory,
+        CancellationToken ct);
 
     /// <summary>
     /// The change line of one turn, read from <c>turn_checkpoints</c> (files, added and removed lines); null when the session
@@ -730,7 +744,7 @@ public sealed class SessionMessenger
             // as a failure of the session's work.
             if (turn > 0)
             {
-                await EndTurnAsync(seam, child, turn).ConfigureAwait(false);
+                await EndTurnAsync(seam, child, turn, SessionReplyStatus.Stopped, StoppedReason).ConfigureAwait(false);
             }
 
             return new SessionTurnOutcome(child.PartialText, SessionReplyStatus.Stopped, StoppedReason, turn);
@@ -741,17 +755,14 @@ public sealed class SessionMessenger
             Trace.TraceWarning($"message_session: the turn of '{child.SessionId}' failed: {exception.Message}");
             if (turn > 0)
             {
-                await EndTurnAsync(seam, child, turn).ConfigureAwait(false);
+                await EndTurnAsync(seam, child, turn, SessionReplyStatus.Failed, exception.Message).ConfigureAwait(false);
             }
 
             return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Failed, exception.Message, turn);
         }
 
-        if (turn > 0)
-        {
-            await EndTurnAsync(seam, child, turn).ConfigureAwait(false);
-        }
-
+        // The outcome is read before the checkpoint closes, because closing it is also what writes the turn's metrics row:
+        // a run that ended failed or stopped must not be recorded as a completed turn.
         var (status, reason) = finished switch
         {
             { Status: SubAgentStatus.Completed } => (SessionReplyStatus.Completed, (string?)null),
@@ -761,14 +772,25 @@ public sealed class SessionMessenger
             // failure would be a guess. The report is the instance's last committed answer.
             _ => (SessionReplyStatus.Completed, (string?)null),
         };
+
+        if (turn > 0)
+        {
+            await EndTurnAsync(seam, child, turn, status, reason).ConfigureAwait(false);
+        }
+
         return new SessionTurnOutcome(child.PartialText, status, reason, turn);
     }
 
-    private static async Task EndTurnAsync(ISessionMessageEndpoint seam, AgentInstance child, int turn)
+    /// <summary>
+    /// Closes the turn's checkpoint with the outcome the run actually reached: the App writes the turn's metrics row while it
+    /// closes the checkpoint, so passing the status here is what keeps a failed or stopped delivery from being recorded as a
+    /// completed turn. A checkpoint that cannot be closed is never a reason to report a different outcome.
+    /// </summary>
+    private static async Task EndTurnAsync(ISessionMessageEndpoint seam, AgentInstance child, int turn, SessionReplyStatus status, string? reason)
     {
         try
         {
-            await seam.EndSessionTurnAsync(child.SessionId, turn, child.WorkingDirectory, CancellationToken.None).ConfigureAwait(false);
+            await seam.EndSessionTurnAsync(child.SessionId, turn, status, reason, child.WorkingDirectory, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
