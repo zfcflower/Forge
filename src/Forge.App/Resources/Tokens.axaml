@@ -159,6 +159,9 @@
       <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#EDF3F4" />
       <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#E8F8F7" />
       <SolidColorBrush x:Key="SurfaceInputBrush" Color="#FFFFFF" />
+      <!-- The reply card of the transcript: a neutral near-white one step below the white page, so a long answer reads as a
+           single surface without competing with the turn beside it. -->
+      <SolidColorBrush x:Key="AssistantCardBrush" Color="#F8F8F8" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1D2129" />
       <SolidColorBrush x:Key="TextSecondaryBrush" Color="#4E5969" />
@@ -284,6 +287,8 @@
       <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#193332" />
       <!-- The one surface that goes the other way in dark: an input sits below the card it lives on. -->
       <SolidColorBrush x:Key="SurfaceInputBrush" Color="#161D1F" />
+      <!-- The reply card keeps the light theme's relationship: one step below the card it sits on, above the page. -->
+      <SolidColorBrush x:Key="AssistantCardBrush" Color="#171C1E" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F2F4F5" />
       <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A9B2B8" />

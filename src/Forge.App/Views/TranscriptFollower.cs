@@ -29,6 +29,7 @@ internal sealed class TranscriptFollower
     private readonly ListBox list;
     private readonly Border sticky;
     private readonly TextBlock stickyText;
+    private readonly TextBlock stickyTip;
     private readonly Button follow;
     private readonly TranscriptScrollAnchor anchor;
     private INotifyCollectionChanged? items;
@@ -52,6 +53,14 @@ internal sealed class TranscriptFollower
             VerticalAlignment = VerticalAlignment.Center,
         };
         stickyText.Bind(TextBlock.ForegroundProperty, stickyText.GetResourceObservable("TextPrimaryBrush"));
+        // The row can only show the beginning of the message, so the tip carries all of it - wrapped and capped, because a
+        // plain tooltip renders one unbroken line: a long prompt ran off the screen edge and the rest stayed unreadable.
+        stickyTip = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 480,
+        };
+        ToolTip.SetTip(stickyText, stickyTip);
         sticky = new Border
         {
             VerticalAlignment = VerticalAlignment.Top,
@@ -370,6 +379,7 @@ internal sealed class TranscriptFollower
             && stickyRound.Rows[0] is UserMessageViewModel message)
         {
             stickyText.Text = message.Text;
+            stickyTip.Text = message.Text;
             sticky.IsVisible = true;
         }
         else

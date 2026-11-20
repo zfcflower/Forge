@@ -123,13 +123,14 @@
     <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
   </Style>
 
-  <!-- Tier 1 of the one button system: no border, no fill. The quietest tier, for actions that live inside a row or a
-         header and must not read as a button until the pointer is on them; its hover and press are the two grey tints the
-         icon buttons already use. -->
+  <!-- Tier 1 of the one button system: no border, no fill, the small (26 px) geometry of the SPEC's button table - so
+         8,3 of padding and the small tier's type, exactly like `Button.outline`. The quietest tier, for actions that live
+         inside a row or a header and must not read as a button until the pointer is on them; its hover and press are the
+         two grey tints the icon buttons already use. -->
   <Style Selector="Button.flat">
     <Setter Property="MinHeight" Value="26" />
-    <Setter Property="Padding" Value="8,0" />
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="Padding" Value="8,3" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -239,11 +240,11 @@
     <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
 
-  <!-- The reply's own surface: a card on the text column's left edge, matching the user bubble opposite it. White rather than
-       the window's off-white, so the reply sits on top of the page instead of blending into it. Its outline is the same
-       hairline the regions and panels divide on, so a card never draws a second, tinted edge of its own. -->
+  <!-- The reply's own surface: a card on the text column's left edge, matching the user bubble opposite it. A neutral near-white
+       rather than the page white, so a long answer reads as one surface instead of having to outshine the row beside it; the
+       outline is the same hairline the regions and panels divide on, so a card never draws a second, tinted edge of its own. -->
   <Style Selector="Border.assistant-card">
-    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AssistantCardBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
