@@ -84,6 +84,9 @@ public sealed class SessionMessagingTests
         private readonly ConcurrentQueue<SessionTurnRequest> requests = new();
         private readonly ConcurrentQueue<string> receipts = new();
         private readonly ConcurrentQueue<string> begins = new();
+        private int blockChangesOnce;
+        private TaskCompletionSource? changesEntered;
+        private TaskCompletionSource? changesGate;
 
         public Func<string, Task>? OnReceipt { get; set; }
 
@@ -135,8 +138,33 @@ public sealed class SessionMessagingTests
             return Task.CompletedTask;
         }
 
-        public Task<SessionTurnChanges?> ReadChangesAsync(string sessionId, int turn, CancellationToken ct) =>
-            Task.FromResult<SessionTurnChanges?>(new SessionTurnChanges(2, 5, 3));
+        /// <summary>
+        /// Holds the next change-line read until <see cref="ReleaseChanges"/>, and answers a task that completes once that
+        /// read is there. Entering that read means the turn already returned and its outcome is recorded, so this is the one
+        /// window where a delivery is past its turn and still assembling its receipt. The wait ignores its token on purpose:
+        /// the test, not a stop, decides when the receipt goes on, so the state the stop sees is the one the test built.
+        /// </summary>
+        public Task BlockNextChanges()
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            changesEntered = entered;
+            changesGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Interlocked.Exchange(ref blockChangesOnce, 1);
+            return entered.Task;
+        }
+
+        public void ReleaseChanges() => changesGate?.TrySetResult();
+
+        public async Task<SessionTurnChanges?> ReadChangesAsync(string sessionId, int turn, CancellationToken ct)
+        {
+            if (Interlocked.Exchange(ref blockChangesOnce, 0) == 1)
+            {
+                changesEntered!.TrySetResult();
+                await changesGate!.Task.ConfigureAwait(false);
+            }
+
+            return new SessionTurnChanges(2, 5, 3);
+        }
 
         public void DeliverReceipt(string initiatorSessionId, string text)
         {
@@ -220,6 +248,7 @@ public sealed class SessionMessagingTests
             // End any held background mailbox drain before closing its store. Tests that enqueue a delivery wait for its
             // receipt explicitly; completing here also releases the endpoint if an assertion failed first.
             Endpoint.CompleteTurn();
+            Endpoint.ReleaseChanges();
             await Store.DisposeAsync();
             SqliteConnectionCleanup();
             try
@@ -586,6 +615,39 @@ public sealed class SessionMessagingTests
         Assert.Equal(
             "[会话回复 #1 · 来自 Worker · 状态:完成 · 任务:inspect the change]\n改动: 2 个文件 (+5/−3)\n报告: finished",
             receipt);
+        Assert.Single(harness.Endpoint.Receipts);
+    }
+
+    [Fact]
+    public async Task A_stop_that_lands_while_a_finished_delivery_reads_its_change_line_keeps_the_real_receipt()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var child = await harness.AddUserSessionAsync();
+        harness.Host.SessionMessaging.Grant(harness.Root.SessionId, child.Id, child.Title);
+        var receipt = NextReceiptOf(harness, "#1");
+        // Blocking the change-line read is what puts #1 in the window this test pins: its turn has returned and its outcome
+        // is recorded, while the receipt is still being put together.
+        var readingChanges = harness.Endpoint.BlockNextChanges();
+
+        Assert.Equal(
+            "已投递 #1（未完成，你现在没有结果）",
+            (await SendAsync(harness, RootContext(harness), "Worker")).Text);
+        await harness.Endpoint.FirstRequest;
+        harness.Endpoint.CompleteTurn(new SessionTurnOutcome("finished report", SessionReplyStatus.Completed, null, 1));
+        await readingChanges.WaitAsync(Watchdog);
+
+        // The user presses stop on the root inside that window: #1's turn is over, so the stop owns nothing of it.
+        harness.Host.StopUserChildren(RootStopReason);
+        Assert.Empty(harness.Endpoint.Receipts);
+
+        // Released, #1 answers with what its turn really produced - its change line and its report - and not with the stopped
+        // shape a rewrite would carry ("状态:已停止…" and 0 changed files).
+        harness.Endpoint.ReleaseChanges();
+        Assert.Equal(
+            "[会话回复 #1 · 来自 Worker · 状态:完成 · 任务:inspect the change]\n改动: 2 个文件 (+5/−3)\n报告: finished report",
+            await receipt.WaitAsync(Watchdog));
+
+        // One delivery, one receipt: the stop must not leave a second line next to the real one.
         Assert.Single(harness.Endpoint.Receipts);
     }
 
