@@ -31,12 +31,25 @@ internal static class StorageSchema
     public const string TodoOriginAgent = "agent";
     public const string TodoOriginUser = "user";
 
+    /// <summary>
+    /// The only text <c>sessions.child_driver</c> stores: a session the user opened under a root session. Every other
+    /// session - a root, or a child the model spawned - keeps NULL.
+    /// </summary>
+    public const string ChildDriverUser = "user";
+
+    /// <summary>
+    /// Step 0's schema, which the V1 step creates a new file from. <c>sessions.child_driver</c> rides this create script
+    /// instead of getting a ladder step: <c>CREATE TABLE IF NOT EXISTS</c> leaves an existing table untouched, so a file
+    /// written before the column existed keeps failing when it is read (deliberate - the product is unreleased, so an old
+    /// database is deleted and rebuilt rather than migrated).
+    /// </summary>
     private const string BaseSchemaSql = """
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             workspace_path TEXT NOT NULL,
             title TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            child_driver TEXT NULL
         );
         CREATE INDEX IF NOT EXISTS ix_sessions_workspace ON sessions (workspace_path, created_at DESC);
 

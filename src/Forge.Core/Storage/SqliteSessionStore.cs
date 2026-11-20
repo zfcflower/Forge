@@ -26,13 +26,13 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
     private const string SessionColumns =
         "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
         "last_active_at, deleted_at, fork_of_branch, fork_base_sha, inherits_from_session_id, inherits_up_to_seq, " +
-        "COALESCE(lineage_root_id, id), origin_kind, prefix_fingerprint, automation_id, automation_run_id";
+        "COALESCE(lineage_root_id, id), origin_kind, prefix_fingerprint, automation_id, automation_run_id, child_driver";
 
     /// <summary>Columns a new session row is written with; <c>occupancy_key</c> is always computed by the store.</summary>
     private const string InsertColumns =
         "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
         "last_active_at, last_active_ticks, occupancy_key, fork_of_branch, fork_base_sha, inherits_from_session_id, " +
-        "inherits_up_to_seq, lineage_root_id, origin_kind, automation_id, automation_run_id";
+        "inherits_up_to_seq, lineage_root_id, origin_kind, automation_id, automation_run_id, child_driver";
 
     /// <summary>Name of the savepoint each occupancy-changing / lifecycle write runs under inside a writer batch.</summary>
     private const string OperationSavepoint = "forge_op";
@@ -111,7 +111,7 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         await using var command = connection.CreateCommand();
         command.CommandText = $"SELECT {SessionColumns} FROM sessions WHERE id = $id";
         command.Parameters.AddWithValue("$id", sessionId);
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await using var reader = await ExecuteSessionReadAsync(command, ct).ConfigureAwait(false);
         return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadSession(reader, sessionId) : null;
     }
 
@@ -129,7 +129,7 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         }
 
         var sessions = new List<SessionInfo>();
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await using var reader = await ExecuteSessionReadAsync(command, ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             sessions.Add(ReadSession(reader, null));
@@ -186,7 +186,7 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
             $"SELECT {SessionColumns} FROM sessions WHERE {string.Join(" AND ", conditions)} ORDER BY last_active_ticks DESC, id";
 
         var sessions = new List<SessionInfo>();
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await using var reader = await ExecuteSessionReadAsync(command, ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             sessions.Add(ReadSession(reader, null));
@@ -384,11 +384,44 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         _ => throw StorageDb.Malformed(databasePath, "status", row, $"'{value}' is not one of Active, Archived, Deleted", null),
     };
 
+    /// <summary><c>sessions.child_driver</c> for a create request; null and <c>"user"</c> are the only legal values.</summary>
+    private static string? ChildDriverName(string? childDriver) => childDriver switch
+    {
+        null or StorageSchema.ChildDriverUser => childDriver,
+        _ => throw new ArgumentException(
+            $"Unknown child driver '{childDriver}': only null (a child the model spawned) and '{StorageSchema.ChildDriverUser}' are allowed.",
+            nameof(childDriver)),
+    };
+
+    /// <summary>NULL reads as null (a child the model spawned, or a root session); any other text than <c>"user"</c> is malformed.</summary>
+    private static string? ParseChildDriver(string? value, string databasePath, string row) => value switch
+    {
+        null or StorageSchema.ChildDriverUser => value,
+        _ => throw StorageDb.Malformed(databasePath, "child_driver", row, $"'{value}' is neither NULL nor '{StorageSchema.ChildDriverUser}'", null),
+    };
+
     private static string ResolveDatabasePath(string dataSource) =>
         dataSource.StartsWith("file:", StringComparison.OrdinalIgnoreCase) ||
         dataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase)
             ? dataSource
             : Path.GetFullPath(dataSource);
+
+    /// <summary>
+    /// Runs a <c>sessions</c> read. A database file written before <c>sessions.child_driver</c> existed has no such column
+    /// and no ladder step adds one (the product is unreleased, so an old file is rebuilt rather than migrated); SQLite's
+    /// bare "no such column" is replaced here by the one instruction that resolves it.
+    /// </summary>
+    private static async Task<SqliteDataReader> ExecuteSessionReadAsync(SqliteCommand command, CancellationToken ct)
+    {
+        try
+        {
+            return await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        }
+        catch (SqliteException exception) when (exception.Message.Contains("child_driver", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("本地 forge.db 缺少 sessions.child_driver，请删除并重建数据库。", exception);
+        }
+    }
 
     private SessionInfo ReadSession(SqliteDataReader reader, string? knownId)
     {
@@ -429,6 +462,10 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
             PrefixFingerprint = StorageDb.ReadOptionalText(reader, 19, "prefix_fingerprint", _databasePath, row),
             AutomationId = StorageDb.ReadOptionalText(reader, 20, "automation_id", _databasePath, row),
             AutomationRunId = StorageDb.ReadOptionalText(reader, 21, "automation_run_id", _databasePath, row),
+            ChildDriver = ParseChildDriver(
+                StorageDb.ReadOptionalText(reader, 22, "child_driver", _databasePath, row),
+                _databasePath,
+                row),
         };
     }
 

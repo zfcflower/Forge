@@ -26,6 +26,13 @@ public sealed record SessionInfo(string Id, string WorkspacePath, string Title, 
     /// <summary>Full task text of a sub-agent session; null for a main session.</summary>
     public string? Task { get; init; }
 
+    /// <summary>
+    /// Who drives a child session (<c>sessions.child_driver</c>): null for a child the model spawned with
+    /// <c>spawn_agent</c> (and for every root session), <c>"user"</c> for a session the user opened under a root session.
+    /// Those are the only two values a store stores or reads back.
+    /// </summary>
+    public string? ChildDriver { get; init; }
+
     public SessionStatus Status { get; init; } = SessionStatus.Active;
 
     public DateTimeOffset LastActiveAt { get; init; }
@@ -74,6 +81,9 @@ public sealed record SessionCreate(string WorkspacePath, string Title)
     public string? AgentKind { get; init; }
 
     public string? Task { get; init; }
+
+    /// <summary>See <see cref="SessionInfo.ChildDriver"/>; only null and <c>"user"</c> are accepted.</summary>
+    public string? ChildDriver { get; init; }
 
     /// <summary>Fork source branch; see <see cref="SessionInfo.ForkOfBranch"/>.</summary>
     public string? ForkOfBranch { get; init; }

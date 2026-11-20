@@ -236,6 +236,7 @@ public sealed partial class SqliteSessionStore
             ParentSessionId = request.ParentSessionId,
             AgentKind = request.AgentKind,
             Task = request.Task,
+            ChildDriver = ChildDriverName(request.ChildDriver),
             Status = SessionStatus.Active,
             LastActiveAt = now,
             ForkOfBranch = request.ForkOfBranch,
@@ -374,7 +375,7 @@ public sealed partial class SqliteSessionStore
         var sql = $"""
             INSERT INTO sessions ({InsertColumns})
             SELECT $id, $ws, $title, $at, $project, $worktree, $branch, $parent, $kind, $task, 'Active', $active, $ticks, $key,
-                   $fork, $forkSha, $inherits, $inheritsSeq, $lineage, $origin, $automation, $automationRun
+                   $fork, $forkSha, $inherits, $inheritsSeq, $lineage, $origin, $automation, $automationRun, $childDriver
             {(root ? "WHERE " + KeyFreeSql : string.Empty)}
             """;
         await using var command = Command(connection, transaction, sql);
@@ -399,6 +400,7 @@ public sealed partial class SqliteSessionStore
         command.Parameters.AddWithValue("$origin", OriginName(session.Origin));
         BindNullable(command, "$automation", session.AutomationId);
         BindNullable(command, "$automationRun", session.AutomationRunId);
+        BindNullable(command, "$childDriver", session.ChildDriver);
         var changed = await ExecuteOccupyingAsync(command, connection, transaction, key, zeroRowsMeansOccupied: root).ConfigureAwait(false);
         if (changed != 1)
         {
@@ -508,7 +510,7 @@ public sealed partial class SqliteSessionStore
     {
         await using var command = Command(connection, transaction, $"SELECT {SessionColumns} FROM sessions WHERE id = $id");
         command.Parameters.AddWithValue("$id", sessionId);
-        await using var reader = await command.ExecuteReaderAsync(CancellationToken.None).ConfigureAwait(false);
+        await using var reader = await ExecuteSessionReadAsync(command, CancellationToken.None).ConfigureAwait(false);
         return await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false)
             ? ReadSession(reader, sessionId)
             : throw new InvalidOperationException($"Session {sessionId} does not exist.");
