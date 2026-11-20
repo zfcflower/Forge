@@ -34,7 +34,7 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 - 生命周期 Started(父发出)→ 仅在确实等名额时 Queued → Running → 每个 run 恰一次 Finished(在调度器 `finally` 中,含异常与父取消;父取消记为 Stopped "parent cancelled")。用量为本 run 增量,耗时从 spawn 起算(含排队)。
 - `runs` 只保存运行中的 run,结束即移除并释放其 CTS 与父令牌注册;已结束 id 记入紧凑集合以继续返回 `AlreadyFinished`;`instances` 保留以支持按 id 续跑。
 
-**Agent 会话(用户驱动的子会话;已定、未实现,设计记录 2026-11-19)。** 用户在活动根会话下手动增加的子会话:存储形态与模型派生的子 Agent 相同(`parent_session_id` = 根、继承根的项目与 worktree、深度 1),区别只在**由谁驱动**。不变量:
+**Agent 会话(用户驱动的子会话;已实现,授权通信除外,设计记录 2026-11-19)。** 用户在活动根会话下手动增加的子会话:存储形态与模型派生的子 Agent 相同(`parent_session_id` = 根、继承根的项目与 worktree、深度 1),区别只在**由谁驱动**。不变量:
 - 不参与占用索引(`ux_sessions_occupancy` 只约束 `parent_session_id IS NULL`,不改索引);一个工作区仍只有一个活动根会话。
 - 实例跑在**根会话的 `AgentHost`** 里,共用工具面、审批处理、取消表、树内并发名额与限速;每条用户消息是一轮,占一个树内名额,名额满时排队。深度 1,可再派生一层(深度 2 的 Agent 由 `ToolRegistry.Select` 剔除派生与控制工具)。
 - 宿主入口(Core 侧已实现):`AgentHost.StartUserChildAsync` 建会话行(`child_driver='user'`、parent = 根会话)并跑首轮;`RunUserChildTurnAsync` 对已有实例跑一轮;`ResumeUserChildAsync` 从存储重建(幂等,复用 `SessionHistory.LoadAsync`);`StopUserChildren` 停掉名下所有用户会话的 run(排队/运行)。四者内部与 `SpawnAsync` 共用抽出的 `DriveAsync`(attach 进取消表 → `AgentSubAgentStarted` → `Runner` → 恰一次 `AgentSubAgentFinished` 带本 run 的 `Usage`/`Elapsed`);分叉点只有:会话行写 `child_driver`、id 用 `session-<n>`、**不查 catalog/不做工具白名单与深度检查**(种类筛选由 App 负责,App 必须自己排除主 Agent、没有 `tools` 列表与含 git 写/`pr_*` 的定义)、`RunUserTurnAsync` 只接受本调度器登记为用户的同一实例。模型路径的 Started/Finished 语义未变。
