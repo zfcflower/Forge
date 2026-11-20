@@ -29,6 +29,12 @@ internal static class InspectorStrings
     public const string FilesName = "files.name";
     public const string FilesLoading = "files.loading";
     public const string FilesOpenInNewTab = "files.openInNewTab";
+    public const string FilesOpen = "files.open";
+    public const string FilesReveal = "files.reveal";
+    public const string FilesCopyPath = "files.copyPath";
+    public const string FilesCopyRelativePath = "files.copyRelativePath";
+    public const string FilesPaste = "files.paste";
+    public const string FilesDelete = "files.delete";
     public const string FilesRefresh = "files.refresh";
     public const string FilesRefreshName = "files.refresh.name";
     public const string FilesTabTitlePattern = "files.tabTitle";
@@ -194,6 +200,12 @@ internal static class InspectorStrings
         Loc.Register(FilesName, "文件", "Files");
         Loc.Register(FilesLoading, "读取中…", "Loading…");
         Loc.Register(FilesOpenInNewTab, "在新标签页打开", "Open in new tab");
+        Loc.Register(FilesOpen, "打开", "Open");
+        Loc.Register(FilesReveal, "在资源管理器中打开", "Reveal in File Explorer");
+        Loc.Register(FilesCopyPath, "复制路径", "Copy path");
+        Loc.Register(FilesCopyRelativePath, "复制相对路径", "Copy relative path");
+        Loc.Register(FilesPaste, "粘贴", "Paste");
+        Loc.Register(FilesDelete, "删除", "Delete");
         Loc.Register(FilesRefresh, "刷新", "Refresh");
         Loc.Register(FilesRefreshName, "刷新文件", "Refresh files");
         Loc.Register(FilesTabTitlePattern, "{0}", "{0}");

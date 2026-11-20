@@ -255,7 +255,7 @@
                            Grid.Column="0"
                            Margin="8,0,0,0"
                            VerticalAlignment="Center"
-                           FontSize="{DynamicResource FontSizeMd}"
+                           FontSize="{DynamicResource FontSizeBase}"
                            FontWeight="Bold"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"

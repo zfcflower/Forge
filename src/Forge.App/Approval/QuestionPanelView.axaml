@@ -308,7 +308,7 @@
                   Command="{Binding NextCommand}"
                   Content="{Binding [questions.panel.next], Source={x:Static loc:Loc.Instance}}"
                   AutomationProperties.AutomationId="question-next" />
-          <Button Classes="tinted cta large"
+          <Button Classes="primary large"
                   IsVisible="{Binding ShowsSubmit}"
                   Command="{Binding SubmitCommand}"
                   Content="{Binding SubmitText}"

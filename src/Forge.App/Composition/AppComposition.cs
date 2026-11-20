@@ -1134,7 +1134,7 @@ internal sealed class AppComposition : IAsyncDisposable
             // AvaloniaObject.CheckAccess, not Dispatcher.UIThread: reading the latter off the UI thread creates a dispatcher there.
             if (Application.Current is { } app && app.CheckAccess())
             {
-                return new AppearanceFeature(section, new AppearanceApplier(preferences, app.Resources), app.Dispatcher);
+                return new AppearanceFeature(section, new AppearanceApplier(preferences, app.Resources, app), app.Dispatcher);
             }
 
             return new AppearanceFeature(section, applier: null, dispatcher: null);

@@ -142,27 +142,8 @@
   </Style>
 
   <!-- The project tree spells a sub-agent's state with a dot or a check instead of a caption; the colours match the icon
-       the same row shows, so one glance reads the state twice. -->
-  <Style Selector="Ellipse.status-dot.agent-running">
-    <Setter Property="Fill" Value="{DynamicResource BrandActionBrush}" />
-  </Style>
-
-  <Style Selector="Ellipse.status-dot.agent-queued">
-    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
-  </Style>
-
-  <Style Selector="Ellipse.status-dot.agent-failed">
-    <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
-  </Style>
-
-  <Style Selector="Ellipse.status-dot.agent-stopped">
-    <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
-  </Style>
-
-  <Style Selector="Ellipse.status-dot.agent-ended">
-    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
-  </Style>
-
+       the same row shows, so one glance reads the state twice. The dot's colours themselves are in ChromeStyles (the
+       finished menu of the bottom group prints the same dot). -->
   <Style Selector="wc|FluentIcon.status-check">
     <Setter Property="Width" Value="11" />
     <Setter Property="Height" Value="11" />

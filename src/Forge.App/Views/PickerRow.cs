@@ -5,7 +5,6 @@ using Avalonia.Automation.Provider;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Media;
 
 namespace Forge.App.Views;
 
@@ -35,8 +34,8 @@ internal sealed class PickerRow : Border
 
     public PickerRow()
     {
-        // A border without a background is not hit-testable.
-        Background = Brushes.Transparent;
+        // The row needs a background to be hit-testable, but it is set by the style sheet (Views/ComposerStyles): a local
+        // value here would outrank that sheet's `:pointerover` fill and the hover would never paint.
         Cursor = HandCursor;
         Classes.Add("picker-row");
     }

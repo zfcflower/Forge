@@ -6,12 +6,13 @@
              x:DataType="vm:FinishedSubAgentsViewModel">
   <UserControl.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-    <!-- A flat title-bar button: 20 px tall so it fits the 28 px bar beside the 20x20 icon buttons. -->
+    <!-- A flat title-bar button: 20 px tall so it fits the 28 px bar beside the 20x20 icon buttons. Its label is body size,
+         the same as the panel titles beside it, not the caption size of a toolbar readout. -->
     <Style Selector="Button.finished-menu">
       <Setter Property="Height" Value="20" />
       <Setter Property="MinHeight" Value="0" />
       <Setter Property="Padding" Value="6,0" />
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
@@ -26,6 +27,23 @@
     <Style Selector="Button.finished-menu:pressed /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
     </Style>
+    <!-- One finished agent per row, in the geometry of the app's menus: full width, no border, no selection state, and its
+         own rectangle painted only while the pointer is on it - the same `SurfaceHoverBrush` every flyout menu row takes.
+         The name is a single line that trims to the row. -->
+    <Style Selector="Button.finished-row">
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="6,3" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.finished-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
   </UserControl.Styles>
 
   <Button x:Name="MenuButton"
@@ -37,7 +55,7 @@
           ToolTip.Tip="{Binding Hint}">
     <Button.Content>
       <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
-        <TextBlock Classes="label" Text="{Binding Title}" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
         <wc:FluentIcon Data="{DynamicResource IconChevronDown}"
                        Width="12"
                        Height="12"
@@ -46,27 +64,48 @@
     </Button.Content>
     <Button.Flyout>
       <Flyout Placement="BottomEdgeAlignedRight">
-        <ListBox x:Name="FinishedPicker"
-                 MinWidth="260"
-                 MaxHeight="320"
-                 SelectionMode="Single"
-                 ItemsSource="{Binding Items}"
-                 SelectedItem="{Binding Selected, Mode=TwoWay}"
-                 AutomationProperties.AutomationId="finished-subagents-list"
-                 AutomationProperties.Name="{Binding Title}">
-          <ListBox.ItemTemplate>
-            <DataTemplate x:DataType="vm:SubAgentViewModel">
-              <Grid ColumnDefinitions="Auto,*,Auto" MinWidth="240">
-                <TextBlock Classes="glyph" Text="○" />
-                <TextBlock Grid.Column="1"
-                           Margin="6,0"
-                           Text="{Binding TaskSummary}"
-                           TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="2" Classes="caption" Text="{Binding StatusText}" />
-              </Grid>
-            </DataTemplate>
-          </ListBox.ItemTemplate>
-        </ListBox>
+        <!-- A menu, not a list box: no selection survives the click, so the rows are buttons and the flyout closes on one. -->
+        <ScrollViewer MaxHeight="320"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+          <ItemsControl ItemsSource="{Binding Items}"
+                        MinWidth="260"
+                        MaxWidth="320"
+                        AutomationProperties.AutomationId="finished-subagents-list"
+                        AutomationProperties.Name="{Binding Title}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SubAgentViewModel">
+                <!-- Stretch is the row's hit area: a button left-aligns to its text by default, which left the blank end of a
+                     short task outside the row - it neither lit under the pointer nor opened the agent. -->
+                <Button Classes="finished-row"
+                        HorizontalAlignment="Stretch"
+                        Click="OnAgentClick"
+                        AutomationProperties.Name="{Binding Task}"
+                        AutomationProperties.HelpText="{Binding StatusText}"
+                        ToolTip.Tip="{Binding Task}">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <!-- The fate is the colour of the dot: green finished, red failed, amber stopped, grey when the store
+                         could not say how it ended. The words live in the row's tooltip, not beside it. -->
+                    <Ellipse Classes="status-dot"
+                             Classes.agent-completed="{Binding EndedCompleted}"
+                             Classes.agent-failed="{Binding EndedFailed}"
+                             Classes.agent-stopped="{Binding EndedStopped}"
+                             VerticalAlignment="Center" />
+                    <!-- The row is one line: the task trims to whatever the flyout leaves it, and its tooltip carries the
+                         whole task, so a name that runs past the edge is still readable in full. -->
+                    <TextBlock Grid.Column="1"
+                               Margin="8,0,0,0"
+                               Text="{Binding TaskSummary}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center"
+                               ToolTip.Tip="{Binding Task}" />
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
       </Flyout>
     </Button.Flyout>
   </Button>

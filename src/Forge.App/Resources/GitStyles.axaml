@@ -5,13 +5,15 @@
 
   <!-- The files panel's git row, ship row and banner, and the +x -y counts of the changes tree. Included by Views/FilesToolView only: a style sheet that applies to every Border, Button or TextBlock costs every control of those types a match when it attaches, so the rules of one panel live with the panel (see src/Forge.App/SPEC.md, transcript scroll). -->
 
-  <!-- The files panel's git row: a 24 px status line. One place answers "which branch, how far from the remote, and what
-       can I do about it". Numbers ride on the two verbs that change something; the fetch verb has none because it only
-       makes them current. -->
+  <!-- The files panel's git row: a 28 px status line, the same height as a panel title bar and as the scope row above the
+       tree, so every band of the panel lines up with the chrome around it. Its type is body size, regular weight: the
+       branch is a value, not a heading, and bold at this size turned the row into a second title. One place answers
+       "which branch, how far from the remote, and what can I do about it". Numbers ride on the two verbs that change
+       something; the fetch verb has none because it only makes them current. -->
   <Style Selector="Border.git-row">
-    <Setter Property="Height" Value="24" />
+    <Setter Property="Height" Value="28" />
     <Setter Property="Padding" Value="8,0,4,0" />
-    <Setter Property="Background" Value="{DynamicResource SidebarBackgroundBrush}" />
+    <Setter Property="Background" Value="{DynamicResource PanelBandBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
   </Style>
@@ -27,8 +29,8 @@
 
   <Style Selector="TextBlock.git-row-branch">
     <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
@@ -36,7 +38,7 @@
   </Style>
 
   <Style Selector="TextBlock.git-row-message">
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
@@ -48,10 +50,10 @@
   </Style>
 
   <Style Selector="Button.git-row-details">
-    <Setter Property="MinHeight" Value="18" />
+    <Setter Property="MinHeight" Value="20" />
     <Setter Property="MinWidth" Value="0" />
     <Setter Property="Padding" Value="2,0" />
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />    
     <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
@@ -87,8 +89,8 @@
 
   <!-- A count is the information, so it keeps its colour only while its verb is usable. -->
   <Style Selector="TextBlock.git-row-count">
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
@@ -111,25 +113,28 @@
   <Style Selector="Border.git-ship">
     <Setter Property="Height" Value="28" />
     <Setter Property="Padding" Value="8,0" />
-    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="Background" Value="{DynamicResource PanelBandBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
   </Style>
 
   <Style Selector="TextBlock.git-ship-hint">
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
+  <!-- A chip, not a bare link: the two controls of this row are buttons and read as buttons - a 24 px rounded box filled
+       with the card surface inside the divider's hairline, the same white-on-band pair the row itself sits on. Type is
+       body size, regular weight, so the row never turns into a heading. -->
   <Style Selector="Button.git-pill">
-    <Setter Property="Height" Value="22" />
-    <Setter Property="MinHeight" Value="22" />
-    <Setter Property="Padding" Value="8,0" />
-    <Setter Property="CornerRadius" Value="11" />
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+    <Setter Property="MinHeight" Value="24" />
+    <Setter Property="Padding" Value="7,2" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
@@ -139,36 +144,36 @@
   </Style>
 
   <Style Selector="Button.git-pill:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+  </Style>
+
+  <Style Selector="Button.git-pill:pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
   </Style>
 
   <Style Selector="Button.git-pill.publish">
-    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <!-- The pull-request pill takes the colour of what the platform last said; "no pull request yet" stays neutral. -->
   <Style Selector="Button.git-pill.target">
-    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
   </Style>
 
   <Style Selector="Button.git-pill.target.open">
-    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Button.git-pill.target.draft">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
   <Style Selector="Button.git-pill.target.merged">
-    <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Button.git-pill.target.closed">
-    <Setter Property="Background" Value="{DynamicResource ErrorBubbleBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 

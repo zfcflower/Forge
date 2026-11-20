@@ -25,9 +25,11 @@
     <Setter Property="TextTrimming" Value="None" />
   </Style>
 
+  <!-- A form field's label: body size, regular weight, secondary ink - the same 13 px as the value it names, so a label
+       labels instead of competing (a heading is `TextBlock.h2`). One line, never wrapped. -->
   <Style Selector="TextBlock.label">
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
-    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
   </Style>
@@ -87,7 +89,7 @@
   <!-- Buttons. The base look is scoped to Forge's own button classes so the workbench chrome keeps the geometry its
        ControlThemes give it. -->
 
-  <Style Selector="Button.ghost, Button.link, Button.icon">
+  <Style Selector="Button.ghost, Button.flat, Button.link, Button.icon">
     <Setter Property="MinHeight" Value="28" />
     <Setter Property="Padding" Value="{StaticResource PaddingControl}" />
     <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
@@ -102,16 +104,44 @@
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
+  <!-- One geometry for every button that reads as a button: the Fluent medium size (32 px high, 12 px of side padding,
+       14 px type) on a white fill inside the divider's 1 px border. Two palettes only - this outlined white tier, and the
+       brand tier `Button.primary` (see ChromeStyles.axaml) - so a button never invents a third background. -->
   <Style Selector="Button.ghost">
-    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="12,4" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeMd}" />
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
   </Style>
 
   <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
   </Style>
 
   <Style Selector="Button.ghost:pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
+  </Style>
+
+  <!-- Tier 1 of the one button system: no border, no fill. The quietest tier, for actions that live inside a row or a
+         header and must not read as a button until the pointer is on them; its hover and press are the two grey tints the
+         icon buttons already use. -->
+  <Style Selector="Button.flat">
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <Style Selector="Button.flat:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.flat:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
   </Style>
 
   <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
@@ -134,16 +164,54 @@
     <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
+  <!-- An icon-only button is not the shape above: it keeps the 26 px box, no border and no fill, so `ghost icon` stays a
+       flat glyph in a row or a title bar. -->
   <Style Selector="Button.icon">
     <Setter Property="MinWidth" Value="26" />
     <Setter Property="MinHeight" Value="26" />
     <Setter Property="Padding" Value="4" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>
 
-  <Style Selector="Button.primary:disabled, Button.ghost:disabled, Button.icon:disabled, Button.tab:disabled, Button.link:disabled">
+  <Style Selector="Button.primary:disabled, Button.ghost:disabled, Button.flat:disabled, Button.icon:disabled, Button.tab:disabled, Button.link:disabled">
     <Setter Property="Opacity" Value="0.45" />
     <Setter Property="Cursor" Value="Arrow" />
+  </Style>
+
+  <!-- Popups. One card for every flyout, dropdown and tooltip: the button tier's white fill, the divider's 1 px border and
+       the button radius - the three values the rest of the chrome already uses, so a popup never reads as a second system. -->
+  <Style Selector="FlyoutPresenter">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
+  </Style>
+
+  <Style Selector="MenuFlyoutPresenter">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
+  </Style>
+
+  <!-- Context menus are their own type (ContextMenu : MenuBase), so the MenuFlyoutPresenter rule above does not reach
+       them; its Fluent theme template-binds these four properties, which is why the background stayed the theme's grey. -->
+  <Style Selector="ContextMenu">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
+  </Style>
+
+  <Style Selector="ToolTip">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
+    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
   </Style>
 
   <!-- Surfaces. -->
@@ -172,10 +240,11 @@
   </Style>
 
   <!-- The reply's own surface: a card on the text column's left edge, matching the user bubble opposite it. White rather than
-       the window's off-white, so the reply sits on top of the page instead of blending into it. -->
+       the window's off-white, so the reply sits on top of the page instead of blending into it. Its outline is the same
+       hairline the regions and panels divide on, so a card never draws a second, tinted edge of its own. -->
   <Style Selector="Border.assistant-card">
     <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BrandSoftBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
     <Setter Property="Padding" Value="10,8" />

@@ -253,8 +253,12 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
     private DispatcherTimer? watcherTimer;
     private CountsSnapshot? countsSnapshot;
     private readonly Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory;
+    private readonly Func<string, Task> reveal;
+    private readonly Func<string, CancellationToken, Task>? trash;
     private readonly Git.GitSyncViewModel? gitSync;
     private LocText error;
+    private FileNodeViewModel? contextRow;
+    private string? copiedFile;
     private bool isLoading;
     private int selectedTab;
     private int refreshGeneration;
@@ -263,7 +267,15 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
     private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     public FilesPanelViewModel(GitCli git, Action<string> openFile, Action<string> openFileInNewTab, Action<string> openChanges)
-        : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory: null, changeReview: null)
+        : this(
+            git,
+            openFile,
+            openFileInNewTab,
+            openChanges,
+            lineCountsFactory: null,
+            changeReview: null,
+            reveal: static _ => Task.CompletedTask,
+            trash: null)
     {
     }
 
@@ -274,10 +286,14 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
         Action<string> openChanges,
         Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory,
         ChangesViewModel? changeReview = null,
-        Git.GitSyncViewModel? gitSync = null)
+        Git.GitSyncViewModel? gitSync = null,
+        Func<string, Task>? reveal = null,
+        Func<string, CancellationToken, Task>? trash = null)
     {
         this.git = git;
         this.gitSync = gitSync;
+        this.reveal = reveal ?? (static _ => Task.CompletedTask);
+        this.trash = trash;
         this.openFile = openFile;
         this.openFileInNewTab = openFileInNewTab;
         this.openChanges = openChanges;
@@ -286,6 +302,7 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
         changedTree = new ChangedFileTree(OpenChanged);
         changedTree.FoldingChanged += OnChangedFoldingChanged;
         ToggleChangedFoldingCommand = new RelayCommand(() => changedTree.SetAllExpanded(changedTree.IsAllCollapsed));
+        CollapseAllFilesCommand = new AsyncRelayCommand(CollapseAllFilesAsync, () => expandedPaths.Count > 0, OnFailed);
         if (changeReview is not null)
         {
             changeReview.Files.CollectionChanged += OnChangeReviewFilesChanged;
@@ -294,6 +311,11 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
             changedTree.SetSelected(changeReview.SelectedFile);
         }
         ChangedCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => true, OnFailed);
+        OpenCommand = new RelayCommand(OpenContextRow, () => ContextRow is not null);
+        RevealCommand = new RelayCommand(() => _ = RevealAsync(), () => ContextRow is not null);
+        CopyFileCommand = new RelayCommand(CopyFile, () => ContextRow is not null);
+        PasteCommand = new AsyncRelayCommand(PasteAsync, () => ContextRow is not null && copiedFile is not null, OnFailed);
+        DeleteCommand = new AsyncRelayCommand(DeleteAsync, () => ContextRow is not null && trash is not null, OnFailed);
         AllTabCommand = new RelayCommand(() => SelectedTab = 0);
         ChangedTabCommand = new RelayCommand(() => SelectedTab = 1);
         Loc.Instance.LanguageChanged += OnLanguageChanged;
@@ -321,8 +343,207 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
     /// <summary>Folds or unfolds every folder of the changed tree.</summary>
     public RelayCommand ToggleChangedFoldingCommand { get; }
 
+    /// <summary>
+    /// Folds every folder the 全部 tree has open. The tree keeps its open folders in <see cref="expandedPaths"/>, so
+    /// clearing that set and rebuilding is the same thing a collapse of each folder would do, in one pass.
+    /// </summary>
+    public AsyncRelayCommand CollapseAllFilesCommand { get; }
+
+    /// <summary>Whether the 全部 tree currently has a folder open, which is when the collapse-all tool is worth showing.</summary>
+    public bool HasExpandedFiles => expandedPaths.Count > 0;
+
+    private async Task CollapseAllFilesAsync(CancellationToken ct)
+    {
+        expandedPaths.Clear();
+        await RefreshAsync(ct).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// The row the context menu was opened on. The menu is a single instance that lives on the list (a per-row menu is
+    /// destroyed by the next watcher refresh, which closed it while the user was reading it), so the row travels through
+    /// this property and every item acts on it.
+    /// </summary>
+    public FileNodeViewModel? ContextRow
+    {
+        get => contextRow;
+        set
+        {
+            if (ReferenceEquals(contextRow, value))
+            {
+                return;
+            }
+
+            contextRow = value;
+            OnPropertyChanged(nameof(ContextRow));
+            OnPropertyChanged(nameof(ContextRowIsFile));
+            OpenCommand.NotifyCanExecuteChanged();
+            RevealCommand.NotifyCanExecuteChanged();
+            CopyFileCommand.NotifyCanExecuteChanged();
+            PasteCommand.NotifyCanExecuteChanged();
+            DeleteCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>True while the menu is about a file: "open in new tab" is the one item a folder does not get.</summary>
+    public bool ContextRowIsFile => contextRow is { IsDirectory: false };
+
+    /// <summary>"Open": a file goes to the editor, a folder expands or collapses the way a click on it does.</summary>
+    public RelayCommand OpenCommand { get; }
+
+    /// <summary>"Reveal in the file manager": a folder opens, a file is selected inside its folder.</summary>
+    public RelayCommand RevealCommand { get; }
+
+    /// <summary>Remembers the file for <see cref="PasteCommand"/>; the copied path also goes to the OS clipboard as text.</summary>
+    public RelayCommand CopyFileCommand { get; }
+
+    /// <summary>Copies the remembered file into the folder the context row lives in.</summary>
+    public AsyncRelayCommand PasteCommand { get; }
+
+    /// <summary>Moves the file to the OS recycle bin.</summary>
+    public AsyncRelayCommand DeleteCommand { get; }
+
+    /// <summary>Absolute path of a row, or empty when the panel has no working directory.</summary>
+    public string FullPathOf(FileNodeViewModel row) =>
+        Context.WorkingDirectory.Length == 0 ? string.Empty : Path.Combine(Context.WorkingDirectory, row.RelativePath);
+
+    private void OpenContextRow()
+    {
+        if (ContextRow is not { } row)
+        {
+            return;
+        }
+
+        if (row.IsDirectory)
+        {
+            row.ToggleCommand.Execute(null);
+            return;
+        }
+
+        if (FullPathOf(row) is { Length: > 0 } path)
+        {
+            openFile(path);
+        }
+    }
+
+    private async Task RevealAsync()
+    {
+        if (ContextRow is { } row && FullPathOf(row) is { Length: > 0 } path)
+        {
+            await reveal(path).ConfigureAwait(true);
+        }
+    }
+
+    private void CopyFile()
+    {
+        if (ContextRow is { } row && FullPathOf(row) is { Length: > 0 } path
+            && (File.Exists(path) || Directory.Exists(path)))
+        {
+            copiedFile = path;
+            PasteCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private async Task PasteAsync(CancellationToken ct)
+    {
+        if (copiedFile is not { Length: > 0 } source || ContextRow is not { } row)
+        {
+            return;
+        }
+
+        var sourceIsDirectory = Directory.Exists(source);
+        if (!sourceIsDirectory && !File.Exists(source))
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(FullPathOf(row));
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            var target = FreeName(directory, Path.GetFileName(source), sourceIsDirectory);
+            if (sourceIsDirectory)
+            {
+                CopyDirectory(source, target);
+            }
+            else
+            {
+                File.Copy(source, target);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            OnFailed(exception);
+            return;
+        }
+
+        await RefreshAsync(ct).ConfigureAwait(true);
+    }
+
+    private async Task DeleteAsync(CancellationToken ct)
+    {
+        if (trash is null || ContextRow is not { } row || FullPathOf(row) is not { Length: > 0 } path)
+        {
+            return;
+        }
+
+        try
+        {
+            await trash(path, ct).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            OnFailed(exception);
+            return;
+        }
+
+        await RefreshAsync(ct).ConfigureAwait(true);
+    }
+
+    /// <summary>The first name in <paramref name="directory"/> that is a free variant of <paramref name="name"/> ("a - copy.txt").</summary>
+    private static string FreeName(string directory, string name, bool isDirectory = false)
+    {
+        var candidate = Path.Combine(directory, name);
+        if (!File.Exists(candidate) && !Directory.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        var stem = isDirectory ? name : Path.GetFileNameWithoutExtension(name);
+        var extension = isDirectory ? string.Empty : Path.GetExtension(name);
+        for (var index = 2; ; index++)
+        {
+            candidate = Path.Combine(directory, $"{stem} - copy{index.ToString(CultureInfo.InvariantCulture)}{extension}");
+            if (!File.Exists(candidate) && !Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    /// <summary>Copies a folder tree into a path that does not exist yet (paste of a folder).</summary>
+    private static void CopyDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+        }
+
+        foreach (var child in Directory.EnumerateDirectories(source))
+        {
+            CopyDirectory(child, Path.Combine(target, Path.GetFileName(child)));
+        }
+    }
+
     /// <summary>The refresh button belongs to the 全部 tab (and the legacy list); the changed tree has the fold toggle instead.</summary>
     public bool ShowRefreshButton => !ShowSharedChanges;
+
+    /// <summary>The 全部 tab's own fold-all tool: visible only while it has a folder to fold.</summary>
+    public bool ShowCollapseAllButton => !ShowSharedChanges && HasExpandedFiles;
 
     public bool ShowFoldingButton => ShowSharedChanges;
 
@@ -563,6 +784,9 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
         }
 
         tree.ExpansionChanged(node);
+        CollapseAllFilesCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(HasExpandedFiles));
+        OnPropertyChanged(nameof(ShowCollapseAllButton));
     }
 
     /// <summary>Opens the changes document scoped to one changed file.</summary>

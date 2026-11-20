@@ -55,7 +55,7 @@
 ### 第 1 行：出货（`GitShipViewModel`，28 px）
 
 - 左侧远程读数是文本不是按钮：`没有远程` / `未发布` / `{n} 个提交待推送` / `与 origin 同步` / `落后 origin {n} 个提交`；动词在上一行，这格不会因误点而推送。
-- `发布` 药丸 + `提交目标 ▾` 裂分按钮，按状态列出：打开 PR（对话框填标题/正文/草稿 → `IPrPlatform.CreatePullRequestAsync`）、在本地合并到默认分支、合并 PR（`gh pr merge --squash|--merge|--rebase [-d]`，策略默认压缩、合并后删远端分支默认关）、标记可评审（`gh pr ready`，仅草稿可用，不必确认；已可评审时按成功处理）、PR 检查…、在浏览器打开、删除远程分支（仅 PR 已合并或已关闭时可用，必确认）。
+- `发布` + `提交目标 ▾` 两枚 chip（24 px 高、5 px 圆角、`CardBackgroundBrush` 白底 + 1 px `BorderBrush` 描边、13 px 常规字重；悬停换 `SurfaceHoverBrush`），按状态列出：打开 PR（对话框填标题/正文/草稿 → `IPrPlatform.CreatePullRequestAsync`）、在本地合并到默认分支、合并 PR（`gh pr merge --squash|--merge|--rebase [-d]`，策略默认压缩、合并后删远端分支默认关）、标记可评审（`gh pr ready`，仅草稿可用，不必确认；已可评审时按成功处理）、PR 检查…、在浏览器打开、删除远程分支（仅 PR 已合并或已关闭时可用，必确认）。
 - **打开 PR 的正文预填**为 `PrBodyRenderer.Render(计划摘要, 步骤, 分组)` 的结果——与 agent 的 `pr_create` 默认正文同一个来源，不需要再调一次模型；用户改完才创建。
 - gh 缺失/未登录时菜单有“在浏览器打开 compare 页面”（只对 github.com 远端生成，按解析出的 host 精确判定），可用条件是“远端在 GitHub、读得到默认分支、平台没有报出该分支的 PR 状态”。
 - **合并队列**：`gh pr merge` 成功返回但 PR 仍是 OPEN 时，行里报“已加入合并队列 PR #n”，不谎报“已合并”。

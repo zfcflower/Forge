@@ -501,11 +501,10 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             return;
         }
 
-        RegionModel region = GetRegion(panel.Region);
         if (panel.IsMinimized)
         {
             panel.IsMinimized = false;
-            UpdateCanMinimize(region);
+            RefreshMinimizeStates();
             return;
         }
 
@@ -515,7 +514,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         }
 
         panel.IsMinimized = true;
-        UpdateCanMinimize(region);
+        RefreshMinimizeStates();
     }
 
     public void ResizePreviewColumn(double width)
@@ -669,7 +668,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
     // ---------------------------------------------------------------- bottom group
 
-    /// <summary>Height of the bottom group when shown; kept while it is collapsed or empty so it pops up at the same height.</summary>
+    /// <summary>Height of the bottom group when shown; kept while it is folded or empty so it pops up at the same height.</summary>
     public double BottomHeight
     {
         get => bottomHeight;
@@ -688,9 +687,10 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// The bottom group sits at title-bar height: its title bar, tab strip and tools stay, its body gives the space back to
-    /// Main. This is the same shrink the panel's own restore button drives (<see cref="ToggleMinimize"/>) - there is no
-    /// second, strip-shaped collapsed form, so the composer's sub-agent toggle and that button are two entries to one state.
+    /// The session's own wish to keep the bottom group at title-bar height: its title bar, tab strip and tools stay, its body
+    /// gives the space back to Main. This is the same shrink the panel's own restore button drives (<see cref="ToggleMinimize"/>) -
+    /// there is no second, strip-shaped collapsed form, so the composer's sub-agent toggle and that button are two entries to
+    /// one state. A group with no docked tab is minimized regardless (see <see cref="ApplyBottomMinimize"/>).
     /// </summary>
     public bool IsBottomMinimized
     {
@@ -708,22 +708,32 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Pushes the intent onto the group. Only a visible group with an expanded peer can be minimized, so the intent is held
-    /// until that is true: the group keeps its tabs while nothing shows it.
+    /// True while the bottom group shows its body: a tab is docked and nobody collapsed it. It follows the group's own state,
+    /// so a group with nothing docked reads closed - that is what the composer's sub-agent chip paints.
+    /// </summary>
+    public bool IsBottomBodyOpen => bottomTabs.IsVisible && !bottomTabs.IsMinimized;
+
+    /// <summary>
+    /// The bottom group's minimize state, and its only writer. The body shows only while a tab is docked in the group and the
+    /// session has not collapsed it: a group living on its title-bar tools alone (the finished sub-agent dropdown, the
+    /// new-terminal tool) has nothing to expand, so it folds to its title bar and offers no restore button. The intent is left
+    /// untouched, so the next tab to dock opens the body again for a session the user never collapsed by hand. A group with a
+    /// tab shrinks only while its peer in Main stays expanded, which is why the intent is held until that is true: the group
+    /// keeps its tabs while nothing shows it.
     /// </summary>
     private void ApplyBottomMinimize()
     {
-        if (bottomMinimized)
+        if (!bottomTabs.IsVisible)
         {
-            if (bottomTabs.IsVisible && bottomTabs.CanMinimize)
-            {
-                bottomTabs.IsMinimized = true;
-            }
-
+            bottomTabs.IsMinimized = false;
+            bottomTabs.CanMinimize = false;
             return;
         }
 
-        bottomTabs.IsMinimized = false;
+        bool hasTab = bottomTabs.HasDockedTab;
+        bool peer = hasTab && HasExpandedPeer(main, bottomTabs);
+        bottomTabs.IsMinimized = !hasTab || (bottomMinimized && peer);
+        bottomTabs.CanMinimize = hasTab && (bottomTabs.IsMinimized || peer);
     }
 
     // ---------------------------------------------------------------- tabs
@@ -1409,15 +1419,21 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         bool hasContent = bottomTabs.HasDockedTab || bottomTabs.KeepsVisibleWhenEmpty;
         bottomTabs.IsVisible = hasContent;
 
-        UpdateCanMinimize(project);
-        UpdateCanMinimize(main);
-        UpdateCanMinimize(inspector);
-        ApplyBottomMinimize();
+        RefreshMinimizeStates();
 
         if (!previewTabs.IsVisible)
         {
             IsPreviewCoveringMain = false;
         }
+    }
+
+    /// <summary>Recomputes which panels may shrink and which do, across all three regions.</summary>
+    private void RefreshMinimizeStates()
+    {
+        UpdateCanMinimize(project);
+        UpdateCanMinimize(main);
+        UpdateCanMinimize(inspector);
+        ApplyBottomMinimize();
     }
 
     private void UpdateCanMinimize(RegionModel region)
@@ -1435,6 +1451,12 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         for (int i = 0; i < panels.Count; i++)
         {
             PanelModel panel = panels[i];
+            // The bottom group answers to its tabs as well as to its peer, so ApplyBottomMinimize is its only writer.
+            if (ReferenceEquals(panel, bottomTabs))
+            {
+                continue;
+            }
+
             if (!panel.IsVisible || visible < 2)
             {
                 panel.IsMinimized = false;
@@ -1612,11 +1634,24 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             return;
         }
 
+        // The chip reads whether the group's body is on screen, which moves with either flag.
+        if (ReferenceEquals(group, bottomTabs) &&
+            e.PropertyName is nameof(TabGroupModel.IsMinimized) or nameof(TabGroupModel.IsVisible))
+        {
+            OnPropertyChanged(nameof(IsBottomBodyOpen));
+        }
+
         // The group's own restore button (or the layout clearing a stale minimize) moves the intent with it, so the
-        // composer toggle and the title bar never disagree.
+        // composer toggle and the title bar never disagree. Only a group with a tab is clickable, so the fold the layout
+        // forces on an empty group is not the user's choice and must stay out of the intent.
         if (e.PropertyName == nameof(TabGroupModel.IsMinimized) && ReferenceEquals(group, bottomTabs) &&
             bottomMinimized != bottomTabs.IsMinimized)
         {
+            if (!bottomTabs.HasDockedTab)
+            {
+                return;
+            }
+
             bottomMinimized = bottomTabs.IsMinimized;
             OnPropertyChanged(nameof(IsBottomMinimized));
             OnLayoutChanged();

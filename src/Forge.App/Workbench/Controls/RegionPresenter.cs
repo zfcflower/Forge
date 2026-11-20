@@ -340,13 +340,16 @@ internal sealed class RegionPresenter : Panel
             placed++;
             if (placed < visible)
             {
-                if (placed - 1 < stackGaps.Count)
+                // The first gap of the left column is draggable: it moves the projects/general-chats split. That splitter
+                // draws the gap's 1 px line itself, from inside its 6 px hit band, so the gap line must not be drawn under
+                // it: two lines arranged half a pixel apart read as a divider twice as thick as every other one.
+                var draggable = placed == 1 && Role == RegionRole.Project && firstSlot >= 0;
+                if (!draggable && placed - 1 < stackGaps.Count)
                 {
                     Place(stackGaps[placed - 1], new Rect(body.X, y, body.Width, splitterHeight));
                 }
 
-                // The first gap of the left column is draggable: it moves the projects/general-chats split.
-                if (placed == 1 && Role == RegionRole.Project && firstSlot >= 0)
+                if (draggable)
                 {
                     projectSplitter.TrackLength = body.Height;
                     Place(projectSplitter, new Rect(

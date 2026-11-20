@@ -1,27 +1,31 @@
 using Avalonia.Controls;
+using Avalonia.Interactivity;
+using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
 
 /// <summary>
 /// The compact finished sub-agent menu of the bottom group's title bar: a 20 px button with the item count that opens a
-/// flyout listing the finished sub-agents. Choosing one selects it on the view model, which opens its read-only tab.
+/// flyout listing the finished sub-agents. Choosing one opens its read-only tab and closes the menu; the rows keep no
+/// selection, so the same entry can be picked again after its tab is closed.
 /// </summary>
 public partial class FinishedSubAgentsHeaderView : UserControl
 {
     public FinishedSubAgentsHeaderView()
     {
         InitializeComponent();
-        if (MenuButton.Flyout is Flyout { Content: ListBox list })
-        {
-            list.SelectionChanged += OnSelectionChanged;
-        }
     }
 
-    private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    private void OnAgentClick(object? sender, RoutedEventArgs e)
     {
-        if (MenuButton.Flyout is { } flyout && e.AddedItems.Count > 0)
+        if (sender is Button { DataContext: SubAgentViewModel agent }
+            && DataContext is FinishedSubAgentsViewModel menu)
         {
-            flyout.Hide();
+            menu.Open(agent);
+            if (MenuButton.Flyout is Flyout flyout)
+            {
+                flyout.Hide();
+            }
         }
     }
 }

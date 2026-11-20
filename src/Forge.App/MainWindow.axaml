@@ -57,10 +57,8 @@
                      Text="FORGE" />
           <!-- Automations entry: opens Settings > Automations; the badge counts the running and waiting runs only and
           is hidden at zero. -->
-          <Button Classes="ghost"
+          <Button Classes="flat"
                   Margin="10,0,0,0"
-                  Height="26"
-                  Padding="6,0"
                   Command="{Binding OpenAutomationsCommand}"
                   ToolTip.Tip="{Binding AutomationsTooltip}"
                   AutomationProperties.AutomationId="automations-open"

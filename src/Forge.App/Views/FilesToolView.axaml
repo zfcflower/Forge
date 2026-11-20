@@ -18,9 +18,13 @@
          the ancestor's chevron. -->
     <DataTemplate x:Key="IndentGuideTemplate" x:DataType="vm:IndentMark">
       <Border Width="{Binding Step}" VerticalAlignment="Stretch">
-        <Grid ColumnDefinitions="8,*" VerticalAlignment="Stretch">
+        <Grid VerticalAlignment="Stretch">
+          <!-- The line sits 11 px into the step: the row's chevron box is 6 px of inset plus a 10 px box, so 11 is the
+               centre of the ancestor's chevron (and of the icon block that follows it). Centring it in a 8 px column put
+               it 7 px to the left of that column and the guides missed the rows they belong to. -->
           <Border Width="1"
-                  HorizontalAlignment="Center"
+                  Margin="11,0,0,0"
+                  HorizontalAlignment="Left"
                   IsVisible="{Binding DrawLine}"
                   Background="{DynamicResource BorderBrush}" />
         </Grid>
@@ -29,12 +33,6 @@
 
     <DataTemplate x:Key="FileNodeTemplate" x:DataType="vm:FileNodeViewModel">
       <Border Classes="tree-row">
-        <Border.ContextMenu>
-          <ContextMenu>
-            <MenuItem Header="{Binding [files.openInNewTab], Source={x:Static loc:Loc.Instance}}"
-                      Command="{Binding OpenInNewTabCommand}" />
-          </ContextMenu>
-        </Border.ContextMenu>
         <Grid ColumnDefinitions="Auto,*">
           <ItemsControl Grid.Column="0"
                         VerticalAlignment="Stretch"
@@ -149,7 +147,14 @@
   </UserControl.Resources>
 
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" Background="Transparent">
-    <Border Grid.Row="0" Classes="toolbar">
+    <!-- The scope row (全部 / 已改动): one line of panel chrome, so it is exactly one panel title bar high and wears the
+         same band as the two git rows at the bottom of the panel. The row fixes its height and drops its vertical padding,
+         so the 26 px icon tools on its right edge fit under the 1 px divider without being clipped. -->
+    <Border Grid.Row="0"
+            Classes="toolbar"
+            Height="28"
+            Padding="8,0"
+            Background="{DynamicResource PanelBandBrush}">
       <Grid ColumnDefinitions="*,Auto">
         <!-- Each tab carries its own count: the panel no longer spells both numbers out in a summary after the buttons. A
              badge is never hidden, so an idle session reads "已改动 0" rather than leaving the reader to guess. -->
@@ -193,6 +198,17 @@
                 AutomationProperties.Name="{Binding [files.refresh.name], Source={x:Static loc:Loc.Instance}}">
           <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
         </Button>
+        <!-- The 全部 tab's fold-all tool: the file tree keeps its open folders between refreshes, so this is how the
+             reader closes all of them at once (it only shows while at least one is open). -->
+        <Button Grid.Column="1"
+                Classes="ghost icon"
+                Command="{Binding CollapseAllFilesCommand}"
+                IsVisible="{Binding ShowCollapseAllButton}"
+                ToolTip.Tip="{Binding [changes.picker.collapseAll], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="files-fold-all"
+                AutomationProperties.Name="{Binding [changes.picker.collapseAll], Source={x:Static loc:Loc.Instance}}">
+          <wc:FluentIcon Data="{StaticResource IconArrowCollapseAll}" Width="14" Height="14" />
+        </Button>
         <Button Grid.Column="1"
                 Classes="ghost icon"
                 Command="{Binding ToggleChangedFoldingCommand}"
@@ -216,7 +232,9 @@
 
     <Border Grid.Row="1"
             Classes="toolbar"
-            Padding="6,4"
+            Height="28"
+            Padding="6,0"
+            Background="{DynamicResource PanelBandBrush}"
             IsVisible="{Binding ShowSharedChanges}">
       <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
         <Button x:Name="ScopePicker"
@@ -455,6 +473,55 @@
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
              AutomationProperties.AutomationId="files-tree"
              AutomationProperties.Name="{Binding [files.tree.name], Source={x:Static loc:Loc.Instance}}">
+      <!-- One menu for the whole list, not one per row: the rows are rebuilt by every watcher tick, and a context menu
+           that belongs to a row closes the moment its owner leaves the tree. The view fills in the row under the pointer
+           before it opens (see the code-behind) and cancels the menu for a folder: this list is the file tier. -->
+      <ListBox.ContextMenu>
+        <ContextMenu x:Name="TreeMenu"
+                     Opening="OnTreeContextOpening"
+                     AutomationProperties.AutomationId="files-context-menu">
+          <MenuItem Header="{Binding [files.open], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding OpenCommand}"
+                    AutomationProperties.AutomationId="files-menu-open" />
+          <!-- The one item a folder does not get: a folder has nothing to open in a tab. -->
+          <MenuItem Header="{Binding [files.openInNewTab], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding ContextRow.OpenInNewTabCommand}"
+                    IsVisible="{Binding ContextRowIsFile}"
+                    AutomationProperties.AutomationId="files-menu-open-new-tab" />
+          <MenuItem Header="{Binding [files.reveal], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding RevealCommand}"
+                    AutomationProperties.AutomationId="files-menu-reveal" />
+          <Separator />
+          <MenuItem Header="{Binding [files.copyPath], Source={x:Static loc:Loc.Instance}}"
+                    Click="OnCopyFullPathClick"
+                    AutomationProperties.AutomationId="files-menu-copy-path" />
+          <MenuItem Header="{Binding [files.copyRelativePath], Source={x:Static loc:Loc.Instance}}"
+                    Click="OnCopyRelativePathClick"
+                    AutomationProperties.AutomationId="files-menu-copy-relative-path" />
+          <Separator />
+          <MenuItem Header="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding CopyFileCommand}"
+                    AutomationProperties.AutomationId="files-menu-copy" />
+          <MenuItem Header="{Binding [files.paste], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding PasteCommand}"
+                    AutomationProperties.AutomationId="files-menu-paste" />
+          <Separator />
+          <!-- The header carries the icon, not the item's content: a child control in the item body is an Items entry,
+               which turned this row into a one-entry submenu. -->
+          <MenuItem Foreground="{DynamicResource StatusErrorBrush}"
+                    AutomationProperties.AutomationId="files-menu-delete"
+                    Command="{Binding DeleteCommand}">
+            <MenuItem.Header>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <wc:FluentIcon Data="{StaticResource IconTrash}" Width="14" Height="14" />
+                <TextBlock Text="{Binding [files.delete], Source={x:Static loc:Loc.Instance}}"
+                           Foreground="{DynamicResource StatusErrorBrush}"
+                           VerticalAlignment="Center" />
+              </StackPanel>
+            </MenuItem.Header>
+          </MenuItem>
+        </ContextMenu>
+      </ListBox.ContextMenu>
       <ListBox.ItemsPanel>
         <ItemsPanelTemplate>
           <VirtualizingStackPanel />
@@ -535,7 +602,7 @@
                 AutomationProperties.AutomationId="git-publish"
                 AutomationProperties.Name="{Binding Git.PushTooltip}">
           <StackPanel Orientation="Horizontal" Spacing="4">
-            <wc:FluentIcon Data="{StaticResource IconGitPush}" Width="12" Height="12" />
+            <wc:FluentIcon Data="{StaticResource IconGitPush}" Width="14" Height="14" />
             <TextBlock Text="{Binding [git.ship.publish], Source={x:Static loc:Loc.Instance}}" />
           </StackPanel>
         </Button>
@@ -557,7 +624,7 @@
             <TextBlock IsVisible="{Binding Git.HasPullRequestState}"
                        Text="{Binding Git.PullRequestNumberText}"
                        VerticalAlignment="Center" />
-            <wc:FluentIcon Data="{StaticResource IconChevronDown}" Width="12" Height="12" VerticalAlignment="Center" />
+            <wc:FluentIcon Data="{StaticResource IconChevronDown}" Width="14" Height="14" VerticalAlignment="Center" />
           </StackPanel>
           <Button.Flyout>
             <Flyout Placement="BottomEdgeAlignedRight">
@@ -610,10 +677,10 @@
                   ToolTip.Tip="{Binding Git.FetchTooltip}"
                   AutomationProperties.AutomationId="git-fetch"
                   AutomationProperties.Name="{Binding Git.FetchTooltip}">
-            <Panel Width="12" Height="12">
+            <Panel Width="14" Height="14">
               <wc:FluentIcon Data="{StaticResource IconGitFetch}"
-                             Width="12"
-                             Height="12"
+                             Width="14"
+                             Height="14"
                              IsVisible="{Binding !Git.IsFetchRunning}" />
               <Ellipse Width="6"
                        Height="6"
@@ -630,10 +697,10 @@
                   AutomationProperties.AutomationId="git-pull"
                   AutomationProperties.Name="{Binding Git.PullTooltip}">
             <StackPanel Orientation="Horizontal" Spacing="2">
-              <Panel Width="12" Height="12">
+              <Panel Width="14" Height="14">
                 <wc:FluentIcon Data="{StaticResource IconGitPull}"
-                               Width="12"
-                               Height="12"
+                               Width="14"
+                               Height="14"
                                IsVisible="{Binding !Git.IsPullRunning}" />
                 <Ellipse Width="6"
                          Height="6"
@@ -655,10 +722,10 @@
                   AutomationProperties.AutomationId="git-push"
                   AutomationProperties.Name="{Binding Git.PushTooltip}">
             <StackPanel Orientation="Horizontal" Spacing="2">
-              <Panel Width="12" Height="12">
+              <Panel Width="14" Height="14">
                 <wc:FluentIcon Data="{StaticResource IconGitPush}"
-                               Width="12"
-                               Height="12"
+                               Width="14"
+                               Height="14"
                                IsVisible="{Binding !Git.IsPushRunning}" />
                 <Ellipse Width="6"
                          Height="6"
@@ -713,8 +780,8 @@
         <wc:FluentIcon DockPanel.Dock="Left"
                        Classes="git-row-branch-icon"
                        Data="{StaticResource IconBranch}"
-                       Width="11"
-                       Height="11"
+                       Width="14"
+                       Height="14"
                        Margin="0,0,5,0"
                        VerticalAlignment="Center" />
         <TextBlock Classes="git-row-branch"

@@ -7,9 +7,11 @@
        rows (see src/Forge.App/SPEC.md, transcript scroll). The classes used inside the transcript rows (ghost, icon, link,
        caption, label, muted, mono, the row and bubble borders, the tree chevron) stay in `Controls.axaml`. -->
 
+  <!-- The one heading above a block of content (a settings group, a dialog's title): 14 px bold. Bold, not SemiBold - the
+       CJK faces in the default chain have no 600 and would resolve SemiBold to 700 anyway, splitting the weight by script. -->
   <Style Selector="TextBlock.h2">
     <Setter Property="FontSize" Value="{DynamicResource FontSizeMd}" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontWeight" Value="Bold" />
   </Style>
 
   <Style Selector="TextBlock.section-title">
@@ -27,17 +29,19 @@
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
+  <!-- Tier 4 of the one button system (see the module SPEC, 「控件形态」): a brand fill with no border of its own. The scale
+       gives it three stops - `BrandActionBrush` at rest, `BrandHoverBrush` under the pointer, `BrandPressedBrush` while
+       pressed - because a filled button cannot borrow the grey hover tints the two outlined tiers use. -->
   <Style Selector="Button.primary">
-    <Setter Property="MinHeight" Value="28" />
-    <Setter Property="Padding" Value="{StaticResource PaddingControl}" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="12,4" />
     <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeMd}" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="Cursor" Value="Hand" />
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Background" Value="{DynamicResource BrandActionBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextOnBrandBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
@@ -74,13 +78,12 @@
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
-  <Style Selector="Button.primary /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource BrandActionBrush}" />
-    <Setter Property="Foreground" Value="{DynamicResource TextOnBrandBrush}" />
+  <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrandHoverBrush}" />
   </Style>
 
-  <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Opacity" Value="0.85" />
+  <Style Selector="Button.primary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrandPressedBrush}" />
   </Style>
 
   <Style Selector="Button.tab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
@@ -147,41 +150,37 @@
     <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
-  <!-- Panel buttons. `tinted` is the picker-row button look (a brand tint inside the interactive brand border), `cta` is its
-       primary-action tier (border and label one step deeper), `outline` is the neutral one. The composer's own copy of the
-       tinted look sits in `Views/ComposerStyles.axaml`: that sheet loads on the composer's subtree only and carries the
-       composer's row geometry, so the two do not share one selector. -->
+  <!-- Tier 3 of the one button system: a brand border and a brand label on the brand tint. Its three stops stay inside the
+       mint family - the tint at rest, one step deeper under the pointer, border and label inked deepest while pressed - so a
+       brand-outlined button never borrows the grey hover tints of the neutral tier. The composer's own copy of the look sits
+       in `Views/ComposerStyles.axaml`: that sheet carries the composer's row geometry, so the two do not share one selector. -->
   <Style Selector="Button.tinted">
     <Setter Property="MinHeight" Value="26" />
     <Setter Property="Padding" Value="8,3" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
   <Style Selector="Button.tinted:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SelectionBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
   </Style>
 
-  <Style Selector="Button.tinted:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
-  </Style>
-
-  <Style Selector="Button.tinted.cta">
+  <Style Selector="Button.tinted:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SelectionBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
-    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <!-- The taller tier: a panel footer that owns the decision of its card (the question panel's dismiss / step / submit
        row) sizes its buttons one step up from the inline ones, so the row reads as the card's action bar. -->
-  <Style Selector="Button.tinted.large, Button.outline.large, Button.tinted.cta.large">
+  <Style Selector="Button.primary.large, Button.tinted.large, Button.outline.large">
     <Setter Property="MinHeight" Value="32" />
     <Setter Property="Padding" Value="14,6" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
@@ -190,7 +189,7 @@
   <Style Selector="Button.outline">
     <Setter Property="MinHeight" Value="26" />
     <Setter Property="Padding" Value="8,3" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
@@ -203,6 +202,10 @@
 
   <Style Selector="Button.outline:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.outline:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
   </Style>
 
   <Style Selector="Button.outline:disabled, Button.tinted:disabled">
@@ -233,6 +236,29 @@
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
     <Setter Property="Padding" Value="8,4" />
+  </Style>
+
+  <!-- The agent-state dot: one shape, one colour per fate, shared by the project tree and every list that prints the same
+       state (the bottom group's finished menu). A completed run is the one green mark; anything else that ended stays
+       neutral, and only a run that went wrong or was stopped takes a status colour. -->
+  <Style Selector="Ellipse.status-dot.agent-completed">
+    <Setter Property="Fill" Value="{DynamicResource StatusSuccessBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-failed">
+    <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-stopped">
+    <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-running">
+    <Setter Property="Fill" Value="{DynamicResource BrandActionBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-queued">
+    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot">

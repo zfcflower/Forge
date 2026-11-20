@@ -87,7 +87,7 @@
       </StackPanel>
       <Button.Flyout>
         <Flyout Placement="TopEdgeAlignedLeft">
-          <StackPanel Width="300" Spacing="6" AutomationProperties.AutomationId="composer-model-panel">
+          <StackPanel Width="410" Spacing="6" AutomationProperties.AutomationId="composer-model-panel">
             <TextBox x:Name="ModelSearch"
                      Text="{Binding ModelSearch, Mode=TwoWay}"
                      PlaceholderText="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}"
@@ -119,7 +119,7 @@
                                      Classes.section="{Binding IsSection}"
                                      Command="{Binding ToggleCommand}"
                                      AutomationProperties.Name="{Binding Name}">
-                      <Grid ColumnDefinitions="14,*,Auto">
+                      <Grid ColumnDefinitions="18,*,Auto">
                         <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
                                        Classes="tree-chevron"
                                        Classes.expanded="{Binding IsExpanded}"
@@ -144,7 +144,7 @@
                       <Grid ColumnDefinitions="*,Auto">
                         <views:PickerRow Command="{Binding SelectCommand}"
                                 Click="OnModelPicked"
-                                AutomationProperties.Name="{Binding Name}">
+                                AutomationProperties.Name="{Binding Label}">
                           <Grid ColumnDefinitions="18,*,Auto,Auto">
                             <wc:FluentIcon Data="{StaticResource IconCheck}"
                                            Width="12"
@@ -153,7 +153,8 @@
                                            Foreground="{DynamicResource BrandActionBrush}"
                                            VerticalAlignment="Center" />
                             <TextBlock Grid.Column="1"
-                                       Text="{Binding Name}"
+                                       Classes="model-name"
+                                       Text="{Binding Label}"
                                        TextTrimming="CharacterEllipsis"
                                        VerticalAlignment="Center" />
                             <wc:FluentIcon Grid.Column="2"
@@ -191,20 +192,28 @@
                                            IsVisible="{Binding IsPinned}" />
                           </Panel>
                         </views:PickerRow>
+                        <!-- The row's light rule, drawn as an inset rectangle so it can start at the name's edge and still run
+                             under the pin to the row's end; the border itself stays bare so the hover fill owns the whole row. -->
+                        <Rectangle Classes="model-row-rule" Grid.ColumnSpan="2" />
                       </Grid>
                     </Border>
-                  </DataTemplate>
-                </ItemsControl.DataTemplates>
+                </DataTemplate>
+              </ItemsControl.DataTemplates>
             </ItemsControl>
             <TextBlock Classes="caption"
+                       Margin="26,0"
                        IsVisible="{Binding HasNoModels}"
                        Text="{Binding [session.composer.noModels], Source={x:Static loc:Loc.Instance}}" />
-            <Separator />
+            <!-- One left edge for the whole popup: the model id name's (26 px = the row's 8 px padding + the 18 px check
+                 column). The row rules, the section separators, the effort title, the captions and the footer buttons'
+                 text all start there; the dial's own track keeps its thumb-radius insets, which are geometry, not text. -->
+            <Separator Margin="26,2" />
             <!-- The effort track: the gradient itself is the scale (light = least, deep = most), so the whole bar stays
                  visible and only the thumb marks the chosen step. The ticks under it are the steps this model accepts,
                  one label each, the chosen one inked. -->
-            <StackPanel Margin="2,0" Spacing="5">
+            <StackPanel Margin="8,0" Spacing="5">
               <TextBlock Classes="effort-title"
+                         Margin="18,0,0,0"
                          Text="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
               <Panel>
                 <Border Classes="effort-track" />
@@ -258,10 +267,10 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </StackPanel>
-            <Separator />
+            <Separator Margin="26,2" />
             <!-- One row, two ends: refreshing the catalogue on the left, saving this pick as the new-session default on
                  the right. Same weight for both — neither is the popup's primary action. -->
-            <Grid ColumnDefinitions="Auto,*,Auto" Margin="2,0">
+            <Grid ColumnDefinitions="Auto,*,Auto" Margin="18,0">
               <Button Classes="composer-row outlined"
                       Command="{Binding RefreshCommand}"
                       AutomationProperties.AutomationId="composer-refresh">
@@ -281,7 +290,7 @@
               </Button>
             </Grid>
             <TextBlock Classes="caption"
-                       Margin="8,0"
+                       Margin="26,0"
                        IsVisible="{Binding HasStatus}"
                        Text="{Binding Status}" />
           </StackPanel>

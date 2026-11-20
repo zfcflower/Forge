@@ -13,9 +13,9 @@ internal static class WorkbenchStripText
     {
         Text = title,
         FontSize = 12,
-        // Rotated 90 degrees on the window edge, the label is the strip's only content: one weight up from the panel
-        // titles keeps it readable without turning into the Bold the title bars use.
-        FontWeight = FontWeight.SemiBold,
+        // Rotated 90 degrees on the window edge, the label is the strip's only content: bold, like the title of the panel
+        // it belongs to (a SemiBold CJK face does not exist and resolved to bold anyway).
+        FontWeight = FontWeight.Bold,
         TextWrapping = TextWrapping.NoWrap,
         TextTrimming = TextTrimming.CharacterEllipsis,
         MaxWidth = 180,

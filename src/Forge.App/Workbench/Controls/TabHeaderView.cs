@@ -146,17 +146,27 @@ internal sealed class TabHeaderView : TemplatedControl
     }
 
     /// <summary>
-    /// Resolves the tab's leading glyph: the chat bubble (filled while the tab is active) for a conversation, the file
-    /// tree's document for a file preview, nothing for the kinds that spell themselves out in the title.
+    /// Resolves the tab's leading glyph: the same one the project tree paints for that row, so the tab and the tree never
+    /// disagree about what a conversation is - a session's chat bubble (filled while its tab is active), an agent session's
+    /// mention bubble, a sub-agent's conversation-and-return glyph, the file tree's document for a file preview, and nothing
+    /// for the kinds that spell themselves out in the title.
     /// </summary>
     private void ApplyIcon()
     {
-        var (rest, active) = Model?.Kind switch
+        var (rest, active) = Model switch
         {
-            TabKind.Session or TabKind.SubAgent =>
+            // The tree's own glyphs for the rows whose tab used to fall back to the plain chat bubble: the agent session's
+            // mention bubble, and the sub-agent's conversation-and-return glyph - the lock for the last level, which is any
+            // agent that hangs under another agent rather than directly under the session.
+            { Content: SubAgentViewModel { IsFirstLevel: true } } =>
+                (TreeIcons.ChatArrowBackDown, TreeIcons.ChatArrowBackDownFilled),
+            { Content: SubAgentViewModel } => (TreeIcons.ChatLock, TreeIcons.ChatLockFilled),
+            { Content: SessionWorkspaceViewModel { IsAgentSession: true } } =>
+                (TreeIcons.CommentMention, TreeIcons.CommentMentionFilled),
+            { Kind: TabKind.Session or TabKind.SubAgent } =>
                 (WorkbenchIcons.Find(this, "IconChat"), WorkbenchIcons.Find(this, "IconChatFilled")),
-            TabKind.FilePreview => (TreeIcons.File, null),
-            TabKind.Question => (WorkbenchIcons.Find(this, "IconInfo"), null),
+            { Kind: TabKind.FilePreview } => (TreeIcons.File, null),
+            { Kind: TabKind.Question } => (WorkbenchIcons.Find(this, "IconInfo"), null),
             _ => (null, null),
         };
 

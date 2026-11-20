@@ -35,9 +35,12 @@
          centred in the chevron slot so it lines up under the ancestor's chevron. -->
     <DataTemplate x:Key="IndentGuideTemplate" x:DataType="vm:IndentMark">
       <Border Width="{Binding Step}" VerticalAlignment="Stretch">
-        <Grid ColumnDefinitions="8,*" VerticalAlignment="Stretch">
+        <Grid VerticalAlignment="Stretch">
+          <!-- The line sits 11 px into the step: the row's chevron box is 6 px of inset plus a 10 px box, so 11 is the
+               centre of the ancestor's chevron (and of the icon block that follows it). -->
           <Border Width="1"
-                  HorizontalAlignment="Center"
+                  Margin="11,0,0,0"
+                  HorizontalAlignment="Left"
                   IsVisible="{Binding DrawLine}"
                   Background="{DynamicResource BorderBrush}" />
         </Grid>
@@ -220,7 +223,6 @@
                                Classes.agent-queued="{Binding IsAgentQueued}"
                                Classes.agent-failed="{Binding IsAgentFailed}"
                                Classes.agent-stopped="{Binding IsAgentStopped}"
-                               Classes.agent-ended="{Binding IsAgentEndedGlyph}"
                                HorizontalAlignment="Center"
                                IsVisible="{Binding ShowsStatusDot}" />
                       <wc:FluentIcon Classes="status-check"

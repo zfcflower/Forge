@@ -41,18 +41,23 @@ internal sealed class TranscriptFollower
     private TranscriptFollower(ListBox list, Panel host)
     {
         this.list = list;
+        // One line, one panel-title-bar height: the floating row stands in for the user message and must not push the
+        // transcript down by growing with it, so it reads as chrome (28 px, like the title bars above and beside it) and
+        // shows the message's first line; the click takes the reader to the whole of it.
         stickyText = new TextBlock
         {
-            TextWrapping = TextWrapping.Wrap,
+            TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxLines = 2,
+            MaxLines = 1,
+            VerticalAlignment = VerticalAlignment.Center,
         };
         stickyText.Bind(TextBlock.ForegroundProperty, stickyText.GetResourceObservable("TextPrimaryBrush"));
         sticky = new Border
         {
             VerticalAlignment = VerticalAlignment.Top,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(12, 6),
+            Height = PanelChrome.TitleBarHeight,
+            Padding = new Thickness(12, 0),
             BorderThickness = new Thickness(0, 0, 0, 1),
             IsVisible = false,
             Cursor = new Cursor(StandardCursorType.Hand),

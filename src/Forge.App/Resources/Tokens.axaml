@@ -71,9 +71,10 @@
        resources are searched before the theme's style resources; the dictionary AppearanceApplier merges later still wins
        over these static defaults, so the interface-font preference keeps reaching built-in controls.
 
-       Two knobs deliberately stay with Fluent: ButtonPadding, because the clear button inside a TextBox template is sized
-       from it (a wider value clips its 12 px glyph), and the TextControl* brushes, because state colour belongs to the
-       theme (see SPEC: built-in borders do not take Forge's hover tokens). -->
+       ButtonPadding deliberately stays with Fluent: the clear button inside a TextBox template is sized from it, and a
+       wider value clips its 12 px glyph. The border brushes of the same controls are aliased to Forge's line and status
+       tokens further down (see the `TextControl*` / `ComboBox*` entries in each theme), so an input box, the divider above
+       it and the button beside it all draw the same hairline; their backgrounds and foregrounds still come from the theme. -->
   <!-- The smallest radius the system has: Fluent's own default for a control. Spelled out rather than dropped, because
        OverlayCornerRadius defaults to 5 and the two must not drift apart, and because Forge's button classes bind this same
        key (see Controls.axaml) — so an input box, the button beside it and the flyout they open share one radius, and a
@@ -135,6 +136,9 @@
       <SolidColorBrush x:Key="BrandInteractiveBrush" Color="#078A86" />
       <SolidColorBrush x:Key="BrandActionBrush" Color="#067A76" />
       <SolidColorBrush x:Key="BrandHoverBrush" Color="#066E6A" />
+      <!-- One step past hover, for the pressed state of a brand-filled button: the scale needs a third stop so a
+           press reads differently from a hover without an opacity trick. -->
+      <SolidColorBrush x:Key="BrandPressedBrush" Color="#055E5A" />
       <SolidColorBrush x:Key="BrandSoftBrush" Color="#81D8D0" />
       <!-- BrandSoftBrush is deliberately the same mint in both themes, so its ink cannot be a theme-dependent brand tier:
            BrandActionBrush on it is 3.13:1 in light and 1.28:1 in dark (where BrandAction is #26C6C1). This is the one
@@ -146,9 +150,12 @@
            Subtle is a static inset (gutter, inline code, code block), Hover and Selected are the two row states,
            Input is the composer's input band. -->
       <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#FAFAFA" />
-      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#F6F9FA" />
+      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#FBFCFD" />
       <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#F4F7F8" />
+      <!-- A band inside a panel (the file panel's git rows and its scope row): one step lighter than the chrome above them,
+           one step deeper than the panel body, so the band reads as part of the panel without disappearing into it. -->
+      <SolidColorBrush x:Key="PanelBandBrush" Color="#F3F7F8" />
       <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#EDF3F4" />
       <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#E8F8F7" />
       <SolidColorBrush x:Key="SurfaceInputBrush" Color="#FFFFFF" />
@@ -177,6 +184,20 @@
            divider and its pressed state equals the stronger outline is preserved by using the two same values. -->
       <SolidColorBrush x:Key="BorderBrush" Color="#CFD7DA" />
       <SolidColorBrush x:Key="BorderStrongBrush" Color="#C3CDD0" />
+
+      <!-- Form controls take Forge's own line colours instead of Fluent's greys: the same hairline as every divider, one
+           step deeper under the pointer, and the brand tier for focus (the 2 px bottom edge Fluent already draws) and for
+           errors. Aliases, not copies, so an input can never drift from the divider it sits next to. -->
+      <StaticResource x:Key="TextControlBorderBrush" ResourceKey="BorderBrush" />
+      <StaticResource x:Key="TextControlBorderBrushPointerOver" ResourceKey="BorderStrongBrush" />
+      <StaticResource x:Key="TextControlBorderBrushFocused" ResourceKey="BrandActionBrush" />
+      <StaticResource x:Key="TextControlBorderBrushDisabled" ResourceKey="BorderBrush" />
+      <StaticResource x:Key="ComboBoxBorderBrush" ResourceKey="BorderBrush" />
+      <StaticResource x:Key="ComboBoxBorderBrushPointerOver" ResourceKey="BorderStrongBrush" />
+      <StaticResource x:Key="ComboBoxBorderBrushPressed" ResourceKey="BorderStrongBrush" />
+      <StaticResource x:Key="ComboBoxBorderBrushDisabled" ResourceKey="BorderBrush" />
+      <StaticResource x:Key="ComboBoxBackgroundBorderBrushFocused" ResourceKey="BrandActionBrush" />
+      <StaticResource x:Key="SystemControlErrorTextForegroundBrush" ResourceKey="StatusErrorBrush" />
       <!-- One chrome colour: the window header row, every panel title bar (and the tab strip drawn on it), the dock
            strips and a floated panel's own title bar. One step below the darkest surface, so chrome never borrows the
            sidebar's or the card's grey. -->
@@ -249,6 +270,7 @@
       <SolidColorBrush x:Key="BrandInteractiveBrush" Color="#26C6C1" />
       <SolidColorBrush x:Key="BrandActionBrush" Color="#26C6C1" />
       <SolidColorBrush x:Key="BrandHoverBrush" Color="#3CD4CF" />
+      <SolidColorBrush x:Key="BrandPressedBrush" Color="#1E9E9B" />
       <SolidColorBrush x:Key="BrandSoftBrush" Color="#81D8D0" />
       <SolidColorBrush x:Key="OnBrandSoftBrush" Color="#072625" />
       <SolidColorBrush x:Key="BrandTintBrush" Color="#0D3F3E" />
@@ -257,6 +279,7 @@
       <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#181E20" />
       <SolidColorBrush x:Key="CardBackgroundBrush" Color="#1C2224" />
       <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#242C2E" />
+      <SolidColorBrush x:Key="PanelBandBrush" Color="#121A1B" />
       <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#293235" />
       <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#193332" />
       <!-- The one surface that goes the other way in dark: an input sits below the card it lives on. -->
@@ -281,6 +304,17 @@
 
       <SolidColorBrush x:Key="BorderBrush" Color="#3A4447" />
       <SolidColorBrush x:Key="BorderStrongBrush" Color="#465256" />
+
+      <StaticResource x:Key="TextControlBorderBrush" ResourceKey="BorderBrush" />
+      <StaticResource x:Key="TextControlBorderBrushPointerOver" ResourceKey="BorderStrongBrush" />
+      <StaticResource x:Key="TextControlBorderBrushFocused" ResourceKey="BrandActionBrush" />
+      <StaticResource x:Key="TextControlBorderBrushDisabled" ResourceKey="BorderBrush" />
+      <StaticResource x:Key="ComboBoxBorderBrush" ResourceKey="BorderBrush" />
+      <StaticResource x:Key="ComboBoxBorderBrushPointerOver" ResourceKey="BorderStrongBrush" />
+      <StaticResource x:Key="ComboBoxBorderBrushPressed" ResourceKey="BorderStrongBrush" />
+      <StaticResource x:Key="ComboBoxBorderBrushDisabled" ResourceKey="BorderBrush" />
+      <StaticResource x:Key="ComboBoxBackgroundBorderBrushFocused" ResourceKey="BrandActionBrush" />
+      <StaticResource x:Key="SystemControlErrorTextForegroundBrush" ResourceKey="StatusErrorBrush" />
       <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#0D1213" />
       <SolidColorBrush x:Key="CountBadgeBrush" Color="#2C3538" />
       <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#556468" />

@@ -174,16 +174,9 @@
                   SizeChanged="OnInstrumentStripSizeChanged">
             <Grid ColumnDefinitions="Auto,*,Auto">
               <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <!-- Only the git markers: no status dot, no path and no branch - the project tree already carries the
-                     session, its state and the branch it runs on, so a chip for any of them repeated a value the user
-                     already sees twice. -->
-                <StackPanel x:Name="StripGit" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <TextBlock Classes="instrument-meta"
-                             Text="{Binding Instruments.AheadBehindText}"
-                             IsVisible="{Binding Instruments.HasAheadBehind}"
-                             AutomationProperties.AutomationId="strip-ahead-behind" />
-                </StackPanel>
-
+                <!-- No status dot, no path and no branch: the project tree already carries the session, its state and
+                     the branch it runs on, so a chip for any of them repeated a value the user already sees twice. The
+                     ahead/behind pair moved to the right group, next to the readings it belongs with. -->
                 <!-- The resource button: a plain button that opens the resource window. A dot and the number of running
                      automation agents appear beside it while any runs (green), or a bare red dot when an MCP server failed. -->
                 <Button x:Name="StripResources"
@@ -221,7 +214,7 @@
                 <!-- The accent marks the open area, not the collapsed one: green on this strip elsewhere means "live", so an
                      accented chip while the region is hidden read as its opposite. Collapsed is the plain resting state. -->
                 <Button Classes="instrument-chip"
-                        Classes.active="{Binding !SubAgentsCollapsed}"
+                        Classes.active="{Binding SubAgentRegionOpen}"
                         Command="{Binding ToggleSubAgentsCommand}"
                         IsVisible="{Binding HasSubAgentActivity}"
                         ToolTip.Tip="{Binding SubAgentToggleTooltip}"
@@ -279,13 +272,11 @@
                   </StackPanel>
                   <Button.Flyout>
                     <Flyout Placement="BottomEdgeAlignedRight">
+                      <!-- The flyout presenter already draws the popup card (white, 1 px divider border, button radius):
+                           this border only carries the panel's own padding and width. -->
                       <Border MinWidth="240"
                               MaxWidth="320"
                               Padding="12,10"
-                              CornerRadius="{StaticResource RadiusMd}"
-                              Background="{DynamicResource CardBackgroundBrush}"
-                              BorderBrush="{DynamicResource BorderStrongBrush}"
-                              BorderThickness="1"
                               AutomationProperties.AutomationId="strip-usage-summary-panel">
                         <StackPanel Spacing="6">
                           <TextBlock Classes="h2" Text="{Binding Instruments.UsageSummaryTitle}" />
@@ -320,6 +311,14 @@
                     </Flyout>
                   </Button.Flyout>
                 </Button>
+                <!-- The git markers ride with the context readings: the same row answers "how far from the remote" and
+                     "how far through the window", and both print next to the usage chip they qualify. -->
+                <StackPanel x:Name="StripGit" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <TextBlock Classes="instrument-meta"
+                             Text="{Binding Instruments.AheadBehindText}"
+                             IsVisible="{Binding Instruments.HasAheadBehind}"
+                             AutomationProperties.AutomationId="strip-ahead-behind" />
+                </StackPanel>
                 <TextBlock Classes="instrument-meta"
                            VerticalAlignment="Center"
                            Text="{Binding Instruments.CacheReadText}" />

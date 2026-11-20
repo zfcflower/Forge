@@ -104,6 +104,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>The root agent is rebuilt for the next turn, so its accumulated usage starts again from zero.</summary>
     private bool rootRebuilt;
     private bool subAgentsCollapsed;
+    private bool subAgentRegionOpen;
     private CancellationTokenSource? turn;
     private int turnNumber;
 
@@ -636,7 +637,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         get => subAgentsCollapsed;
         set
         {
-            if (SetAndNotify(ref subAgentsCollapsed, value, nameof(SubAgentsVisible)))
+            if (Set(ref subAgentsCollapsed, value))
             {
                 SubAgentsChanged?.Invoke();
             }
@@ -645,8 +646,16 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     public bool HasSubAgents => subAgents.Count > 0;
 
-    /// <summary>True while the region has something to show: a live sub-agent or a finished one in the dropdown.</summary>
-    public bool SubAgentsVisible => (subAgents.Count > 0 || finished.Count > 0) && !subAgentsCollapsed;
+    /// <summary>
+    /// Whether the workbench's bottom group is showing its body for this session. The shell mirrors it from the layout, which
+    /// folds a group with nothing docked on its own; the composer's chip paints its accent from here, so it never claims an
+    /// open area the user cannot see, and <see cref="SubAgentsCollapsed"/> stays this session's own wish.
+    /// </summary>
+    public bool SubAgentRegionOpen
+    {
+        get => subAgentRegionOpen;
+        internal set => Set(ref subAgentRegionOpen, value);
+    }
 
     /// <summary>Anything to collapse or reopen: a live sub-agent or a finished one in the dropdown.</summary>
     public bool HasSubAgentActivity => subAgents.Count > 0 || finished.Count > 0;
@@ -800,7 +809,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             SyncFinishedMenu();
 
             OnPropertyChanged(nameof(HasSubAgents));
-            OnPropertyChanged(nameof(SubAgentsVisible));
             OnPropertyChanged(nameof(HasSubAgentActivity));
             RaiseSubAgentCounters();
 
@@ -2460,7 +2468,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         subAgents.Add(agent);
         DrainEarlyDeltas(agent);
         OnPropertyChanged(nameof(HasSubAgents));
-        OnPropertyChanged(nameof(SubAgentsVisible));
         OnPropertyChanged(nameof(HasSubAgentActivity));
         RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
@@ -2516,7 +2523,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         finished.Add(agent);
         SyncFinishedMenu();
         OnPropertyChanged(nameof(HasSubAgents));
-        OnPropertyChanged(nameof(SubAgentsVisible));
         OnPropertyChanged(nameof(HasSubAgentActivity));
         RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
@@ -2668,6 +2674,13 @@ internal sealed class SubAgentViewModel : NotifyingObject
     public string? ParentAgentId { get; }
 
     /// <summary>
+    /// True for an agent at the first level: one the session's own agent spawned. Its parent link is the main agent's
+    /// <c>"root"</c> (or absent, for a child replayed from a store row without a parent), which is what tells the first
+    /// level apart from an agent hanging under another one - the two levels wear different icons.
+    /// </summary>
+    public bool IsFirstLevel => ParentAgentId is not { Length: > 0 } || string.Equals(ParentAgentId, "root", StringComparison.Ordinal);
+
+    /// <summary>
     /// True for a child an automation started outside any turn (the CI chain's Scout, a prompt automation); false for one the
     /// session's own agent spawned. The resource window lists only the former, because the latter already have a tab and the
     /// sub-agent strip.
@@ -2742,6 +2755,9 @@ internal sealed class SubAgentViewModel : NotifyingObject
             {
                 OnPropertyChanged(nameof(IsFinished));
                 OnPropertyChanged(nameof(IsLive));
+                OnPropertyChanged(nameof(EndedCompleted));
+                OnPropertyChanged(nameof(EndedFailed));
+                OnPropertyChanged(nameof(EndedStopped));
                 OnPropertyChanged(nameof(CanStop));
                 StopCommand.NotifyCanExecuteChanged();
             }
@@ -2760,6 +2776,16 @@ internal sealed class SubAgentViewModel : NotifyingObject
         };
 
     public bool IsFinished => outcomeUnknown || status is SubAgentStatus.Completed or SubAgentStatus.Stopped or SubAgentStatus.Failed;
+
+    /// <summary>
+    /// How the run ended, one flag per colour the finished menu's dot wears. The dot carries the state and the words move to
+    /// the row's tooltip, so a list of finished agents reads at a glance instead of spelling the same status out on every row.
+    /// </summary>
+    public bool EndedCompleted => !outcomeUnknown && status == SubAgentStatus.Completed;
+
+    public bool EndedFailed => !outcomeUnknown && status == SubAgentStatus.Failed;
+
+    public bool EndedStopped => !outcomeUnknown && status == SubAgentStatus.Stopped;
 
     /// <summary>
     /// When the run acquired a run slot (Core's <c>AgentSubAgentRunning.At</c>); <see cref="DateTimeOffset.MinValue"/> while it
@@ -2931,6 +2957,9 @@ internal sealed class SubAgentViewModel : NotifyingObject
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(IsFinished));
         OnPropertyChanged(nameof(IsLive));
+        OnPropertyChanged(nameof(EndedCompleted));
+        OnPropertyChanged(nameof(EndedFailed));
+        OnPropertyChanged(nameof(EndedStopped));
         OnPropertyChanged(nameof(ElapsedText));
         StopCommand.NotifyCanExecuteChanged();
     }
@@ -2966,7 +2995,6 @@ internal sealed class SubAgentViewModel : NotifyingObject
 /// </summary>
 internal sealed class FinishedSubAgentsViewModel : ObservableObject
 {
-    private SubAgentViewModel? selected;
     private Action<SubAgentViewModel>? open;
 
     public ObservableCollection<SubAgentViewModel> Items { get; } = [];
@@ -2983,29 +3011,9 @@ internal sealed class FinishedSubAgentsViewModel : ObservableObject
         OnPropertyChanged(nameof(Hint));
     }
 
-    public SubAgentViewModel? Selected
-    {
-        get => selected;
-        set
-        {
-            if (Set(ref selected, value) && value is not null)
-            {
-                open?.Invoke(value);
-                Dispatcher.UIThread.Post(() =>
-                {
-                    if (Set(ref selected, null, nameof(Selected)))
-                    {
-                        OnPropertyChanged(nameof(HasSelection));
-                    }
-                });
-            }
-
-            OnPropertyChanged(nameof(HasSelection));
-        }
-    }
-
-    /// <summary>Resets after opening, so the same entry can be chosen again.</summary>
-    public bool HasSelection => selected is not null;
+    /// <summary>Opens one item's read-only tab. The rows are a menu, so nothing stays selected: picking the same entry
+    /// again works without a reset step.</summary>
+    public void Open(SubAgentViewModel item) => open?.Invoke(item);
 
     /// <summary>Also enables the title-bar button: an empty menu has nothing to list.</summary>
     public bool HasItems => Items.Count > 0;
@@ -3022,6 +3030,5 @@ internal sealed class FinishedSubAgentsViewModel : ObservableObject
 
         OnPropertyChanged(nameof(HasItems));
         OnPropertyChanged(nameof(Title));
-        Selected = null;
     }
 }

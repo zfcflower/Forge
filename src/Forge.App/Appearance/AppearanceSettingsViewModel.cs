@@ -43,6 +43,9 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
         dispatcher = Application.Current is { } app && app.CheckAccess() ? app.Dispatcher : null;
         Ui = new FontGroupViewModel(preferences, FontGroupKind.Ui);
         Code = new FontGroupViewModel(preferences, FontGroupKind.Code);
+        ThemeSystemCommand = new RelayCommand(() => SetTheme(ThemeMode.System));
+        ThemeLightCommand = new RelayCommand(() => SetTheme(ThemeMode.Light));
+        ThemeDarkCommand = new RelayCommand(() => SetTheme(ThemeMode.Dark));
 
         preferences.PropertyChanged += OnPreferencesChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
@@ -55,6 +58,38 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
     public FontGroupViewModel Ui { get; }
 
     public FontGroupViewModel Code { get; }
+
+    /// <summary>One command per segment: the view highlights a segment from the flags below, never by comparing an enum.</summary>
+    public RelayCommand ThemeSystemCommand { get; }
+
+    public RelayCommand ThemeLightCommand { get; }
+
+    public RelayCommand ThemeDarkCommand { get; }
+
+    public bool IsThemeSystem => preferences.Theme == ThemeMode.System;
+
+    public bool IsThemeLight => preferences.Theme == ThemeMode.Light;
+
+    public bool IsThemeDark => preferences.Theme == ThemeMode.Dark;
+
+    /// <summary>
+    /// Writes the chosen variant. The <see cref="AppearanceApplier"/> that already listens to the preferences pushes it onto
+    /// the application, so the switch needs no apply step of its own here.
+    /// </summary>
+    private void SetTheme(ThemeMode mode)
+    {
+        if (preferences.Theme != mode)
+        {
+            preferences.Theme = mode;
+        }
+    }
+
+    private void RaiseTheme()
+    {
+        OnPropertyChanged(nameof(IsThemeSystem));
+        OnPropertyChanged(nameof(IsThemeLight));
+        OnPropertyChanged(nameof(IsThemeDark));
+    }
 
     /// <summary>
     /// Whether looping animations are off. Bound straight to the preference: the <see cref="AppearanceApplier"/> that already
@@ -159,6 +194,9 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
                 break;
             case nameof(AppPreferences.ReduceMotion):
                 OnPropertyChanged(nameof(ReduceMotion));
+                break;
+            case nameof(AppPreferences.Theme):
+                RaiseTheme();
                 break;
         }
     }

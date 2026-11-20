@@ -13,12 +13,25 @@ using ZLogger;
 
 namespace Forge.App.Preferences;
 
-/// <summary>UI language choice; <see cref="System"/> follows the OS UI culture (Chinese when it is zh-*, otherwise English).</summary>
+/// <summary>
+/// UI language choice; <see cref="System"/> follows the OS UI culture (Chinese when it is zh-*, otherwise English).
+/// </summary>
 internal enum UiLanguage
 {
     System,
     Chinese,
     English,
+}
+
+/// <summary>
+/// Light/dark choice of the whole window; <see cref="System"/> follows the OS theme (Avalonia's
+/// <c>ThemeVariant.Default</c>), the other two pin it.
+/// </summary>
+internal enum ThemeMode
+{
+    System,
+    Light,
+    Dark,
 }
 
 /// <summary>
@@ -47,9 +60,14 @@ internal sealed class AppPreferences : ObservableObject
     /// </summary>
     public const bool DefaultReduceMotion = false;
 
+    /// <summary>
+    /// Which light/dark variant the window wears. The default follows the OS, so a fresh install matches the rest of the
+    /// desktop; pinning one of the two is a display choice like the font pair.
+    /// </summary>
+    public const ThemeMode DefaultTheme = ThemeMode.System;
+
     /// <summary>Lower bound of the terminal scrollback; below it the ring is too short to scroll a build log.</summary>
     public const int MinScrollbackLines = 1000;
-
     /// <summary>Upper bound of the terminal scrollback; the emulator caps there too.</summary>
     public const int MaxScrollbackLines = 100000;
 
@@ -229,6 +247,7 @@ internal sealed class AppPreferences : ObservableObject
     private string codeFontFamily = DefaultCodeFontFamily;
     private double codeFontSize = DefaultCodeFontSize;
     private bool reduceMotion = DefaultReduceMotion;
+    private ThemeMode theme = DefaultTheme;
     private UiLanguage language = UiLanguage.System;
     private string terminalShell = string.Empty;
     private string terminalArguments = string.Empty;
@@ -321,6 +340,9 @@ internal sealed class AppPreferences : ObservableObject
 
     /// <summary>Whether looping animations are off; see <see cref="DefaultReduceMotion"/>.</summary>
     public bool ReduceMotion { get => reduceMotion; set => Set(ref reduceMotion, value); }
+
+    /// <summary>Light/dark variant of the whole app; see <see cref="DefaultTheme"/>.</summary>
+    public ThemeMode Theme { get => theme; set => Set(ref theme, value); }
 
     public UiLanguage Language { get => language; set => Set(ref language, value); }
 
@@ -875,6 +897,7 @@ internal sealed class AppPreferences : ObservableObject
         codeFontFamily = Family(section.CodeFontFamily, DefaultCodeFontFamily);
         codeFontSize = Size(section.CodeFontSize, DefaultCodeFontSize);
         reduceMotion = section.ReduceMotion ?? DefaultReduceMotion;
+        theme = ParseTheme(section.Theme);
         language = loadedLanguage;
         terminalShell = (section.TerminalShell ?? string.Empty).Trim();
         terminalArguments = section.TerminalArguments ?? string.Empty;
@@ -1038,6 +1061,7 @@ internal sealed class AppPreferences : ObservableObject
             CodeFontFamily = codeFontFamily,
             CodeFontSize = codeFontSize,
             ReduceMotion = reduceMotion,
+            Theme = ThemeToken(theme),
             Language = LanguageToken(language),
             TerminalShell = terminalShell,
             TerminalArguments = terminalArguments,
@@ -1188,6 +1212,21 @@ internal sealed class AppPreferences : ObservableObject
     {
         UiLanguage.Chinese => "chinese",
         UiLanguage.English => "english",
+        _ => "system",
+    };
+
+    /// <summary>Reads a <c>theme</c> token; empty or unknown text means <see cref="ThemeMode.System"/>.</summary>
+    internal static ThemeMode ParseTheme(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "light" => ThemeMode.Light,
+        "dark" => ThemeMode.Dark,
+        _ => ThemeMode.System,
+    };
+
+    private static string ThemeToken(ThemeMode theme) => theme switch
+    {
+        ThemeMode.Light => "light",
+        ThemeMode.Dark => "dark",
         _ => "system",
     };
 
@@ -1352,6 +1391,10 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("reduceMotion")]
     public bool? ReduceMotion { get; set; }
+
+    /// <summary><c>system</c> | <c>light</c> | <c>dark</c>; absent means <c>system</c>.</summary>
+    [JsonPropertyName("theme")]
+    public string? Theme { get; set; }
 
     [JsonPropertyName("language")]
     public string? Language { get; set; }

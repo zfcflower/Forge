@@ -171,7 +171,7 @@ internal sealed class FloatingPanelWindow : Window
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap,
         };
-        WorkbenchResources.Link(label, TextBlock.FontSizeProperty, "FontSizeMd");
+        WorkbenchResources.Link(label, TextBlock.FontSizeProperty, "FontSizeBase");
         WorkbenchResources.Link(label, TextBlock.ForegroundProperty, "TextSecondaryBrush");
 
         var dock = new PanelIconButton

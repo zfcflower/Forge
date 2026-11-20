@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Forge.App.Preferences;
 using Forge.App.ViewModels;
 using Forge.App.Logging;
@@ -29,6 +31,7 @@ internal sealed class AppearanceApplier : IDisposable
 
     private readonly AppPreferences preferences;
     private readonly IResourceDictionary target;
+    private readonly Application? application;
     private readonly PropertyChangedEventHandler preferenceChanged;
     private ResourceDictionary tokens = new();
     private Applied? applied;
@@ -37,10 +40,12 @@ internal sealed class AppearanceApplier : IDisposable
     private bool disposed;
 
     /// <summary>Subscribes to <paramref name="preferences"/> and applies the current values immediately.</summary>
-    public AppearanceApplier(AppPreferences preferences, IResourceDictionary target)
+    /// <param name="application">The app whose light/dark variant follows the theme preference; null in a host without one.</param>
+    public AppearanceApplier(AppPreferences preferences, IResourceDictionary target, Application? application = null)
     {
         this.preferences = preferences ?? throw new ArgumentNullException(nameof(preferences));
         this.target = target ?? throw new ArgumentNullException(nameof(target));
+        this.application = application;
         preferenceChanged = OnPreferenceChanged;
         preferences.PropertyChanged += preferenceChanged;
         Apply();
@@ -68,6 +73,22 @@ internal sealed class AppearanceApplier : IDisposable
         // Not a resource: the animation gate is read by live controls (the tree rows and the chat timeline's gutters), which
         // subscribe to TreeMotion.Changed; setting it before the early return keeps the switch live even when no font changed.
         TreeMotion.ReducedMotion = preferences.ReduceMotion;
+
+        // The window's variant is a property of the app, not a resource: Default means "whatever the OS says", so the three
+        // options are the two pinned variants around the system-following default. Also set before the early return.
+        if (application is { } app)
+        {
+            var variant = preferences.Theme switch
+            {
+                ThemeMode.Light => ThemeVariant.Light,
+                ThemeMode.Dark => ThemeVariant.Dark,
+                _ => ThemeVariant.Default,
+            };
+            if (!Equals(app.RequestedThemeVariant, variant))
+            {
+                app.RequestedThemeVariant = variant;
+            }
+        }
 
         // Compare the resolved values, not the raw text: a family that failed to parse resolved to the previous one,
         // so re-reporting the same broken text is not a change.
@@ -208,7 +229,8 @@ internal sealed class AppearanceApplier : IDisposable
         || string.Equals(name, nameof(AppPreferences.UiFontSize), StringComparison.Ordinal)
         || string.Equals(name, nameof(AppPreferences.CodeFontFamily), StringComparison.Ordinal)
         || string.Equals(name, nameof(AppPreferences.CodeFontSize), StringComparison.Ordinal)
-        || string.Equals(name, nameof(AppPreferences.ReduceMotion), StringComparison.Ordinal);
+        || string.Equals(name, nameof(AppPreferences.ReduceMotion), StringComparison.Ordinal)
+        || string.Equals(name, nameof(AppPreferences.Theme), StringComparison.Ordinal);
 
     /// <summary>A resolved chain: the text it came from (the change key) and the family it produced.</summary>
     private readonly record struct ResolvedFamily(string Text, FontFamily Value);

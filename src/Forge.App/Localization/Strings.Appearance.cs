@@ -22,6 +22,12 @@ internal static class AppearanceStrings
     public const string ReduceMotion = "appearance.reduceMotion";
     public const string ReduceMotionHint = "appearance.reduceMotionHint";
 
+    public const string ThemeGroupTitle = "appearance.theme.title";
+    public const string ThemeModeLabel = "appearance.theme.mode";
+    public const string ThemeSystem = "appearance.theme.system";
+    public const string ThemeLight = "appearance.theme.light";
+    public const string ThemeDark = "appearance.theme.dark";
+
     [ModuleInitializer]
     internal static void Initialize() => Register();
 
@@ -41,11 +47,17 @@ internal static class AppearanceStrings
         Loc.Register(UiPreview, "界面文字预览 The quick brown fox", "Interface preview — The quick brown fox");
         Loc.Register(CodePreview, "代码预览 0O1lI {}[] => != 中文", "Code preview 0O1lI {}[] => !=");
 
-        Loc.Register(MotionGroupTitle, "动效", "Motion");
-        Loc.Register(ReduceMotion, "减少动画", "Reduce animations");
+        Loc.Register(MotionGroupTitle, "动效", "Motion");        Loc.Register(ReduceMotion, "减少动画", "Reduce animations");
         Loc.Register(
             ReduceMotionHint,
             "关闭运行中的 Agent 与聊天时间轴节点的循环动画;颜色与图标状态不变。",
             "Stops the looping animations of a running agent and of a running timeline node; colours and icon states stay.");
+
+        // The appearance page wears the whole window's light/dark variant, so its own section has to be readable in both.
+        Loc.Register(ThemeGroupTitle, "主题", "Theme");
+        Loc.Register(ThemeModeLabel, "主题模式", "Theme mode");
+        Loc.Register(ThemeSystem, "系统", "System");
+        Loc.Register(ThemeLight, "浅色", "Light");
+        Loc.Register(ThemeDark, "深色", "Dark");
     }
 }

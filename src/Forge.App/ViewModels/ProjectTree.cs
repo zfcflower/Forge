@@ -182,6 +182,24 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         set => Set(ref icon, value);
     }
 
+    /// <summary>
+    /// Both weights of the row's glyph: the outlined one at rest and the filled twin while the row is the one in front
+    /// (the active session, or the agent whose tab the bottom group shows). A row without a filled twin keeps the outlined
+    /// glyph in both states - only the conversation shapes have one.
+    /// </summary>
+    public void SetGlyphs(Geometry resting, Geometry? active)
+    {
+        glyph = resting;
+        glyphActive = active ?? resting;
+        RefreshGlyph();
+    }
+
+    /// <summary>Repaints the glyph after the row became, or stopped being, the active one.</summary>
+    public void RefreshGlyph() => Icon = IsActiveRow ? glyphActive : glyph;
+
+    private Geometry glyph = TreeIcons.Session;
+    private Geometry glyphActive = TreeIcons.Session;
+
     /// <summary>Indent step count; agent rows indent by level only and get no guide lines.</summary>
     public int Depth { get; private set; }
 
@@ -198,6 +216,13 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
 
     /// <summary>True for a workspace row, the row that names its branch (the main checkout included).</summary>
     public bool IsWorktree => Kind == TreeNodeKind.Worktree;
+
+    /// <summary>
+    /// False for the rows that name a branch (a workspace row, the root checkout included - both are worktree rows): their
+    /// menu is flat, with no bold default entry, because its first group is already ordered by the one entry the trailing
+    /// "+" runs.
+    /// </summary>
+    public bool BoldsMenuDefault => Kind != TreeNodeKind.Worktree;
 
     /// <summary>
     /// True for the rows that head a subtree rather than name something you can be "on": a project and its workspaces.
@@ -437,9 +462,6 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
 
     public bool ShowsStatusCheck => HasStatusGlyph && agentState == AgentState.Completed;
 
-    /// <summary>The neutral dot: an agent whose state the transcript did not state, drawn like a queued one but muted.</summary>
-    public bool IsAgentEndedGlyph => agentState == AgentState.Ended;
-
     /// <summary>The classified state of an agent row, derived from <see cref="StatusText"/>; neutral for other rows.</summary>
     public AgentState AgentState
     {
@@ -459,7 +481,6 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
             OnPropertyChanged(nameof(IsAgentFailed));
             OnPropertyChanged(nameof(IsAgentStopped));
             OnPropertyChanged(nameof(IsAgentRunningAnimated));
-            OnPropertyChanged(nameof(IsAgentEndedGlyph));
             OnPropertyChanged(nameof(ShowsStatusDot));
             OnPropertyChanged(nameof(ShowsStatusCheck));
         }
@@ -1152,8 +1173,12 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         activeSessionId = sessionId ?? string.Empty;
         foreach (var node in Enumerate(Sections))
         {
-            node.IsActiveSession = node.Kind == TreeNodeKind.Session
+            node.IsActiveSession = node.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession
                 && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
+            if (node.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession)
+            {
+                node.RefreshGlyph();
+            }
         }
 
         ActiveRowChanged?.Invoke(this, EventArgs.Empty);
@@ -1167,6 +1192,10 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         {
             node.IsActiveAgent = node.IsAgent
                 && string.Equals(node.AgentId, activeAgentId, StringComparison.Ordinal);
+            if (node.IsAgent)
+            {
+                node.RefreshGlyph();
+            }
         }
 
         ActiveRowChanged?.Invoke(this, EventArgs.Empty);
@@ -2003,6 +2032,20 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         _ => TreeIcons.Session,
     };
 
+    /// <summary>
+    /// The filled twin a row swaps in while it is the one in front - the active session, the active agent session, or the
+    /// agent whose tab the bottom group shows. It is the same filled/outline pair its tab wears on the panel title bar, so
+    /// tree and title bar agree on what is in front; a kind without a filled twin sends null and keeps its outline.
+    /// </summary>
+    private static Geometry? ActiveIconOf(TreeNodePlan plan) => plan.Kind switch
+    {
+        TreeNodeKind.Session => TreeIcons.BubbleFilled,
+        TreeNodeKind.AgentSession => TreeIcons.CommentMentionFilled,
+        TreeNodeKind.MainAgent => TreeIcons.ChatArrowBackDownFilled,
+        TreeNodeKind.SubAgent => plan.AgentLevel >= 2 ? TreeIcons.ChatLockFilled : TreeIcons.ChatArrowBackDownFilled,
+        _ => null,
+    };
+
     private void Apply(TreeNodeViewModel node, TreeNodePlan plan)
     {
         node.Update(plan.Title, plan.Subtitle, plan.IsRunning);
@@ -2022,7 +2065,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         node.IsActiveSession = plan.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession
             && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
         node.IsActiveAgent = node.IsAgent && string.Equals(plan.AgentId, activeAgentId, StringComparison.Ordinal);
-        node.Icon = IconOf(plan);
+        node.SetGlyphs(IconOf(plan), ActiveIconOf(plan));
         // A project's trailing button starts a worktree on a new branch (Fluent "Organization Add"); every other row's starts a
         // conversation ("Chat Add"). Both are drawn 2 px larger than the row's own micro marks so the trailing rail of the tree
         // reads at the same weight as the names, and the glyph and the tooltip name which action each button takes.

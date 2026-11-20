@@ -208,8 +208,18 @@ internal sealed class ComposerModelOption : ObservableObject, IComposerModelRow
     public bool IsPinned
     {
         get => isPinned;
-        set => Set(ref isPinned, value);
+        set
+        {
+            if (Set(ref isPinned, value))
+                OnPropertyChanged(nameof(Label));
+        }
     }
+
+    /// <summary>
+    /// What the row shows as its title. The pinned section flattens the provider groups away, so its rows carry the provider
+    /// in the name ("Pi/claude-sonnet-4-5"); a pinned model no provider lists any more has no name to prefix and stays bare.
+    /// </summary>
+    public string Label => IsPinned && ProviderName.Length > 0 ? $"{ProviderName}/{Name}" : Name;
 
     public bool IsSelected
     {

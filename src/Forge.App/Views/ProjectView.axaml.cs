@@ -226,7 +226,7 @@ public partial class ProjectView : UserControl
         }
 
         rowMenu ??= new ContextMenu();
-        rowMenu.ItemsSource = TreeMenuControls.Build(items);
+        rowMenu.ItemsSource = TreeMenuControls.Build(items, node.BoldsMenuDefault);
         rowMenu.Open(row);
     }
 
@@ -247,8 +247,11 @@ public partial class ProjectView : UserControl
         var items = node.PlusItems();
         if (items.Count > 0)
         {
-            new MenuFlyout { ItemsSource = TreeMenuControls.Build(items), Placement = PlacementMode.BottomEdgeAlignedRight }
-                .ShowAt(button);
+            new MenuFlyout
+            {
+                ItemsSource = TreeMenuControls.Build(items, node.BoldsMenuDefault),
+                Placement = PlacementMode.BottomEdgeAlignedRight,
+            }.ShowAt(button);
         }
     }
 

@@ -48,12 +48,17 @@
       <Setter Property="Padding" Value="4" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
-    <!-- The picker rows (PickerRow): a plain decorator, so a popup that attaches dozens of them stays cheap. -->
+    <!-- The picker rows (PickerRow): a plain decorator, so a popup that attaches dozens of them stays cheap. The transparent
+         fill is what makes the row hit-testable; it lives here rather than in the control, because a local value would
+         outrank the `:pointerover` fill below and no picker row would ever highlight. -->
     <Style Selector="Border.picker-row">
+      <Setter Property="Background" Value="Transparent" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
-      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="Padding" Value="8,6" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
     </Style>
+    <!-- One hover fill for every row of every flyout menu (model rows, provider groups, the agent and orchestration
+         pickers): `SurfaceHoverBrush`, the one tint a menu row takes under the pointer. -->
     <Style Selector="Border.picker-row:pointerover">
       <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
@@ -65,34 +70,58 @@
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
-    <!-- Rows of the model picker: the pinned caption, one header per provider and the models under it. A model row carries the
-         list's one light rule at its bottom, and hovering paints the whole row, pin included, so the hit target and the
-         highlight are the same rectangle. -->
-    <Style Selector="Border.model-row">
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-      <Setter Property="BorderThickness" Value="0,0,0,1" />
-    </Style>
+    <!-- Rows of the model picker: the pinned caption, one header per provider and the models under it. A model row carries
+         the list's one light rule at its bottom - a rectangle inset to the name's edge (26 px = the row padding + the check
+         column), not a border, because a border cannot start mid-row. Hovering paints the whole row, pin included, so the
+         hit target and the highlight are the same rectangle. -->
     <Style Selector="Border.model-row:pointerover">
       <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
+    <Style Selector="Rectangle.model-row-rule">
+      <Setter Property="Fill" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Height" Value="1" />
+      <Setter Property="VerticalAlignment" Value="Bottom" />
+      <Setter Property="Margin" Value="26,0,0,0" />
+    </Style>
+    <!-- The model id itself: one step below the provider headers, so the name reads as an entry, not a heading. -->
+    <Style Selector="TextBlock.model-name">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    </Style>
+    <!-- The provider header is a band: the same grey as a panel's scope row, at the body size, with 2 px more headroom than a
+         model row on each side - the group names the block below it instead of looking like one more entry. Declared after
+         the generic row hover, so its band and the hover tint above it need their own, later rules. -->
     <Style Selector="Border.picker-row.model-group">
-      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Padding" Value="8,8" />
       <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Background" Value="{DynamicResource PanelBandBrush}" />
+      <!-- 1 px of card below each band: collapsed groups would otherwise touch and read as one grey block. -->
+      <Setter Property="Margin" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.picker-row.model-group:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
+    <Style Selector="Border.picker-row.model-group:focus-visible">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
     <Style Selector="TextBlock.model-group-name">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
       <Setter Property="FontWeight" Value="Medium" />
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
     </Style>
-    <!-- The pinned section is a caption, not a group to open: smaller, quieter, no chevron. -->
+    <!-- The pinned section is a caption, not a group to open: no chevron, no count - but at body size and bold, so the
+         word that names the block reads on its own instead of hiding under the provider headers. -->
     <Style Selector="Border.picker-row.model-group.section">
       <Setter Property="Padding" Value="8,4" />
       <Setter Property="Cursor" Value="Arrow" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.picker-row.model-group.section:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
     <Style Selector="Border.picker-row.model-group.section TextBlock.model-group-name">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
-      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+      <Setter Property="FontWeight" Value="Bold" />
       <Setter Property="LetterSpacing" Value="0.6" />
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     </Style>

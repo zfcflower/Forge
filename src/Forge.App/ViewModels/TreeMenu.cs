@@ -240,7 +240,8 @@ internal static class TreeMenu
         return entries;
     }
 
-    /// <summary>5.3: new session / replace X / parallel fork, by the active session's state.</summary>
+    /// <summary>5.3: new session / replace X / parallel fork, by the active session's state. The agent session leads: it is the
+    /// one entry that never needs the current session to be idle, so it stays usable while the rest of the group waits.</summary>
     private static List<TreeMenuEntry> First(TreeRowState row)
     {
         var block = row.DirectoryMissing ? LifecycleStrings.DirectoryMissing : row.StaleReason ?? WorkspaceBlock(row);
@@ -249,9 +250,9 @@ internal static class TreeMenu
         {
             return
             [
-                Gate(TreeMenuKey.NewSession, block, isDefault: true) with { Warning = warning },
                 // An agent session hangs under an active root session; without one there is nothing to attach it to.
                 Gate(TreeMenuKey.NewAgentSession, block ?? AgentSessionStrings.NoRoot),
+                Gate(TreeMenuKey.NewSession, block, isDefault: true) with { Warning = warning },
             ];
         }
 
@@ -259,10 +260,10 @@ internal static class TreeMenu
         var replaceReason = block ?? busy;
         var entries = new List<TreeMenuEntry>(3)
         {
-            Gate(TreeMenuKey.ReplaceSession, replaceReason, isDefault: true) with { Warning = warning },
             // The root is busy or not: an agent session queues for a run slot like any other child, so only a workspace that
             // cannot take a new session at all disables this one.
             Gate(TreeMenuKey.NewAgentSession, block),
+            Gate(TreeMenuKey.ReplaceSession, replaceReason, isDefault: true) with { Warning = warning },
         };
         if (row.InRepository)
         {

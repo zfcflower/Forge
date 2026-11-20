@@ -6,15 +6,75 @@
              x:DataType="appearance:AppearanceSettingsViewModel">
   <UserControl.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+    <!-- The theme switch is a segmented control: a quiet track holding three segments, the chosen one filled with the brand
+         tint and its label inked with the brand action colour. Only the track and the chosen segment carry a fill, so the
+         control reads as one choice rather than three buttons. -->
+    <Style Selector="Button.segment">
+      <Setter Property="MinHeight" Value="26" />
+      <Setter Property="Padding" Value="14,0" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.segment:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
+    <!-- Declared after the hover rule: the chosen segment keeps the brand tint under the pointer. -->
+    <Style Selector="Button.segment.selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
+    </Style>
+    <Style Selector="Button.segment.selected">
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
+    </Style>
   </UserControl.Styles>
   <StackPanel Spacing="{StaticResource Space4}">
+
+    <!-- Theme: the whole window's light/dark variant, pinned or following the OS. -->
+    <StackPanel Spacing="{StaticResource Space2}">
+      <TextBlock Classes="h2" FontSize="{DynamicResource FontSizeMd}" Text="{Binding [appearance.theme.title], Source={x:Static loc:Loc.Instance}}" />
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="label"
+                   VerticalAlignment="Center"
+                   Text="{Binding [appearance.theme.mode], Source={x:Static loc:Loc.Instance}}" />
+        <Border Grid.Column="1"
+                Background="{DynamicResource SurfaceSubtleBrush}"
+                CornerRadius="{StaticResource RadiusMd}"
+                Padding="2">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <Button Classes="segment"
+                    Classes.selected="{Binding IsThemeSystem}"
+                    Command="{Binding ThemeSystemCommand}"
+                    Content="{Binding [appearance.theme.system], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="appearance-theme-system"
+                    AutomationProperties.Name="{Binding [appearance.theme.system], Source={x:Static loc:Loc.Instance}}" />
+            <Button Classes="segment"
+                    Classes.selected="{Binding IsThemeLight}"
+                    Command="{Binding ThemeLightCommand}"
+                    Content="{Binding [appearance.theme.light], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="appearance-theme-light"
+                    AutomationProperties.Name="{Binding [appearance.theme.light], Source={x:Static loc:Loc.Instance}}" />
+            <Button Classes="segment"
+                    Classes.selected="{Binding IsThemeDark}"
+                    Command="{Binding ThemeDarkCommand}"
+                    Content="{Binding [appearance.theme.dark], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="appearance-theme-dark"
+                    AutomationProperties.Name="{Binding [appearance.theme.dark], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+        </Border>
+      </Grid>
+    </StackPanel>
 
     <!-- Interface font: the tree, tabs, chat and buttons. -->
     <StackPanel Spacing="{StaticResource Space2}">
       <TextBlock Classes="h2" FontSize="{DynamicResource FontSizeMd}" Text="{Binding Ui.Title}" />
 
       <StackPanel Spacing="2">
-        <TextBlock Classes="label" FontSize="{DynamicResource FontSizeXs}" Text="{Binding Ui.FamilyLabel}" />
+        <TextBlock Classes="label" Text="{Binding Ui.FamilyLabel}" />
         <AutoCompleteBox x:Name="UiFamilyBox"
                          ItemsSource="{Binding Ui.Families}"
                          FilterMode="Contains"
@@ -28,7 +88,6 @@
 
       <StackPanel Orientation="Horizontal" Spacing="{StaticResource Space2}">
         <TextBlock Classes="label"
-                   FontSize="{DynamicResource FontSizeXs}"
                    VerticalAlignment="Center"
                    Text="{Binding Ui.SizeLabel}" />
         <NumericUpDown Width="96"
@@ -61,7 +120,7 @@
       <TextBlock Classes="h2" FontSize="{DynamicResource FontSizeMd}" Text="{Binding Code.Title}" />
 
       <StackPanel Spacing="2">
-        <TextBlock Classes="label" FontSize="{DynamicResource FontSizeXs}" Text="{Binding Code.FamilyLabel}" />
+        <TextBlock Classes="label" Text="{Binding Code.FamilyLabel}" />
         <AutoCompleteBox x:Name="CodeFamilyBox"
                          ItemsSource="{Binding Code.Families}"
                          FilterMode="Contains"
@@ -75,7 +134,6 @@
 
       <StackPanel Orientation="Horizontal" Spacing="{StaticResource Space2}">
         <TextBlock Classes="label"
-                   FontSize="{DynamicResource FontSizeXs}"
                    VerticalAlignment="Center"
                    Text="{Binding Code.SizeLabel}" />
         <NumericUpDown Width="96"

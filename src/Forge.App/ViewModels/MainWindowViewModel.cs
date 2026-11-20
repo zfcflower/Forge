@@ -287,7 +287,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             path => ShowChangesAsync(path),
             lineCountsFactory: null,
             changeReview: Changes,
-            gitSync: GitSync);
+            gitSync: GitSync,
+            reveal: RevealAsync,
+            trash: (path, ct) => composition.Trash.MoveToTrashAsync(path, ct));
         Services.EditorFileOpener.Handler = path => OpenFile(path, newTab: false);
         Todos = new TodoListViewModel(composition.Todos, composition.TodoStepCommitter);
         Reviews = new ReviewPanelViewModel(reviews, path => ShowChangesAsync(path));
@@ -2328,6 +2330,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             OpenSubAgentTab(agent);
         }
+
+        // The chip reads the real thing, not the wish: a session whose sub-agents have all finished docks no tab, so the
+        // group folds to its title bar (its finished menu stays) and the chip rests until a tab lands again.
+        session.SubAgentRegionOpen = Workbench.IsBottomBodyOpen;
     }
 
     private void PruneSubAgentTabs(SessionWorkspaceViewModel? session, HashSet<string> live)
@@ -2468,10 +2474,21 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Workbench.BottomTabs.KeepsVisibleWhenEmpty = menu.Items.Count > 0;
 
     /// <summary>
-    /// The bottom group's own restore button minimizes it; the session keeps that state so it is not popped up again.
+    /// The bottom group's own restore button minimizes it; the session keeps that state so it is not popped up again. Its
+    /// body coming and going (a tab docks, the last one leaves) is mirrored too, for the composer's chip.
     /// </summary>
     private void OnWorkbenchPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(WorkbenchLayout.IsBottomBodyOpen))
+        {
+            if (activeSession is { } open)
+            {
+                open.SubAgentRegionOpen = Workbench.IsBottomBodyOpen;
+            }
+
+            return;
+        }
+
         if (e.PropertyName != nameof(WorkbenchLayout.IsBottomMinimized) || activeSession is not { } session)
         {
             // The restored layout announces its own state before any session is attached; that announcement is what the
