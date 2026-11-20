@@ -322,6 +322,40 @@ public sealed class SessionMessagingTests
     }
 
     [Fact]
+    public async Task A_root_that_left_active_refuses_delivery_and_drops_every_grant_of_its_tree()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var child = await harness.AddUserSessionAsync();
+        harness.Host.SessionMessaging.Grant(harness.Root.SessionId, child.Id, child.Title);
+        Assert.True(harness.Host.SessionMessaging.Authorizations.IsGranted(harness.Root.SessionId, child.Id));
+        Assert.True(await ((ISessionCatalog)harness.Store).SetStatusAsync(
+            harness.Root.SessionId,
+            SessionStatus.Archived,
+            CancellationToken.None));
+
+        var refused = await SendAsync(harness, RootContext(harness), "Worker");
+
+        // A root that left Active authorizes nothing: the failure says so, the pair is gone and no turn was started for it.
+        Assert.True(refused.IsError);
+        Assert.Contains("The root session is no longer active", refused.Text);
+        Assert.False(harness.Host.SessionMessaging.Authorizations.IsGranted(harness.Root.SessionId, child.Id));
+        Assert.Empty(harness.Endpoint.Requests);
+        Assert.Equal(0, harness.Provider.Calls);
+
+        // The pair itself is gone: bringing the root back to Active does not revive it, so the next attempt is refused for
+        // want of authorization instead of running a turn.
+        Assert.True(await ((ISessionCatalog)harness.Store).SetStatusAsync(
+            harness.Root.SessionId,
+            SessionStatus.Active,
+            CancellationToken.None));
+        var again = await SendAsync(harness, RootContext(harness), "Worker");
+        Assert.True(again.IsError);
+        Assert.Contains("No authorization", again.Text);
+        Assert.Empty(harness.Endpoint.Requests);
+        Assert.Equal(0, harness.Provider.Calls);
+    }
+
+    [Fact]
     public async Task Delivery_returns_while_the_target_turn_never_completes_and_marks_busy_root_delivery_as_queued()
     {
         await using var harness = await Harness.CreateAsync();
