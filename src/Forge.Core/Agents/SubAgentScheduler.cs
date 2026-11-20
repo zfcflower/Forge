@@ -390,6 +390,35 @@ public sealed class SubAgentScheduler : ISubAgentControl
     }
 
     /// <summary>
+    /// Forgets the user-driven session instance <paramref name="agentId"/> names, without touching its run. One caller case
+    /// exists: the user changed the agent kind or the model of their own agent session, and the app then resumes that session
+    /// from the store with the new definition - <see cref="ResumeUserSessionAsync"/> would otherwise hand the instance it
+    /// already holds right back and the change would never take effect. Nothing of the conversation is lost (it is in the
+    /// store), the rebuilt instance has a new prompt prefix so the provider's cache misses once, and a turn that is already
+    /// running keeps its instance and its cancellation entry, so the stop button still reaches it. False for an id this
+    /// scheduler does not hold as a user-driven session (a model-spawned child, or one that never existed).
+    /// </summary>
+    public bool ForgetUserSession(string agentId)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+        {
+            return false;
+        }
+
+        lock (gate)
+        {
+            if (!owners.TryGetValue(agentId, out var owner) || owner != AgentOwner.User)
+            {
+                return false;
+            }
+
+            owners.Remove(agentId);
+            finished.Remove(agentId);
+            return instances.Remove(agentId);
+        }
+    }
+
+    /// <summary>
     /// Whether <paramref name="instance"/> is a user-driven session this scheduler registered - the same instance, not just
     /// an id - so an instance built elsewhere (or a model-spawned child whose id was copied) is never driven as one.
     /// </summary>
@@ -402,6 +431,17 @@ public sealed class SubAgentScheduler : ISubAgentControl
                    && ReferenceEquals(registered, instance)
                    && owners.TryGetValue(instance.Id, out var owner)
                    && owner == AgentOwner.User;
+        }
+    }
+
+    /// <summary>The user-driven session instance <paramref name="sessionId"/> names - running or idle - if this scheduler holds it.</summary>
+    public bool TryGetUserSession(string sessionId, out AgentInstance instance)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (gate)
+        {
+            instance = FindUserSessionLocked(sessionId)!;
+            return instance is not null;
         }
     }
 

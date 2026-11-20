@@ -22,6 +22,7 @@ internal static class AgentSessionStrings
     public const string AgentNoToolsKey = "agentSession.agent.noTools";
     public const string AgentRootOnlyToolsKey = "agentSession.agent.rootOnlyTools";
     public const string SkillNeedsRootKey = "agentSession.skill.needsRoot";
+    public const string KindFallbackKey = "agentSession.kind.fallback";
 
     // ---------------------------------------------------------------- failures the shell reports
     public const string OpenFailedKey = "agentSession.openFailed";
@@ -39,6 +40,8 @@ internal static class AgentSessionStrings
 
     public static string SkillNeedsRoot => Loc.Instance[SkillNeedsRootKey];
 
+    public static string KindFallback(string kind, string fallback) => Loc.Instance.Format(KindFallbackKey, kind, fallback);
+
     public static string RootNotActive(string root) => Loc.Instance.Format(RootNotActiveKey, root);
 
     public static string OpenFailed(string reason) => Loc.Instance.Format(OpenFailedKey, reason);
@@ -52,6 +55,7 @@ internal static class AgentSessionStrings
         Loc.Register(AgentNoToolsKey, "这个 Agent 没有 tools 白名单,不能作为 Agent 会话运行", "This agent declares no tools, so it cannot run as an agent session");
         Loc.Register(AgentRootOnlyToolsKey, "这个 Agent 的白名单含 git 写或 PR 工具,只能在根会话里用", "This agent's tools include git writes or pull requests, which only the root session may use");
         Loc.Register(SkillNeedsRootKey, "需要 git 写/PR 工具,请在根会话里用", "Needs git write or pull request tools; use this skill in the root session");
+        Loc.Register(KindFallbackKey, "这个会话原来跑的「{0}」现在不能作为 Agent 会话运行，改用「{1}」。", "This session ran as \"{0}\", which can no longer drive an agent session; it now runs as \"{1}\".");
         Loc.Register(OpenFailedKey, "打不开这个 Agent 会话:{0}", "Could not open this agent session: {0}");
         Loc.Register(RootNotActiveKey, "根会话「{0}」已不是活动状态,它的 Agent 会话不能再起回合。", "The root session \"{0}\" is no longer active, so its agent sessions cannot start a turn.");
     }

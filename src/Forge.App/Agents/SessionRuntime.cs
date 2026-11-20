@@ -631,6 +631,43 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     }
 
     /// <summary>
+    /// The instance this host holds for the user-driven session <paramref name="sessionId"/>, running or idle; null when it
+    /// holds none (a session this host never resumed, or one whose instance was forgotten).
+    /// </summary>
+    internal AgentInstance? FindUserChild(string sessionId)
+    {
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        return built?.FindUserChild(sessionId);
+    }
+
+    /// <summary>
+    /// Drops the instance this host holds for a user session so the next <see cref="ResumeUserChildAsync"/> really rebuilds it
+    /// from the store with the definition handed there (Core: <see cref="AgentHost.ForgetUserChild"/>, which also states what
+    /// stays untouched). Only the user's own change of an agent session's kind or model asks for it: the tab calls it right
+    /// before that resume, so the change takes effect from the next turn and a turn still running keeps its instance.
+    /// </summary>
+    internal bool ForgetUserChild(string? agentId)
+    {
+        if (string.IsNullOrEmpty(agentId))
+        {
+            return false;
+        }
+
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        return built?.ForgetUserChild(agentId) ?? false;
+    }
+
+    /// <summary>
     /// The name a user-driven child's cards show: the store's title, which is what the tab and the tree row name the session.
     /// The kind's name stands in only when the store has no row to read (a resumed session that vanished).
     /// </summary>

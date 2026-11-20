@@ -239,6 +239,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             notificationScope: session.Id,
             appPreferences: preferences);
         Composer.AttachmentsChanged += RefreshCanSend;
+        if (agentSession is not null)
+        {
+            // The chips switch to their agent-session mode here, not only when the view binds: the kind a reopened session ran
+            // with has to be selected before anything reads the definition, and the view's later assignment is a no-op then.
+            Composer.IsAgentSession = true;
+            SelectAgentSessionKind(session.AgentKind);
+        }
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
         Instruments = new SessionInstrumentsViewModel(
             session,

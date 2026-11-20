@@ -1005,6 +1005,20 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         Status = SessionStrings.ComposerModelsFetched(allModels.Count);
     }
 
+    /// <summary>
+    /// The model chip's whole selection - model, effort, provider and that provider's output cap - as a definition has to
+    /// carry it. <see cref="CurrentDefinition"/> builds the root definition around it; an agent-session tab puts it on the kind
+    /// its agent chip holds instead (the kind supplies prompt and tools, the model chip the model).
+    /// </summary>
+    public ModelSettings SelectedModel
+    {
+        get
+        {
+            var provider = catalog.Find(providerId);
+            return new ModelSettings(model, effort, provider?.Definition.MaxOutputTokens, providerId);
+        }
+    }
+
     /// <summary>The definition the root agent should run with, or null for the untouched default.</summary>
     public AgentDefinition? CurrentDefinition()
     {
@@ -1022,7 +1036,7 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             return null;
         }
 
-        var settings = new ModelSettings(model, effort, provider.Definition.MaxOutputTokens, provider.Id);
+        var settings = SelectedModel;
         return selectedAgent.Definition is { } definition
             ? definition with { Model = settings }
             : new AgentDefinition("Root", "Main coding agent.", string.Empty, settings);

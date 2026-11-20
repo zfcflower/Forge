@@ -373,6 +373,23 @@ public sealed class AgentHost
     }
 
     /// <summary>
+    /// Forgets the user-driven session instance <paramref name="agentId"/> names, so <see cref="ResumeUserChildAsync"/> builds
+    /// that session again from the store instead of handing the held instance back. There is one case for it: the user changed
+    /// the agent or the model of their own agent session, and the change takes effect from the next turn (forge-app "Agent 会话
+    /// 的界面与接线"). The conversation stays - the rebuild loads it from the store - the new prompt prefix makes the
+    /// provider's cache miss once, and a turn already running is untouched: it keeps its instance and its cancellation entry,
+    /// so <see cref="SubAgentControl"/> still stops it. False for an id this host does not hold as a user session.
+    /// </summary>
+    public bool ForgetUserChild(string agentId) => scheduler.ForgetUserSession(agentId);
+
+    /// <summary>
+    /// The instance this host holds for the user-driven session <paramref name="sessionId"/>, running or idle; null when it
+    /// holds none - a session whose tab was closed and whose host was rebuilt since has to be resumed again.
+    /// </summary>
+    public AgentInstance? FindUserChild(string sessionId) =>
+        scheduler.TryGetUserSession(sessionId, out var instance) ? instance : null;
+
+    /// <summary>
     /// Stops every run of a user-driven session this host owns - queued or running - and returns how many were stopped. The
     /// root session's own turn is not touched: the shell stops that one and calls this for the sessions under it when the
     /// user presses stop on the root.

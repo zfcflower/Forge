@@ -64,9 +64,6 @@ internal sealed partial class SessionWorkspaceViewModel
     /// <summary>Agent id of the child's run as the start event named it, written off the UI thread.</summary>
     private string? agentAgentId;
 
-    /// <summary>The kind this tab's child runs with; resolved once from the composer's kinds and kept for every turn.</summary>
-    private AgentDefinition? agentDefinition;
-
     /// <summary>The stored child session's id; null while the tab is still a draft.</summary>
     private string? agentChildSessionId;
 
@@ -165,17 +162,27 @@ internal sealed partial class SessionWorkspaceViewModel
     public event Action<SessionWorkspaceViewModel>? AgentSessionTurnEnded;
 
     /// <summary>
-    /// The agent and model this tab's child runs with, resolved from the composer's kinds: the launched one when the tab
-    /// named it, else the default kind (the implementing agent), else the first kind that may drive a session. Null when no
-    /// kind of this session can (every one of them may change git, which only the root may do).
+    /// The agent and model this tab's child runs with right now: the kind the composer's agent chip holds, with the model, the
+    /// effort and the provider its model chip holds (forge-app "Agent 会话的界面与接线": changing either rebuilds the instance
+    /// before the next turn). Recomputed on every call rather than kept: the chips are the state, and a definition cached here
+    /// would go stale the moment the user picks another kind or model. Null when no kind of this session can drive one (every
+    /// one of them may change git, which only the root may do).
     /// </summary>
     private AgentDefinition? AgentSessionDefinition()
     {
-        if (agentDefinition is not null)
-        {
-            return agentDefinition;
-        }
+        var kind = Composer.SelectedAgent.Definition is { } selected && CanBeUserSession(selected)
+            ? selected
+            : FallbackAgentKind();
+        return kind is null ? null : kind with { Model = Composer.SelectedModel };
+    }
 
+    /// <summary>
+    /// The kind used when the chip's selection cannot drive a session: the default kind (the implementing agent), else the first
+    /// kind that may. The chip normally cannot land there - an agent-session tab lists only kinds it may run and greys the rest -
+    /// so this covers a kind file that changed after the chip was built.
+    /// </summary>
+    private AgentDefinition? FallbackAgentKind()
+    {
         AgentDefinition? fallback = null;
         foreach (var option in Composer.Agents)
         {
@@ -186,13 +193,78 @@ internal sealed partial class SessionWorkspaceViewModel
 
             if (string.Equals(definition.Name, AgentSessionKinds.Default, StringComparison.Ordinal))
             {
-                return agentDefinition = definition;
+                return definition;
             }
 
             fallback ??= definition;
         }
 
-        return agentDefinition = fallback;
+        return fallback;
+    }
+
+    /// <summary>
+    /// Whether an instance built from <paramref name="held"/> already runs what the composer's chips now say: the kind, the
+    /// model, the reasoning effort and the provider. Only these four decide a rebuild - the advice description and the tool
+    /// list come from the same kind file and are not something the chips move (forge-app "Agent 会话的界面与接线": a change of
+    /// agent, model or effort is what rebuilds the instance before the next turn).
+    /// </summary>
+    private static bool SameAgentModel(AgentDefinition held, AgentDefinition wanted) =>
+        string.Equals(held.Name, wanted.Name, StringComparison.Ordinal)
+        && string.Equals(held.Model.Model, wanted.Model.Model, StringComparison.Ordinal)
+        && held.Model.Thinking == wanted.Model.Thinking
+        && string.Equals(held.Model.ProviderId ?? string.Empty, wanted.Model.ProviderId ?? string.Empty, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Puts the agent chip on the kind this tab's stored session ran with, so a reopened tab shows the agent that wrote the
+    /// conversation instead of always the default one. A kind the session kinds no longer offer (or one that may not drive a
+    /// session any more) keeps the composer's default and says why once.
+    /// </summary>
+    private void SelectAgentSessionKind(string? kind)
+    {
+        if (string.IsNullOrWhiteSpace(kind))
+        {
+            // A draft has no row and a row written before the kind was stored has none either: the composer's default stands.
+            return;
+        }
+
+        if (Composer.Agents.FirstOrDefault(option => string.Equals(option.Key, kind, StringComparison.Ordinal)) is { IsAvailable: true } option)
+        {
+            Composer.SelectedAgent = option;
+            return;
+        }
+
+        Transcript.AddNotice(LocText.Literal(AgentSessionStrings.KindFallback(kind, Composer.AgentLabel)), isError: true);
+    }
+
+    /// <summary>
+    /// The instance this turn runs on: the one the host holds for this tab's session, rebuilt from the store when the composer's
+    /// chips now ask for another kind, model or provider. A rebuild discards the held instance and resumes the session - the
+    /// history comes back through <c>SessionHistory.LoadAsync</c>, exactly like after a restart - so the conversation survives,
+    /// the new prompt prefix makes the provider's cache miss once, and the counters start over at zero for the new instance
+    /// (which is why the tab's usage baselines are dropped here: differencing readings of two instances is meaningless).
+    /// </summary>
+    private async Task<AgentInstance> ResolveAgentChildAsync(SessionRuntime live, AgentDefinition definition, CancellationToken ct)
+    {
+        // By the stored session id, not by the agent id the last run announced: a tab closed and opened again does not know that
+        // id, yet the host still holds the instance it must not keep once the chips moved.
+        var held = live.FindUserChild(agentChildSessionId!);
+        if (held is not null && SameAgentModel(held.Definition, definition))
+        {
+            return held;
+        }
+
+        if (held is not null)
+        {
+            // Forget it first: the resume is idempotent, so a held instance would come straight back and the new definition would
+            // never take effect. A run still on its way is untouched - the forget only drops the instance the next turn builds on.
+            live.ForgetUserChild(held.Id);
+        }
+
+        agentInstance = null;
+        Volatile.Write(ref agentAgentId, null);
+        agentUsage.Remove("root");
+        agentStream.Remove("root");
+        return await live.ResumeUserChildAsync(agentChildSessionId!, WorkDir, definition, ct).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -284,11 +356,10 @@ internal sealed partial class SessionWorkspaceViewModel
             }
             else
             {
-                // One message is one run of the same child; the instance is rebuilt from the store only when this tab does
-                // not hold it (a restart, or a tab opened from the tree after one was closed).
-                var child = agentInstance ?? await live
-                    .ResumeUserChildAsync(agentChildSessionId, WorkDir, definition, token)
-                    .ConfigureAwait(true);
+                // One message is one run of the same child. The instance is the one this tab (or its host) already holds, and it
+                // is rebuilt from the store when the chips now ask for another kind, model or provider: the change then takes
+                // effect from this turn on, while the turn that already ran kept the definition it started with.
+                var child = await ResolveAgentChildAsync(live, definition, token).ConfigureAwait(true);
                 agentInstance = child;
                 BeginAgentCounters();
                 turnNo = await BeginAgentTurnAsync(agentChildSessionId, card.Round).ConfigureAwait(true);
