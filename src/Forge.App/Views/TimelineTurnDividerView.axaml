@@ -2,34 +2,63 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:views="using:Forge.App.Views"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
              x:Class="Forge.App.Views.TimelineTurnDividerView"
              x:DataType="vm:TurnDividerViewModel">
+  <UserControl.Styles>
+    <!-- The numbers ride on the rule inside a pad of the card's own colour: the wave runs behind them without cutting a glyph.
+         In a transcript that folds older turns the pad is the fold handle, so it is a button there. -->
+    <Style Selector="Button.divider-pad">
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="10,0" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.divider-pad:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    </Style>
+    <Style Selector="Button.divider-pad:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    </Style>
+    <Style Selector="Button.divider-pad.collapsible">
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+  </UserControl.Styles>
+
   <!-- The round-end row: the axis stops on this round's closing node (a check when the round finished cleanly, the failure
-       icon when it did not) and the round's numbers ride beside it. The line wraps instead of trimming: its tail is the model
-       name, and a metrics line that loses its tail reads as missing data. The tooltip carries the full breakdown. -->
-  <Grid ColumnDefinitions="Auto,*">
+       icon when it did not) and the round's numbers sit centred on a wavy rule that closes the round. The rule crosses the
+       numbers' middle, so a card-coloured pad behind them keeps the wave off the glyphs. The hover carries the breakdown. -->
+  <Grid ColumnDefinitions="Auto,*" Background="Transparent" ToolTip.Tip="{Binding Tooltip}">
     <views:TimelineGutter Kind="RoundEnd" IsFailing="{Binding HasFailed}" />
-    <StackPanel Grid.Column="1" Margin="0,5,8,8" Spacing="2">
-      <TextBlock Classes="round-end-line"
-                 Classes.failed="{Binding HasFailed}"
-                 TextWrapping="Wrap"
-                 Text="{Binding Line}"
-                 AutomationProperties.AutomationId="turn-divider" />
-      <!-- The numbers the line leaves out, printed rather than hidden behind a hover: a wavy rule marks them as the detail. -->
-      <Panel IsVisible="{Binding HasExtra}" HorizontalAlignment="Left">
-        <StackPanel Spacing="0">
-          <TextBlock Classes="round-end-extra"
+    <Panel Grid.Column="1" Margin="0,5,8,8">
+      <views:WavyUnderline Height="5" VerticalAlignment="Center" Stroke="{DynamicResource BorderBrush}" />
+      <!-- One click target for the whole label: folding a turn is a click on the row that closes it, not a second control
+           above it. A transcript that never folds (the main session) keeps the pad inert and draws no chevron. -->
+      <Button Classes="divider-pad"
+              Classes.collapsible="{Binding CanCollapse}"
+              IsHitTestVisible="{Binding CanCollapse}"
+              Command="{Binding ToggleCommand}"
+              AutomationProperties.AutomationId="turn-divider-toggle"
+              AutomationProperties.Name="{Binding ToggleName}">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
+                         Classes="tree-chevron"
+                         Classes.expanded="{Binding IsExpanded}"
+                         Width="12"
+                         Height="12"
+                         VerticalAlignment="Center"
+                         IsVisible="{Binding CanCollapse}" />
+          <!-- The numbers wrap instead of trimming: a wrapped label only makes the pad taller (the wave then runs between its
+               two lines), while a metrics line that lost its tail would read as missing data. -->
+          <TextBlock Classes="round-end-line"
                      Classes.failed="{Binding HasFailed}"
-                     MaxWidth="640"
-                     TextWrapping="NoWrap"
-                     TextTrimming="CharacterEllipsis"
-                     Text="{Binding Extra}"
-                     AutomationProperties.AutomationId="turn-divider-extra" />
-          <views:WavyUnderline Height="5"
-                               Classes.failed="{Binding HasFailed}"
-                               Stroke="{DynamicResource StatusSuccessBrush}" />
+                     TextWrapping="Wrap"
+                     Text="{Binding Line}"
+                     AutomationProperties.AutomationId="turn-divider" />
         </StackPanel>
-      </Panel>
-    </StackPanel>
+      </Button>
+    </Panel>
   </Grid>
 </UserControl>

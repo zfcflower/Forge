@@ -7,12 +7,8 @@ namespace Forge.App.Localization;
 /// </summary>
 internal static class QuestionsStrings
 {
-    public const string CardTitleKey = "questions.card.title";
-    public const string AskedByKey = "questions.card.askedBy";
     public const string FreeTextWatermarkKey = "questions.card.freeText";
     public const string MultiHintKey = "questions.card.multiHint";
-    public const string SkipKey = "questions.card.skip";
-    public const string AllSkippedKey = "questions.card.allSkipped";
     public const string WaitingKey = "questions.card.waiting";
     public const string BoundsExactKey = "questions.card.bounds.exact";
     public const string BoundsRangeKey = "questions.card.bounds.range";
@@ -30,32 +26,27 @@ internal static class QuestionsStrings
     public const string ReasonUnrelatedKey = "questions.discuss.reason.unrelated";
     public const string ReasonContextKey = "questions.discuss.reason.context";
     public const string DiscussNoteKey = "questions.discuss.note";
-    public const string DiscussCancelHintKey = "questions.discuss.cancelHint";
+    public const string DiscussHintKey = "questions.discuss.hint";
+    public const string DiscussRequiredKey = "questions.discuss.required";
+    public const string PreviousKey = "questions.panel.previous";
+    public const string NextKey = "questions.panel.next";
     public const string OtherLabelKey = "questions.card.other";
     public const string SubmitDiscussKey = "questions.card.submitDiscuss";
     public const string TranscriptPendingKey = "questions.transcript.pending";
     public const string TranscriptDismissedKey = "questions.transcript.dismissed";
     public const string TranscriptCancelledKey = "questions.transcript.cancelled";
     public const string TranscriptDiscussingKey = "questions.transcript.discussing";
-    public const string TranscriptSkippedKey = "questions.transcript.skipped";
-    public const string TranscriptNoAnswerKey = "questions.transcript.noAnswer";
     public const string TranscriptAnsweredKey = "questions.transcript.answered";
     public const string NotifyTitleKey = "questions.notify.title";
     public const string NotifyBodyKey = "questions.notify.body";
 
-    public static string CardTitle => Loc.Instance[CardTitleKey];
-
-    public static string AskedBy(string agent) => Loc.Instance.Format(AskedByKey, agent);
-
     public static string TabTitle(string agent) => Loc.Instance.Format(TabTitleKey, agent);
 
-    public static string NeedsInput(string agent) => Loc.Instance.Format(NeedsInputKey, agent);
+    public static string NeedsInput(string session, string agent) => Loc.Instance.Format(NeedsInputKey, session, agent);
 
     public static string Submit => Loc.Instance[SubmitKey];
 
     public static string SubmitDiscuss => Loc.Instance[SubmitDiscussKey];
-
-    public static string AllSkippedHint => Loc.Instance[AllSkippedKey];
 
     public static string Waiting(int count) => Loc.Instance.Format(WaitingKey, count);
 
@@ -81,32 +72,29 @@ internal static class QuestionsStrings
     /// <summary>Idempotent: registering the same key with the same texts twice is a no-op.</summary>
     internal static void Register()
     {
-        Loc.Register(CardTitleKey, "Agent 向你提问", "The agent has a question");
-        Loc.Register(AskedByKey, "提问者:{0}", "Asked by {0}");
         Loc.Register(FreeTextWatermarkKey, "输入您自己的回答…", "Type your own answer…");
         Loc.Register(TabTitleKey, "提问 · {0}", "Question · {0}");
-        Loc.Register(NeedsInputKey, "需要您输入 · {0} 正在等待", "Input needed · {0} is waiting");
-        Loc.Register(DiscussKey, "讨论", "Discuss");
-        Loc.Register(DiscussingKey, "讨论中", "Discussing");
+        Loc.Register(NeedsInputKey, "{0} · {1} 正在等您的回答", "{0} · {1} is waiting for your answer");
+        Loc.Register(DiscussKey, "先讨论下", "Discuss first");
+        Loc.Register(DiscussingKey, "取消讨论", "Cancel discussion");
         Loc.Register(DiscussBannerKey, "Agent 会先与你讨论这个问题,然后再问一次。", "The agent will discuss this question with you first, then ask again.");
-        Loc.Register(ReasonLabelKey, "原因(可选):", "Reason (optional):");
+        Loc.Register(DiscussHintKey, "提出你的疑问,讨论清楚后模型会再次对该问题和剩下的问题进行提问", "Raise your doubts; once they are settled the model asks this question and the remaining ones again");
+        Loc.Register(ReasonLabelKey, "原因(选一项,或在下面填写说明):", "Reason (pick one, or explain below):");
         Loc.Register(ReasonUnclearKey, "不够清楚", "Not clear enough");
         Loc.Register(ReasonUnrelatedKey, "与问题无关", "Not relevant");
         Loc.Register(ReasonContextKey, "需要更多上下文", "Need more context");
-        Loc.Register(DiscussNoteKey, "希望 agent 解释什么?(可选)", "What should the agent explain? (optional)");
-        Loc.Register(DiscussCancelHintKey, "选择某个选项或自行作答会取消此操作。", "Picking an option or typing your own answer cancels this.");
-        Loc.Register(OtherLabelKey, "其他 —— 你自己的答案", "Other — your own answer");
+        Loc.Register(DiscussNoteKey, "希望 agent 解释什么?", "What should the agent explain?");
+        Loc.Register(DiscussRequiredKey, "选一个原因或填写说明后即可开始讨论。", "Pick a reason or write a note to start the discussion.");
+        Loc.Register(OtherLabelKey, "其他", "Other");
         Loc.Register(SubmitDiscussKey, "开始讨论", "Start discussion");
+        Loc.Register(PreviousKey, "上一个", "Previous");
+        Loc.Register(NextKey, "下一个", "Next");
         Loc.Register(TranscriptPendingKey, "等待回答", "Waiting for an answer");
         Loc.Register(TranscriptDismissedKey, "已忽略", "Dismissed");
         Loc.Register(TranscriptCancelledKey, "已取消", "Cancelled");
-        Loc.Register(TranscriptDiscussingKey, "讨论中", "Discussing");
-        Loc.Register(TranscriptSkippedKey, "已跳过", "Skipped");
-        Loc.Register(TranscriptNoAnswerKey, "未作答", "No answer");
+        Loc.Register(TranscriptDiscussingKey, "待讨论", "To discuss");
         Loc.Register(TranscriptAnsweredKey, "已回答", "Answered");
         Loc.Register(MultiHintKey, "可多选", "Select all that apply");
-        Loc.Register(SkipKey, "跳过本题", "Skip this question");
-        Loc.Register(AllSkippedKey, "所有问题都已跳过,请改用“忽略”", "Every question is skipped; use Dismiss instead");
         Loc.Register(WaitingKey, "还有 {0} 个问题等待", "{0} more question(s) waiting");
         Loc.Register(BoundsExactKey, "选择 {0} 项", "Select exactly {0}");
         Loc.Register(BoundsRangeKey, "选择 {0}–{1} 项", "Select {0}–{1}");

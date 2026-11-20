@@ -1,8 +1,7 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wc="using:Forge.App.Workbench.Controls"
-        xmlns:ac="using:AvaloniaEdit.CodeCompletion"
-        xmlns:views="using:Forge.App.Views">
+        xmlns:ac="using:AvaloniaEdit.CodeCompletion">
 
   <!-- Text ramp. -->
   <Style Selector="TextBlock">
@@ -37,25 +36,17 @@
     <Setter Property="Focusable" Value="False" />
   </Style>
 
-  <!-- The round-end metrics line: one step up from the caption it grew out of, coloured like the node it sits on. -->
+  <!-- The round-end numbers: one step up from the caption it grew out of, coloured like the node they sit beside and
+       centred on the wavy rule that closes the round. -->
   <Style Selector="TextBlock.round-end-line">
     <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
+    <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
 
   <Style Selector="TextBlock.round-end-line.failed">
     <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
-  </Style>
-
-  <!-- The detail under the round's line: one step quieter, and its wavy rule takes the same colour as the text. -->
-  <Style Selector="TextBlock.round-end-extra">
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
-    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-  </Style>
-
-  <Style Selector="views|WavyUnderline.failed">
-    <Setter Property="Stroke" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
   <!-- The opened reasoning: one quiet inset block instead of loose text, so it reads as an aside beside the answer. -->

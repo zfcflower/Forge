@@ -3,9 +3,8 @@ using Avalonia.Controls;
 namespace Forge.App.Views;
 
 /// <summary>
-/// The round-end divider: a rule across the whole row with the turn's metrics in the middle, on a row of its own after
-/// the footnote. The row carries no timeline gutter, so the axis is interrupted here and every turn's axis segment
-/// stands alone.
+/// The round-end divider: a wavy rule across the content column with the turn's metrics centred on it, on a row of its own
+/// after the footnote. The axis stops on the row's closing node, so every turn's axis segment stands alone.
 /// </summary>
 public partial class TimelineTurnDividerView : UserControl
 {

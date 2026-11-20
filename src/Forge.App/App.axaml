@@ -699,12 +699,6 @@
       </Grid>
     </DataTemplate>
 
-    <!-- One agent turn is several rows of the flat transcript list, all on the same axis: its metadata row (the card itself),
-         one row per block of the reply, and the closing footnote row. -->
-    <DataTemplate DataType="vm:TurnCardViewModel" x:DataType="vm:TurnCardViewModel">
-      <views:TimelineTurnView />
-    </DataTemplate>
-
     <!-- The busy-turn row: what the agent is about to do, while nothing else is in flight. -->
     <DataTemplate DataType="vm:TurnWorkingViewModel" x:DataType="vm:TurnWorkingViewModel">
       <Grid ColumnDefinitions="Auto,*">
@@ -719,13 +713,25 @@
     </DataTemplate>
 
     <DataTemplate DataType="vm:TurnFootnoteViewModel" x:DataType="vm:TurnFootnoteViewModel">
-      <Grid ColumnDefinitions="Auto,*">
+      <Grid ColumnDefinitions="Auto,*,Auto">
         <views:TimelineGutter Role="Footnote" Kind="Error" IsFailing="True" />
         <TextBlock Grid.Column="1"
                    Classes="caption"
                    Margin="0,4,8,6"
                    TextWrapping="Wrap"
                    Text="{Binding Text}" />
+        <!-- Only a failed turn that produced nothing gets this: it is the one shape a replay cannot repeat. The session
+             decides whether it may run now (idle, writable, no resume already waiting); see TranscriptViewModel.CanRetry. -->
+        <Button Grid.Column="2"
+                Classes="link"
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Content="{Binding [turn.retry], Source={x:Static loc:Loc.Instance}}"
+                Command="{Binding RetryCommand}"
+                IsVisible="{Binding CanRetry}"
+                ToolTip.Tip="{Binding [turn.retryName], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="turn-retry"
+                AutomationProperties.Name="{Binding [turn.retryName], Source={x:Static loc:Loc.Instance}}" />
       </Grid>
     </DataTemplate>
 

@@ -19,6 +19,6 @@ internal static class TimelineLayout
     /// <paramref name="hasNode"/> is false only for the sub-agent turn header, which is metadata rather than an event: the
     /// axis then passes through it, so the first block below still lines up with the round above.
     /// </summary>
-    public static TimelineRowLayout Row(int index, int count, bool hasNode) =>
-        new(hasNode, index > 0, index < count - 1);
+    public static TimelineRowLayout Row(int index, int count) =>
+        new(true, index > 0, index < count - 1);
 }

@@ -609,24 +609,11 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 
     public ReadOnlyObservableCollection<TurnBlockViewModel> Blocks { get; }
 
-    /// <summary>
-    /// The card title, derived from the turn's state on every read: a language switch (or a tick, or new usage) only has to
-    /// re-raise it, and the elapsed time re-formats in the current language.
-    /// </summary>
-    public string Header =>
-        SessionStrings.TurnHeader(
-            Round,
-            startedAt,
-            lastElapsed,
-            isRunning,
-            sawUsage ? inputTokens : null,
-            sawUsage ? outputTokens : null);
-
     public string? Footnote => footnote.IsEmpty ? null : footnote.Resolve();
 
     public bool HasFootnote => !footnote.IsEmpty;
 
-    /// <summary>Main-session turns are always expanded; a sub-agent collapses every turn but the newest.</summary>
+    /// <summary>Main-session turns are always expanded; a sub-agent folds every turn but the newest, from its round-end row.</summary>
     public bool IsExpanded
     {
         get => isExpanded;
@@ -669,6 +656,32 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     internal UserMessageViewModel? UserMessage { get; set; }
 
     /// <summary>
+    /// What the user sent to open this turn (text and attachments), kept so a failed turn can be replayed unchanged.
+    /// Set by the session that starts the turn; a replayed or sub-agent turn has none and is never offered a retry.
+    /// </summary>
+    internal ComposerPrompt? Prompt { get; set; }
+
+    /// <summary>
+    /// Whether this turn may be replayed as-is: it failed and ran no tool call, so replaying it cannot repeat a side effect.
+    /// A turn that already ran one is never offered — `bash`, `write` or a `git push` would happen twice — and a stopped or
+    /// token-limited turn is no failure to retry. Reply text or reasoning already streamed does not block it: a stream that
+    /// dies mid-answer was never persisted, which is exactly the shape worth re-sending. The live half (is the session
+    /// writable and quiet, is a resume already waiting) belongs to the owning session and is asked through
+    /// <see cref="TranscriptViewModel.CanRetry"/>.
+    /// </summary>
+    internal bool CanRetry =>
+        Prompt is not null &&
+        EndStatus == TurnEndStatus.Failed &&
+        toolCallsTotal == 0 &&
+        Owner?.CanRetry(this) == true;
+
+    /// <summary>Replays this turn through the owning session's own turn entry point; see <see cref="TranscriptViewModel.RetryTurn"/>.</summary>
+    internal Task RetryAsync() => Owner?.RetryAsync(this) ?? Task.CompletedTask;
+
+    /// <summary>Lets the live half of <see cref="CanRetry"/> change without a new footnote.</summary>
+    internal void RefreshRetry() => footnoteRow?.RefreshRetry();
+
+    /// <summary>
     /// How this turn ended. Live turns derive it from the footnote and the stop reason when they finish; replayed turns
     /// start as completed (a replayed finish carries no outcome) and are corrected from <c>turn_metrics</c>.
     /// </summary>
@@ -676,6 +689,9 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 
     /// <summary>The row after the footnote that closes the turn with its metrics; created on first use.</summary>
     internal TurnDividerViewModel DividerRow => dividerRow ??= new TurnDividerViewModel(this);
+
+    /// <summary>Lets an already-built divider row re-read the fold state, without building one that does not exist yet.</summary>
+    internal void NotifyExpanded() => dividerRow?.RefreshExpanded();
 
     /// <summary>The divider only exists once the turn is over; a running turn shows no metrics.</summary>
     internal bool HasDivider => !IsRunning;
@@ -719,10 +735,10 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         dividerRow?.RefreshText();
     }
 
-    /// <summary>The model line the divider tooltip shows: the model with its provider, or unknown.</summary>
+    /// <summary>The model reference the tooltip's last line shows: the provider and the model, or whichever half was known.</summary>
     internal string DividerModelText =>
         modelName is { Length: > 0 } model
-            ? providerName is { Length: > 0 } provider ? $"{model} ({provider})" : model
+            ? providerName is { Length: > 0 } provider ? $"{provider}/{model}" : model
             : TextFormat.None;
 
     /// <summary>The user-visible text of the footnote, for the divider's status line; null when the turn went through.</summary>
@@ -736,8 +752,6 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         EndStatus == TurnEndStatus.Completed && sawUsage
             ? new TokenUsage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheWrite1hTokens)
             : null;
-
-    public RelayCommand ToggleCommand => new(() => IsExpanded = !IsExpanded);
 
     public bool IsRunning
     {
@@ -790,29 +804,33 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     }
 
     /// <summary>
-    /// The numbers the round's line leaves out — the cache columns, the hit rate and the cost — as one sentence under it. It
-    /// used to live in a hover tooltip; a hover is not discoverable on a transcript read with a trackpad, so it is printed.
+    /// The five lines the row hides behind its hover: the outcome with the wall clock, the tokens with the cost, the caches
+    /// with the hit rate, and the model with its provider — everything the line itself leaves out, kept off the row so the
+    /// round closes on one wavy rule instead of a second printed line that a narrow window would truncate.
     /// </summary>
-    internal string BuildDividerExtra()
+    internal string BuildDividerTooltip()
     {
         var usage = ReportedUsage;
-        var cost = usage is { } reported ? Owner?.ResolveCost?.Invoke(reported, providerName, modelName) : null;
+        var cost = usage is { } priced ? Owner?.ResolveCost?.Invoke(priced, providerName, modelName) : null;
         var statusText = SessionStrings.TurnStatusText(EndStatus);
-        var status = SessionStrings.DividerTipStatus(
-            string.IsNullOrEmpty(ErrorSummary) ? statusText : statusText + " · " + ErrorSummary);
-        var tokens = SessionStrings.DividerTipTokens(
-            TextFormat.Number(usage?.InputTokens),
-            TextFormat.Number(usage?.OutputTokens),
-            TextFormat.Number(usage?.CacheReadTokens),
-            TextFormat.Number(usage?.CacheWriteTokens),
-            TextFormat.Number(usage?.CacheWrite1hTokens));
-        var meta = SessionStrings.DividerTipMeta(
-            usage is { } measured
-                ? (SessionUsageMath.CacheHitRatio(measured) * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%"
-                : TextFormat.None,
-            string.IsNullOrEmpty(cost) ? TextFormat.None : cost,
-            TextFormat.None);
-        return string.Join(" · ", status, tokens, meta);
+        return string.Join(
+            "\n",
+            SessionStrings.DividerTipState(
+                string.IsNullOrEmpty(ErrorSummary) ? statusText : statusText + " · " + ErrorSummary,
+                Elapsed is { } wall ? TextFormat.Elapsed(wall) : TextFormat.None),
+            SessionStrings.DividerTipUsage(
+                TextFormat.Number(usage?.InputTokens),
+                TextFormat.Number(usage?.OutputTokens),
+                string.IsNullOrEmpty(cost) ? TextFormat.None : cost),
+            SessionStrings.DividerTipCacheRead(
+                TextFormat.Number(usage?.CacheReadTokens),
+                usage is { } measured
+                    ? (SessionUsageMath.CacheHitRatio(measured) * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%"
+                    : TextFormat.None),
+            SessionStrings.DividerTipCacheWrite(
+                TextFormat.Number(usage?.CacheWriteTokens),
+                TextFormat.Number(usage?.CacheWrite1hTokens)),
+            SessionStrings.DividerTipModel(DividerModelText));
     }
 
     private void AddBlock(TurnBlockViewModel block)
@@ -931,7 +949,6 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         cacheWrite1hTokens += usage.CacheWrite1hTokens;
         stop = stopReason;
         sawUsage = true;
-        OnPropertyChanged(nameof(Header));
         OnPropertyChanged(nameof(HasUsage));
 
         // The usage can land after Finish (the Background flush may trail the turn's Normal-priority continuation), and
@@ -947,7 +964,6 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         SealThinking();
         lastElapsed = elapsed;
         IsRunning = false;
-        OnPropertyChanged(nameof(Header));
         footnote = error ?? default;
         EndStatus = footnote.IsEmpty
             ? stop == StopReason.MaxTokens ? TurnEndStatus.Limit : TurnEndStatus.Completed
@@ -956,6 +972,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         OnPropertyChanged(nameof(HasFootnote));
         Owner?.FootnoteChanged(this);
         Owner?.DividerChanged(this);
+        RefreshRetry();
         NotifyWorking();
         foreach (var row in toolRows.Values)
         {
@@ -968,21 +985,11 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         toolRows.Clear();
     }
 
-    /// <summary>A running card re-reads its header once per tick; a finished one has nothing to update.</summary>
-    public void Tick()
-    {
-        if (isRunning)
-        {
-            OnPropertyChanged(nameof(Header));
-        }
-    }
-
     /// <summary>Elapsed time the card shows, or null when it was replayed from the store and never measured.</summary>
     public TimeSpan? Elapsed => isRunning ? null : lastElapsed;
 
     public override void RefreshText()
     {
-        OnPropertyChanged(nameof(Header));
         OnPropertyChanged(nameof(Footnote));
         OnPropertyChanged(nameof(HasFootnote));
         footnoteRow?.RefreshText();
@@ -1011,11 +1018,33 @@ internal sealed class TurnWorkingViewModel(TurnCardViewModel card) : TranscriptI
 
 internal sealed class TurnFootnoteViewModel(TurnCardViewModel card) : TranscriptItemViewModel
 {
+    private AsyncRelayCommand? retryCommand;
+
     public TurnCardViewModel Card { get; } = card;
 
     public string? Text => Card.Footnote;
 
-    public override void RefreshText() => OnPropertyChanged(nameof(Text));
+    /// <summary>Whether the footnote shows the retry button beside its text.</summary>
+    public bool CanRetry => Card.CanRetry;
+
+    /// <summary>
+    /// Re-runs the failed turn. The command disables itself while it runs, and the session's runner reports its own
+    /// failures (the turn is exactly the place a failure is already shown), so nothing escapes to the dispatcher.
+    /// </summary>
+    public AsyncRelayCommand RetryCommand =>
+        retryCommand ??= new AsyncRelayCommand(_ => Card.RetryAsync(), () => Card.CanRetry);
+
+    internal void RefreshRetry()
+    {
+        OnPropertyChanged(nameof(CanRetry));
+        retryCommand?.NotifyCanExecuteChanged();
+    }
+
+    public override void RefreshText()
+    {
+        OnPropertyChanged(nameof(Text));
+        RefreshRetry();
+    }
 }
 
 /// <summary>
@@ -1040,17 +1069,37 @@ internal sealed class TurnDividerViewModel(TurnCardViewModel card) : TranscriptI
     /// <summary>True for a turn that did not complete: the gutter node wears the failing state.</summary>
     public bool HasFailed => Card.EndStatus != TurnEndStatus.Completed;
 
-    /// <summary>Everything the line leaves out, printed under it with a wavy underline instead of a hover tooltip.</summary>
-    public string Extra => Card.BuildDividerExtra();
+    /// <summary>Everything the row leaves out, shown on hover: the outcome and the full token, cache, cost and model breakdown.</summary>
+    public string Tooltip => Card.BuildDividerTooltip();
 
-    public bool HasExtra => Extra.Length > 0;
+    /// <summary>
+    /// The row is also the turn's fold handle, but only where a transcript folds older turns (a sub-agent's); a main-session
+    /// turn is always whole and draws no chevron.
+    /// </summary>
+    public bool CanCollapse => Card.Owner?.CollapseOlderTurns == true;
+
+    /// <summary>Whether the turn's blocks are in the list; the chevron turns with it.</summary>
+    public bool IsExpanded => Card.IsExpanded;
+
+    /// <summary>The chevron's screen-reader name, which is also the only place the action is spelled out.</summary>
+    public string ToggleName => Card.IsExpanded ? SessionStrings.CollapseTurn : SessionStrings.ExpandTurn;
+
+    /// <summary>Folds or unfolds the turn this rule closes; its blocks come and go above it.</summary>
+    public RelayCommand ToggleCommand => new(() => Card.IsExpanded = !Card.IsExpanded);
+
+    internal void RefreshExpanded()
+    {
+        OnPropertyChanged(nameof(IsExpanded));
+        OnPropertyChanged(nameof(ToggleName));
+    }
 
     public override void RefreshText()
     {
         OnPropertyChanged(nameof(Line));
         OnPropertyChanged(nameof(HasFailed));
-        OnPropertyChanged(nameof(Extra));
-        OnPropertyChanged(nameof(HasExtra));
+        OnPropertyChanged(nameof(Tooltip));
+        OnPropertyChanged(nameof(CanCollapse));
+        RefreshExpanded();
     }
 }
 
@@ -1172,6 +1221,28 @@ internal sealed class TranscriptViewModel : ObservableObject
     public TurnCardViewModel? Current => current;
 
     /// <summary>
+    /// The retry of a failed turn, installed by whoever owns this transcript's turns: the gate answers from that session's
+    /// live state (writable, quiet, no resume already waiting) and the runner replays the turn through that session's own
+    /// entry point. A transcript therefore never names a session kind — a root session, a hand-created agent session driven
+    /// another way, and a model-spawned sub-agent (which installs neither) are told apart by what is installed, not by a
+    /// condition on the session.
+    /// </summary>
+    internal Func<TurnCardViewModel, bool>? CanRetryTurn { get; set; }
+
+    /// <summary>Runs the retry; owns its own failures, so the transcript never observes a fault of it.</summary>
+    internal Func<TurnCardViewModel, Task>? RetryTurn { get; set; }
+
+    /// <summary>Only the newest turn is retryable: once a later turn exists the user has already moved on past it.</summary>
+    internal bool CanRetry(TurnCardViewModel card) =>
+        ReferenceEquals(card, current) && CanRetryTurn?.Invoke(card) == true;
+
+    internal Task RetryAsync(TurnCardViewModel card) =>
+        RetryTurn is { } run && CanRetry(card) ? run(card) : Task.CompletedTask;
+
+    /// <summary>Re-reads the retry gate of the newest turn after the session's state moved (running, read-only, a resume run).</summary>
+    internal void RefreshRetry() => current?.RefreshRetry();
+
+    /// <summary>
     /// Formats a turn's cost for the divider tooltip, or null when it cannot be priced. The transcript owns no pricing:
     /// the session plugs its model-metadata lookup in when it opens the session, and a transcript without one shows "—".
     /// </summary>
@@ -1254,6 +1325,7 @@ internal sealed class TranscriptViewModel : ObservableObject
 
         round++;
         var card = new TurnCardViewModel(round, at);
+        var wasCurrent = current;
         if (CollapseOlderTurns)
         {
             foreach (var item in items)
@@ -1267,6 +1339,10 @@ internal sealed class TranscriptViewModel : ObservableObject
 
         current = card;
         card.Owner = this;
+
+        // The turn that was current until now stopped being retryable the moment a newer one started; its button has to go
+        // with it, and nothing else will touch that row again.
+        wasCurrent?.RefreshRetry();
         var claimed = pendingRound is { };
         var host = claimed ? pendingRound! : new TranscriptRoundViewModel();
         pendingRound = null;
@@ -1281,13 +1357,6 @@ internal sealed class TranscriptViewModel : ObservableObject
         {
             pendingUserMessage = null;
             card.UserMessage = user;
-        }
-
-        // A sub-agent turn keeps its collapsible header row; a main-session turn does not (its information sits under the
-        // user message and in the round-end row).
-        if (CollapseOlderTurns)
-        {
-            host.RowList.Add(card);
         }
 
         items.Add(card);
@@ -1313,7 +1382,10 @@ internal sealed class TranscriptViewModel : ObservableObject
         }
     }
 
-    /// <summary>A card was expanded or collapsed: its block rows appear after its header or go away.</summary>
+    /// <summary>
+    /// A card was expanded or collapsed from its round-end row: its block rows appear after the round's user message or go
+    /// away. No transcript keeps a header row of its own, so the card itself is never in the list — only its blocks are.
+    /// </summary>
     internal void ExpandedChanged(TurnCardViewModel card)
     {
         if (card.Host?.RowList is not { } rows)
@@ -1321,13 +1393,14 @@ internal sealed class TranscriptViewModel : ObservableObject
             return;
         }
 
-        var header = IndexOf(rows, card);
+        // The round-end row's chevron reads the flag it just changed.
+        card.NotifyExpanded();
         if (card.IsExpanded)
         {
-            var at = header + 1;
-            if (at <= 0)
+            var at = EndOfBlocks(card);
+            if (at < 0)
             {
-                at = EndOfBlocks(card);
+                return;
             }
 
             foreach (var block in card.Blocks)
@@ -1337,9 +1410,12 @@ internal sealed class TranscriptViewModel : ObservableObject
         }
         else
         {
-            while (header + 1 < rows.Count && rows[header + 1] is TurnBlockViewModel block && ReferenceEquals(block.Turn, card))
+            for (var index = rows.Count - 1; index >= 0; index--)
             {
-                rows.RemoveAt(header + 1);
+                if (rows[index] is TurnBlockViewModel block && ReferenceEquals(block.Turn, card))
+                {
+                    rows.RemoveAt(index);
+                }
             }
         }
     }
@@ -1506,6 +1582,17 @@ internal sealed class TranscriptViewModel : ObservableObject
             }
         }
 
+        // Nothing of the turn is in the list yet: its blocks belong above the rows that close it.
+        if (card.HasFootnote && IndexOf(rows, card.FootnoteRow) is var footnoteAt && footnoteAt >= 0)
+        {
+            return footnoteAt;
+        }
+
+        if (card.HasDivider && IndexOf(rows, card.DividerRow) is var dividerAt && dividerAt >= 0)
+        {
+            return dividerAt;
+        }
+
         return rows.Count;
     }
 
@@ -1573,11 +1660,6 @@ internal sealed class TranscriptViewModel : ObservableObject
     {
         FlushPending();
         current?.Finish(elapsed, error);
-    }
-
-    public void Tick()
-    {
-        current?.Tick();
     }
 
     /// <summary>Re-raises every item's text after a language switch; the items derive their texts from their state.</summary>

@@ -97,11 +97,10 @@ internal static class SessionStrings
     public const string ComposerCommandKey = "session.composer.command";
     public const string ComposerNoMatchesKey = "session.composer.noMatches";
     // ---------------------------------------------------------------- turn card and the notices around it
-    public const string TurnHeaderKey = "turn.header";
-    public const string TurnRunningKey = "turn.running";
     public const string TurnWorkingKey = "turn.working";
     public const string TurnTokenSummaryKey = "turn.tokenSummary";
     public const string TurnCollapseKey = "turn.collapse";
+    public const string TurnExpandKey = "turn.expand";
     public const string ToolArgumentsKey = "turn.toolArguments";
     public const string ToolResultKey = "turn.toolResult";
     public const string ToolOpenFileKey = "turn.toolOpenFile";
@@ -113,6 +112,8 @@ internal static class SessionStrings
     public const string CopyMessageKey = "turn.copyMessage";
     public const string NoToolResultKey = "turn.noToolResult";
     public const string TurnFailedKey = "turn.failed";
+    public const string TurnRetryKey = "turn.retry";
+    public const string TurnRetryNameKey = "turn.retryName";
     public const string DeniedKey = "turn.denied";
     public const string CompactedKey = "turn.compacted";
     public const string ProviderNoticeTitleKey = "turn.providerNotice.title";
@@ -133,11 +134,11 @@ internal static class SessionStrings
     public const string TurnStatusStoppedKey = "turn.status.stopped";
     public const string TurnStatusFailedKey = "turn.status.failed";
     public const string TurnStatusLimitKey = "turn.status.limit";
-    public const string TurnDividerTipStatusKey = "turn.dividerTip.status";
-    public const string TurnDividerTipTimeKey = "turn.dividerTip.time";
-    public const string TurnDividerTipTokensKey = "turn.dividerTip.tokens";
-    public const string TurnDividerTipMetaKey = "turn.dividerTip.meta";
-    public const string TurnDividerRateNoteKey = "turn.dividerTip.rateNote";
+    public const string TurnDividerTipStateKey = "turn.dividerTip.state";
+    public const string TurnDividerTipUsageKey = "turn.dividerTip.usage";
+    public const string TurnDividerTipCacheReadKey = "turn.dividerTip.cacheRead";
+    public const string TurnDividerTipCacheWriteKey = "turn.dividerTip.cacheWrite";
+    public const string TurnDividerTipModelKey = "turn.dividerTip.model";
 
     // ---------------------------------------------------------------- sub-agents
     public const string SubAgentQueuedKey = "subagent.queued";
@@ -345,29 +346,8 @@ internal static class SessionStrings
         }
     }
     // ---------------------------------------------------------------- turn card
-    /// <summary>
-    /// <c>第 3 轮 · 12:30:45 · 4.2 秒 · 输入 900 · 输出 80</c> / <c>Turn 3 · 12:30:45 · 4.2s · in 900 · out 80</c>; a side
-    /// the provider did not report becomes <see cref="TextFormat.None"/>.
-    /// </summary>
-    public static string TurnHeader(
-        int round,
-        DateTimeOffset startedAt,
-        TimeSpan? elapsed,
-        bool running,
-        int? inputTokens,
-        int? outputTokens) =>
-        Loc.Instance.Format(
-            TurnHeaderKey,
-            TextFormat.Number(round),
-            TextFormat.Clock(startedAt),
-            running ? TurnRunning : elapsed is { } value ? TextFormat.Elapsed(value) : TextFormat.None,
-            TextFormat.Number(inputTokens),
-            TextFormat.Number(outputTokens));
-
     /// <summary>The row a busy turn shows while nothing has arrived yet: what it is doing right now.</summary>
     public static string TurnWorking => Loc.Instance[TurnWorkingKey];
-
-    public static string TurnRunning => Loc.Instance[TurnRunningKey];
 
     /// <summary><c>输入 900 · 输出 80</c>; a side the provider did not report becomes <see cref="TextFormat.None"/>.</summary>
     public static string TokenSummary(int? inputTokens, int? outputTokens) =>
@@ -377,6 +357,8 @@ internal static class SessionStrings
     public static string TokenCount(int? tokens) => TextFormat.Number((long?)tokens);
 
     public static string CollapseTurn => Loc.Instance[TurnCollapseKey];
+
+    public static string ExpandTurn => Loc.Instance[TurnExpandKey];
 
     public static string ToolArguments => Loc.Instance[ToolArgumentsKey];
 
@@ -460,23 +442,26 @@ internal static class SessionStrings
             _ => TurnStatusCompletedKey,
         }];
 
-    /// <summary>The divider tooltip's status line, with the user-visible error when the turn left one.</summary>
-    public static string DividerTipStatus(string status) => Loc.Instance.Format(TurnDividerTipStatusKey, status);
+    /// <summary>The divider tooltip's first line: how the turn ended, with the user-visible error when it left one, and the
+    /// wall clock that times it.</summary>
+    public static string DividerTipState(string status, string elapsed) =>
+        Loc.Instance.Format(TurnDividerTipStateKey, status, elapsed);
 
-    /// <summary>The divider tooltip's time line: elapsed time, tool count and average output rate.</summary>
-    public static string DividerTipTime(string elapsed, int tools, string rate) =>
-        Loc.Instance.Format(TurnDividerTipTimeKey, elapsed, TextFormat.Number(tools), rate);
+    /// <summary>The tooltip's usage line: the two tokens with the cost that was priced for them.</summary>
+    public static string DividerTipUsage(string input, string output, string cost) =>
+        Loc.Instance.Format(TurnDividerTipUsageKey, input, output, cost);
 
-    /// <summary>The divider tooltip's token line: all five columns, each unknown as <see cref="TextFormat.None"/>.</summary>
-    public static string DividerTipTokens(string input, string output, string cacheRead, string cacheWrite, string cacheWrite1h) =>
-        Loc.Instance.Format(TurnDividerTipTokensKey, input, output, cacheRead, cacheWrite, cacheWrite1h);
+    /// <summary>The tooltip's cache-read line: the read column and the hit rate computed from it.</summary>
+    public static string DividerTipCacheRead(string cacheRead, string hitRate) =>
+        Loc.Instance.Format(TurnDividerTipCacheReadKey, cacheRead, hitRate);
 
-    /// <summary>The divider tooltip's meta line: hit rate, cost and model.</summary>
-    public static string DividerTipMeta(string hitRate, string cost, string model) =>
-        Loc.Instance.Format(TurnDividerTipMetaKey, hitRate, cost, model);
+    /// <summary>The tooltip's cache-write line: the write column and its one-hour share.</summary>
+    public static string DividerTipCacheWrite(string cacheWrite, string cacheWrite1h) =>
+        Loc.Instance.Format(TurnDividerTipCacheWriteKey, cacheWrite, cacheWrite1h);
 
-    /// <summary>Why the average output rate reads low: its denominator is the turn's wall clock, all of it.</summary>
-    public static string DividerRateNote => Loc.Instance[TurnDividerRateNoteKey];
+    /// <summary>The tooltip's model line: the provider and the model that ran the turn.</summary>
+    public static string DividerTipModel(string model) =>
+        Loc.Instance.Format(TurnDividerTipModelKey, model);
 
     // ---------------------------------------------------------------- sub-agents
     public static string SubAgentQueued => Loc.Instance[SubAgentQueuedKey];
@@ -649,8 +634,9 @@ internal static class SessionStrings
         Loc.Register(BreadcrumbBackToParentKey, "返回父会话 {0}", "Back to {0}");
 
         // turn card and its notices
-        Loc.Register(TurnHeaderKey, "第 {0} 轮 · {1} · {2} · 输入 {3} · 输出 {4}", "Turn {0} · {1} · {2} · in {3} · out {4}");
-        Loc.Register(TurnRunningKey, "运行中…", "Running…");
+        Loc.Register(TurnTokenSummaryKey, "输入 {0} · 输出 {1}", "in {0} · out {1}");
+        Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");
+        Loc.Register(TurnExpandKey, "展开本轮", "Expand this turn");
         Loc.Register(TurnWorkingKey, "正在处理下一步…", "Working on the next step…");
         Loc.Register(TurnTokenSummaryKey, "输入 {0} · 输出 {1}", "in {0} · out {1}");
         Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");
@@ -665,6 +651,8 @@ internal static class SessionStrings
         Loc.Register(CopyMessageKey, "复制消息", "Copy message");
         Loc.Register(NoToolResultKey, "没有结果：本轮已结束", "No result: the turn ended");
         Loc.Register(TurnFailedKey, "本轮无法运行：{0}", "This turn could not run: {0}");
+        Loc.Register(TurnRetryKey, "重试", "Retry");
+        Loc.Register(TurnRetryNameKey, "重试这一轮（重新发送同一条消息）", "Retry this turn (sends the same message again)");
         Loc.Register(DeniedKey, "已拒绝：{0}（尚未配置审批对话框）", "Denied: {0} (no approval dialog yet)");
         Loc.Register(CompactedKey, "已压缩上下文：{0} → {1} tokens", "Context compacted: {0} → {1} tokens");
         Loc.Register(ProviderNoticeTitleKey, "本轮请求的形状被降级", "This turn ran with a reduced request");
@@ -688,23 +676,11 @@ internal static class SessionStrings
         Loc.Register(TurnStatusStoppedKey, "已停止", "Stopped");
         Loc.Register(TurnStatusFailedKey, "失败", "Failed");
         Loc.Register(TurnStatusLimitKey, "超限", "Limit");
-        Loc.Register(TurnDividerTipStatusKey, "状态 {0}", "Status {0}");
-        Loc.Register(
-            TurnDividerTipTimeKey,
-            "耗时 {0} · 工具 {1} · 平均输出速率 {2}",
-            "Elapsed {0} · Tools {1} · Avg output rate {2}");
-        Loc.Register(
-            TurnDividerTipTokensKey,
-            "输入 {0} · 输出 {1} · 缓存读 {2} · 缓存写 {3} · 1 小时写 {4}",
-            "In {0} · Out {1} · Cache read {2} · Cache write {3} · 1h write {4}");
-        Loc.Register(
-            TurnDividerTipMetaKey,
-            "缓存命中率 {0} · 成本 {1} · 模型 {2}",
-            "Cache hit rate {0} · Cost {1} · Model {2}");
-        Loc.Register(
-            TurnDividerRateNoteKey,
-            "平均输出速率的分母为模型流式生成时间，不含排队、审批、工具与 git 快照",
-            "Average output rate divides by the model's streaming time, excluding queueing, approvals, tool runs and git snapshots");
+        Loc.Register(TurnDividerTipStateKey, "状态: {0} · 耗时: {1}", "Status: {0} · Elapsed: {1}");
+        Loc.Register(TurnDividerTipUsageKey, "输入: {0} · 输出: {1} · 成本: {2}", "In: {0} · Out: {1} · Cost: {2}");
+        Loc.Register(TurnDividerTipCacheReadKey, "缓存读: {0} · 缓存命中率: {1}", "Cache read: {0} · Cache hit rate: {1}");
+        Loc.Register(TurnDividerTipCacheWriteKey, "缓存写: {0} · 一小时写: {1}", "Cache write: {0} · 1h write: {1}");
+        Loc.Register(TurnDividerTipModelKey, "模型: {0}", "Model: {0}");
 
         // sub-agents
         Loc.Register(SubAgentQueuedKey, "排队中", "Queued");

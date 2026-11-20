@@ -5,8 +5,8 @@ using Avalonia.Media;
 namespace Forge.App.Views;
 
 /// <summary>
-/// A hand-drawn wavy rule, used to mark a line as the detail behind the one above it. Avalonia's <c>TextDecoration</c> can
-/// only draw straight strokes (solid or dashed), so the wave is one <see cref="StreamGeometry"/> of the visible width.
+/// A hand-drawn wavy rule: the round-end divider the turn's numbers sit on. Avalonia's <c>TextDecoration</c> can only draw
+/// straight strokes (solid or dashed), so the wave is one <see cref="StreamGeometry"/> of the visible width.
 /// </summary>
 internal sealed class WavyUnderline : Control
 {
