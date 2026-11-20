@@ -37,6 +37,13 @@ public static class SessionReplies
     /// <summary>Every receipt starts with this; the transcript recognises a receipt by it instead of guessing from the text.</summary>
     public const string Marker = "[会话回复";
 
+    /// <summary>
+    /// The wire text in front of a stored report's artifact id: a receipt that was cut, or whose report was stored at all, ends
+    /// with this line and the id behind it. It is wire text the model reads next turn, never translated copy, and it is defined
+    /// only here - the card that turns the line into "open the full report" reads this constant instead of repeating the words.
+    /// </summary>
+    public const string FullReportPointer = "\n完整报告: ";
+
     /// <summary>The status word used on the wire; a failure or stop always carries its reason, flattened to one line so the three-line receipt stays three lines. An unmapped status throws rather than reading as success.</summary>
     public static string StatusText(SessionReplyStatus status, string? reason = null) => status switch
     {
@@ -80,7 +87,7 @@ public static class SessionReplies
 
         if (!fitted || store is not null)
         {
-            text.Append("\n完整报告: ").Append(store);
+            text.Append(FullReportPointer).Append(store);
         }
 
         return text.ToString();

@@ -27,9 +27,10 @@ internal sealed class SessionReplyViewModel : TranscriptItemViewModel, ICopyable
     /// <summary>
     /// What <see cref="SessionReplies.Build"/> puts in front of the artifact id of a report that did not fit the caps. It is the
     /// wire text of the receipt (what the model reads next turn), never a translated label: the card only recognises it to offer
-    /// the stored copy, it never shows it as text of its own.
+    /// the stored copy, it never shows it as text of its own. The words live in <see cref="SessionReplies.FullReportPointer"/>
+    /// alone, so the producer and this card cannot drift apart.
     /// </summary>
-    private const string ReportPointer = AgentSessionStrings.ReplyFullReportPointer;
+    private const string ReportPointer = SessionReplies.FullReportPointer;
 
     public SessionReplyViewModel(string text, DateTimeOffset at)
     {

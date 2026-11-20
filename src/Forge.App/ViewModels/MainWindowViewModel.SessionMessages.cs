@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using Avalonia.Threading;
 using Forge.Abstractions;
@@ -60,7 +61,9 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// asked - a user session's own run state is Core's to see on the instance it drives.
     /// <para>The tool calls this from a worker thread while <c>sessions</c> and the queue are UI-thread state (a plain
     /// dictionary and an <c>ObservableCollection</c>), so the reading is marshalled to the UI thread and never made where it
-    /// would race a write. This is what the seam's contract asks of the implementation.</para>
+    /// would race a write. This is what the seam's contract asks of the implementation. Because that marshal blocks, the
+    /// caller must be outside <see cref="SessionMessenger"/>'s gate: the UI thread takes the same gate from the stop button
+    /// (<see cref="SessionMessenger.CancelPending"/>), and a call made under the lock would freeze the window.</para>
     /// </summary>
     public bool IsBusy(string sessionId) =>
         Dispatcher.UIThread.CheckAccess()
@@ -76,10 +79,15 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// One delivered turn, run inside the session's own tab. Null means the tab is not open (Core then either drives a user
     /// session itself or reports that the root cannot run), so the loop below keeps polling until the tab appears or the
     /// session stops being busy.
+    /// <para>The wait is bounded by <see cref="SessionMessenger.IdleWaitLimit"/>, the same limit and the same reason Core's own
+    /// wait ends with (forge-core "授权通信"): this is the path a root's delivery takes, since the app holds the root's turn, so
+    /// a target that never goes idle must end as <see cref="SessionReplyStatus.Stopped"/> here too instead of polling forever.
+    /// The clock only runs while there is no outcome, which is the whole loop - an outcome returns at once.</para>
     /// </summary>
     public async Task<SessionTurnOutcome?> RunSessionTurnAsync(SessionTurnRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var waited = Stopwatch.StartNew();
         while (!ct.IsCancellationRequested)
         {
             if (disposed || closing)
@@ -98,6 +106,11 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
             if (step.Outcome is { } outcome)
             {
                 return outcome;
+            }
+
+            if (waited.Elapsed >= SessionMessenger.IdleWaitLimit)
+            {
+                return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, SessionMessenger.BusyTooLongReason, 0);
             }
 
             // The tab is open but busy with the user's own turn: the delivery waits for it (a busy target queues).
@@ -637,6 +650,52 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
         if (sessions.TryGetValue(rootId, out var root) && !root.IsAgentSession)
         {
             root.RefreshSessionMentions();
+        }
+    }
+
+    /// <summary>
+    /// An agent session was renamed: the <c>@</c> picker of its root offers the stored list it read, so the old name must not
+    /// stay in it (a closed session is offered from that list, and an open popup reads it on every keystroke). The name is
+    /// the only field a rename changes, so the entry is patched in place and the tabs of that root refill without a store read.
+    /// </summary>
+    private void RenameMentionTarget(string sessionId, string title)
+    {
+        if (disposed || string.IsNullOrEmpty(sessionId) || mentionTargets.Count == 0)
+        {
+            return;
+        }
+
+        List<(string RootId, SessionMentionTarget[] Targets)>? renamed = null;
+        foreach (var (rootId, stored) in mentionTargets)
+        {
+            SessionMentionTarget[]? updated = null;
+            for (var i = 0; i < stored.Count; i++)
+            {
+                if (!string.Equals(stored[i].SessionId, sessionId, StringComparison.Ordinal)
+                    || string.Equals(stored[i].Name, title, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                updated ??= [.. stored];
+                updated[i] = stored[i] with { Name = title };
+            }
+
+            if (updated is not null)
+            {
+                (renamed ??= []).Add((rootId, updated));
+            }
+        }
+
+        if (renamed is null)
+        {
+            return;
+        }
+
+        foreach (var (rootId, targets) in renamed)
+        {
+            mentionTargets[rootId] = targets;
+            RefreshSessionMentionsOf(rootId);
         }
     }
 

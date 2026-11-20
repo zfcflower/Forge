@@ -214,6 +214,11 @@ internal sealed partial class MainWindowViewModel
         var key = AgentTabKey(session);
         var tab = Workbench.FindTab(WorkbenchIds.SessionTab(key))
                    ?? Workbench.OpenTab(Workbench.MainTabs, WorkbenchIds.SessionTab(key), TabKind.Session, session, session.TabTitle);
+        // The header's double-click rename: the child's own name, written through the same store path the tree row runs.
+        tab.RenameCommand = new AsyncRelayCommand(
+            ct => RenameAgentSessionTabAsync(session, ct),
+            () => !disposed,
+            OnCommandFailed);
         agentTabs[key] = tab;
         agentViews[session] = tab;
         if (session.AgentChildSessionId is { Length: > 0 } childId)
@@ -232,6 +237,34 @@ internal sealed partial class MainWindowViewModel
 
     /// <summary>The key a tab is filed under: the stored session id once there is one, the draft's id before that.</summary>
     private static string AgentTabKey(SessionWorkspaceViewModel session) => session.AgentChildSessionId ?? session.Info.Id;
+
+    /// <summary>
+    /// The double-click rename of an agent-session tab: the child's own name (never the composed "root › child" label) goes
+    /// through the same store write as the tree row's rename, so the row, the tab and the <c>@</c> picker follow. A draft has
+    /// no row yet: its name stays on the view and becomes the row's Title when the first message creates it.
+    /// </summary>
+    private async Task RenameAgentSessionTabAsync(SessionWorkspaceViewModel session, CancellationToken ct)
+    {
+        if (disposed || !session.IsAgentSession)
+        {
+            return;
+        }
+
+        var typed = await PromptTextAsync(ProjectStrings.RenameSessionTitle, session.AgentSessionName).ConfigureAwait(true);
+        var title = typed?.Trim();
+        if (string.IsNullOrEmpty(title) || string.Equals(title, session.AgentSessionName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (session.AgentChildSessionId is { Length: > 0 } childId)
+        {
+            await Projects.RenameAsync(childId, title, ct).ConfigureAwait(true);
+            return;
+        }
+
+        session.Rename(title);
+    }
 
     private void ActivateAgentSessionTab(string sessionId)
     {
@@ -527,6 +560,10 @@ internal sealed partial class MainWindowViewModel
         {
             session.Rename(title);
         }
+
+        // The @ picker keeps the names it read from the store: an agent session renamed while its tab is closed would still
+        // be offered under its old name there, and an open popup would keep showing it.
+        RenameMentionTarget(sessionId, title);
     }
 
     /// <summary>

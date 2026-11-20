@@ -224,11 +224,17 @@ public sealed class SessionMessenger
     /// <summary>Why a delivery ended when this root's sessions were stopped before its turn started.</summary>
     private const string StoppedReason = "会话已停止";
 
-    /// <summary>Why a delivery ended when its target never went idle inside <see cref="IdleWaitLimit"/>.</summary>
-    private const string BusyTooLongReason = "目标长时间忙";
+    /// <summary>
+    /// Why a delivery ended when its target never went idle inside <see cref="IdleWaitLimit"/>. The wire text of the receipt, so
+    /// it stays fixed: the app's own wait for a target's tab ends with the same words (it holds the turn the mailbox waits for).
+    /// </summary>
+    public const string BusyTooLongReason = "目标长时间忙";
 
-    /// <summary>How long a delivery waits for its target to go idle: far past any one turn, so only a stuck target reaches it.</summary>
-    private static readonly TimeSpan IdleWaitLimit = TimeSpan.FromMinutes(30);
+    /// <summary>
+    /// How long a delivery waits for its target to go idle: far past any one turn, so only a stuck target reaches it. The app's
+    /// wait for a busy tab follows the same limit - the two waits are the same wait seen from either side of the seam.
+    /// </summary>
+    public static readonly TimeSpan IdleWaitLimit = TimeSpan.FromMinutes(30);
 
     /// <summary>The pause between two looks at whether a busy target has gone idle.</summary>
     private static readonly TimeSpan IdlePollInterval = TimeSpan.FromMilliseconds(200);
@@ -306,7 +312,9 @@ public sealed class SessionMessenger
     /// and the messages already handed to them together): the queued deliveries are dropped and the one a mailbox is running
     /// right now ends with it, each one answered by a <see cref="SessionReplyStatus.Stopped"/> receipt, and the turns in flight
     /// get a stop token, so a mailbox whose target is busy returns to the next delivery instead of waiting out
-    /// <see cref="IdleWaitLimit"/>. Thread-safe: the mailboxes drain on background tasks.
+    /// <see cref="IdleWaitLimit"/>. A delivery whose turn already ended is left alone: <see cref="DeliverAsync"/> recorded its
+    /// outcome and is only assembling its receipt, which the stop must not replace. Thread-safe, and it may be called from the
+    /// UI thread: it takes <see cref="gate"/> for a moment and never calls the seam while holding it.
     /// </summary>
     /// <returns>How many deliveries were stopped.</returns>
     public int CancelPending(string? reason)
@@ -325,7 +333,11 @@ public sealed class SessionMessenger
                     stopped.Add(box.Queue.Dequeue());
                 }
 
-                if (box.Current is { } running)
+                // Only a delivery whose turn is still running is stopped here. One that already recorded its outcome is
+                // past the turn: it is reading its change line and building its receipt right now, so its answer is the
+                // one the initiator must read - a "已停止" thrown in here would be it, because Reply hands out the first
+                // receipt only and the real one would be dropped.
+                if (box.Current is { Outcome: null } running)
                 {
                     stopped.Add(running);
                 }
@@ -426,6 +438,10 @@ public sealed class SessionMessenger
             return Error("This host is not connected to the app's sessions, so nothing can be delivered.");
         }
 
+        // Read the busy state before taking the gate, never inside it: IsBusy marshals to the UI thread (the app's
+        // implementation does) and the UI thread itself takes that same gate when the user presses stop, so a call made
+        // under the lock would wedge the tool thread against the stop button. It only decides the wording below.
+        var targetBusy = target.IsRoot ? endpointNow.IsBusy(target.SessionId) : IsUserSessionRunning(target.SessionId);
         var id = Interlocked.Increment(ref dispatchSequence);
         var delivery = new PendingDelivery(
             id,
@@ -440,11 +456,9 @@ public sealed class SessionMessenger
         lock (gate)
         {
             box = mailboxFor(target.SessionId);
-            // What the target already owes: its own mailbox work, or a turn this host does not queue (the user's own turn
-            // on the root, or one the user is driving in the session's tab).
-            queued = box.Running
-                     || box.Queue.Count > 0
-                     || (target.IsRoot ? endpointNow.IsBusy(target.SessionId) : IsUserSessionRunning(target.SessionId));
+            // What the target already owes: the mailbox work read under the gate here, plus the busy reading taken above
+            // (its own run or a turn this host does not queue - the user's turn on the root, or one in the session's tab).
+            queued = box.Running || box.Queue.Count > 0 || targetBusy;
             box.Queue.Enqueue(delivery);
             start = !box.Draining;
             if (start)
@@ -586,6 +600,23 @@ public sealed class SessionMessenger
         /// the worker that runs the delivery can both reach <see cref="Reply"/> for it.
         /// </summary>
         public bool Replied { get; set; }
+
+        /// <summary>
+        /// How the delivery's turn ended, recorded under the messenger's gate the moment the turn returned and before the
+        /// change line and the receipt are worked out. <see cref="CancelPending"/> reads it to tell a delivery that is still
+        /// running (a stop owns that one) from one that already ended and is only assembling its answer: rewriting the second
+        /// one as "已停止" would drop the finished turn's receipt for good, because <see cref="Replied"/> lets the stop's line win.
+        /// </summary>
+        public SessionTurnOutcome? Outcome { get; set; }
+    }
+
+    /// <summary>Records how a delivery's turn ended, so <see cref="CancelPending"/> leaves a finished delivery to its worker.</summary>
+    private void MarkEnded(PendingDelivery delivery, SessionTurnOutcome outcome)
+    {
+        lock (gate)
+        {
+            delivery.Outcome = outcome;
+        }
     }
 
     /// <summary>Whether a user-driven session is inside a turn right now; false when this host does not hold it.</summary>
@@ -620,12 +651,11 @@ public sealed class SessionMessenger
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
                 // A delivery that blew up still owes the initiator a receipt: the catch above only covers the turn itself,
-                // so a broken seam ends in the same place as a failed turn instead of a silent hole.
-                Reply(delivery, Receipt(delivery, new SessionTurnOutcome(
-                    string.Empty,
-                    SessionReplyStatus.Failed,
-                    exception.Message,
-                    0), null));
+                // so a broken seam ends in the same place as a failed turn instead of a silent hole. Recording the outcome
+                // first keeps a stop that arrives in this moment from taking the answer away from the worker.
+                var failed = new SessionTurnOutcome(string.Empty, SessionReplyStatus.Failed, exception.Message, 0);
+                MarkEnded(delivery, failed);
+                Reply(delivery, Receipt(delivery, failed, null));
             }
             finally
             {
@@ -640,9 +670,15 @@ public sealed class SessionMessenger
         }
     }
 
+    /// <summary>
+    /// Runs the delivery's turn and answers it: the outcome is recorded before the change line is read and the receipt built,
+    /// because everything after the turn is bookkeeping on an answer that already exists - a stop that arrives while it runs
+    /// must not throw that answer away (it would be the only line the initiator ever reads).
+    /// </summary>
     private async Task DeliverAsync(PendingDelivery delivery, CancellationToken stop)
     {
         var outcome = await RunTurnAsync(delivery, stop).ConfigureAwait(false);
+        MarkEnded(delivery, outcome);
         SessionTurnChanges? changes = null;
         if (outcome.Turn > 0 && endpoint() is { } seam)
         {
@@ -968,7 +1004,9 @@ public sealed class SessionMessenger
     /// <summary>
     /// Writes one delivery's receipt exactly once. Two callers can get here for the same delivery - the worker that ran its
     /// turn and <see cref="CancelPending"/> - and the initiator must read one answer per dispatch number, whichever came first:
-    /// a turn that ended before the stop counts, a stopped delivery does not owe a second line.
+    /// a turn that ended before the stop counts (<see cref="CancelPending"/> no longer answers for a delivery that recorded its
+    /// <see cref="PendingDelivery.Outcome"/>, and this first-wins check is the belt to that suspender), a stopped delivery does
+    /// not owe a second line.
     /// </summary>
     private void Reply(PendingDelivery delivery, string receipt)
     {
