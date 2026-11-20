@@ -65,6 +65,9 @@ internal enum TimelineNodeKind
 
     /// <summary>The round-end node: the last row of a round, where the axis stops.</summary>
     RoundEnd,
+
+    /// <summary>The transient "what is happening next" row of a running turn.</summary>
+    Working,
 }
 
 /// <summary>How a node currently reads: the regular/filled variant and the colour both follow this.</summary>
@@ -233,6 +236,7 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Error => "IconWarning",
         TimelineNodeKind.Approval => "IconShieldCheckRegular",
         TimelineNodeKind.RoundEnd => "IconCheckmarkCircleSparkle",
+        TimelineNodeKind.Working => "IconWorking",
         _ => "IconWrenchRegular",
     };
 
@@ -253,6 +257,7 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Error => "IconWarningFilled",
         TimelineNodeKind.Approval => "IconShieldCheckFilled",
         TimelineNodeKind.RoundEnd => "IconCheckmarkCircleSparkleFilled",
+        TimelineNodeKind.Working => "IconWorkingFilled",
         _ => "IconWrenchFilled",
     };
 
@@ -274,6 +279,7 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Error => TimelineStrings.NameError,
         TimelineNodeKind.Approval => TimelineStrings.NameApproval,
         TimelineNodeKind.RoundEnd => TimelineStrings.NameRoundEnd,
+        TimelineNodeKind.Working => TimelineStrings.NameWorking,
         _ => TimelineStrings.NameTool,
     };
 

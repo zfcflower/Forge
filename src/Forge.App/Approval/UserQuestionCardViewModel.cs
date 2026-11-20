@@ -23,8 +23,8 @@ internal sealed class QuestionOptionViewModel : NotifyingObject
 
     public bool HasDescription => Description.Length > 0;
 
-    /// <summary>False when the question is skipped, or (multi-select) the max is reached and this option is not picked.</summary>
-    public bool IsEnabled => !owner.IsSkipped && (!owner.MultiSelect || isSelected || !owner.IsAtMax);
+    /// <summary>False when (multi-select) the max is reached and this option is not picked.</summary>
+    public bool IsEnabled => !owner.MultiSelect || isSelected || !owner.IsAtMax;
 
     internal void RefreshEnabled() => OnPropertyChanged(nameof(IsEnabled));
 
@@ -105,7 +105,6 @@ internal sealed class QuestionItemViewModel : NotifyingObject
     private string freeText = string.Empty;
     private string discussNote = string.Empty;
     private bool updating;
-    private bool skipped;
     private bool otherSelected;
     private bool discussing;
     private bool isCurrent;
@@ -141,6 +140,7 @@ internal sealed class QuestionItemViewModel : NotifyingObject
             new(this, UserQuestionDiscussReason.NeedsContext, QuestionsStrings.ReasonContextKey),
         ];
         SelectCommand = new RelayCommand(() => this.select(this));
+        ToggleDiscussCommand = new RelayCommand(() => IsDiscussing = !IsDiscussing);
     }
 
     public string Id { get; }
@@ -161,6 +161,9 @@ internal sealed class QuestionItemViewModel : NotifyingObject
 
     /// <summary>Makes this the visible question (the chips strip of a multi-question card).</summary>
     public RelayCommand SelectCommand { get; }
+
+    /// <summary>Opens or closes the inline discussion request from the question's header button.</summary>
+    public RelayCommand ToggleDiscussCommand { get; }
 
     /// <summary>Fewest picks that answer a multi-select question (free text counts as one); 1 for single-select.</summary>
     public int MinSelect { get; }
@@ -188,10 +191,8 @@ internal sealed class QuestionItemViewModel : NotifyingObject
     /// <summary>Localized selection-bound hint; empty for single-select.</summary>
     public string BoundsHint => !MultiSelect ? string.Empty : QuestionsStrings.BoundsHint(MinSelect, MaxSelect, Options.Count + (AllowFreeText ? 1 : 0));
 
-    public bool IsEditable => !skipped;
-
-    /// <summary>The "other" row is off while skipped, or when a multi-select question is full and the row is not picked.</summary>
-    public bool IsFreeTextEnabled => !skipped && (!MultiSelect || otherSelected || PickCount < MaxSelect);
+    /// <summary>The "other" row is off while a multi-select question is full and the row is not picked.</summary>
+    public bool IsFreeTextEnabled => !MultiSelect || otherSelected || PickCount < MaxSelect;
 
     /// <summary>The "other, your own answer" row is picked; typing into its box picks it automatically.</summary>
     public bool IsOtherSelected
@@ -216,25 +217,6 @@ internal sealed class QuestionItemViewModel : NotifyingObject
         }
     }
 
-    /// <summary>The user chose not to answer this question; it counts as resolved but not as answered.</summary>
-    public bool IsSkipped
-    {
-        get => skipped;
-        set
-        {
-            if (SetAndNotify(ref skipped, value, nameof(IsEditable)))
-            {
-                if (skipped)
-                {
-                    SetDiscussing(false);
-                }
-
-                RefreshState();
-                changed();
-            }
-        }
-    }
-
     /// <summary>The user wants to talk about this question before answering it; counts as resolved.</summary>
     public bool IsDiscussing
     {
@@ -249,12 +231,6 @@ internal sealed class QuestionItemViewModel : NotifyingObject
             if (value)
             {
                 ClearPicks();
-                if (skipped)
-                {
-                    skipped = false;
-                    OnPropertyChanged(nameof(IsSkipped));
-                    OnPropertyChanged(nameof(IsEditable));
-                }
             }
 
             SetDiscussing(value);
@@ -263,14 +239,32 @@ internal sealed class QuestionItemViewModel : NotifyingObject
         }
     }
 
+    /// <summary>
+    /// The request the agent will read: what the user would like explained. A reason or a note is required — an empty
+    /// request would send the agent off to discuss nothing.
+    /// </summary>
     public string DiscussNote
     {
         get => discussNote;
-        set => Set(ref discussNote, value ?? string.Empty);
+        set
+        {
+            if (Set(ref discussNote, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(HasDiscussInput));
+                OnPropertyChanged(nameof(NeedsDiscussionInput));
+                changed();
+            }
+        }
     }
 
-    /// <summary>The question is skipped, discussed, or its pick count is within bounds.</summary>
-    public bool IsResolved => skipped || discussing || IsAnswered;
+    /// <summary>A reason chip is on, or the note has text.</summary>
+    public bool HasDiscussInput => Reasons.Any(reason => reason.IsSelected) || !string.IsNullOrWhiteSpace(discussNote);
+
+    /// <summary>The discussion card is open but still empty: the agent could not discuss anything yet.</summary>
+    public bool NeedsDiscussionInput => discussing && !HasDiscussInput;
+
+    /// <summary>The question is discussed, or its pick count is within bounds.</summary>
+    public bool IsResolved => discussing || IsAnswered;
 
     internal void RefreshLanguage()
     {
@@ -307,7 +301,7 @@ internal sealed class QuestionItemViewModel : NotifyingObject
                 return;
             }
 
-            if (HasFreeText && !otherSelected && !skipped && (!MultiSelect || !IsAtMax))
+            if (HasFreeText && !otherSelected && (!MultiSelect || !IsAtMax))
             {
                 SetOther(true);
                 OnPicked();
@@ -318,9 +312,9 @@ internal sealed class QuestionItemViewModel : NotifyingObject
         }
     }
 
-    /// <summary>Not skipped, not discussed, and the pick count is within [min, max] (the "other" row needs non-blank text).</summary>
+    /// <summary>Not discussed, and the pick count is within [min, max] (the "other" row needs non-blank text).</summary>
     public bool IsAnswered =>
-        !skipped && !discussing && (!otherSelected || HasFreeText)
+        !discussing && (!otherSelected || HasFreeText)
         && (MultiSelect ? PickCount >= MinSelect && PickCount <= MaxSelect : PickCount >= 1);
 
     internal void OnOptionChanged(QuestionOptionViewModel changedOption)
@@ -377,6 +371,11 @@ internal sealed class QuestionItemViewModel : NotifyingObject
                 }
             }
         }
+
+        // The reason is part of the request the agent receives, so it decides whether a discussion may start.
+        OnPropertyChanged(nameof(HasDiscussInput));
+        OnPropertyChanged(nameof(NeedsDiscussionInput));
+        changed();
     }
 
     /// <summary>A real pick (option or "other") was made: a pending discussion request is cancelled.</summary>
@@ -421,6 +420,8 @@ internal sealed class QuestionItemViewModel : NotifyingObject
 
         discussing = value;
         OnPropertyChanged(nameof(IsDiscussing));
+        OnPropertyChanged(nameof(HasDiscussInput));
+        OnPropertyChanged(nameof(NeedsDiscussionInput));
     }
 
     private void ClearPicks()
@@ -461,11 +462,6 @@ internal sealed class QuestionItemViewModel : NotifyingObject
 
     internal UserQuestionAnswer ToAnswer()
     {
-        if (skipped)
-        {
-            return new UserQuestionAnswer(Id, [], null, Skipped: true);
-        }
-
         if (discussing)
         {
             var reason = Reasons.FirstOrDefault(item => item.IsSelected)?.Reason;
@@ -506,6 +502,8 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
         current.IsCurrent = true;
         SubmitCommand = new RelayCommand(Submit, () => CanSubmit);
         DismissCommand = new RelayCommand(Dismiss, () => !IsDecided);
+        PreviousCommand = new RelayCommand(() => Move(-1), () => HasPrevious);
+        NextCommand = new RelayCommand(() => Move(1), () => HasNext);
         AttachLanguageChanged(OnLanguageChanged);
     }
 
@@ -526,35 +524,47 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
 
     public RelayCommand DismissCommand { get; }
 
+    /// <summary>Steps to the question before the visible one; the footer offers it whenever there is one.</summary>
+    public RelayCommand PreviousCommand { get; }
+
+    /// <summary>Steps to the question after the visible one; the last question swaps it for the submit.</summary>
+    public RelayCommand NextCommand { get; }
+
+    public bool HasPrevious => IndexOfCurrent() > 0;
+
+    public bool HasNext => IndexOfCurrent() < Questions.Count - 1;
+
     public string AgentName => agentName;
-
-    public string AskedByText => QuestionsStrings.AskedBy(agentName);
-
-    public string Title => QuestionsStrings.CardTitle;
 
     /// <summary>The bottom-group tab title.</summary>
     public string TabTitle => QuestionsStrings.TabTitle(agentName);
 
-    /// <summary>"Needs your input · the agent is waiting".</summary>
-    public string HeaderText => QuestionsStrings.NeedsInput(agentName);
+    /// <summary>One line: which session this is, and that the agent is waiting for an answer.</summary>
+    public string HeaderText => QuestionsStrings.NeedsInput(SessionTitle, agentName);
 
     private int waitingCount;
 
-    /// <summary>Every question is resolved (answered, skipped or discussed), one is answered or discussed, and the card is open.</summary>
-    public bool CanSubmit => !IsDecided
-        && Questions.All(question => question.IsResolved)
-        && Questions.Any(question => question.IsAnswered || question.IsDiscussing);
+    /// <summary>
+    /// The card may be submitted: a question marked for discussion carries the reason or note the agent will answer, and
+    /// every other question is answered — unless a discussion is under way, which submits even with questions still open
+    /// (those come back with the next <c>ask_user</c> call, so the user need not answer everything before asking a question).
+    /// </summary>
+    public bool CanSubmit => !IsDecided && Questions.All(IsSettled);
+
+    private bool IsSettled(QuestionItemViewModel question) =>
+        question.IsDiscussing
+            ? question.HasDiscussInput
+            : question.IsAnswered || IsDiscussionRequested;
+
+    /// <summary>
+    /// The submit sits on the last question, and on any question whose discussion the user wants to start right here.
+    /// </summary>
+    public bool ShowsSubmit => !HasNext || IsDiscussionRequested;
 
     /// <summary>At least one question asks for a discussion: submitting starts it instead of finishing the questions.</summary>
     public bool IsDiscussionRequested => Questions.Any(question => question.IsDiscussing);
 
     public string SubmitText => IsDiscussionRequested ? QuestionsStrings.SubmitDiscuss : QuestionsStrings.Submit;
-
-    /// <summary>True when every question is skipped: nothing to submit, the user should dismiss instead.</summary>
-    public bool AllSkipped => Questions.All(question => question.IsSkipped);
-
-    /// <summary>Shown when the submit is disabled because everything was skipped.</summary>
-    public string AllSkippedHint => AllSkipped ? QuestionsStrings.AllSkippedHint : string.Empty;
 
     /// <summary>Other question cards of the same session waiting behind this one; set by the queue on the UI thread.</summary>
     public int WaitingCount
@@ -589,6 +599,39 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
         current.IsCurrent = false;
         current = question;
         current.IsCurrent = true;
+        RaiseStepChanged();
+    }
+
+    private void Move(int delta)
+    {
+        var index = IndexOfCurrent() + delta;
+        if (index >= 0 && index < Questions.Count)
+        {
+            Select(Questions[index]);
+        }
+    }
+
+    private int IndexOfCurrent()
+    {
+        for (var i = 0; i < Questions.Count; i++)
+        {
+            if (ReferenceEquals(Questions[i], current))
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>The footer's navigation pair follows the visible question, so every step re-reads both edges.</summary>
+    private void RaiseStepChanged()
+    {
+        PreviousCommand.NotifyCanExecuteChanged();
+        NextCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(HasPrevious));
+        OnPropertyChanged(nameof(HasNext));
+        OnPropertyChanged(nameof(ShowsSubmit));
     }
 
     private void Submit()
@@ -613,19 +656,15 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
         OnPropertyChanged(nameof(CanSubmit));
         OnPropertyChanged(nameof(IsDiscussionRequested));
         OnPropertyChanged(nameof(SubmitText));
-        OnPropertyChanged(nameof(AllSkipped));
-        OnPropertyChanged(nameof(AllSkippedHint));
+        OnPropertyChanged(nameof(ShowsSubmit));
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        OnPropertyChanged(nameof(AskedByText));
-        OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(TabTitle));
         OnPropertyChanged(nameof(HeaderText));
         OnPropertyChanged(nameof(SubmitText));
         OnPropertyChanged(nameof(WaitingText));
-        OnPropertyChanged(nameof(AllSkippedHint));
         foreach (var question in Questions)
         {
             question.RefreshLanguage();

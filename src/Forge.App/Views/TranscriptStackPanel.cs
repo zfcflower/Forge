@@ -61,6 +61,9 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
 
     private Rect viewport;
 
+    /// <summary>Set for one request when the app itself asks the list to bring a row into view (the sticky message's jump).</summary>
+    private static int allowNext;
+
     /// <summary>When a key last went down inside the list (<see cref="Environment.TickCount64"/>).</summary>
     private long keyAt = -KeyWindow;
 
@@ -84,8 +87,19 @@ internal sealed class TranscriptStackPanel : VirtualizingStackPanel
     /// and one from inside a row only, like a focus change on a row, while the keyboard drives, so Tab or the arrow keys
     /// through a row's controls still scroll to the focused one.
     /// </summary>
+    /// <summary>
+    /// Lets the next bring-into-view request through. The transcript cancels focus-driven scrolls (a tall row would yank the
+    /// list around), which also cancels a deliberate <c>ScrollIntoView</c> — this marks the one that is meant.
+    /// </summary>
+    internal static void AllowNextBringIntoView() => System.Threading.Interlocked.Exchange(ref allowNext, 1);
+
     private void OnRequestBringIntoView(object? sender, RequestBringIntoViewEventArgs e)
     {
+        if (System.Threading.Interlocked.Exchange(ref allowNext, 0) == 1)
+        {
+            return;
+        }
+
         if (Environment.TickCount64 - keyAt < KeyWindow || e.TargetObject is not Visual target)
         {
             return;

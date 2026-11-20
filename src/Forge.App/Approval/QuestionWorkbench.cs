@@ -68,15 +68,25 @@ internal sealed class QuestionWorkbench : IDisposable
             return;
         }
 
-        // A card that left the queue (answered, dismissed or withdrawn) takes its tab with it, floating or not.
+        // A card that left the queue (answered, dismissed or withdrawn) takes its tab with it, floating or not. When the
+        // user decided it, the group folds back to its title bar: nothing is left to show, and the transcript gets the room
+        // back. A card the queue simply moved on from (a withdrawal) leaves the group as the user had it.
+        var decided = false;
         for (var i = tracked.Count - 1; i >= 0; i--)
         {
             if (!queue.Questions.Contains(tracked[i]))
             {
+                decided |= tracked[i].IsDecided
+                    && string.Equals(tracked[i].SessionId, activeSessionId, StringComparison.Ordinal);
                 tracked[i].ContentHeightReported -= OnContentHeight;
                 CloseTabOf(tracked[i]);
                 tracked.RemoveAt(i);
             }
+        }
+
+        if (decided)
+        {
+            layout.IsBottomMinimized = true;
         }
 
         foreach (var card in queue.Questions)
@@ -126,8 +136,9 @@ internal sealed class QuestionWorkbench : IDisposable
     }
 
     /// <summary>
-    /// Opens the bottom group tall enough for the whole question (never shorter than the user's own height). The user's height
-    /// is put back once no question is left, unless the user resized the group in the meantime.
+    /// Sizes the bottom group to exactly what the card needs (plus the panel's title bar), so the whole question is shown
+    /// without scrolling inside a leftover height. The height the user had comes back once no question is left, and is only
+    /// restored while the group still stands at the height this set.
     /// </summary>
     private void OnContentHeight(double content)
     {
@@ -137,7 +148,7 @@ internal sealed class QuestionWorkbench : IDisposable
         }
 
         var wanted = content + PanelChrome.TitleBarHeight;
-        if (wanted <= layout.BottomHeight)
+        if (Math.Abs(wanted - layout.BottomHeight) <= 1)
         {
             return;
         }

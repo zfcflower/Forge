@@ -375,13 +375,30 @@ internal sealed class TranscriptFollower
 
     private void OnStickyPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (stickyIndex >= 0)
+        if (stickyIndex < 0)
         {
-            StopFollowing();
-            anchor.UserScrolled();
-            list.ScrollIntoView(stickyIndex);
-            e.Handled = true;
+            return;
         }
+
+        StopFollowing();
+        anchor.UserScrolled();
+        TranscriptStackPanel.AllowNextBringIntoView();
+        list.ScrollIntoView(stickyIndex);
+
+        // ScrollIntoView only guarantees "somewhere visible"; the sticky stands for the message itself, so the round's own top
+        // goes to the top of the viewport once the panel has placed it.
+        var index = stickyIndex;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (scroller is { } sv && list.ContainerFromIndex(index) is { } container
+                    && container.TranslatePoint(default, sv) is { } point)
+                {
+                    sv.Offset = new Vector(sv.Offset.X, Math.Max(0, sv.Offset.Y + point.Y));
+                }
+            },
+            DispatcherPriority.Background);
+        e.Handled = true;
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e) => RefreshText();

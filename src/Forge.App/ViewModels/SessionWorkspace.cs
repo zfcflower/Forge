@@ -224,6 +224,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         metricsRecorder = instrumentSourcesResolved.TurnMetricsRecorder;
         this.instrumentSources = instrumentSourcesResolved;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
+
+        // A failed turn that ran no tool is replayed through this session's own turn entry. The button itself lives on the
+        // transcript's footnote row, so it belongs to every transcript; these two hooks are the whole of what a session
+        // contributes — a session kind driven another way (a hand-created agent session) installs its own and gets the same
+        // button with no transcript change.
+        Transcript.CanRetryTurn = _ => IsRetryableTurn();
+        Transcript.RetryTurn = RetryTurnAsync;
         coalescer = new FrameCoalescer<AgentEvent>(HandleOnUi, FlushAllPendingText);
         SubAgents = new ReadOnlyObservableCollection<SubAgentViewModel>(subAgents);
         Finished = new ReadOnlyObservableCollection<SubAgentViewModel>(finished);
@@ -578,6 +585,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     {
         cancelAutomation = cancel;
         AutomationBanner = text;
+        Transcript.RefreshRetry();
     }
 
     public event Action? SubAgentsChanged;
@@ -937,7 +945,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     public void Tick()
     {
-        Transcript.Tick();
         foreach (var agent in subAgents)
         {
             agent.Tick();
@@ -1134,6 +1141,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         // Every input of CanCompactNow (running, gating, handing over, compacting, read-only) changes through here.
         OnPropertyChanged(nameof(CanCompactNow));
         compactCommand?.NotifyCanExecuteChanged();
+
+        // Same inputs decide whether a failed turn may be replayed.
+        Transcript.RefreshRetry();
     }
 
     private async Task SendAsync(CancellationToken ignored)
@@ -1688,6 +1698,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Transcript.AddUserMessage(text, turnStartedAt, prompt.Attachments);
         var card = Transcript.BeginTurn(turnStartedAt);
         turnCard = card;
+
+        // Kept on the card, not in a field: a retry re-sends exactly this turn's text and attachments, and a card that never
+        // had a prompt (a replayed one) must not offer one.
+        card.Prompt = prompt;
         card.NoteModel(
             Composer.ProviderId is { Length: > 0 } provider ? provider : null,
             Composer.Model is { Length: > 0 } model ? model : null);
@@ -1884,6 +1898,35 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             NotificationsStrings.TurnFailedTitle,
             SessionStrings.TurnFailed(exception.Message),
             "turn-failed:" + SessionId);
+    }
+
+    /// <summary>
+    /// Whether the failed turn's retry may run now: the session has to be writable and quiet, and no automation run may be
+    /// attached — a <c>builtin.quota-resume</c> waiting for the reset already is the retry, and two would fight over the turn.
+    /// </summary>
+    private bool IsRetryableTurn() =>
+        !disposed && !isReadOnlyView && !isRunning && !gating && !compacting && !isHandingOver && !HasAutomationBanner;
+
+    /// <summary>
+    /// Replays the failed turn: the same text and attachments the user sent, as one new user message and one new turn, through
+    /// the ordinary turn path — so the turn gate, the queue's pause state and every failure path stay exactly as they are.
+    /// </summary>
+    private async Task RetryTurnAsync(TurnCardViewModel card)
+    {
+        if (card.Prompt is not { } prompt || !IsRetryableTurn())
+        {
+            return;
+        }
+
+        try
+        {
+            await RunTurnAsync(prompt).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The turn's own failures are already reported by RunTurnAsync; this is everything else (store, checkpoints host).
+            OnSendFailed(exception);
+        }
     }
 
     /// <summary>Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer.</summary>
@@ -2757,8 +2800,6 @@ internal sealed class SubAgentViewModel : NotifyingObject
             elapsed = DateTimeOffset.Now - startedAt;
             OnPropertyChanged(nameof(ElapsedText));
         }
-
-        Transcript.Tick();
     }
 
     /// <summary>

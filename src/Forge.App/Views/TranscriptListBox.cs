@@ -74,7 +74,7 @@ internal sealed class TranscriptListBox : ListBox
         /// but their data context. Prose (<c>TurnText</c>) builds a markdown tree that a new data context rebuilds anyway.
         /// </summary>
         public static bool Poolable(object? data) =>
-            data is UserMessageViewModel or TurnCardViewModel or TurnThinkingViewModel or ToolRowViewModel or TurnDividerViewModel;
+            data is UserMessageViewModel or TurnThinkingViewModel or ToolRowViewModel or TurnDividerViewModel;
 
         public void Return(Control control)
         {

@@ -253,7 +253,7 @@ public sealed class ProcessRunner : IProcessRunner
     /// pipe fail in platform specific ways and a failed pump must not turn into a failed tool call.</summary>
     private static async Task PumpAsync(Stream stream, ProcessOutputCollector capture, ProcessOutputTail? tail, CancellationToken cancellationToken)
     {
-        var decoder = tail is null ? null : Encoding.UTF8.GetDecoder();
+        var decoder = tail is null ? null : ProcessTextDecoding.CreateDecoder();
         var buffer = ArrayPool<byte>.Shared.Rent(ReadChunkBytes);
         try
         {

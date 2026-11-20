@@ -1,4 +1,5 @@
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Xunit;
 
@@ -41,17 +42,18 @@ public sealed class TranscriptRoundsTests
     [Fact]
     public void A_sub_agent_round_holds_its_task_row_and_its_turn_together()
     {
-        // A sub-agent transcript collapses older turns, but the task row and the turn it opened belong to one round: two rounds
-        // would cut the axis between the task's node and the turn's first node.
+        // A sub-agent transcript folds older turns, but the task row and the turn it opened belong to one round: two rounds
+        // would cut the axis between the task's node and the turn's first node. The turn itself is never a row — the rows
+        // are its blocks, and its numbers ride the round-end rule.
         var transcript = new TranscriptViewModel(collapseOlderTurns: true);
         transcript.AddUserMessage("summarise the diff", At);
         var card = transcript.BeginTurn(At);
         card.AppendText("done");
 
         var round = Assert.Single(transcript.Rounds);
-        Assert.Equal(3, round.Rows.Count);
+        Assert.Equal(2, round.Rows.Count);
         Assert.IsType<UserMessageViewModel>(round.Rows[0]);
-        Assert.Same(card, round.Rows[1]);
+        Assert.Same(card.Blocks[0], round.Rows[1]);
         Assert.Same(card, round.Card);
     }
 
@@ -123,6 +125,28 @@ public sealed class TranscriptRoundsTests
     }
 
     [Fact]
+    public void A_running_turn_shows_the_working_row_only_while_nothing_is_in_flight()
+    {
+        var transcript = MainTranscript();
+        transcript.AddUserMessage("go", At);
+        var card = transcript.BeginTurn(At);
+
+        // The turn started and nothing else arrived yet: the row is there.
+        Assert.Contains(transcript.FlatRows(), row => row is TurnWorkingViewModel);
+
+        // Reasoning that just arrived speaks for the turn: the row leaves.
+        card.AppendThinking("thinking about it");
+        Assert.DoesNotContain(transcript.FlatRows(), row => row is TurnWorkingViewModel);
+
+        card.AppendText("answer");
+        Assert.DoesNotContain(transcript.FlatRows(), row => row is TurnWorkingViewModel);
+
+        // The turn ends: nothing is left to announce.
+        transcript.EndTurn(TimeSpan.FromSeconds(2), null);
+        Assert.DoesNotContain(transcript.FlatRows(), row => row is TurnWorkingViewModel);
+    }
+
+    [Fact]
     public void A_typed_answer_gets_an_option_card_of_its_own()
     {
         var row = new ToolRowViewModel(
@@ -135,6 +159,41 @@ public sealed class TranscriptRoundsTests
         Assert.False(question.Options[0].IsChosen);
         Assert.True(question.Options[2].IsChosen);
         Assert.Equal("the new parser only", question.Options[2].Label);
+    }
+
+    [Fact]
+    public void The_question_card_keeps_only_the_questions_the_user_answered_or_wants_to_discuss()
+    {
+        const string arguments = """
+            {"questions":[
+              {"header":"Scope","question":"Which files?","options":[{"label":"Only the diff"},{"label":"Everything"}]},
+              {"header":"Style","question":"Which style?","options":[{"label":"Concise"},{"label":"Detailed"}]}]}
+            """;
+
+        // Still waiting: nothing is hidden yet, because nothing has been decided.
+        var pending = new ToolRowViewModel("ask_user", arguments);
+        Assert.Equal(2, pending.QuestionItems.Count);
+
+        // Answered: the second question was skipped, which is not an answer and does not belong in the record.
+        var row = new ToolRowViewModel("ask_user", arguments);
+        row.Complete(new ToolResult([new TextBlock("Scope: Only the diff\nStyle: (skipped)")]));
+        var answered = Assert.Single(row.QuestionItems);
+        Assert.Equal("Scope", answered.Header);
+        Assert.True(answered.Options[0].IsChosen);
+
+        // Asked to discuss: the question stays and reads as still to be discussed, the note riding along.
+        var discussed = new ToolRowViewModel("ask_user", arguments);
+        discussed.Complete(new ToolResult([new TextBlock("Scope: Only the diff\nStyle: (discussion requested) pick the tone with me")]));
+        Assert.Equal(2, discussed.QuestionItems.Count);
+        var question = discussed.QuestionItems[1];
+        Assert.StartsWith(Loc.Instance[QuestionsStrings.TranscriptDiscussingKey], question.Answer, StringComparison.Ordinal);
+        Assert.Contains("pick the tone with me", question.Answer, StringComparison.Ordinal);
+
+        // Dismissed: no question was answered at all, so the card keeps only its status.
+        var dismissed = new ToolRowViewModel("ask_user", arguments);
+        dismissed.Complete(new ToolResult([new TextBlock("The user dismissed the questions without answering.")]));
+        Assert.Empty(dismissed.QuestionItems);
+        Assert.Equal(Loc.Instance[QuestionsStrings.TranscriptDismissedKey], dismissed.QuestionStatusText);
     }
 
     [Fact]

@@ -574,11 +574,6 @@ internal static partial class TranscriptScenarios
                 Expect($"icon pixels equal the templated icon's (worst channel difference {worst})", worst <= 8);
                 Expect("icon ink uses the muted text colour", Enumerable.Range(6, 14).SelectMany(y => Enumerable.Range(0, 14).Select(x => node(x, y))).Any(c => c.A > 150 && Math.Abs(c.R - ink.R) <= 3 && Math.Abs(c.G - ink.G) <= 3));
 
-                // The header: no node, one line through the slot.
-                var headerRow = await MiddleGutterAsync(role: Forge.App.Views.TimelineRowRole.TurnHeader, Height).ConfigureAwait(true);
-                var header = Capture(headerRow.Gutter, Width, Height);
-                Expect("node-less header: the axis from top to bottom and nothing else", AxisOnly(header, 0, Height));
-
                 // A node waiting for the user, motion reduced: a still ring (18.9 across) around the node.
                 gutter = new Forge.App.Views.TimelineGutter { Kind = TimelineNodeKind.Approval, IsRunning = true };
                 host = new Border { Width = Width, Height = Height, Child = gutter };

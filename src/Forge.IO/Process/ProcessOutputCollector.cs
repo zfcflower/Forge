@@ -116,6 +116,6 @@ internal sealed class ProcessOutputCollector
 
         // Invalid sequences decode to U+FFFD rather than throwing: half a multi-byte character at the truncation point is
         // expected output, not a failure of the run.
-        return bytes.IsEmpty ? string.Empty : Encoding.UTF8.GetString(bytes);
+        return ProcessTextDecoding.Decode(bytes);
     }
 }

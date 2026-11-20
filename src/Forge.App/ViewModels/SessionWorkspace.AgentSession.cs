@@ -435,6 +435,12 @@ internal sealed partial class SessionWorkspaceViewModel
         Transcript.AddUserMessage(text, turnStartedAt, prompt.Attachments);
         var card = Transcript.BeginTurn(turnStartedAt);
         turnCard = card;
+
+        // Kept on the card for the same reason the root's turn keeps it: a retry re-sends exactly this turn's text and
+        // attachments. The retry hooks live on the shared transcript and its runner is this session's own turn entry
+        // (RunTurnAsync branches to the agent path), so a card without a prompt is the one thing that would leave a failed
+        // first turn - quota, 401, network, a retired model - with no way back.
+        card.Prompt = prompt;
         card.NoteModel(Composer.ProviderId is { Length: > 0 } provider ? provider : null, definition.Model.Model);
         turnNumber = card.Round;
         IsRunning = true;

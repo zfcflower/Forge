@@ -21,9 +21,6 @@ internal enum TimelineRowRole
     /// <summary>A top-level item that always has a node: a user message or a transcript notice.</summary>
     Item,
 
-    /// <summary>The turn's metadata row: no node, the axis only passes through it.</summary>
-    TurnHeader,
-
     /// <summary>One block of an expanded turn, a row of the flat transcript list.</summary>
     Block,
 
@@ -69,10 +66,7 @@ internal sealed class TimelineGutter : Control
     public static readonly StyledProperty<bool> IsFailingProperty =
         AvaloniaProperty.Register<TimelineGutter, bool>(nameof(IsFailing));
 
-    /// <summary>
-    /// Whether this row draws its node. The turn header does not, except when it is the end node of a turn that has nothing
-    /// visible of its own (see <see cref="TimelineLayout.TurnHeader"/>); every other row always does.
-    /// </summary>
+    /// <summary>Whether this row draws its node: every row does, except the one row a turn with nothing visible of its own still shows.</summary>
     public static readonly StyledProperty<bool> ShowNodeProperty =
         AvaloniaProperty.Register<TimelineGutter, bool>(nameof(ShowNode), true);
 
@@ -297,7 +291,6 @@ internal sealed class TimelineGutter : Control
         container = owner is null || DataContext is null ? null : owner.ContainerFromItem(DataContext);
         turn = Role switch
         {
-            TimelineRowRole.TurnHeader => DataContext as TurnCardViewModel,
             TimelineRowRole.Footnote => (DataContext as TurnFootnoteViewModel)?.Card,
             TimelineRowRole.Block => (DataContext as TurnBlockViewModel)?.Turn,
             _ => null,
@@ -451,7 +444,7 @@ internal sealed class TimelineGutter : Control
         // The owning ItemsControl is the round this row belongs to, so the index and the count are the row's place inside
         // its own round and the axis is continuous there by construction.
         var index = owner.IndexFromContainer(container);
-        return TimelineLayout.Row(index, owner.ItemCount, Role != TimelineRowRole.TurnHeader);
+        return TimelineLayout.Row(index, owner.ItemCount);
     }
 
     private (TimelineNodeKind Kind, TimelineNodeState State) Effective()

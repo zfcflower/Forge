@@ -81,19 +81,13 @@ internal sealed partial class ToolRowViewModel
         OnPropertyChanged(nameof(CardBody));
     }
 
-    /// <summary>Turns the model-facing wording of one answer into the user's language.</summary>
+    /// <summary>
+    /// The choices the user made, in the user's language. A question the card still hides (never answered, or skipped by an
+    /// older build) has no answer text, and the card leaves it out: the transcript records what was decided, not what was
+    /// asked.
+    /// </summary>
     private static string Describe(string raw)
     {
-        if (string.Equals(raw, SkippedMarker, StringComparison.Ordinal))
-        {
-            return Loc.Instance[QuestionsStrings.TranscriptSkippedKey];
-        }
-
-        if (string.Equals(raw, NoAnswerMarker, StringComparison.Ordinal))
-        {
-            return Loc.Instance[QuestionsStrings.TranscriptNoAnswerKey];
-        }
-
         if (raw.StartsWith(DiscussionMarker, StringComparison.Ordinal))
         {
             var close = raw.IndexOf(')', StringComparison.Ordinal);
@@ -147,11 +141,24 @@ internal sealed partial class ToolRowViewModel
                     {
                         if (lines[cursor].StartsWith(prefix, StringComparison.Ordinal))
                         {
-                            answer = Describe(lines[cursor][prefix.Length..].TrimEnd('\r'));
+                            var raw = lines[cursor][prefix.Length..].TrimEnd('\r').Trim();
                             cursor++;
+                            if (!string.Equals(raw, SkippedMarker, StringComparison.Ordinal)
+                                && !string.Equals(raw, NoAnswerMarker, StringComparison.Ordinal))
+                            {
+                                answer = Describe(raw);
+                            }
+
                             break;
                         }
                     }
+                }
+
+                // A settled card keeps only what the user decided: a question nobody answered is not part of the record,
+                // while a pending card still lists every question it is asking.
+                if (HasResult && answer.Length == 0)
+                {
+                    continue;
                 }
 
                 items.Add(new QuestionCardItem(header, prompt, answer, OptionsOf(element, answer)));

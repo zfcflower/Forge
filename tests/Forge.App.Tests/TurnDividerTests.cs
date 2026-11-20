@@ -51,14 +51,49 @@ public sealed class TurnDividerTests
     }
 
     [Fact]
-    public void A_sub_agent_transcript_keeps_its_header_and_numbers_no_subtitle()
+    public void A_sub_agent_transcript_shows_no_turn_row_and_folds_from_the_round_end_row()
     {
         var transcript = new TranscriptViewModel(collapseOlderTurns: true);
         transcript.AddUserMessage("hi", At0);
-        var card = transcript.BeginTurn(At0);
+        var first = transcript.BeginTurn(At0);
+        first.AppendText("first");
+        transcript.EndTurn(TimeSpan.FromSeconds(2), null);
 
-        Assert.Same(card, transcript.FlatRows()[1]);
+        // No transcript keeps a header row of its own: the numbers live on the rule that closes the turn, and a sub-agent
+        // keeps no round number on its task line.
         Assert.False(((UserMessageViewModel)transcript.FlatRows()[0]).HasRound);
+        Assert.DoesNotContain(transcript.FlatRows(), row => ReferenceEquals(row, first));
+
+        // The next turn folds the previous one, and the fold handle is that rule.
+        transcript.AddUserMessage("again", At1);
+        transcript.BeginTurn(At1, closePrevious: true);
+        var divider = Assert.IsType<TurnDividerViewModel>(
+            transcript.FlatRows().First(row => row is TurnDividerViewModel));
+        Assert.False(first.IsExpanded);
+        Assert.False(divider.IsExpanded);
+        Assert.True(divider.CanCollapse);
+        Assert.DoesNotContain(transcript.FlatRows(), row => ReferenceEquals(row, first.Blocks[0]));
+
+        // Clicking it brings the blocks back, above the rule.
+        divider.ToggleCommand.Execute(null);
+        Assert.True(first.IsExpanded);
+        Assert.True(divider.IsExpanded);
+        var rows = transcript.FlatRows();
+        Assert.Contains(first.Blocks[0], rows);
+        Assert.True(rows.IndexOf(first.Blocks[0]) < rows.IndexOf(divider));
+    }
+
+    [Fact]
+    public void A_main_session_turn_draws_no_fold_handle()
+    {
+        // Main-session turns are always whole: the round-end row shows the numbers and nothing else.
+        var transcript = MainTranscript();
+        transcript.AddUserMessage("hi", At0);
+        transcript.BeginTurn(At0).AppendText("hello");
+        transcript.EndTurn(TimeSpan.FromSeconds(2), null);
+
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
+        Assert.False(divider.CanCollapse);
     }
 
     // ---------------------------------------------------------------- line rules
@@ -130,6 +165,41 @@ public sealed class TurnDividerTests
         Assert.Same(card, divider.Card);
         Assert.Contains("tok/s", divider.Line);
         Assert.DoesNotContain("—", divider.Line);
+    }
+
+    [Fact]
+    public void The_hover_carries_the_five_lines_the_row_leaves_out()
+    {
+        // The row itself is one line; everything else rides the hover, one line per question: outcome+clock, the two tokens
+        // with the priced cost, the read cache with the hit rate, the write cache with its hour-long share, and the model.
+        var transcript = MainTranscript();
+        transcript.ResolveCost = (_, _, _) => "$0.0123";
+        transcript.AddUserMessage("hi", At0);
+        var card = transcript.BeginTurn(At0);
+        card.NoteModel("openai", "gpt-5.4");
+        card.AddUsage(new TokenUsage(3_322, 222, 3_222, 142, 42), StopReason.EndTurn);
+        transcript.EndTurn(TimeSpan.FromSeconds(31), null);
+
+        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
+        var lines = divider.Tooltip.Split('\n');
+
+        Assert.Equal(5, lines.Length);
+        Assert.DoesNotContain("—", divider.Tooltip);
+        // Status and the wall clock.
+        Assert.Contains(SessionStrings.TurnStatusText(TurnEndStatus.Completed), lines[0], StringComparison.Ordinal);
+        Assert.Contains(TextFormat.Elapsed(TimeSpan.FromSeconds(31)), lines[0], StringComparison.Ordinal);
+        // The two token counts and the cost priced for them.
+        Assert.Contains("3,322", lines[1], StringComparison.Ordinal);
+        Assert.Contains("222", lines[1], StringComparison.Ordinal);
+        Assert.Contains("$0.0123", lines[1], StringComparison.Ordinal);
+        // The read cache, then its ratio to the input — 3,222 of 3,322.
+        Assert.Contains("3,222", lines[2], StringComparison.Ordinal);
+        Assert.Contains("97.0%", lines[2], StringComparison.Ordinal);
+        // The write cache, then the hour-long share of it, in that order.
+        Assert.Contains("142", lines[3], StringComparison.Ordinal);
+        Assert.EndsWith("42", lines[3].TrimEnd(), StringComparison.Ordinal);
+        // The model with its provider, the reference the composer picked.
+        Assert.EndsWith("openai/gpt-5.4", lines[4].TrimEnd(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -210,10 +280,10 @@ public sealed class TurnDividerTests
 
         Assert.Equal(TurnEndStatus.Failed, card.EndStatus);
         Assert.Equal(6, card.ToolCount);
-        Assert.Equal("m (p)", card.DividerModelText);
+        Assert.Equal("p/m", card.DividerModelText);
         Assert.Contains("—", dividerBefore.Line);
         Assert.DoesNotContain("tok/s", dividerBefore.Line);
-        Assert.Contains("boom", dividerBefore.Tooltip);
+        Assert.Contains("boom", dividerBefore.Line + dividerBefore.Tooltip);
     }
 
     [Fact]
@@ -316,7 +386,7 @@ public sealed class TurnDividerTests
 
         var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.EndsWith("claude-sonnet-4-5", divider.Line, StringComparison.Ordinal);
-        Assert.Contains("claude-sonnet-4-5", divider.Tooltip, StringComparison.Ordinal);
+        Assert.Contains("claude-sonnet-4-5", divider.Line, StringComparison.Ordinal);
 
         // A turn nobody stamped (a replay whose metrics row had no model) omits the segment entirely.
         card.NoteModel(null, null);
