@@ -897,7 +897,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
         if (string.Equals(sessionId, SessionId, StringComparison.Ordinal))
         {
-            return TryInterject(text);
+            return TryInterject(text) is not null;
         }
 
         AgentHost? built;
@@ -1014,17 +1014,17 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         Services.SkillCatalog.Discover(Session.WorkspacePath, AgentRuntimeServices.UserDirectory(), AgentRuntimeServices.ProductSkillsDirectory);
 
     /// <summary>
-    /// Hands a user message to the running root turn; the loop delivers it at the next tool-batch boundary. False when no
+    /// Hands a user message to the running root turn; the loop delivers it at the next tool-batch boundary. Null when no
     /// turn is running, in which case the caller should queue the message instead.
     /// </summary>
-    public bool TryInterject(string text) => TryInterject(text, []);
+    public Interjection? TryInterject(string text) => TryInterject(text, []);
 
     /// <summary>
     /// Hands a user message with attachments (images, files, inlined text files) to the running root turn, delivered with
-    /// them at the next tool-batch boundary. The text may be empty only when an attachment is present. False when no turn
-    /// is running.
+    /// them at the next tool-batch boundary. The text may be empty only when an attachment is present. Null when no turn
+    /// is running. The returned message can be taken back with <see cref="TryWithdraw"/> until the loop delivers it.
     /// </summary>
-    public bool TryInterject(string text, IReadOnlyList<ContentBlock> attachments)
+    public Interjection? TryInterject(string text, IReadOnlyList<ContentBlock> attachments)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(attachments);
@@ -1038,11 +1038,23 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         {
             if (disposed || activeRoot is null)
             {
-                return false;
+                return null;
             }
 
-            activeRoot.Interject(content);
-            return true;
+            return activeRoot.Interject(content);
+        }
+    }
+
+    /// <summary>
+    /// Takes back an interjection the loop has not delivered yet (the user withdrew it to edit it). False when it already
+    /// reached the model, where the message is part of the history and nothing can undo it.
+    /// </summary>
+    public bool TryWithdraw(Interjection interjection)
+    {
+        ArgumentNullException.ThrowIfNull(interjection);
+        lock (gate)
+        {
+            return activeRoot?.Withdraw(interjection) == true;
         }
     }
 

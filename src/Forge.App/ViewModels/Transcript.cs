@@ -520,7 +520,11 @@ internal sealed class TurnThinkingViewModel : TurnBlockViewModel
 }
 
 /// <summary>A note inside a turn card, such as a redirected or stopped sub-agent.</summary>
-internal sealed class TurnNoticeViewModel(LocText text, bool isError, TimelineNodeKind kind = TimelineNodeKind.Notice)
+internal sealed class TurnNoticeViewModel(
+    LocText text,
+    bool isError,
+    TimelineNodeKind kind = TimelineNodeKind.Notice,
+    bool fromUser = false)
     : TurnBlockViewModel
 {
     /// <summary>The note in the current language, resolved when the note is rendered.</summary>
@@ -530,6 +534,12 @@ internal sealed class TurnNoticeViewModel(LocText text, bool isError, TimelineNo
 
     /// <summary>Which timeline node the note wears; a denied approval is <see cref="TimelineNodeKind.Approval"/>.</summary>
     public TimelineNodeKind Kind { get; } = kind;
+
+    /// <summary>
+    /// The note carries the user's own words (a delivered interjection): it reads at body size in the primary colour, like the
+    /// message bubble it stands for, instead of the muted caption every other note uses.
+    /// </summary>
+    public bool FromUser { get; } = fromUser;
 
     public override void RefreshText() => OnPropertyChanged(nameof(Text));
 }
@@ -911,12 +921,16 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         AddBlock(late);
     }
 
-    public void AddNotice(LocText text, bool isError = false, TimelineNodeKind kind = TimelineNodeKind.Notice)
+    public void AddNotice(
+        LocText text,
+        bool isError = false,
+        TimelineNodeKind kind = TimelineNodeKind.Notice,
+        bool fromUser = false)
     {
         SealText();
         SealThinking();
         SealToolGroup();
-        AddBlock(new TurnNoticeViewModel(text, isError, kind));
+        AddBlock(new TurnNoticeViewModel(text, isError, kind, fromUser));
     }
 
     /// <summary>

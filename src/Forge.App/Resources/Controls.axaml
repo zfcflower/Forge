@@ -17,6 +17,14 @@
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
+  <!-- A caption that carries the user's own words (a delivered interjection): body size, primary colour, no ellipsis. -->
+  <Style Selector="TextBlock.caption.user">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextTrimming" Value="None" />
+  </Style>
+
   <Style Selector="TextBlock.label">
     <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
     <Setter Property="FontWeight" Value="Medium" />

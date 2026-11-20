@@ -53,6 +53,7 @@ internal static class NotificationsStrings
     public const string EditorFailedTitleKey = "notifications.title.editorFailed";
     public const string SessionReplyTitleKey = "notifications.title.sessionReply";
     public const string ReceiptReportMissingTitleKey = "notifications.title.receiptReportMissing";
+    public const string WithdrawRefusedTitleKey = "notifications.title.withdrawRefused";
 
     // Bodies that are one sentence of their own.
     public const string ApprovalWaitingBody = "notifications.body.approval";
@@ -74,6 +75,9 @@ internal static class NotificationsStrings
 
     /// <summary>Headline of the "sub agent finished" notification.</summary>
     public static LocText SubAgentFinishedTitle => new(SubAgentFinishedTitleKey);
+
+    /// <summary>Headline of the "that waiting message can no longer be taken back" notification.</summary>
+    public static LocText WithdrawRefusedTitle => new(WithdrawRefusedTitleKey);
 
     /// <summary>Headline of the "step commit failed" notification.</summary>
     public static LocText StepCommitFailedTitle => new(StepCommitFailedTitleKey);
@@ -187,6 +191,7 @@ internal static class NotificationsStrings
         Loc.Register(TurnFailedTitleKey, "回合失败", "Turn failed");
         Loc.Register(ProviderMissingTitleKey, "提供商不可用", "Provider unavailable");
         Loc.Register(SubAgentFinishedTitleKey, "子 Agent 结束", "Sub-agent finished");
+        Loc.Register(WithdrawRefusedTitleKey, "无法撤回", "Cannot withdraw");
         Loc.Register(StepCommitFailedTitleKey, "步骤提交失败", "Step commit failed");
         Loc.Register(GitOperationFailedTitleKey, "Git 操作失败", "Git operation failed");
         Loc.Register(HostUnavailableTitleKey, "扩展宿主不可用", "Extension host unavailable");

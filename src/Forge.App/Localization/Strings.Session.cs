@@ -86,7 +86,9 @@ internal static class SessionStrings
     public const string ComposerStopHintKey = "session.composer.stopHint";
     public const string ComposerQueuedKey = "session.composer.queued";
     public const string ComposerInterjectingKey = "session.composer.interjecting";
-    public const string ComposerRemoveQueuedKey = "session.composer.removeQueued";
+    public const string ComposerWithdrawQueuedKey = "session.composer.withdrawQueued";
+    public const string ComposerInterjectDeliveredKey = "session.composer.interjectDelivered";
+    public const string ComposerWithdrawAttachmentsFullKey = "session.composer.withdrawAttachmentsFull";
     public const string ComposerQueuePausedKey = "session.composer.queuePaused";
     public const string ComposerInterjectedNoticeKey = "session.composer.interjectedNotice";
     public const string ComposerInterjectedAttachmentsBase = "session.composer.interjectedAttachments";
@@ -240,6 +242,12 @@ internal static class SessionStrings
     public static string ComposerQueued => Loc.Instance[ComposerQueuedKey];
 
     public static string ComposerInterjecting => Loc.Instance[ComposerInterjectingKey];
+
+    /// <summary>Why a pending interjection could not be withdrawn any more.</summary>
+    public static LocText ComposerInterjectDelivered => new(ComposerInterjectDeliveredKey);
+
+    /// <summary>Why a waiting message with attachments stays in the queue: the composer is full.</summary>
+    public static LocText ComposerWithdrawAttachmentsFull => new(ComposerWithdrawAttachmentsFullKey);
 
     public static string ComposerDefaultsSaved => Loc.Instance[ComposerDefaultsSavedKey];
 
@@ -600,7 +608,15 @@ internal static class SessionStrings
         Loc.Register(ComposerStopHintKey, "停止本轮，暂停队列", "Stop this turn and pause the queue");
         Loc.Register(ComposerQueuedKey, "排队", "Queued");
         Loc.Register(ComposerInterjectingKey, "插话", "Interjecting");
-        Loc.Register(ComposerRemoveQueuedKey, "移除", "Remove");
+        Loc.Register(ComposerWithdrawQueuedKey, "撤回并编辑", "Withdraw and edit");
+        Loc.Register(
+            ComposerInterjectDeliveredKey,
+            "这条插话已经送达模型，无法撤回；下一条在送达前可以撤回",
+            "This interjection already reached the model and cannot be withdrawn; the next one can be withdrawn before delivery");
+        Loc.Register(
+            ComposerWithdrawAttachmentsFullKey,
+            "输入框里的附件已满，先移除一些再撤回这条消息",
+            "The composer already holds the maximum attachments; remove some before withdrawing this message");
         Loc.Register(ComposerQueuePausedKey, "队列已暂停：发送或按 Ctrl+Enter 继续", "Queue paused: send or press Ctrl+Enter to resume");
         Loc.Register(ComposerInterjectedNoticeKey, "插话：{0}", "Interjected: {0}");
         Loc.Register(ComposerInterjectedAttachmentsBase + ".one", "插话：{0} 个附件（{1}）", "Interjected: {0} attachment ({1})");

@@ -7,6 +7,7 @@ using Forge.App.Localization;
 using Forge.App.Notifications;
 using Forge.App.Preferences;
 using Forge.App.Providers;
+using Forge.Core.Agents;
 using Forge.Core.Providers;
 using Forge.App.Services;
 using Forge.App.Prompts;
@@ -330,18 +331,24 @@ internal sealed class QueuedMessageViewModel : ObservableObject
     public QueuedMessageViewModel(
         string text,
         bool isInterjection,
-        Action<QueuedMessageViewModel> remove,
-        IReadOnlyList<ContentBlock>? attachments = null)
+        Action<QueuedMessageViewModel> withdraw,
+        IReadOnlyList<ContentBlock>? attachments = null,
+        Interjection? interjection = null)
     {
-        ArgumentNullException.ThrowIfNull(remove);
+        ArgumentNullException.ThrowIfNull(withdraw);
         Text = text;
         Attachments = attachments ?? [];
         IsInterjection = isInterjection;
-        RemoveCommand = new RelayCommand(() => remove(this), () => !IsInterjection);
+        Interjection = interjection;
+        WithdrawCommand = new RelayCommand(() => withdraw(this));
     }
 
-    public QueuedMessageViewModel(ComposerPrompt prompt, bool isInterjection, Action<QueuedMessageViewModel> remove)
-        : this(prompt.Text, isInterjection, remove, prompt.Attachments)
+    public QueuedMessageViewModel(
+        ComposerPrompt prompt,
+        bool isInterjection,
+        Action<QueuedMessageViewModel> withdraw,
+        Interjection? interjection = null)
+        : this(prompt.Text, isInterjection, withdraw, prompt.Attachments, interjection)
     {
         Orchestration = prompt.Orchestration;
         Mentions = prompt.Mentions;
@@ -372,14 +379,21 @@ internal sealed class QueuedMessageViewModel : ObservableObject
     /// <summary>Single-line preview for the chip.</summary>
     public string Preview => Text.ReplaceLineEndings(" ");
 
-    /// <summary>Handed to the running agent already; it can no longer be taken back.</summary>
+    /// <summary>Handed to the running agent already; it leaves for the model at the next tool-batch boundary.</summary>
     public bool IsInterjection { get; }
 
-    public bool CanRemove => !IsInterjection;
+    /// <summary>The interjection this chip stands for, kept so it can be taken back by identity while it still waits; null for a queued message.</summary>
+    public Interjection? Interjection { get; }
+
+    /// <summary>
+    /// Both shapes can be taken back and edited while they wait — a queued message leaves the queue, a pending interjection
+    /// leaves the running turn's interjection list — and both put their text and attachments back into the composer.
+    /// </summary>
+    public bool CanWithdraw => !IsInterjection || Interjection is not null;
 
     public string Label => IsInterjection ? SessionStrings.ComposerInterjecting : SessionStrings.ComposerQueued;
 
-    public RelayCommand RemoveCommand { get; }
+    public RelayCommand WithdrawCommand { get; }
 
     public void RefreshText()
     {
