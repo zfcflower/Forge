@@ -17,6 +17,13 @@ public sealed record SubAgentOutcome(string AgentId, string Text, bool IsError)
     public bool Stopped { get; init; }
 }
 
+/// <summary>Who drives an instance: the model (<c>spawn_agent</c> and its control tools) or the user (a session the user opened under a root).</summary>
+public enum AgentOwner
+{
+    Model,
+    User,
+}
+
 /// <summary>
 /// Owns sub-agent instances: id allocation, the run gate per instance, the depth limit and the control surface
 /// (<see cref="ISubAgentControl"/>) the parent tools and the UI stop button share. Each spawn is one run with
@@ -34,6 +41,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
     private readonly ISessionCatalog? sessions;
     private readonly AgentOptions options;
     private readonly Dictionary<string, AgentInstance> instances = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AgentOwner> owners = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SubAgentRun> runs = new(StringComparer.Ordinal);
     private readonly HashSet<string> finished = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> counters = new(StringComparer.Ordinal);
@@ -56,7 +64,15 @@ public sealed class SubAgentScheduler : ISubAgentControl
         this.store = store;
         sessions = SessionCatalogs.From(store);
         this.options = options;
+        ModelControl = new OwnerScopedControl(this);
     }
+
+    /// <summary>
+    /// The control surface the model's tools get: an instance the user owns does not exist for it (<c>NotFound</c>, the same
+    /// answer an unknown id gets), while <see cref="ISubAgentControl"/> on the host stays the full surface the UI stop button
+    /// uses for both owners.
+    /// </summary>
+    public ISubAgentControl ModelControl { get; }
 
     internal Func<AgentInstance, ChatMessage, IAgentEventSink, CancellationToken, Task<AgentRunResult>> Runner { get; set; } =
         static (_, _, _, _) => Task.FromException<AgentRunResult>(new InvalidOperationException("No sub-agent runner is configured."));
@@ -79,6 +95,15 @@ public sealed class SubAgentScheduler : ISubAgentControl
         lock (gate)
         {
             return instances.TryGetValue(id, out instance!);
+        }
+    }
+
+    /// <summary>Who registered <paramref name="id"/>; <see cref="AgentOwner.Model"/> for ids this scheduler never handed out.</summary>
+    public AgentOwner OwnerOf(string id)
+    {
+        lock (gate)
+        {
+            return owners.TryGetValue(id, out var owner) ? owner : AgentOwner.Model;
         }
     }
 
@@ -149,7 +174,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
         ToolContext context,
         IAgentEventSink sink,
         string parentId,
-        CancellationToken ct)
+        CancellationToken ct,
+        AgentOwner owner = AgentOwner.Model)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(sink);
@@ -192,6 +218,12 @@ public sealed class SubAgentScheduler : ISubAgentControl
                     return new SubAgentOutcome(resumeId, $"No sub-agent with id '{resumeId}' exists.", IsError: true);
                 }
 
+                // A user-owned session is not the model's to continue: it answers exactly like an unknown id.
+                if (owner == AgentOwner.Model && OwnerOf(resumeId) != AgentOwner.Model)
+                {
+                    return new SubAgentOutcome(resumeId, $"No sub-agent with id '{resumeId}' exists.", IsError: true);
+                }
+
                 if (!string.Equals(instance.Definition.Name, definition.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     return new SubAgentOutcome(
@@ -212,13 +244,13 @@ public sealed class SubAgentScheduler : ISubAgentControl
             {
                 var sessionId = await CreateSessionAsync(definition, task, context, ct).ConfigureAwait(false);
                 instance = new AgentInstance(
-                    NextId(definition.Name),
+                    NextId(definition.Name, owner),
                     definition,
                     sessionId,
                     context.WorkingDirectory,
                     context.AgentDepth + 1,
                     composer.Compose(new PromptInput(layers, definition.Prompt, null)));
-                Register(instance);
+                Register(instance, owner);
                 instance.TryAcquire();
                 holdsGate = true;
             }
@@ -360,17 +392,20 @@ public sealed class SubAgentScheduler : ISubAgentControl
         }
     }
 
-    private void Register(AgentInstance instance)
+    private void Register(AgentInstance instance, AgentOwner owner)
     {
         lock (gate)
         {
             instances[instance.Id] = instance;
+            owners[instance.Id] = owner;
         }
     }
 
-    private string NextId(string kind)
+    private string NextId(string kind, AgentOwner owner)
     {
-        var prefix = Identifier(kind);
+        // Model-spawned children stay <kind>-<n>; user-driven sessions get their own namespace so an id alone says who
+        // registered it (and a future kind named "session" cannot collide).
+        var prefix = owner == AgentOwner.User ? "session" : Identifier(kind);
         lock (gate)
         {
             var next = counters.TryGetValue(prefix, out var current) ? current + 1 : 1;
@@ -421,5 +456,22 @@ public sealed class SubAgentScheduler : ISubAgentControl
         }
 
         return builder.Length == 0 ? "agent" : builder.ToString();
+    }
+
+    /// <summary>
+    /// The model's view of the control surface: ids the user owns answer <see cref="SubAgentControlResult.NotFound"/>,
+    /// indistinguishable from an id that never existed, so the model can neither steer nor stop a session the user drives.
+    /// The UI uses the scheduler itself and is unaffected.
+    /// </summary>
+    private sealed class OwnerScopedControl(SubAgentScheduler scheduler) : ISubAgentControl
+    {
+        public SubAgentControlResult Steer(string agentId, string instruction) =>
+            scheduler.OwnerOf(agentId) == AgentOwner.Model ? scheduler.Steer(agentId, instruction) : SubAgentControlResult.NotFound;
+
+        public SubAgentControlResult FollowUp(string agentId, string instruction) =>
+            scheduler.OwnerOf(agentId) == AgentOwner.Model ? scheduler.FollowUp(agentId, instruction) : SubAgentControlResult.NotFound;
+
+        public SubAgentControlResult Stop(string agentId, string? reason) =>
+            scheduler.OwnerOf(agentId) == AgentOwner.Model ? scheduler.Stop(agentId, reason) : SubAgentControlResult.NotFound;
     }
 }

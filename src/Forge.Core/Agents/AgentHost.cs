@@ -185,9 +185,9 @@ public sealed class AgentHost
 
         scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);
         builtIns.Add(new SpawnAgentTool(scheduler, catalog.All));
-        builtIns.Add(new SubAgentSteerTool(scheduler));
-        builtIns.Add(new SubAgentFollowUpTool(scheduler));
-        builtIns.Add(new SubAgentStopTool(scheduler));
+        builtIns.Add(new SubAgentSteerTool(scheduler.ModelControl));
+        builtIns.Add(new SubAgentFollowUpTool(scheduler.ModelControl));
+        builtIns.Add(new SubAgentStopTool(scheduler.ModelControl));
 
         if (options.Reviews is { } reviews)
         {
