@@ -333,10 +333,25 @@ internal sealed class TabHeaderView : TemplatedControl
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (Model is { } tab && Strip is { } strip)
+        if (Model is not { } tab || Strip is not { } strip)
         {
-            strip.BeginTabDrag(tab, e);
+            return;
         }
+
+        // The second click of a double click on the label is the tab's rename gesture, when it has one. The first click
+        // already activated the tab, and this press starts no drag, so its release activates nothing a second time.
+        if (e.ClickCount == 2 && tab.RenameCommand is { } rename)
+        {
+            e.Handled = true;
+            if (rename.CanExecute(null))
+            {
+                rename.Execute(null);
+            }
+
+            return;
+        }
+
+        strip.BeginTabDrag(tab, e);
     }
 
     private void OnCloseClick(object? sender, RoutedEventArgs e) => Strip?.CloseTab(Model);

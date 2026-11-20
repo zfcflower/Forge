@@ -22,6 +22,12 @@ public partial class ProjectView : UserControl
 
     private ProjectTreeViewModel? tree;
 
+    /// <summary>
+    /// The row whose double click started a rename, so the release that closes that gesture does not run the row's action
+    /// (the first click already did) and a later single click is not mistaken for it: every press resets it.
+    /// </summary>
+    private TreeNodeViewModel? renameTap;
+
     /// <summary>The rows' context menu, made once and refilled from the row's generated entries on every open.</summary>
     private ContextMenu? rowMenu;
 
@@ -30,6 +36,7 @@ public partial class ProjectView : UserControl
         InitializeComponent();
         // The whole row is the hit target, not just the chevron or the trailing buttons.
         TreeList.AddHandler(TappedEvent, OnRowTapped, RoutingStrategies.Bubble, handledEventsToo: true);
+        TreeList.AddHandler(PointerPressedEvent, OnRowPointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
         TreeList.AddHandler(KeyDownEvent, OnRowKeyDown, RoutingStrategies.Tunnel);
         TreeList.AddHandler(ContextRequestedEvent, OnRowContextRequested, RoutingStrategies.Bubble);
         TreeList.AddHandler(Button.ClickEvent, OnPlusClick, RoutingStrategies.Bubble);
@@ -120,6 +127,15 @@ public partial class ProjectView : UserControl
 
         if (source.FindAncestorOfType<ListBoxItem>(includeSelf: true) is { DataContext: TreeNodeViewModel node })
         {
+            if (ReferenceEquals(node, renameTap))
+            {
+                // The release of the double click that opened the rename prompt: the row's own action ran on the first
+                // click and must not run again here.
+                renameTap = null;
+                e.Handled = true;
+                return;
+            }
+
             if (node.Activate())
             {
                 e.Handled = true;
@@ -135,6 +151,31 @@ public partial class ProjectView : UserControl
         {
             ClearSelection();
         }
+    }
+
+    /// <summary>
+    /// A double click on an agent session row renames it, through the same command its context menu runs, so the prompt and
+    /// the store write have one owner. The second press is the gesture: the first click already opened or brought forward
+    /// the row's tab, so this one is consumed here and its release must not run the row action again.
+    /// </summary>
+    private void OnRowPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        renameTap = null;
+        if (e.ClickCount != 2
+            || !e.GetCurrentPoint(TreeList).Properties.IsLeftButtonPressed
+            || e.Source is not Visual source
+            || IsInsideButton(source)
+            || source.FindAncestorOfType<ListBoxItem>(includeSelf: true) is not { DataContext: TreeNodeViewModel node }
+            || node.Kind != TreeNodeKind.AgentSession
+            || node.RenameCommand is not { } rename
+            || !rename.CanExecute(null))
+        {
+            return;
+        }
+
+        renameTap = node;
+        e.Handled = true;
+        rename.Execute(null);
     }
 
     /// <summary>Drops the row selection, and with it the key a later refresh would have restored.</summary>

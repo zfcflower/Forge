@@ -180,6 +180,13 @@ internal sealed class TabModel(string id, TabKind kind, object content, string t
 
     public bool IsClosable { get; init; } = true;
 
+    /// <summary>
+    /// The header's double-click rename, for a tab whose label the user owns (an agent session's own name today). The
+    /// workbench knows only the gesture; the command carries the prompt and the store write. Null leaves the header without
+    /// a rename gesture.
+    /// </summary>
+    public System.Windows.Input.ICommand? RenameCommand { get; set; }
+
     public TabGroupModel? Group { get; internal set; }
 
     public bool IsFloating
