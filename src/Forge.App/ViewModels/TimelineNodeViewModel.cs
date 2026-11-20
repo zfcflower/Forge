@@ -30,8 +30,20 @@ internal enum TimelineNodeKind
     /// <summary>A tool that looks for things: a file, a match, a session.</summary>
     Search,
 
+    /// <summary>A tool that lists what a directory holds.</summary>
+    ListDirectory,
+
     /// <summary>A tool that writes or edits something.</summary>
     EditFile,
+
+    /// <summary>A tool that copies something.</summary>
+    CopyFile,
+
+    /// <summary>A tool that moves something.</summary>
+    MoveFile,
+
+    /// <summary>A tool that deletes something.</summary>
+    DeleteFile,
 
     /// <summary>A shell command or a script run.</summary>
     Command,
@@ -112,8 +124,10 @@ internal static class TimelineNodeMap
             ["spec_graph"] = TimelineNodeKind.ReadFile,
             ["spec_validate"] = TimelineNodeKind.ReadFile,
 
+            // A directory's entries: listing is not searching.
+            ["ls"] = TimelineNodeKind.ListDirectory,
+
             // Searches.
-            ["ls"] = TimelineNodeKind.Search,
             ["find"] = TimelineNodeKind.Search,
             ["grep"] = TimelineNodeKind.Search,
             [SearchHistoryTool.Name] = TimelineNodeKind.Search,
@@ -121,9 +135,11 @@ internal static class TimelineNodeMap
             // Writes and edits.
             ["edit"] = TimelineNodeKind.EditFile,
             ["write"] = TimelineNodeKind.EditFile,
-            ["copy"] = TimelineNodeKind.EditFile,
-            ["move"] = TimelineNodeKind.EditFile,
-            ["delete"] = TimelineNodeKind.EditFile,
+
+            // Copying, moving and deleting a path are their own icons: a pencil for "copy" or "delete" reads as an edit.
+            ["copy"] = TimelineNodeKind.CopyFile,
+            ["move"] = TimelineNodeKind.MoveFile,
+            ["delete"] = TimelineNodeKind.DeleteFile,
 
             // Commands.
             ["bash"] = TimelineNodeKind.Command,
@@ -226,7 +242,11 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Thinking => "IconThinking",
         TimelineNodeKind.ReadFile => "IconDocument",
         TimelineNodeKind.Search => "IconSearchRegular",
+        TimelineNodeKind.ListDirectory => "IconFolderList",
         TimelineNodeKind.EditFile => "IconEditRegular",
+        TimelineNodeKind.CopyFile => "IconCopy",
+        TimelineNodeKind.MoveFile => "IconTrayItemRemove",
+        TimelineNodeKind.DeleteFile => "IconTrash",
         TimelineNodeKind.Command => "IconCode",
         TimelineNodeKind.Network => "IconGlobeRegular",
         TimelineNodeKind.McpTool => "IconPlugRegular",
@@ -247,7 +267,11 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Thinking => "IconThinkingFilled",
         TimelineNodeKind.ReadFile => "IconDocumentFilled",
         TimelineNodeKind.Search => "IconSearchFilled",
+        TimelineNodeKind.ListDirectory => "IconFolderListFilled",
         TimelineNodeKind.EditFile => "IconEditFilled",
+        TimelineNodeKind.CopyFile => "IconCopyFilled",
+        TimelineNodeKind.MoveFile => "IconTrayItemRemoveFilled",
+        TimelineNodeKind.DeleteFile => "IconTrashFilled",
         TimelineNodeKind.Command => "IconCodeFilled",
         TimelineNodeKind.Network => "IconGlobeFilled",
         TimelineNodeKind.McpTool => "IconPlugFilled",
@@ -269,7 +293,11 @@ internal static class TimelineNodeMap
         TimelineNodeKind.Thinking => TimelineStrings.NameThinking,
         TimelineNodeKind.ReadFile => TimelineStrings.NameReadFile,
         TimelineNodeKind.Search => TimelineStrings.NameSearch,
+        TimelineNodeKind.ListDirectory => TimelineStrings.NameListDirectory,
         TimelineNodeKind.EditFile => TimelineStrings.NameEditFile,
+        TimelineNodeKind.CopyFile => TimelineStrings.NameCopyFile,
+        TimelineNodeKind.MoveFile => TimelineStrings.NameMoveFile,
+        TimelineNodeKind.DeleteFile => TimelineStrings.NameDeleteFile,
         TimelineNodeKind.Command => TimelineStrings.NameCommand,
         TimelineNodeKind.Network => TimelineStrings.NameNetwork,
         TimelineNodeKind.McpTool => TimelineStrings.NameMcp,

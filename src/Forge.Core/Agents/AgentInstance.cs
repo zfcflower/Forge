@@ -109,10 +109,14 @@ public sealed class AgentInstance
     /// the batch's results, without dropping any call; a run that ends without another batch leaves it pending, and the
     /// host takes it back with <see cref="TakeInterjections"/> (typically to send it as the next turn). Thread-safe.
     /// </summary>
-    public void Interject(string text)
+    /// <returns>
+    /// The queued message, so the caller can take it back with <see cref="Withdraw"/> while it is still waiting (the user
+    /// withdraws an interjection to edit it).
+    /// </returns>
+    public Interjection Interject(string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        Enqueue(new Interjection([new TextBlock(text)]));
+        return Enqueue(new Interjection([new TextBlock(text)]));
     }
 
     /// <summary>
@@ -121,9 +125,33 @@ public sealed class AgentInstance
     /// the order they should reach the model. It must carry typed text or at least one attachment; other block kinds are
     /// refused. Delivered like <see cref="Interject(string)"/>.
     /// </summary>
-    public void Interject(IReadOnlyList<ContentBlock> content)
+    public Interjection Interject(IReadOnlyList<ContentBlock> content) => Enqueue(Interjection.Create(content));
+
+    /// <summary>
+    /// Takes back one interjection that has not reached the model yet, so the user can edit what they sent while the turn
+    /// runs on. False once the loop has taken them (all pending ones leave together at a tool-batch boundary): the message is
+    /// part of the history then and cannot be undone. Thread-safe.
+    /// </summary>
+    public bool Withdraw(Interjection interjection)
     {
-        Enqueue(Interjection.Create(content));
+        ArgumentNullException.ThrowIfNull(interjection);
+        lock (interjectionGate)
+        {
+            if (interjections is not { } pending)
+            {
+                return false;
+            }
+
+            var index = pending.IndexOf(interjection);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            pending.RemoveAt(index);
+            Volatile.Write(ref pendingInterjections, pending.Count);
+            return true;
+        }
     }
 
     /// <summary>Removes and returns the interjections not delivered yet, oldest first, with their blocks; empty when none.</summary>
@@ -143,12 +171,13 @@ public sealed class AgentInstance
         }
     }
 
-    private void Enqueue(Interjection interjection)
+    private Interjection Enqueue(Interjection interjection)
     {
         lock (interjectionGate)
         {
             (interjections ??= []).Add(interjection);
             Volatile.Write(ref pendingInterjections, interjections.Count);
+            return interjection;
         }
     }
 

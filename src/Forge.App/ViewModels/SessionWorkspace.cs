@@ -437,7 +437,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Composer.RestoreAttachments(state.DraftAttachments);
         foreach (var prompt in state.Queued)
         {
-            queued.Add(new QueuedMessageViewModel(prompt, isInterjection: false, RemoveQueued));
+            queued.Add(new QueuedMessageViewModel(prompt, isInterjection: false, WithdrawQueued));
         }
 
         if (state.Queued.Count > 0)
@@ -1204,7 +1204,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return;
         }
 
-        AddQueued(new QueuedMessageViewModel(prompt, isInterjection: false, RemoveQueued), queued.Count);
+        AddQueued(new QueuedMessageViewModel(prompt, isInterjection: false, WithdrawQueued), queued.Count);
         if (!isRunning)
         {
             ScheduleNext();
@@ -1218,7 +1218,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return false;
         }
 
-        var message = new QueuedMessageViewModel(text.Trim(), isInterjection: false, RemoveQueuedReview);
+        var message = new QueuedMessageViewModel(text.Trim(), isInterjection: false, WithdrawQueued);
         if (withdrawn is not null)
         {
             reviewWithdrawn.Add(message, withdrawn);
@@ -1376,10 +1376,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
 
         // Attachments travel with the interjection: the loop delivers text and attachments together at the next tool-batch
-        // boundary. When no turn takes it, the message is queued normally.
-        var delivered = isRunning && runtime is { } live && live.TryInterject(prompt.Text, prompt.Attachments);
+        // boundary. When no turn takes it, the message is queued normally. The chip keeps the instance, so the message can be
+        // withdrawn (back into the composer) right up to the moment the loop hands it to the model.
+        var delivered = isRunning && runtime is { } live ? live.TryInterject(prompt.Text, prompt.Attachments) : null;
         var front = queued.TakeWhile(message => message.IsInterjection).Count();
-        AddQueued(new QueuedMessageViewModel(prompt, delivered, RemoveQueued), delivered ? front : 0);
+        AddQueued(
+            new QueuedMessageViewModel(prompt, isInterjection: delivered is not null, WithdrawQueued, delivered),
+            delivered is not null ? front : 0);
         if (!isRunning)
         {
             ScheduleNext();
@@ -1396,7 +1399,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (!isRunning)
         {
             queuePaused = false;
-            AddQueued(new QueuedMessageViewModel(prompt, isInterjection: false, RemoveQueued), 0);
+            AddQueued(new QueuedMessageViewModel(prompt, isInterjection: false, WithdrawQueued), 0);
             ScheduleNext();
             return;
         }
@@ -1411,22 +1414,76 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         OnQueueChanged();
     }
 
-    private void RemoveQueued(QueuedMessageViewModel message)
+    /// <summary>
+    /// Takes a waiting message back into the composer: a queued one leaves the queue, a pending interjection leaves the
+    /// running turn as well (only while the loop has not delivered it — once the model has it, nothing can undo it), and both
+    /// hand their text and attachments back for editing. The text appends to what the user already typed, never replaces it.
+    /// </summary>
+    private void WithdrawQueued(QueuedMessageViewModel message)
     {
-        if (queued.Remove(message))
+        // Checked before anything is taken: a refusal has to leave both the chip and the composer exactly as they were.
+        if (!CanRestoreAttachments(message))
         {
-            OnQueueChanged();
+            RefuseWithdraw(SessionStrings.ComposerWithdrawAttachmentsFull, "withdraw-attachments");
+            return;
         }
+
+        if (message.Interjection is { } interjection && runtime?.TryWithdraw(interjection) != true)
+        {
+            // The loop took it at a tool-batch boundary: the chip goes away on its own when AgentInterjected lands, so the
+            // message is not restored (that would send it twice) and the user is told why nothing came back.
+            RefuseWithdraw(SessionStrings.ComposerInterjectDelivered, "interject-delivered");
+            return;
+        }
+
+        queued.Remove(message);
+        OnQueueChanged();
+        NotifyWithdrawn(message);
+
+        if (!string.IsNullOrWhiteSpace(message.Text))
+        {
+            Draft = ComposerDraft.Append(Draft, message.Text);
+        }
+
+        Composer.RestoreAttachments(message.Attachments);
     }
 
-    private void RemoveQueuedReview(QueuedMessageViewModel message)
+    /// <summary>
+    /// Whether the composer can take everything this message carries back. Images and files are capped per message and a
+    /// withdrawal never drops one silently — an attachment lost on the way back would be gone for good.
+    /// </summary>
+    private bool CanRestoreAttachments(QueuedMessageViewModel message)
     {
-        if (queued.Remove(message))
+        if (!message.HasAttachments)
         {
-            OnQueueChanged();
-            NotifyWithdrawn(message);
+            return true;
         }
+
+        var images = 0;
+        var files = 0;
+        foreach (var block in message.Attachments)
+        {
+            if (block is ImageBlock)
+            {
+                images++;
+            }
+            else
+            {
+                files++;
+            }
+        }
+
+        return Composer.Attachments.Count + images <= ImageAttachmentRules.MaxImagesPerMessage
+            && Composer.Files.Count + files <= FileAttachmentRules.MaxFilesPerMessage;
     }
+
+    /// <summary>Says why a waiting message stays where it is; the message itself is untouched.</summary>
+    private void RefuseWithdraw(LocText reason, string key) =>
+        notifications.Notify(
+            NotificationLevel.Warning,
+            NotificationsStrings.WithdrawRefusedTitle,
+            reason,
+            key + ":" + SessionId);
 
     private void NotifyWithdrawn(QueuedMessageViewModel message)
     {
@@ -1482,7 +1539,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     new QueuedMessageViewModel(
                         new ComposerPrompt(leftover.Text, [.. leftover.Attachments]),
                         isInterjection: false,
-                        RemoveQueued));
+                        WithdrawQueued));
             }
 
             OnQueueChanged();
@@ -1515,7 +1572,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             // Something else started in between: the redirect waits in the queue like any other message.
             if (redirect is not null)
             {
-                AddQueued(new QueuedMessageViewModel(redirect, isInterjection: false, RemoveQueued), 0);
+                AddQueued(new QueuedMessageViewModel(redirect, isInterjection: false, WithdrawQueued), 0);
             }
 
             return;
@@ -1760,7 +1817,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             }
             else
             {
-                AddQueued(new QueuedMessageViewModel(rejected, isInterjection: false, RemoveQueued), 0);
+                AddQueued(new QueuedMessageViewModel(rejected, isInterjection: false, WithdrawQueued), 0);
             }
         }
     }
@@ -2041,7 +2098,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             OnQueueChanged();
         }
 
-        Card(interjected.AgentId)?.AddNotice(SessionStrings.ComposerInterjectedNotice(interjected.Text, attachments));
+        // Marked as the user's own words: the note reads at body size in the primary colour, not as a muted caption.
+        Card(interjected.AgentId)?.AddNotice(
+            SessionStrings.ComposerInterjectedNotice(interjected.Text, attachments),
+            fromUser: true);
     }
 
     /// <summary>

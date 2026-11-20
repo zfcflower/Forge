@@ -352,10 +352,12 @@
 
           <Border Grid.Row="1" Classes="composer-body">
             <Grid RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,10,0,0">
-              <!-- queued and interjected messages -->
+              <!-- queued and interjected messages. The card's top border is drawn 10px above this grid (the body's
+                   Margin="0,-10,0,0" plus this grid's 10px is the shared-outline trick), so -8 puts the chips' own top
+                   2px below that border: the strip hugs the input area's top edge instead of floating 18px under it. -->
               <StackPanel Grid.Row="0"
                           Spacing="4"
-                          Margin="8,8,8,0"
+                          Margin="8,-8,8,0"
                           IsVisible="{Binding HasQueued}">
                 <ItemsControl ItemsSource="{Binding Queued}"
                               AutomationProperties.AutomationId="composer-queue">
@@ -380,11 +382,12 @@
                                      TextTrimming="CharacterEllipsis"
                                      VerticalAlignment="Center" />
                           <Button Classes="icon composer-mini"
-                                  Command="{Binding RemoveCommand}"
-                                  IsVisible="{Binding CanRemove}"
-                                  AutomationProperties.Name="{Binding [session.composer.removeQueued], Source={x:Static loc:Loc.Instance}}"
-                                  ToolTip.Tip="{Binding [session.composer.removeQueued], Source={x:Static loc:Loc.Instance}}">
-                            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+                                  Command="{Binding WithdrawCommand}"
+                                  IsVisible="{Binding CanWithdraw}"
+                                  AutomationProperties.AutomationId="composer-chip-withdraw"
+                                  AutomationProperties.Name="{Binding [session.composer.withdrawQueued], Source={x:Static loc:Loc.Instance}}"
+                                  ToolTip.Tip="{Binding [session.composer.withdrawQueued], Source={x:Static loc:Loc.Instance}}">
+                            <wc:FluentIcon Data="{StaticResource IconEditArrowBack}" Width="14" Height="14" />
                           </Button>
                         </StackPanel>
                       </Border>

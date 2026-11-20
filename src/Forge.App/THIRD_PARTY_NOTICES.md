@@ -19,13 +19,16 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   `chat_sparkle` (regular + filled), `checkmark`, `checkmark_circle`, `chevron_down`, `chevron_left`, `chevron_right`, `chevron_up`,
   `circle`,
   `circle_half_fill`, `cloud_arrow_down`, `color`, `comment_add`, `copy`, `delete`, `dismiss`, `document_bullet_list_clock`,
-  `edit`, `eye`, `flash` (regular + filled), `folder`,
+  `edit`, `edit_arrow_back`, `eye`, `flash` (regular + filled), `folder`,
   `folder_add`, `home_garage`, `layer`, `more_horizontal` (regular + filled), `open`, `pause_circle`, `person`, `pin` (regular +
   filled), `plug_connected`, `local_language`, `save`, `search`, `send`, `server`, `settings`, `shield_checkmark`, `sparkle`, `square`,
   `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`,
   `code`, `document_text`, `globe`, `info`, `lightbulb`, `task_list_ltr`, `warning`;
   the model-capability icons (2026-11) add `brain_sparkle`, `document_pdf`, `image`, `speaker_2`, `text_description` and `video`.
   The picture viewer (2026-11) adds `zoom_in`, `zoom_out`, `scale_fit` and `full_screen_maximize`.
+  The tool timeline's per-kind icons add `edit_arrow_back`, `tray_item_remove` (both variants), plus the filled
+  variants of `copy` and `delete`; `folder_list` exists only at 20 px, so both of its variants are scaled by
+  24/20 into the 24 grid the app renders on (the same treatment `panel_bottom` gets).
   The chat timeline (wave W13) added a second, exact regular variant of `search`, `edit`, `globe`, `plug_connected`,
   `shield_checkmark` and `wrench` (`*Regular` + `*Filled` in `Icons.axaml`) because the older outline keys were
   coordinate-rounded replays of the same FIS path; the two variants of one node type must be the same glyph at two weights.

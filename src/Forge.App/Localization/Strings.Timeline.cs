@@ -18,7 +18,11 @@ internal static class TimelineStrings
     public const string NameThinking = "timeline.name.thinking";
     public const string NameReadFile = "timeline.name.readFile";
     public const string NameSearch = "timeline.name.search";
+    public const string NameListDirectory = "timeline.name.listDirectory";
     public const string NameEditFile = "timeline.name.editFile";
+    public const string NameCopyFile = "timeline.name.copyFile";
+    public const string NameMoveFile = "timeline.name.moveFile";
+    public const string NameDeleteFile = "timeline.name.deleteFile";
     public const string NameCommand = "timeline.name.command";
     public const string NameNetwork = "timeline.name.network";
     public const string NameMcp = "timeline.name.mcp";
@@ -49,7 +53,11 @@ internal static class TimelineStrings
         Loc.Register(NameThinking, "思考", "Thinking");
         Loc.Register(NameReadFile, "读取文件", "Read file");
         Loc.Register(NameSearch, "搜索", "Search");
+        Loc.Register(NameListDirectory, "列目录", "List directory");
         Loc.Register(NameEditFile, "编辑文件", "Edit file");
+        Loc.Register(NameCopyFile, "复制", "Copy");
+        Loc.Register(NameMoveFile, "移动", "Move");
+        Loc.Register(NameDeleteFile, "删除", "Delete");
         Loc.Register(NameCommand, "运行命令", "Command");
         Loc.Register(NameNetwork, "网络请求", "Network request");
         Loc.Register(NameMcp, "MCP 工具", "MCP tool");

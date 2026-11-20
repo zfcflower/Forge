@@ -792,7 +792,9 @@
       <Grid ColumnDefinitions="Auto,*">
         <views:TimelineGutter Role="Block" Kind="{Binding Kind}" IsFailing="{Binding IsError}" />
         <Border Grid.Column="1" Classes="notice" Classes.error="{Binding IsError}" Margin="0,2,0,4">
-          <TextBlock Classes="caption" Text="{Binding Text}" TextWrapping="Wrap" />
+          <!-- A note that carries the user's own words (an interjection) reads at body size and in the primary colour,
+               like the message bubble it stands for; every other note stays a muted caption. -->
+          <TextBlock Classes="caption" Classes.user="{Binding FromUser}" Text="{Binding Text}" TextWrapping="Wrap" />
         </Border>
       </Grid>
     </DataTemplate>
