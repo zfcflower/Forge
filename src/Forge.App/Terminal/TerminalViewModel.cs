@@ -591,14 +591,17 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
 
         ITerminalSession? active;
         bool changed;
+        bool trimmed;
         lock (gate)
         {
             changed = columns != emulator.Columns || rows != emulator.Rows;
+            var trimmedBefore = emulator.ScreenTrimmed;
             if (changed)
             {
                 emulator.Resize(columns, rows);
             }
 
+            trimmed = emulator.ScreenTrimmed != trimmedBefore;
             active = session;
         }
 
@@ -608,6 +611,13 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
         }
 
         Invalidate();
+
+        // A trim moves the rows the screen keeps, so a result set found on them no longer anchors to its text.
+        if (trimmed && isSearchVisible && searchText.Length > 0 && Environment.CurrentManagedThreadId == uiThread)
+        {
+            ScheduleSearch();
+        }
+
         if (active is not null)
         {
             ResizeQuietly(active, new TerminalSize(columns, rows));

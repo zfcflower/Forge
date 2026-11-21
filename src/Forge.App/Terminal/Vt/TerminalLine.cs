@@ -32,6 +32,27 @@ internal sealed class TerminalLine
     /// <summary>True when the line continues onto the next one because of auto-wrap (a soft break, not a newline).</summary>
     public bool Wrapped { get; private set; }
 
+    /// <summary>
+    /// True when every cell is the default blank cell, i.e. the row paints nothing: no rune, no colour, no attribute.
+    /// A row that only differs in colours (a filled band, a selection) is not blank — it is visible on screen.
+    /// </summary>
+    public bool IsBlank
+    {
+        get
+        {
+            TerminalCell[] cells = this.cells;
+            for (int column = 0; column < cells.Length; column++)
+            {
+                if (!cells[column].IsBlank)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
     /// <summary>All cells; the second half of a wide character carries <see cref="CellFlags.WideContinuation"/>.</summary>
     public ReadOnlySpan<TerminalCell> Cells => cells;
 

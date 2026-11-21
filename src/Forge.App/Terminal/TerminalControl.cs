@@ -85,6 +85,7 @@ internal sealed class TerminalControl : Control
     private int scrollOffset;
     private long anchoredPushed;
     private long anchoredDropped;
+    private long anchoredTrimmed;
     private IReadOnlyList<TerminalSearchMatch>? indexedMatches;
     private Dictionary<long, List<TerminalSearchMatch>>? matchesByLine;
     private (int Line, int Column) selectionStart;
@@ -858,17 +859,21 @@ internal sealed class TerminalControl : Control
     /// <see cref="TerminalEmulator.ScrollbackPushed"/> moves the viewport towards the bottom (the scrollback grew by one
     /// line), so an offset above zero is raised by the push delta to stay on the same text; at the bottom the view follows
     /// the output. <see cref="TerminalEmulator.ScrollbackDropped"/> shifts every absolute line index down, so the selection
-    /// is moved by the same amount and dropped once it would fall off the oldest line. Call with
-    /// <see cref="TerminalViewModel.Gate"/> held.
+    /// is moved by the same amount and dropped once it would fall off the oldest line. <see cref="TerminalEmulator.ScreenTrimmed"/>
+    /// moves only the rows the screen keeps, which no viewer can follow, so the selection is let go instead of landing on
+    /// other text. Call with <see cref="TerminalViewModel.Gate"/> held.
     /// </summary>
     private void SyncScrollAnchor(TerminalEmulator emulator)
     {
         var pushed = emulator.ScrollbackPushed;
         var dropped = emulator.ScrollbackDropped;
+        var trimmed = emulator.ScreenTrimmed;
         var pushedDelta = pushed - anchoredPushed;
         var droppedDelta = dropped - anchoredDropped;
+        var trimmedDelta = trimmed - anchoredTrimmed;
         anchoredPushed = pushed;
         anchoredDropped = dropped;
+        anchoredTrimmed = trimmed;
 
         if (pushedDelta > 0 && scrollOffset > 0)
         {
@@ -878,6 +883,14 @@ internal sealed class TerminalControl : Control
         if (droppedDelta > 0)
         {
             ShiftSelection(droppedDelta);
+        }
+
+        if (trimmedDelta > 0 && hasSelection)
+        {
+            selectionStart = default;
+            selectionEnd = default;
+            hasSelection = false;
+            selecting = false;
         }
     }
 
@@ -890,6 +903,7 @@ internal sealed class TerminalControl : Control
             {
                 anchoredPushed = viewModel.Emulator.ScrollbackPushed;
                 anchoredDropped = viewModel.Emulator.ScrollbackDropped;
+                anchoredTrimmed = viewModel.Emulator.ScreenTrimmed;
             }
 
             return;
@@ -897,6 +911,7 @@ internal sealed class TerminalControl : Control
 
         anchoredPushed = 0;
         anchoredDropped = 0;
+        anchoredTrimmed = 0;
     }
 
     /// <summary>Moves the selection up by the lines the scrollback dropped; a selection that falls off the oldest line is gone.</summary>

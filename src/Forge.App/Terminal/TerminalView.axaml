@@ -111,7 +111,8 @@
       </Grid>
     </Border>
 
-    <term:TerminalControl Grid.Row="2" Source="{Binding}" />
+    <!-- Inset by the panel-body 8 px; the banner, the search bar and the status line stay full-bleed (SPEC「面板内边距」). -->
+    <term:TerminalControl Grid.Row="2" Margin="8" Source="{Binding}" />
 
     <!-- One local line after the screen: "starting", the exit code, or why the terminal stopped. A terminal that is over
          offers a restart here, next to the reason it stopped. -->

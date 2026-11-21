@@ -53,6 +53,7 @@ internal sealed partial class TerminalEmulator
     private long version;
     private long scrollbackPushed;
     private long scrollbackDropped;
+    private long screenTrimmed;
 
     public TerminalEmulator(int columns, int rows, int scrollbackLimit, ITerminalEmulatorHost host)
     {
@@ -114,6 +115,14 @@ internal sealed partial class TerminalEmulator
     /// the text it was dragged over.
     /// </summary>
     public long ScrollbackDropped => scrollbackDropped;
+
+    /// <summary>
+    /// Monotonic count of screen rows a row shrink removed instead of handing them to the scrollback (the blank rows
+    /// below the content). A push leaves every line index where it was and a discard moves them all, but a trim moves only
+    /// the rows the screen keeps: a viewer that anchors on a screen row can no longer tell which row it points at, so it
+    /// watches this counter and lets go of its anchor.
+    /// </summary>
+    public long ScreenTrimmed => screenTrimmed;
 
     public TerminalCursor Cursor => new(screen.CursorRow, screen.CursorColumn, cursorVisible, cursorShape, cursorBlinking);
 
@@ -185,9 +194,10 @@ internal sealed partial class TerminalEmulator
     }
 
     /// <summary>
-    /// Changes the screen size. No reflow: lines are truncated or padded on the right. Shrinking rows pushes the top
-    /// lines into the scrollback so the bottom content (where the prompt is) stays visible; the scrolling region and
-    /// any pending wrap are reset, and the cursor is clamped back inside the screen.
+    /// Changes the screen size. No reflow: lines are truncated or padded on the right. Shrinking rows keeps the bottom of
+    /// the screen and hands the top lines to the scrollback — only those that carry text, the blank ones are dropped (see
+    /// <see cref="ScreenTrimmed"/>); the scrolling region and any pending wrap are reset, and the cursor is clamped back
+    /// inside the screen.
     /// </summary>
     public void Resize(int columns, int rows)
     {
@@ -662,10 +672,28 @@ internal sealed partial class TerminalEmulator
         {
             int drop = oldRows - newRows;
             TerminalLine[] primaryLines = primary.Lines;
+
+            // Blank rows are not history: only the rows that carry something go to the scrollback (see the SPEC's VT engine section).
+            int kept = drop;
+            while (kept > 0 && primaryLines[kept - 1].IsBlank)
+            {
+                kept--;
+            }
+
+            screenTrimmed += drop - kept;
+
             for (int i = 0; i < drop; i++)
             {
-                PushScrollback(primaryLines[i]);
+                TerminalLine line = primaryLines[i];
                 primaryLines[i] = null!;
+                if (i < kept)
+                {
+                    PushScrollback(line);
+                }
+                else
+                {
+                    spare = line;
+                }
             }
 
             var keptPrimary = new TerminalLine[newRows];
