@@ -4,6 +4,9 @@
              xmlns:settings="using:Forge.App.Settings"
              x:Class="Forge.App.Views.RateLimitSettingsSectionView"
              x:DataType="settings:RateLimitSettingsSectionViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <!-- The `rate-limit` section body: the local per-provider budget (requests and tokens per minute), whether it is enforced
        at all, and the spacing of automated resumes. Every value is a live preference republished to the limiter on change,
        so the fields need no apply step. -->
@@ -85,7 +88,7 @@
             BorderBrush="{DynamicResource BorderBrush}"
             Padding="0,12,0,0">
       <StackPanel Spacing="6">
-        <TextBlock Classes="title"
+        <TextBlock Classes="h2"
                    Text="{Binding [rateLimit.settings.overrides], Source={x:Static loc:Loc.Instance}}" />
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
@@ -98,7 +101,8 @@
                    IsVisible="{Binding !HasProviders}"
                    Text="{Binding [rateLimit.settings.noProviders], Source={x:Static loc:Loc.Instance}}" />
         <!-- The escape hatch for entries whose provider is gone: they have no row to clear them from. -->
-        <Button HorizontalAlignment="Left"
+        <Button Classes="ghost"
+                HorizontalAlignment="Left"
                 IsVisible="{Binding HasUnusedOverrides}"
                 Command="{Binding ClearUnusedCommand}"
                 Content="{Binding [rateLimit.settings.clearUnused], Source={x:Static loc:Loc.Instance}}"

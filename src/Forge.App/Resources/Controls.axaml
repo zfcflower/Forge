@@ -131,7 +131,7 @@
     <Setter Property="MinHeight" Value="26" />
     <Setter Property="Padding" Value="8,3" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     <Setter Property="BorderThickness" Value="0" />

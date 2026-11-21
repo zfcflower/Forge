@@ -69,7 +69,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private int? usableTokens;
     private int? triggerTokens;
     private ContextLevel contextLevel;
-    private string aheadBehind = string.Empty;
     private bool disposed;
 
     /// <summary>The turns the session already recorded, read once per strip from <c>turn_metrics</c> (else its checkpoints).</summary>
@@ -118,25 +117,14 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         RefreshTurnHistory();
     }
 
-    // ---------------------------------------------------------------- left half: git and the session's own state
-
-    public string AheadBehindText => aheadBehind;
-
-    public bool HasAheadBehind => aheadBehind.Length > 0;
+    // ---------------------------------------------------------------- usage
 
     /// <summary>
-    /// The ahead/behind readout of the active session, pushed by the files panel's git row rather than read: only that row
-    /// knows the divergence, and the strip shows the marker, not the branch. The pull-request CI marker that used to sit
-    /// next to it went away with the Git panel — waiting for checks is an agent-tool flow now.
+    /// The usage chip's own text: the two token columns and the cache-hit rate, composed from the same formatters the
+    /// hover line uses. Always present, zeros included, so the strip's right end keeps its shape before the first turn.
     /// </summary>
-    public void SetGit(string? aheadBehindText)
-    {
-        aheadBehind = aheadBehindText ?? string.Empty;
-        OnPropertyChanged(nameof(AheadBehindText));
-        OnPropertyChanged(nameof(HasAheadBehind));
-    }
-
-    // ---------------------------------------------------------------- usage
+    public string UsageChipText =>
+        InstrumentsStrings.UsageTokens(Scale(usage.InputTokens), Scale(usage.OutputTokens)) + " · " + CacheReadText;
 
     public bool HasUsage => usage.InputTokens > 0 || usage.OutputTokens > 0;
 
@@ -469,6 +457,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         usage += delta;
         OnPropertyChanged(nameof(HasUsage));
         OnPropertyChanged(nameof(CacheReadText));
+        OnPropertyChanged(nameof(UsageChipText));
         OnPropertyChanged(nameof(UsageTooltip));
         RaiseUsageSummary();
     }
@@ -589,6 +578,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(HasUsage));
         OnPropertyChanged(nameof(UsageTooltip));
         OnPropertyChanged(nameof(CacheReadText));
+        OnPropertyChanged(nameof(UsageChipText));
         RaiseUsageSummary();
     }
 
@@ -617,6 +607,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         new(UsageStrings.CacheWriteLabel, UsageCacheWriteText),
         new(UsageStrings.CacheHitLabel, UsageCacheHitText),
         new(UsageStrings.CostLabel, UsageCostText),
+        // The one model constant the hover carries ("C …"), so the popover answers everything the hover does.
+        new(UsageStrings.WindowLabel, UsageWindowText),
         new(UsageStrings.TurnsLabel, UsageTurnsText),
         new(UsageStrings.DurationLabel, UsageDurationText),
         new(UsageStrings.AverageInputLabel, UsageAverageInputText),
@@ -642,7 +634,18 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     public string UsageCacheReadText => Scale(usage.CacheReadTokens);
 
-    public string UsageCacheWriteText => Scale(usage.CacheWriteTokens);
+    /// <summary>Carries the hour-lived share when there is one, the way the hover line splits it: the hour is priced at
+    /// twice the input rate, and a sum without the split would hide why a pause made the next write dearer.</summary>
+    public string UsageCacheWriteText => usage.CacheWrite1hTokens > 0
+        ? UsageStrings.CacheWriteSplitText(
+            Scale(usage.CacheWriteTokens),
+            Scale(usage.CacheWriteTokens - usage.CacheWrite1hTokens),
+            Scale(usage.CacheWrite1hTokens))
+        : Scale(usage.CacheWriteTokens);
+
+    /// <summary>The model's context window, the one constant among the session's numbers; "—" when the model is unknown.</summary>
+    public string UsageWindowText =>
+        Metadata.ContextWindow is { } window ? Scale(window) : UsageStrings.UnknownText;
 
     /// <summary>"98.5%": the share of the input that came from the prompt cache, one decimal.</summary>
     public string UsageCacheHitText => Ratio(SessionUsageMath.CacheHitRatio(usage));

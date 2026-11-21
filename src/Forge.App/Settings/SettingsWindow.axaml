@@ -62,32 +62,29 @@
                    Text="{Binding Title}"
                    AutomationProperties.AutomationId="settings-title" />
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-          <Button Classes="ghost icon"
-                  Width="30" Height="26"
+          <Button Classes="icon"
                   Click="OnToggleNavClick"
                   ToolTip.Tip="{Binding NavToggleTip}"
                   AutomationProperties.AutomationId="settings-nav-toggle"
                   AutomationProperties.Name="{Binding NavToggleTip}">
-            <Panel Width="13" Height="13">
-              <wc:FluentIcon Data="{StaticResource IconChevronLeft}" Width="13" Height="13" IsVisible="{Binding IsNavExpanded}" />
-              <wc:FluentIcon Data="{StaticResource IconChevronRight}" Width="13" Height="13" IsVisible="{Binding IsNavCollapsed}" />
+            <Panel Width="14" Height="14">
+              <wc:FluentIcon Data="{StaticResource IconChevronLeft}" Width="14" Height="14" IsVisible="{Binding IsNavExpanded}" />
+              <wc:FluentIcon Data="{StaticResource IconChevronRight}" Width="14" Height="14" IsVisible="{Binding IsNavCollapsed}" />
             </Panel>
           </Button>
-          <Button Classes="ghost icon"
-                  Width="30" Height="26"
+          <Button Classes="icon"
                   Click="OnReloadClick"
                   ToolTip.Tip="{Binding ReloadText}"
                   AutomationProperties.AutomationId="settings-reload"
                   AutomationProperties.Name="{Binding ReloadText}">
             <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
           </Button>
-          <Button Classes="ghost icon"
-                  Width="34" Height="26"
+          <Button Classes="icon"
                   Click="OnCloseClick"
                   ToolTip.Tip="{Binding CloseText}"
                   AutomationProperties.AutomationId="settings-close"
                   AutomationProperties.Name="{Binding CloseText}">
-            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="14" Height="14" />
           </Button>
         </StackPanel>
       </Grid>
@@ -134,7 +131,6 @@
                             <wc:FluentIcon Data="{Binding Icon}" Width="15" Height="15" IsVisible="{Binding HasIcon}" />
                             <TextBlock Text="{Binding Title}"
                                        IsVisible="{Binding ShowTitle}"
-                                       FontSize="{DynamicResource FontSizeSm}"
                                        TextTrimming="CharacterEllipsis" />
                           </StackPanel>
                         </Button>

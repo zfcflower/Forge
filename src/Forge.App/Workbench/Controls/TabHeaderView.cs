@@ -61,6 +61,9 @@ internal sealed class TabHeaderView : TemplatedControl
 
     private PanelIconButton? closeButton;
     private TabModel? watched;
+
+    /// <summary>The tip's content: the tab's whole text, wrapped so the tooltip's own width cap cannot clip it.</summary>
+    private readonly TextBlock tipText = Views.ToolTipText.Wrap(null);
     private Size silhouetteSize;
     private StreamGeometry? silhouette;
     private StreamGeometry? frame;
@@ -141,8 +144,11 @@ internal sealed class TabHeaderView : TemplatedControl
         IsActive = ReferenceEquals(tab, tab.Group?.ActiveTab);
         ApplyIcon();
         AutomationProperties.SetName(this, tab.Title);
-        // The bottom group's tabs show no tip: it would sit over the strip right where the next click lands.
-        ToolTip.SetTip(this, string.Equals(tab.Group?.Id, WorkbenchIds.BottomTabs, StringComparison.Ordinal) ? null : tab.Title);
+        // The strip can only show a compacted title (`▸ Worker · …`), so the tip carries the whole one: a sub-agent's task
+        // in full, otherwise the tab's own title. Wrapped, because the tooltip has a width cap of its own and a one-line
+        // string is clipped there without any ellipsis to tell the reader something was left out.
+        tipText.Text = tab.Content is SubAgentViewModel agent ? agent.Task : tab.Title;
+        ToolTip.SetTip(this, tipText);
     }
 
     /// <summary>

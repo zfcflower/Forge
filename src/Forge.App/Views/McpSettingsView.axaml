@@ -50,12 +50,9 @@
                 <ItemsControl ItemsSource="{Binding Presets}" Margin="8">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="set:McpPresetOptionViewModel">
-                      <Button Command="{Binding ApplyCommand}"
+                      <Button Classes="flat"
                               HorizontalAlignment="Stretch"
-                              HorizontalContentAlignment="Stretch"
-                              Padding="10,6"
-                              Background="Transparent"
-                              BorderThickness="0">
+                              HorizontalContentAlignment="Stretch">
                         <StackPanel Spacing="1">
                           <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Text="{Binding Title}" />
@@ -114,7 +111,6 @@
                               VerticalAlignment="Center"
                               MaxWidth="340">
                     <TextBlock Text="{Binding Name}"
-                               FontWeight="SemiBold"
                                VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis" />
                     <Border Classes="mcp-badge">
@@ -134,39 +130,40 @@
                             AutomationProperties.AutomationId="mcp-server-enabled"
                             AutomationProperties.Name="{Binding Name}" />
                   <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4">
-                    <Button Classes="ghost"
+                    <Button Classes="outline"
                             Command="{Binding ToggleRunningCommand}"
                             Content="{Binding RunningToggleText}"
                             AutomationProperties.AutomationId="mcp-server-running"
                             AutomationProperties.Name="{Binding RunningToggleText}" />
-                    <Button Classes="ghost"
+                    <Button Classes="outline"
                             Command="{Binding RestartCommand}"
                             Content="{Binding [settings.mcp.row.restart], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="mcp-server-restart"
                             AutomationProperties.Name="{Binding [settings.mcp.row.restart], Source={x:Static loc:Loc.Instance}}" />
-                    <Button Classes="ghost"
+                    <Button Classes="outline"
                             Command="{Binding SignInCommand}"
                             Content="{Binding [settings.mcp.row.signIn], Source={x:Static loc:Loc.Instance}}"
                             IsVisible="{Binding NeedsSignIn}"
                             AutomationProperties.AutomationId="mcp-server-signin"
                             AutomationProperties.Name="{Binding Name}" />
-                    <Button Classes="ghost"
+                    <Button Classes="outline"
                             Command="{Binding SignOutCommand}"
                             Content="{Binding [settings.mcp.row.signOut], Source={x:Static loc:Loc.Instance}}"
                             IsVisible="{Binding IsSignedIn}"
                             AutomationProperties.AutomationId="mcp-server-signout"
                             AutomationProperties.Name="{Binding Name}" />
-                    <Button Classes="ghost"
+                    <Button Classes="outline"
                             Command="{Binding TestCommand}"
                             Content="{Binding [settings.mcp.row.test], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="mcp-server-test"
                             AutomationProperties.Name="{Binding [settings.mcp.row.test], Source={x:Static loc:Loc.Instance}}" />
-                    <Button Classes="ghost"
+                    <Button Classes="outline"
                             Command="{Binding EditCommand}"
                             Content="{Binding [settings.mcp.row.edit], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="mcp-server-edit"
                             AutomationProperties.Name="{Binding [settings.mcp.row.edit], Source={x:Static loc:Loc.Instance}}" />
-                    <Button Classes="ghost"
+                    <Button Classes="flat"
+                            Foreground="{DynamicResource StatusErrorBrush}"
                             Command="{Binding DeleteCommand}"
                             Content="{Binding [settings.mcp.row.delete], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="mcp-server-delete"
@@ -378,7 +375,7 @@
                                Text="{Binding Value, Mode=TwoWay}"
                                PlaceholderText="{Binding [settings.mcp.editor.envValue], Source={x:Static loc:Loc.Instance}}" />
                       <Button Grid.Column="2"
-                              Classes="ghost"
+                              Classes="outline"
                               Command="{Binding RemoveCommand}"
                               Content="{Binding [settings.mcp.editor.removeRow], Source={x:Static loc:Loc.Instance}}"
                               AutomationProperties.Name="{Binding [settings.mcp.editor.removeRow], Source={x:Static loc:Loc.Instance}}" />
@@ -408,7 +405,7 @@
                                Text="{Binding Value, Mode=TwoWay}"
                                PlaceholderText="{Binding [settings.mcp.editor.headersValue], Source={x:Static loc:Loc.Instance}}" />
                       <Button Grid.Column="2"
-                              Classes="ghost"
+                              Classes="outline"
                               Command="{Binding RemoveCommand}"
                               Content="{Binding [settings.mcp.editor.removeRow], Source={x:Static loc:Loc.Instance}}"
                               AutomationProperties.Name="{Binding [settings.mcp.editor.removeRow], Source={x:Static loc:Loc.Instance}}" />

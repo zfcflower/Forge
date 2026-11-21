@@ -24,16 +24,6 @@
     <Style Selector="Button.prompt-row.selected /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
     </Style>
-    <Style Selector="Button.prompt-action">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="CornerRadius" Value="6" />
-      <Setter Property="Padding" Value="10,5" />
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    </Style>
-    <Style Selector="Button.prompt-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
-    </Style>
     <Style Selector="Border.prompt-badge">
       <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="CornerRadius" Value="4" />
@@ -100,7 +90,7 @@
                          AutomationProperties.AutomationId="prompts-filter-custom" />
           </StackPanel>
           <Button Grid.Column="1"
-                  Classes="primary"
+                  Classes="ghost"
                   Command="{Binding NewCommand}"
                   Content="{Binding NewText}"
                   AutomationProperties.AutomationId="prompts-new" />
@@ -113,7 +103,7 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="ps:PromptGroupViewModel">
                 <StackPanel Spacing="2" Margin="0,0,0,8">
-                  <TextBlock Classes="section-title" Margin="8,4,0,2" Text="{Binding Title}" />
+                  <TextBlock Classes="h2" Margin="8,4,0,2" Text="{Binding Title}" />
                   <ItemsControl ItemsSource="{Binding Rows}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="ps:PromptRowViewModel">
@@ -131,7 +121,6 @@
                             </Panel>
                             <StackPanel Grid.Column="1" Spacing="3">
                               <TextBlock Text="{Binding DisplayName}"
-                                         FontSize="{DynamicResource FontSizeMd}"
                                          TextTrimming="CharacterEllipsis" />
                               <WrapPanel Orientation="Horizontal">
                                 <Border Classes="prompt-badge" Margin="0,0,4,0" IsVisible="{Binding Overrides}">
@@ -185,7 +174,7 @@
           <ContentControl.ContentTemplate>
             <DataTemplate x:DataType="ps:PromptEditorViewModel">
               <StackPanel Spacing="8">
-                <TextBlock Classes="section-title" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="h2" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
                 <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasDescription}" Text="{Binding Description}" />
 
                 <!-- Existing entry: id, kind and scope are fixed facts. -->
@@ -235,7 +224,6 @@
                          Height="360"
                          IsReadOnly="{Binding IsReadOnly}"
                          FontFamily="{DynamicResource FontMono}"
-                         FontSize="{DynamicResource FontSizeCode}"
                          Text="{Binding Text, Mode=TwoWay}"
                          AutomationProperties.AutomationId="prompts-text" />
                 <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding !IsBuiltIn}" Text="{Binding AppendHint}" />
@@ -266,7 +254,7 @@
                           Command="{Binding CopyGlobalCommand}"
                           Content="{Binding CopyGlobalText}"
                           AutomationProperties.AutomationId="prompts-copy-global" />
-                  <Button Classes="prompt-action"
+                  <Button Classes="ghost"
                           Command="{Binding CopyProjectCommand}"
                           Content="{Binding CopyProjectText}"
                           AutomationProperties.AutomationId="prompts-copy-project" />
@@ -276,22 +264,23 @@
                           Command="{Binding SaveCommand}"
                           Content="{Binding SaveText}"
                           AutomationProperties.AutomationId="prompts-save" />
-                  <Button Classes="prompt-action"
+                  <Button Classes="ghost"
                           Command="{Binding RevertCommand}"
                           Content="{Binding RevertText}"
                           AutomationProperties.AutomationId="prompts-revert" />
-                  <Button Classes="prompt-action"
+                  <Button Classes="flat"
+                          Foreground="{DynamicResource StatusErrorBrush}"
                           IsVisible="{Binding ShowsDeleteButton}"
                           Command="{Binding DeleteCommand}"
                           Content="{Binding DeleteText}"
                           AutomationProperties.AutomationId="prompts-delete" />
                   <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ConfirmingDelete}">
-                    <Button Classes="prompt-action"
+                    <Button Classes="flat"
                             Foreground="{DynamicResource StatusErrorBrush}"
                             Command="{Binding ConfirmDeleteCommand}"
                             Content="{Binding DeleteConfirmText}"
                             AutomationProperties.AutomationId="prompts-delete-confirm" />
-                    <Button Classes="prompt-action"
+                    <Button Classes="ghost"
                             Command="{Binding CancelDeleteCommand}"
                             Content="{Binding DeleteCancelText}"
                             AutomationProperties.AutomationId="prompts-delete-cancel" />

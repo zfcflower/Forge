@@ -449,13 +449,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             var previous = activeSession;
             if (Set(ref activeSession, value))
             {
-                previous?.Instruments.SetGit(null);
                 CloseChecks();
                 SetTreesActiveSession(activeSession?.SessionId);
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ActiveSessionTitle));
                 ApplyPanelContext();
-                PushGitText();
                 terminals.OnActiveSessionChanged(activeSession?.SessionId, activeSession?.WorkDir);
                 questionPanels?.OnActiveSessionChanged(activeSession?.SessionId);
             }
@@ -2605,11 +2603,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             case nameof(GitSyncViewModel.BranchLabel):
                 OnPropertyChanged(nameof(ActiveBranchText));
                 OnPropertyChanged(nameof(HasActiveBranch));
-                PushGitText();
                 break;
             case nameof(GitSyncViewModel.AheadBehindText):
                 Status.SetAheadBehind(GitSync.AheadBehindText);
-                PushGitText();
                 break;
         }
     }
@@ -3146,10 +3142,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         settingsWindow = null;
         Settings.IsOpen = false;
     }
-
-    /// <summary>Hands the active session's strip the Git panel's live branch, ahead/behind and CI marker.</summary>
-    private void PushGitText() =>
-        activeSession?.Instruments.SetGit(GitSync.AheadBehindText);
 
     private static Task RevealAsync(string path)
     {

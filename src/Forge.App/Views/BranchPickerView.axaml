@@ -54,7 +54,7 @@
                    VerticalAlignment="Center"
                    Text="{Binding [changes.compareBranch.placeholder], Source={x:Static loc:Loc.Instance}}" />
         <Button Grid.Column="1"
-                Classes="ghost icon"
+                Classes="icon"
                 Command="{Binding ReloadBranchesCommand}"
                 ToolTip.Tip="{Binding [changes.picker.reload], Source={x:Static loc:Loc.Instance}}"
                 AutomationProperties.AutomationId="changes-branch-reload"

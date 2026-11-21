@@ -671,7 +671,7 @@ internal static partial class TranscriptScenarios
 
             // The classes that live in ChromeStyles must not be defined at the application level any more (every row control
             // of the transcript would pay a match for each): the sheet holds them, the views above include it.
-            string[] chromeClasses = [".h2", ".section-title", ".glyph", ".primary", ".breadcrumb", ".tab", ".count-badge", ".card", ".divider", ".panel", ".toolbar", ".status-dot"];
+            string[] chromeClasses = [".h2", ".glyph", ".primary", ".breadcrumb", ".tab", ".count-badge", ".card", ".divider", ".panel", ".toolbar", ".status-dot"];
             var leaked = new List<string>();
             var checkedStyles = 0;
             void Walk(Avalonia.Styling.Styles styles)

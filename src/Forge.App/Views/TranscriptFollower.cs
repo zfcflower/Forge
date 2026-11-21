@@ -53,13 +53,9 @@ internal sealed class TranscriptFollower
             VerticalAlignment = VerticalAlignment.Center,
         };
         stickyText.Bind(TextBlock.ForegroundProperty, stickyText.GetResourceObservable("TextPrimaryBrush"));
-        // The row can only show the beginning of the message, so the tip carries all of it - wrapped and capped, because a
-        // plain tooltip renders one unbroken line: a long prompt ran off the screen edge and the rest stayed unreadable.
-        stickyTip = new TextBlock
-        {
-            TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 480,
-        };
+        // The row can only show the beginning of the message, so the tip carries all of it: wrapped inside the tooltip's
+        // own width cap, because a one-line text is clipped there and the rest of a long prompt stayed unreadable.
+        stickyTip = ToolTipText.Wrap(null);
         ToolTip.SetTip(stickyText, stickyTip);
         sticky = new Border
         {

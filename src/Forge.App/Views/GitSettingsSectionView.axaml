@@ -6,8 +6,7 @@
              x:DataType="git:GitSettingsSectionViewModel">
   <!-- The `git` section body: pull strategy, network timeout, step commits and the review rows of wave W17b, the checks
        wait timing, the review package limits and the gh path, each edited live on the preference it belongs to. This
-       control is the section's view: SectionViewTemplate is matched before the app-level templates, so the inline copy of
-       these rows that App.axaml still carries is no longer drawn. -->
+       control is the section's view: SectionViewTemplate is matched before the app-level templates. -->
   <StackPanel Spacing="6">
     <Grid ColumnDefinitions="150,*" Margin="0,3">
       <TextBlock Classes="label"
@@ -22,7 +21,7 @@
                 AutomationProperties.Name="{Binding [git.settings.pullStrategy], Source={x:Static loc:Loc.Instance}}">
         <ComboBox.ItemTemplate>
           <DataTemplate x:DataType="git:GitPullStrategyOption">
-            <TextBlock Classes="caption" Text="{Binding Label}" />
+            <TextBlock Text="{Binding Label}" />
           </DataTemplate>
         </ComboBox.ItemTemplate>
       </ComboBox>
@@ -70,7 +69,7 @@
                 AutomationProperties.Name="{Binding [git.settings.reviewMode], Source={x:Static loc:Loc.Instance}}">
         <ComboBox.ItemTemplate>
           <DataTemplate x:DataType="git:GitReviewModeOption">
-            <TextBlock Classes="caption" Text="{Binding Label}" />
+            <TextBlock Text="{Binding Label}" />
           </DataTemplate>
         </ComboBox.ItemTemplate>
       </ComboBox>

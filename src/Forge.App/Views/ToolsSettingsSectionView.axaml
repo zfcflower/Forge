@@ -4,6 +4,9 @@
              xmlns:set="using:Forge.App.ViewModels.Settings"
              x:Class="Forge.App.Views.ToolsSettingsSectionView"
              x:DataType="set:ToolsSettingsSectionViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <!-- The `tools` section body: the run_code script block on top, then the active session's catalog grouped by origin:
        built-in groups carry a switch per tool, extension and MCP tools are read-only here. -->
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -11,8 +14,8 @@
       <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
       <!-- Wave W14: what a run_code script may call, how many calls it keeps in flight and how much text comes back. -->
       <StackPanel Spacing="6">
-        <TextBlock Classes="label"
-                   FontWeight="SemiBold"
+        <TextBlock Classes="h2"
+                   
                    Text="{Binding [codeMode.settings.heading], Source={x:Static loc:Loc.Instance}}" />
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
@@ -89,8 +92,8 @@
       <!-- Wave W17a: how the terminal looks and which shell it starts. The font fields follow the code font of the appearance
            section until they are given a value of their own. -->
       <StackPanel Spacing="6">
-        <TextBlock Classes="label"
-                   FontWeight="SemiBold"
+        <TextBlock Classes="h2"
+                   
                    Text="{Binding [terminal.settings.section], Source={x:Static loc:Loc.Instance}}" />
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
@@ -175,7 +178,7 @@
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="set:ToolGroupViewModel">
             <StackPanel Spacing="2" Margin="0,4,0,6">
-              <TextBlock Classes="label" FontWeight="SemiBold" Text="{Binding Title}" />
+              <TextBlock Classes="h2" Text="{Binding Title}" />
               <ItemsControl ItemsSource="{Binding Tools}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="set:ToolRowViewModel">

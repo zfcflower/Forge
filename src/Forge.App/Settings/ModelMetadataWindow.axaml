@@ -15,14 +15,11 @@
   <Window.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="TextBlock.meta-header">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+    <!-- A cell input is the stock control: only its alignment is the table's business. Type size, height and padding stay
+         with Fluent's TextControl* keys (28 px, 13 px), like every other input in the app. -->
     <Style Selector="TextBox.meta-cell">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-      <Setter Property="Padding" Value="6,3" />
-      <Setter Property="MinHeight" Value="26" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
     </Style>
     <Style Selector="TextBox.meta-cell.invalid">
@@ -93,7 +90,6 @@
         <TextBlock Text="{Binding Model}"
                    VerticalAlignment="Center"
                    TextTrimming="CharacterEllipsis"
-                   FontSize="{DynamicResource FontSizeSm}"
                    ToolTip.Tip="{Binding Model}" />
       </Border>
     </DataTemplate>
@@ -156,7 +152,6 @@
                      IsVisible="{Binding HasReasoningText}"
                      VerticalAlignment="Center"
                      TextTrimming="CharacterEllipsis"
-                     FontSize="{DynamicResource FontSizeXs}"
                      Foreground="{DynamicResource TextSecondaryBrush}" />
         </Grid>
       </Border>

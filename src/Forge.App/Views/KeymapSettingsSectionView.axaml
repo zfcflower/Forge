@@ -18,7 +18,7 @@
                    TextTrimming="CharacterEllipsis"
                    AutomationProperties.AutomationId="{Binding Id, StringFormat=keymap-action-{0}}" />
         <Button Grid.Column="1"
-                Classes="ghost"
+                Classes="outline"
                 MinWidth="110"
                 Click="OnRebindClick"
                 ToolTip.Tip="{Binding [keymap.rebind], Source={x:Static loc:Loc.Instance}}"
@@ -35,7 +35,7 @@
           </StackPanel>
         </Button>
         <Button Grid.Column="2"
-                Classes="ghost"
+                Classes="flat"
                 Content="{Binding [keymap.reset], Source={x:Static loc:Loc.Instance}}"
                 Command="{Binding ResetCommand}"
                 IsVisible="{Binding IsOverridden}"
@@ -57,6 +57,7 @@
                AutomationProperties.Name="{Binding SearchPlaceholder}"
                AutomationProperties.AutomationId="keymap-search" />
       <Button Grid.Column="1"
+              Classes="outline"
               Content="{Binding ResetAllText}"
               Command="{Binding ResetAllCommand}"
               AutomationProperties.AutomationId="keymap-reset-all" />
@@ -87,7 +88,8 @@
                      AutomationProperties.AutomationId="keymap-capture-conflict" />
         </StackPanel>
         <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-          <Button Content="{Binding CancelText}"
+          <Button Classes="ghost"
+                  Content="{Binding CancelText}"
                   Command="{Binding CancelCaptureCommand}"
                   AutomationProperties.AutomationId="keymap-capture-cancel" />
           <Button Classes="primary"
@@ -98,13 +100,13 @@
       </Grid>
     </Border>
 
-    <TextBlock Classes="caption" Text="{Binding WindowScopeHeading}" AutomationProperties.AutomationId="keymap-scope-window" />
+    <TextBlock Classes="h2" Text="{Binding WindowScopeHeading}" AutomationProperties.AutomationId="keymap-scope-window" />
     <ItemsControl ItemsSource="{Binding WindowRows}" ItemTemplate="{StaticResource KeymapRow}" />
 
-    <TextBlock Classes="caption" Text="{Binding EditorScopeHeading}" Margin="0,8,0,0" AutomationProperties.AutomationId="keymap-scope-editor" />
+    <TextBlock Classes="h2" Text="{Binding EditorScopeHeading}" Margin="0,8,0,0" AutomationProperties.AutomationId="keymap-scope-editor" />
     <ItemsControl ItemsSource="{Binding EditorRows}" ItemTemplate="{StaticResource KeymapRow}" />
 
-    <TextBlock Classes="caption" Text="{Binding ViewScopeHeading}" Margin="0,8,0,0" AutomationProperties.AutomationId="keymap-scope-view" />
+    <TextBlock Classes="h2" Text="{Binding ViewScopeHeading}" Margin="0,8,0,0" AutomationProperties.AutomationId="keymap-scope-view" />
     <ItemsControl ItemsSource="{Binding ViewRows}" ItemTemplate="{StaticResource KeymapRow}" />
   </StackPanel>
 </UserControl>

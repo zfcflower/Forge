@@ -50,14 +50,9 @@
       <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
     </Style>
 
-    <!-- The query line is the palette's only text input: no border of its own, one rule under it. -->
+    <!-- The query line is the palette's only text input, and it is the stock one: 28 px, Fluent's padding and the typed
+         13 px, so it reads as the same control as every other input in the app. Only the outer margin is the palette's. -->
     <Style Selector="TextBox.palette-query">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0,0,0,1" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-      <Setter Property="CornerRadius" Value="0" />
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeMd}" />
-      <Setter Property="Padding" Value="2,4" />
       <Setter Property="Margin" Value="14,10,14,6" />
     </Style>
 
@@ -142,13 +137,11 @@
           </ListBox>
 
           <Button Grid.Column="1"
-                  Classes="ghost icon"
-                  Width="28"
-                  Height="24"
+                  Classes="icon"
                   Command="{Binding CloseCommand}"
                   AutomationProperties.AutomationId="palette-close"
                   AutomationProperties.Name="{Binding [palette.hint.close], Source={x:Static loc:Loc.Instance}}">
-            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="14" Height="14" />
           </Button>
         </Grid>
 

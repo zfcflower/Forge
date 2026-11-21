@@ -36,7 +36,7 @@
 
     <!-- Theme: the whole window's light/dark variant, pinned or following the OS. -->
     <StackPanel Spacing="{StaticResource Space2}">
-      <TextBlock Classes="h2" FontSize="{DynamicResource FontSizeMd}" Text="{Binding [appearance.theme.title], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Classes="h2" Text="{Binding [appearance.theme.title], Source={x:Static loc:Loc.Instance}}" />
       <Grid ColumnDefinitions="*,Auto">
         <TextBlock Classes="label"
                    VerticalAlignment="Center"
@@ -71,7 +71,7 @@
 
     <!-- Interface font: the tree, tabs, chat and buttons. -->
     <StackPanel Spacing="{StaticResource Space2}">
-      <TextBlock Classes="h2" FontSize="{DynamicResource FontSizeMd}" Text="{Binding Ui.Title}" />
+      <TextBlock Classes="h2" Text="{Binding Ui.Title}" />
 
       <StackPanel Spacing="2">
         <TextBlock Classes="label" Text="{Binding Ui.FamilyLabel}" />
@@ -117,7 +117,7 @@
 
     <!-- Code font: file preview, diff, tool arguments/results and the terminal. -->
     <StackPanel Spacing="{StaticResource Space2}">
-      <TextBlock Classes="h2" FontSize="{DynamicResource FontSizeMd}" Text="{Binding Code.Title}" />
+      <TextBlock Classes="h2" Text="{Binding Code.Title}" />
 
       <StackPanel Spacing="2">
         <TextBlock Classes="label" Text="{Binding Code.FamilyLabel}" />
@@ -164,7 +164,6 @@
     <!-- Motion: the one switch for looping animations, shared by the running agent's tree glyph and the chat timeline node. -->
     <StackPanel Spacing="{StaticResource Space2}">
       <TextBlock Classes="h2"
-                 FontSize="{DynamicResource FontSizeMd}"
                  Text="{Binding [appearance.motion.title], Source={x:Static loc:Loc.Instance}}" />
       <CheckBox IsChecked="{Binding ReduceMotion, Mode=TwoWay}"
                 Content="{Binding [appearance.reduceMotion], Source={x:Static loc:Loc.Instance}}"

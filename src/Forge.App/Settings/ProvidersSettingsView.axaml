@@ -28,20 +28,6 @@
     <Style Selector="Ellipse.provider-state.error">
       <Setter Property="Fill" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
-    <Style Selector="Button.provider-action">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="CornerRadius" Value="6" />
-      <Setter Property="Padding" Value="8,4" />
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    </Style>
-    <Style Selector="Button.provider-action /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="CornerRadius" Value="6" />
-    </Style>
-    <Style Selector="Button.provider-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
-    </Style>
   </UserControl.Styles>
 
   <StackPanel Spacing="14">
@@ -60,9 +46,8 @@
     <StackPanel Spacing="3">
       <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="10">
         <TextBlock Grid.Column="0"
+                   Classes="label"
                    Text="{Binding DefaultContextWindowLabel}"
-                   Foreground="{DynamicResource TextSecondaryBrush}"
-                   FontSize="{DynamicResource FontSizeSm}"
                    VerticalAlignment="Center" />
         <TextBox Grid.Column="1"
                  Width="120"
@@ -83,13 +68,11 @@
         <CheckBox Grid.Column="0"
                   IsChecked="{Binding Enabled, Mode=TwoWay}"
                   Content="{Binding EnabledLabel}"
-                  FontSize="{DynamicResource FontSizeSm}"
                   VerticalAlignment="Center"
                   AutomationProperties.AutomationId="providers-compaction-enabled" />
         <TextBlock Grid.Column="1"
+                   Classes="label"
                    Text="{Binding TriggerLabel}"
-                   Foreground="{DynamicResource TextSecondaryBrush}"
-                   FontSize="{DynamicResource FontSizeSm}"
                    VerticalAlignment="Center" />
         <TextBox Grid.Column="2"
                  Width="64"
@@ -100,9 +83,8 @@
                  AutomationProperties.AutomationId="providers-compaction-trigger"
                  AutomationProperties.Name="{Binding TriggerLabel}" />
         <TextBlock Grid.Column="3"
+                   Classes="label"
                    Text="{Binding TargetLabel}"
-                   Foreground="{DynamicResource TextSecondaryBrush}"
-                   FontSize="{DynamicResource FontSizeSm}"
                    VerticalAlignment="Center" />
         <TextBox Grid.Column="4"
                  Width="64"
@@ -137,7 +119,6 @@
     <StackPanel Spacing="3" DataContext="{Binding Usage}" x:DataType="settings:UsageLogSettingsViewModel">
       <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}"
                 Content="{Binding Label}"
-                FontSize="{DynamicResource FontSizeSm}"
                 VerticalAlignment="Center"
                 AutomationProperties.AutomationId="providers-usage-log-enabled" />
       <TextBlock Classes="caption"
@@ -154,13 +135,11 @@
     <StackPanel Spacing="3">
       <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-          <TextBlock Text="{Binding CatalogLabel}"
-                     Foreground="{DynamicResource TextSecondaryBrush}"
-                     FontSize="{DynamicResource FontSizeSm}"
+          <TextBlock Classes="label"
+                     Text="{Binding CatalogLabel}"
                      VerticalAlignment="Center" />
           <TextBlock Text="{Binding CatalogStatusText}"
                      Foreground="{DynamicResource TextSecondaryBrush}"
-                     FontSize="{DynamicResource FontSizeSm}"
                      VerticalAlignment="Center" />
         </StackPanel>
         <TextBox Grid.Column="1"
@@ -171,7 +150,7 @@
                  AutomationProperties.AutomationId="providers-catalog-source"
                  AutomationProperties.Name="{Binding CatalogSourceLabel}" />
         <Button Grid.Column="2"
-                Classes="provider-action"
+                Classes="outline"
                 Command="{Binding UpdateCatalogCommand}"
                 AutomationProperties.AutomationId="providers-catalog-update">
           <StackPanel Orientation="Horizontal" Spacing="6">
@@ -189,14 +168,14 @@
 
     <!-- 1. Connected: what is already set up. -->
     <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
-      <TextBlock Classes="section-title" Text="{Binding ConnectedTitle}" VerticalAlignment="Center" />
+      <TextBlock Classes="h2" Text="{Binding ConnectedTitle}" VerticalAlignment="Center" />
       <TextBlock Grid.Column="1"
                  Classes="caption"
                  VerticalAlignment="Center"
                  Text="{Binding ModelStatsText}"
                  AutomationProperties.AutomationId="providers-model-stats" />
       <Button Grid.Column="2"
-              Classes="provider-action"
+              Classes="outline"
               Command="{Binding RefreshCommand}"
               AutomationProperties.AutomationId="providers-refresh">
         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -212,7 +191,7 @@
           <Border Classes="provider-row">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <TextBlock Text="{Binding Name}" FontSize="{DynamicResource FontSizeMd}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
                 <Border IsVisible="{Binding IsDefault}"
                         Background="{DynamicResource SurfaceHoverBrush}"
                         CornerRadius="4"
@@ -226,7 +205,6 @@
               <TextBlock Grid.Column="1"
                          Text="{Binding CredentialText}"
                          Foreground="{DynamicResource TextMutedBrush}"
-                         FontSize="{DynamicResource FontSizeSm}"
                          VerticalAlignment="Center"
                          TextTrimming="CharacterEllipsis" />
 
@@ -236,7 +214,6 @@
                         IsVisible="{Binding SupportsCacheTtl}"
                         ItemsSource="{Binding CacheTtlOptions}"
                         SelectedItem="{Binding SelectedCacheTtl, Mode=TwoWay}"
-                        FontSize="{DynamicResource FontSizeSm}"
                         MinWidth="104"
                         VerticalAlignment="Center"
                         ToolTip.Tip="{Binding CacheTtlTooltip}"
@@ -253,7 +230,7 @@
                        VerticalAlignment="Center" />
 
               <Button Grid.Column="4"
-                      Classes="provider-action"
+                      Classes="outline"
                       Click="OnEditClick"
                       ToolTip.Tip="{Binding EditText}"
                       AutomationProperties.Name="{Binding EditText}"
@@ -265,7 +242,7 @@
               </Button>
 
               <Button Grid.Column="5"
-                      Classes="provider-action"
+                      Classes="outline"
                       Click="OnModelsClick"
                       ToolTip.Tip="{Binding StatusText}"
                       AutomationProperties.Name="{Binding ModelsLabel}">
@@ -276,14 +253,15 @@
               </Button>
 
               <Button Grid.Column="6"
-                      Classes="provider-action"
+                      Classes="outline"
                       IsVisible="{Binding !IsDefault}"
                       Click="OnMakeDefaultClick"
                       Content="{Binding MakeDefaultText}"
                       AutomationProperties.AutomationId="{Binding Id, StringFormat=provider-default-{0}}" />
 
               <Button Grid.Column="7"
-                      Classes="provider-action"
+                      Classes="flat"
+                      Foreground="{DynamicResource StatusErrorBrush}"
                       Click="OnDeleteClick"
                       Content="{Binding DeleteText}"
                       AutomationProperties.AutomationId="{Binding Id, StringFormat=provider-delete-{0}}" />
@@ -303,11 +281,10 @@
 
     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
       <StackPanel Spacing="4" VerticalAlignment="Center">
-        <TextBlock Classes="section-title" Text="{Binding CustomTitle}" />
-        <TextBlock Text="{Binding CustomHint}"
-                   TextWrapping="Wrap"
-                   Foreground="{DynamicResource TextSecondaryBrush}"
-                   FontSize="{DynamicResource FontSizeSm}" />
+        <TextBlock Classes="h2" Text="{Binding CustomTitle}" />
+        <TextBlock Classes="caption"
+                   Text="{Binding CustomHint}"
+                   TextWrapping="Wrap" />
       </StackPanel>
       <Button Grid.Column="1"
               Classes="primary"
@@ -325,11 +302,10 @@
     <Border Classes="divider" Margin="0,6" />
 
     <StackPanel Spacing="4">
-      <TextBlock Classes="section-title" Text="{Binding BuiltInTitle}" />
-      <TextBlock Text="{Binding BuiltInHint}"
-                 TextWrapping="Wrap"
-                 Foreground="{DynamicResource TextSecondaryBrush}"
-                 FontSize="{DynamicResource FontSizeSm}" />
+      <TextBlock Classes="h2" Text="{Binding BuiltInTitle}" />
+      <TextBlock Classes="caption"
+                 Text="{Binding BuiltInHint}"
+                 TextWrapping="Wrap" />
     </StackPanel>
 
     <ItemsControl ItemsSource="{Binding BuiltInRows}" AutomationProperties.AutomationId="providers-builtin">
@@ -338,18 +314,17 @@
           <Border Classes="provider-row">
             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
               <TextBlock Text="{Binding Name}"
-                         FontSize="{DynamicResource FontSizeMd}"
                          VerticalAlignment="Center" />
 
               <Button Grid.Column="1"
-                      Classes="provider-action"
+                      Classes="outline"
                       IsVisible="{Binding ShowsLogin}"
                       Click="OnLoginClick"
                       Content="{Binding LoginText}"
                       AutomationProperties.AutomationId="{Binding Preset.Id, StringFormat=provider-login-{0}}" />
 
               <Button Grid.Column="2"
-                      Classes="provider-action"
+                      Classes="outline"
                       IsVisible="{Binding ShowsApiKey}"
                       Click="OnApiKeyClick"
                       Content="{Binding ApiKeyText}"
@@ -365,16 +340,15 @@
     <Border Classes="divider" Margin="0,6" />
 
     <StackPanel Spacing="4">
-      <TextBlock Classes="section-title" Text="{Binding AgentsTitle}" />
-      <TextBlock Text="{Binding AgentsHint}"
-                 TextWrapping="Wrap"
-                 Foreground="{DynamicResource TextSecondaryBrush}"
-                 FontSize="{DynamicResource FontSizeSm}" />
+      <TextBlock Classes="h2" Text="{Binding AgentsTitle}" />
+      <TextBlock Classes="caption"
+                 Text="{Binding AgentsHint}"
+                 TextWrapping="Wrap" />
     </StackPanel>
 
     <Grid ColumnDefinitions="120,*,170" ColumnSpacing="8">
-      <TextBlock Grid.Column="1" Classes="caption" Text="{Binding AgentsModelHeader}" />
-      <TextBlock Grid.Column="2" Classes="caption" Text="{Binding AgentsThinkingHeader}" />
+      <TextBlock Grid.Column="1" Classes="label" Text="{Binding AgentsModelHeader}" />
+      <TextBlock Grid.Column="2" Classes="label" Text="{Binding AgentsThinkingHeader}" />
     </Grid>
 
     <ItemsControl ItemsSource="{Binding AgentRows}" AutomationProperties.AutomationId="providers-agent-defaults">
@@ -383,7 +357,6 @@
           <Border Classes="provider-row">
             <Grid ColumnDefinitions="120,*,170" ColumnSpacing="8">
               <TextBlock Text="{Binding Name}"
-                         FontSize="{DynamicResource FontSizeMd}"
                          VerticalAlignment="Center" />
 
               <ComboBox Grid.Column="1"

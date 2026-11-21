@@ -12,52 +12,43 @@
         Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-    <Style Selector="TextBlock.field-label">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-      <Setter Property="Margin" Value="0,0,0,3" />
-    </Style>
     <Style Selector="TextBox.invalid">
       <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
     <Style Selector="TextBox.invalid /template/ Border#PART_BorderElement">
       <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
     </Style>
-    <Style Selector="TextBlock.field-error">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
-      <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
-    </Style>
   </Window.Styles>
 
   <Grid RowDefinitions="Auto,Auto" Margin="18,16">
     <StackPanel Grid.Row="0" Spacing="12">
-      <StackPanel Spacing="3">
-        <TextBlock Classes="field-label" Text="{Binding NameLabel}" />
+      <StackPanel Spacing="4">
+        <TextBlock Classes="label" Text="{Binding NameLabel}" />
         <TextBox Text="{Binding Name, Mode=TwoWay}"
                  Classes.invalid="{Binding HasNameError}"
                  ToolTip.Tip="{Binding NameError}"
                  AutomationProperties.AutomationId="provider-editor-name" />
-        <TextBlock Classes="field-error"
+        <TextBlock Classes="caption" Foreground="{DynamicResource StatusErrorBrush}"
                    IsVisible="{Binding HasNameError}"
                    TextWrapping="Wrap"
                    Text="{Binding NameError}" />
       </StackPanel>
 
-      <StackPanel Spacing="3">
-        <TextBlock Classes="field-label" Text="{Binding BaseUrlLabel}" />
+      <StackPanel Spacing="4">
+        <TextBlock Classes="label" Text="{Binding BaseUrlLabel}" />
         <TextBox Text="{Binding BaseUrl, Mode=TwoWay}"
                  IsReadOnly="{Binding !CanEditBaseUrl}"
                  Classes.invalid="{Binding HasBaseUrlError}"
                  ToolTip.Tip="{Binding BaseUrlError}"
                  AutomationProperties.AutomationId="provider-editor-baseurl" />
-        <TextBlock Classes="field-error"
+        <TextBlock Classes="caption" Foreground="{DynamicResource StatusErrorBrush}"
                    IsVisible="{Binding HasBaseUrlError}"
                    TextWrapping="Wrap"
                    Text="{Binding BaseUrlError}" />
       </StackPanel>
 
       <StackPanel Spacing="6" IsVisible="{Binding ShowsKey}">
-        <TextBlock Classes="field-label" Text="{Binding KeyLabel}" />
+        <TextBlock Classes="label" Text="{Binding KeyLabel}" />
         <CheckBox Content="{Binding KeyAsSecretText}"
                   IsChecked="{Binding KeyIsSecret, Mode=TwoWay}"
                   AutomationProperties.AutomationId="provider-editor-key-as-secret" />
@@ -74,15 +65,15 @@
                  ToolTip.Tip="{Binding KeyError}"
                  AutomationProperties.Name="{Binding KeyVariableLabel}"
                  AutomationProperties.AutomationId="provider-editor-envvar" />
-        <TextBlock Classes="field-error"
+        <TextBlock Classes="caption" Foreground="{DynamicResource StatusErrorBrush}"
                    IsVisible="{Binding HasKeyError}"
                    TextWrapping="Wrap"
                    Text="{Binding KeyError}" />
         <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding KeyHint}" />
       </StackPanel>
 
-      <StackPanel Spacing="3">
-        <TextBlock Classes="field-label" Text="{Binding HeadersLabel}" />
+      <StackPanel Spacing="4">
+        <TextBlock Classes="label" Text="{Binding HeadersLabel}" />
         <TextBox Text="{Binding HeadersText, Mode=TwoWay}"
                  AcceptsReturn="True"
                  TextWrapping="NoWrap"
@@ -93,7 +84,7 @@
                  ToolTip.Tip="{Binding HeadersError}"
                  AutomationProperties.Name="{Binding HeadersLabel}"
                  AutomationProperties.AutomationId="provider-editor-headers" />
-        <TextBlock Classes="field-error"
+        <TextBlock Classes="caption" Foreground="{DynamicResource StatusErrorBrush}"
                    IsVisible="{Binding HasHeadersError}"
                    TextWrapping="Wrap"
                    Text="{Binding HeadersError}" />

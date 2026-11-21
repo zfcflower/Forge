@@ -49,8 +49,6 @@
       <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
         <TextBox x:Name="SearchQuery"
                  Grid.Column="0"
-                 MinHeight="26"
-                 VerticalContentAlignment="Center"
                  Text="{Binding SearchText}"
                  PlaceholderText="{Binding SearchPlaceholder}"
                  AutomationProperties.AutomationId="terminal-search-query"

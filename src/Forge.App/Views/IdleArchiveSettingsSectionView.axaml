@@ -45,7 +45,7 @@
                 AutomationProperties.Name="{Binding [idleArchive.scope], Source={x:Static loc:Loc.Instance}}">
         <ComboBox.ItemTemplate>
           <DataTemplate x:DataType="settings:IdleArchiveScopeOption">
-            <TextBlock Classes="caption" Text="{Binding Label}" />
+            <TextBlock Text="{Binding Label}" />
           </DataTemplate>
         </ComboBox.ItemTemplate>
       </ComboBox>

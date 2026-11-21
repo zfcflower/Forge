@@ -32,6 +32,13 @@ internal static class UsageStrings
     public const string AverageOutput = "usage.summary.avgOutput";
     public const string AverageCost = "usage.summary.avgCost";
 
+    /// <summary>The model's context window — the one constant among the session's numbers, carried in the popover so it
+    /// answers everything the strip's hover line does.</summary>
+    public const string Window = "usage.summary.window";
+
+    /// <summary>The cache-write total with its hour-lived share split out: <c>{0}（5m {1} · 1h {2}）</c>.</summary>
+    public const string CacheWriteSplit = "usage.summary.cacheWrite.split";
+
     /// <summary>Where the numbers come from, and which part of them a non-git session cannot report.</summary>
     public const string Hint = "usage.summary.hint";
 
@@ -76,6 +83,11 @@ internal static class UsageStrings
 
     public static string UnknownText => Loc.Instance[Unknown];
 
+    public static string WindowLabel => Loc.Instance[Window];
+
+    public static string CacheWriteSplitText(string total, string shortLived, string hourLived) =>
+        Loc.Instance.Format(CacheWriteSplit, total, shortLived, hourLived);
+
     public static string TurnsValueText(string recorded, string live) =>
         Loc.Instance.Format(TurnsValue, recorded, live);
 
@@ -105,6 +117,8 @@ internal static class UsageStrings
             "a git session records.");
         Loc.Register(Empty, "这个会话还没有用量", "This session has no usage yet");
         Loc.Register(Unknown, "—", "—");
+        Loc.Register(Window, "窗口", "Window");
+        Loc.Register(CacheWriteSplit, "{0}（5m {1} · 1h {2}）", "{0} (5m {1} · 1h {2})");
         Loc.Register(TurnsValue, "{0} 已记录 · {1} 本次", "{0} recorded · {1} this window");
     }
 }

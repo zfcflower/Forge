@@ -4,11 +4,14 @@
              xmlns:set="using:Forge.App.Settings"
              x:Class="Forge.App.Views.AgentsSettingsSectionView"
              x:DataType="set:AgentsSettingsSectionViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <!-- The merged `agents` page: sub-agent cap, the review settings, then the conversation (chat) display settings. Every
        value is a live preference; each block carries a caption saying what the setting changes. -->
   <StackPanel Spacing="6">
 
-    <TextBlock Classes="label" FontWeight="SemiBold" Text="{Binding [agents.groupAgents], Source={x:Static loc:Loc.Instance}}" />
+    <TextBlock Classes="h2" Text="{Binding [agents.groupAgents], Source={x:Static loc:Loc.Instance}}" />
     <Grid ColumnDefinitions="200,*" Margin="0,3">
       <TextBlock Classes="label"
                  VerticalAlignment="Center"
@@ -28,7 +31,7 @@
                TextWrapping="Wrap"
                Text="{Binding [agents.maxParallelHint], Source={x:Static loc:Loc.Instance}}" />
 
-    <TextBlock Classes="label" FontWeight="SemiBold" Margin="0,18,0,0" Text="{Binding [agents.groupReview], Source={x:Static loc:Loc.Instance}}" />
+    <TextBlock Classes="h2" Margin="0,18,0,0" Text="{Binding [agents.groupReview], Source={x:Static loc:Loc.Instance}}" />
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
                Text="{Binding [agents.review.intro], Source={x:Static loc:Loc.Instance}}" />
@@ -76,7 +79,7 @@
     </Grid>
     <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding [agents.review.maxRoundsHint], Source={x:Static loc:Loc.Instance}}" />
 
-    <TextBlock Classes="label" FontWeight="SemiBold" Margin="0,18,0,0" Text="{Binding [agents.groupChat], Source={x:Static loc:Loc.Instance}}" />
+    <TextBlock Classes="h2" Margin="0,18,0,0" Text="{Binding [agents.groupChat], Source={x:Static loc:Loc.Instance}}" />
     <!-- Thumbnail edge of tool-result images: the decode bound, never a re-encode of the stored image. -->
     <Grid ColumnDefinitions="200,*" Margin="0,3">
       <TextBlock Classes="label"

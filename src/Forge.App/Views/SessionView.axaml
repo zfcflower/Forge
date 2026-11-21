@@ -170,8 +170,7 @@
                value the user already sees twice. -->
           <Border x:Name="InstrumentStrip"
                   Grid.Row="0"
-                  Classes="instrument-strip"
-                  SizeChanged="OnInstrumentStripSizeChanged">
+                  Classes="instrument-strip">
             <Grid ColumnDefinitions="Auto,*,Auto">
               <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <!-- No status dot, no path and no branch: the project tree already carries the session, its state and
@@ -267,7 +266,10 @@
                         AutomationProperties.Name="{Binding Instruments.UsageSummaryTitle}">
                   <StackPanel Orientation="Horizontal" Spacing="5">
                     <wc:FluentIcon Data="{StaticResource IconLayers}" Width="13" Height="13" />
-                    <TextBlock Text="{Binding Instruments.UsageSummaryTitle}" VerticalAlignment="Center" />
+                    <!-- The label is the reading: tokens and the cache-hit rate live on the chip itself, and the two
+                         separate segments they used to occupy (git ahead/behind, a bare "RC x%") are gone — the git
+                         numbers stay in the files panel where the strip pushed them from. -->
+                    <TextBlock Text="{Binding Instruments.UsageChipText}" VerticalAlignment="Center" />
                     <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="11" Height="11" />
                   </StackPanel>
                   <Button.Flyout>
@@ -311,17 +313,6 @@
                     </Flyout>
                   </Button.Flyout>
                 </Button>
-                <!-- The git markers ride with the context readings: the same row answers "how far from the remote" and
-                     "how far through the window", and both print next to the usage chip they qualify. -->
-                <StackPanel x:Name="StripGit" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <TextBlock Classes="instrument-meta"
-                             Text="{Binding Instruments.AheadBehindText}"
-                             IsVisible="{Binding Instruments.HasAheadBehind}"
-                             AutomationProperties.AutomationId="strip-ahead-behind" />
-                </StackPanel>
-                <TextBlock Classes="instrument-meta"
-                           VerticalAlignment="Center"
-                           Text="{Binding Instruments.CacheReadText}" />
                 <Button Classes="instrument-chip context-gauge"
                         Classes.warning="{Binding Instruments.IsContextWarning}"
                         Classes.over="{Binding Instruments.IsContextOver}"

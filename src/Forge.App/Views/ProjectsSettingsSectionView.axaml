@@ -4,6 +4,9 @@
              xmlns:settings="using:Forge.App.Settings"
              x:Class="Forge.App.Views.ProjectsSettingsSectionView"
              x:DataType="settings:ProjectsSettingsSectionViewModel">
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+  </UserControl.Styles>
   <!-- The `projects` section body: how long a clone may run, and where a cloned or created project goes. Both write the
        live preferences, so the next add-project dialog uses them without a restart; the directory picker itself is the
        view's, because it needs a window, and answers through CloneDirectory. -->
@@ -37,14 +40,14 @@
                AutomationProperties.AutomationId="settings-projects-directory"
                AutomationProperties.Name="{Binding [settings.projects.directoryLabel], Source={x:Static loc:Loc.Instance}}" />
       <Button Grid.Column="2"
-              Classes="ghost"
+              Classes="outline"
               Margin="8,0,0,0"
               Content="{Binding [settings.projects.browse], Source={x:Static loc:Loc.Instance}}"
               Command="{Binding BrowseCommand}"
               AutomationProperties.AutomationId="settings-projects-browse"
               AutomationProperties.Name="{Binding [settings.projects.browse], Source={x:Static loc:Loc.Instance}}" />
       <Button Grid.Column="3"
-              Classes="ghost"
+              Classes="outline"
               Margin="8,0,0,0"
               Content="{Binding [settings.projects.clear], Source={x:Static loc:Loc.Instance}}"
               Command="{Binding ClearCommand}"

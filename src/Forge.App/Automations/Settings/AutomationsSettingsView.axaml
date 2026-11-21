@@ -10,16 +10,6 @@
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="Padding" Value="6,1" />
     </Style>
-    <Style Selector="Button.automation-action">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="CornerRadius" Value="6" />
-      <Setter Property="Padding" Value="8,4" />
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    </Style>
-    <Style Selector="Button.automation-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
-    </Style>
     <Style Selector="Border.automation-row">
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="0,0,0,1" />
@@ -69,7 +59,7 @@
               <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                 <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                   <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="{Binding Name}" FontSize="{DynamicResource FontSizeMd}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
                     <Border Classes="automation-badge" IsVisible="{Binding IsBuiltIn}">
                       <TextBlock Text="{Binding BadgeText}"
                                  FontSize="{DynamicResource FontSizeXs}"
@@ -89,18 +79,19 @@
                           VerticalAlignment="Center"
                           AutomationProperties.AutomationId="{Binding Id, StringFormat=automation-enabled-{0}}" />
                 <Button Grid.Column="2"
-                        Classes="automation-action"
+                        Classes="outline"
                         Command="{Binding RunNowCommand}"
                         Content="{Binding RunNowText}"
                         AutomationProperties.AutomationId="{Binding Id, StringFormat=automation-run-{0}}" />
                 <Button Grid.Column="3"
-                        Classes="automation-action"
+                        Classes="outline"
                         IsVisible="{Binding CanEdit}"
                         Command="{Binding EditCommand}"
                         Content="{Binding EditText}"
                         AutomationProperties.AutomationId="{Binding Id, StringFormat=automation-edit-{0}}" />
                 <Button Grid.Column="4"
-                        Classes="automation-action"
+                        Classes="flat"
+                        Foreground="{DynamicResource StatusErrorBrush}"
                         IsVisible="{Binding CanDelete}"
                         Command="{Binding DeleteCommand}"
                         Content="{Binding DeleteText}"
@@ -109,7 +100,7 @@
 
               <!-- The CI built-in: auto-push per repository project. -->
               <StackPanel Spacing="4" IsVisible="{Binding IsCi}">
-                <Button Classes="automation-action"
+                <Button Classes="outline"
                         HorizontalAlignment="Left"
                         Command="{Binding ToggleCiCommand}"
                         Content="{Binding CiToggleText}"
@@ -135,19 +126,19 @@
     </ListBox>
 
     <!-- Runs of the selected row. -->
-    <TextBlock Classes="section-title" Text="{Binding RunsTitle}" />
+    <TextBlock Classes="h2" Text="{Binding RunsTitle}" />
     <TextBlock Classes="caption" IsVisible="{Binding SelectedRow, Converter={x:Static ObjectConverters.IsNull}}" Text="{Binding RunsSelectHint}" />
     <TextBlock Classes="caption" IsVisible="{Binding ShowsNoRuns}" Text="{Binding RunsNoneText}" />
     <ItemsControl ItemsSource="{Binding Runs}" AutomationProperties.AutomationId="automations-runs">
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="auto:AutomationRunRowViewModel">
-          <Button Classes="automation-action"
+          <Button Classes="flat"
                   HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Stretch"
                   Command="{Binding OpenCommand}"
                   ToolTip.Tip="{Binding MessageText}">
             <Grid ColumnDefinitions="Auto,Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12">
-              <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontWeight="SemiBold" />
+              <TextBlock Grid.Column="0" Text="{Binding StatusText}" />
               <TextBlock Grid.Column="1" Classes="caption" Text="{Binding SourceText}" />
               <TextBlock Grid.Column="2" Classes="caption" Text="{Binding TimeText}" />
               <TextBlock Grid.Column="3" Classes="caption" Text="{Binding UsageText}" IsVisible="{Binding HasUsage}" />

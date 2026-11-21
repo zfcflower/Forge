@@ -11,10 +11,12 @@
                Text="{Binding StateText}"
                AutomationProperties.AutomationId="notification-permission-state" />
     <StackPanel Orientation="Horizontal" Spacing="6">
-      <Button Content="{Binding TestActionText}"
+      <Button Classes="ghost"
+              Content="{Binding TestActionText}"
               Command="{Binding SendTestCommand}"
               AutomationProperties.AutomationId="notification-permission-test" />
-      <Button Content="{Binding [notifications.permission.openSettings], Source={x:Static loc:Loc.Instance}}"
+      <Button Classes="ghost"
+              Content="{Binding [notifications.permission.openSettings], Source={x:Static loc:Loc.Instance}}"
               Command="{Binding OpenSettingsCommand}"
               IsVisible="{Binding CanOpenSettings}"
               AutomationProperties.AutomationId="notification-permission-open-settings" />
