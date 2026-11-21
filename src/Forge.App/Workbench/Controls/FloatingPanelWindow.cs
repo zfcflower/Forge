@@ -203,7 +203,7 @@ internal sealed class FloatingPanelWindow : Window
             {
                 ItemsSource = filesPanel.HeaderTools,
                 ItemTemplate = new HeaderToolTemplate(),
-                Margin = new Thickness(0, 0, 4, 0),
+                Margin = new Thickness(0, 0, 2, 0),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center,
                 ItemsPanel = new FuncTemplate<Panel?>(() => new StackPanel

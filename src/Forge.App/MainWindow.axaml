@@ -30,8 +30,7 @@
   <Grid RowDefinitions="Auto,*">
 
     <!-- Window top: the same chrome colour as every panel title bar below it, so the whole top edge of the window reads
-    as one surface. The caption buttons are drawn here because the client area extends into the title bar; the
-    settings button sits to their left. -->
+    as one surface. The caption buttons are drawn here because the client area extends into the title bar. -->
     <Border x:Name="TitleBar"
             Grid.Row="0"
             Height="40"
@@ -39,7 +38,7 @@
             Background="{DynamicResource PanelTitleBarBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0,8,0">
+      <Grid ColumnDefinitions="Auto,*" Margin="12,0,8,0">
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
           <!-- The title row carries the logo lockup only: the project tree on the left already shows the open session
           and its branch, so repeating them here was redundant. The wordmark is the product's own name, so it is
@@ -83,13 +82,14 @@
           </Button>
         </StackPanel>
 
-        <!-- Right-aligned search affordance and host state, sitting just left of the caption buttons: the search button opens the palette
-        (disabled until wave W3), and the extension host's state is the one live readout the
-        header carries — the same state the status bar spells out in words. -->
+        <!-- The right side is one cluster: search, prompt reload, plan, the host readout, then the terminal, settings and
+        the caption buttons. One box (30x26) and one gap (2 px) for all of them - a row of icons is spaced evenly or it
+        reads as two rows; the same rule covers the settings window's title row (SPEC, 控件形态「一行里的图标按钮是一个簇」).
+        The search button opens the palette (disabled until wave W3), and the extension host's state is the one live readout
+        the header carries. -->
         <StackPanel Grid.Column="1"
                     Orientation="Horizontal"
-                    Spacing="18"
-                    Margin="0,0,12,0"
+                    Spacing="2"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center">
           <Button Classes="ghost icon"
@@ -100,8 +100,8 @@
                   AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
                   AutomationProperties.AutomationId="shell-search">
             <wc:FluentIcon Data="{StaticResource IconSearch}"
-                           Width="16"
-                           Height="16"
+                           Width="15"
+                           Height="15"
                            Foreground="{DynamicResource TextMutedBrush}" />
           </Button>
           <!-- Reload prompts of the active session: a session reads templates, agents, skills and AGENTS.md once, so an edit
@@ -117,8 +117,8 @@
                   AutomationProperties.Name="{Binding [session.prompts.reloadTip], Source={x:Static loc:Loc.Instance}}">
             <Grid>
               <wc:FluentIcon Data="{StaticResource IconRefresh}"
-                             Width="16"
-                             Height="16"
+                             Width="15"
+                             Height="15"
                              Foreground="{DynamicResource TextMutedBrush}" />
               <Ellipse Width="7"
                        Height="7"
@@ -139,8 +139,8 @@
                   AutomationProperties.AutomationId="plan-open"
                   AutomationProperties.Name="{Binding [plan.title], Source={x:Static loc:Loc.Instance}}">
             <wc:FluentIcon Data="{StaticResource IconPlan}"
-                           Width="16"
-                           Height="16"
+                           Width="15"
+                           Height="15"
                            Foreground="{DynamicResource TextMutedBrush}" />
           </Button>
           <StackPanel Orientation="Horizontal"
@@ -157,9 +157,8 @@
                      Classes.failed="{Binding Status.IsHostFailed}" />
             <TextBlock Classes="caption" Text="{Binding [status.host.name], Source={x:Static loc:Loc.Instance}}" />
           </StackPanel>
-        </StackPanel>
-
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <!-- Terminal and settings are actions too, so they sit in the same cluster; only the caption buttons change glyph
+          size (13 / 12), never their box. -->
           <Button Classes="ghost icon"
                   Width="30"
                   Height="26"
@@ -179,7 +178,7 @@
           </Button>
           <Button x:Name="MinimizeButton"
                   Classes="ghost icon"
-                  Width="34"
+                  Width="30"
                   Height="26"
                   Click="OnMinimizeClick"
                   AutomationProperties.AutomationId="window-minimize" AutomationProperties.Name="{Binding [window.minimize], Source={x:Static loc:Loc.Instance}}"
@@ -188,7 +187,7 @@
           </Button>
           <Button x:Name="MaximizeButton"
                   Classes="ghost icon"
-                  Width="34"
+                  Width="30"
                   Height="26"
                   Click="OnMaximizeClick"
                   AutomationProperties.AutomationId="window-maximize">
@@ -196,7 +195,7 @@
           </Button>
           <Button x:Name="CloseButton"
                   Classes="ghost icon"
-                  Width="34"
+                  Width="30"
                   Height="26"
                   Click="OnCloseClick"
                   AutomationProperties.AutomationId="window-close" AutomationProperties.Name="{Binding [window.closeWindow], Source={x:Static loc:Loc.Instance}}"

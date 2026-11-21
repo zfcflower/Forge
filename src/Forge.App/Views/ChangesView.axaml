@@ -70,7 +70,9 @@
                      AutomationProperties.AutomationId="changes-viewed" />
         </StackPanel>
 
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+        <!-- Three file-navigation icons are one cluster (2 px apart); the two segmented switches that follow are separate
+             groups, so each brings its own margin up to the 8 px group break. -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
           <Button Classes="ghost icon"
                   Command="{Binding PreviousFileCommand}"
                   ToolTip.Tip="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}"
@@ -109,7 +111,7 @@
                       Content="{Binding [changes.review.inline], Source={x:Static loc:Loc.Instance}}" />
             </StackPanel>
           </Border>
-          <Border Width="1" Height="16" Margin="4,0" Background="{DynamicResource BorderBrush}" />
+          <Border Width="1" Height="16" Margin="6,0" Background="{DynamicResource BorderBrush}" />
           <Border Classes="segmented"
                   AutomationProperties.Name="{Binding [changes.review.layout.name], Source={x:Static loc:Loc.Instance}}">
             <StackPanel Orientation="Horizontal">
