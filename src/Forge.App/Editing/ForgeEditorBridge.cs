@@ -20,6 +20,15 @@ internal sealed class ForgeEditorBridge : IDisposable
 {
     /// <summary>Characters past which the lexical highlighter stays off; the semantic overlay uses the same ceiling.</summary>
     internal const int HighlightLimit = 1 << 20;
+
+    /// <summary>
+    /// One built-in grammar registry per theme for the whole process. Its options read the shipped grammar list (5-8 ms) and
+    /// both opening a file and applying a theme used to build two of them; a document only needs the scope name out of it,
+    /// so the table is shared instead of rebuilt per editor.
+    /// </summary>
+    private static readonly Dictionary<ThemeName, RegistryOptions> SharedOptions = [];
+    private static readonly Lock OptionsGate = new();
+
     private readonly TextEditor editor;
     private readonly FileDocumentViewModel model;
     private readonly EditorDocument document;
@@ -33,6 +42,7 @@ internal sealed class ForgeEditorBridge : IDisposable
     private string? grammarScope;
     private bool noticeShown;
     private bool recheckPosted;
+    private bool installPosted;
     private bool disposed;
 
     public ForgeEditorBridge(TextEditor editor, FileDocumentViewModel model, ForgeEditorMirror mirror, string path, EditorSettings settings)
@@ -105,12 +115,14 @@ internal sealed class ForgeEditorBridge : IDisposable
         whitespace.Configure(settings.ShowTabs, settings.ShowEndOfLine);
         if (installation is null || registry is null)
         {
+            // The install has not run yet: it reads the theme when it does, so there is nothing to swap here.
+            ScheduleInstall();
             return;
         }
 
         try
         {
-            installation.SetTheme(registry.LoadTheme(CurrentThemeName()));
+            installation.SetTheme(Options().LoadTheme(CurrentThemeName()));
         }
         catch (Exception exception) when (IsAssetFailure(exception))
         {
@@ -194,10 +206,10 @@ internal sealed class ForgeEditorBridge : IDisposable
 
         try
         {
-            grammarScope = new RegistryOptions(CurrentThemeName()).GetScopeByExtension(extension);
+            grammarScope = Options().GetScopeByExtension(extension);
             if (grammarScope is not null)
             {
-                Reevaluate();
+                ScheduleInstall();
             }
         }
         catch (Exception exception) when (IsAssetFailure(exception))
@@ -206,6 +218,47 @@ internal sealed class ForgeEditorBridge : IDisposable
             grammarScope = null;
             ReportHighlightFailure(exception);
         }
+    }
+
+    /// <summary>The shipped grammar table of the current theme, read once per theme and shared by every editor.</summary>
+    private RegistryOptions Options()
+    {
+        var theme = CurrentThemeName();
+        lock (OptionsGate)
+        {
+            if (!SharedOptions.TryGetValue(theme, out var options))
+            {
+                options = new RegistryOptions(theme);
+                SharedOptions[theme] = options;
+            }
+
+            return options;
+        }
+    }
+
+    /// <summary>
+    /// Installs the highlighter after the frame that showed the text. Building it costs 20-40 ms on the UI thread for the first
+    /// document of a language (the grammar, the model and the listener) and the coloured layout that follows costs another
+    /// 30-90 ms - all of it paid again for every document, because each installation builds its own registry. None of it is
+    /// needed to read the file, so the click returns with the text on screen and the colours land one idle pass later; the
+    /// token cache a document builds is discarded with it anyway, which is why warming it up in front of the click bought
+    /// nothing.
+    /// </summary>
+    private void ScheduleInstall()
+    {
+        if (installPosted || disposed)
+        {
+            return;
+        }
+
+        installPosted = true;
+        Dispatcher.UIThread.Post(InstallOnIdle, DispatcherPriority.Background);
+    }
+
+    private void InstallOnIdle()
+    {
+        installPosted = false;
+        Reevaluate();
     }
 
     private void Reevaluate()
@@ -238,7 +291,7 @@ internal sealed class ForgeEditorBridge : IDisposable
         }
         try
         {
-            var options = new RegistryOptions(CurrentThemeName());
+            var options = Options();
             registry = options;
             installation = editor.InstallTextMate(options, true, OnTextMateError);
             installation.AppliedTheme += OnThemeApplied;
