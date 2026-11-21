@@ -42,7 +42,7 @@
 | | `read_history` | 只读 | 取回被压缩的原文 |
 | | `read_artifact` | 只读 | 读回超长输出转存的 Artifact（不可关闭） |
 | Web | `web_fetch` | 只读 | 只取 http/https；默认拒绝回环/私网/链路本地；手动跟随最多 5 跳、每跳重查；正文上限 5 MB、30 秒超时；HTML 转纯文本 |
-| | `web_search` | 只读 | 后端 Brave / Tavily / SearXNG；未配置时工具不注册；后端工厂每次调用现取 |
+| | `web_search` | 只读 | 后端 Exa（无密钥走公共 MCP，默认）/ Tavily / DeepSeek（可用模型提供商的密钥）/ Brave / SearXNG；无可用后端时工具不注册；后端工厂每次调用现取 |
 | Git | `git_status` `git_log` `git_diff` `git_fetch` | 只读 | 仅仓库项目的会话提供（General 常规会话不提供：其目录在共享的 General 仓库内，git 工具会看到所有常规会话的改动）；远程失败以结构化结果返回而非抛异常；`git_diff` 支持 `base`、`paths`、`stat_only` |
 | | `git_branch` `git_sync` | 写 | 按工具名固定划分；推送只允许 `--force-with-lease`；拉取策略来自用户设置 |
 | PR | `pr_view` `pr_workflow` `pr_checks` `pr_ci_log` `pr_comments` `review_comments` | 只读 | 13 个 PR 工具中的 6 个只读；仅当会话所在仓库有远程时提供（会话启动时判定，之后只在项目树“配对远程仓库”成功时于下一回合边界重判，不监视外部变更）；见 04 |

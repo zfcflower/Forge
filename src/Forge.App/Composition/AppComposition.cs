@@ -565,7 +565,12 @@ internal sealed class AppComposition : IAsyncDisposable
             "IconPlug"));
 
         // --- web tools: settings section and tool factory ---
-        var webServices = new Forge.App.Web.WebServices(new Forge.App.Web.WebSettingsStore(paths.SettingsPath), providers.Secrets, network);
+        var webServices = new Forge.App.Web.WebServices(
+            new Forge.App.Web.WebSettingsStore(paths.SettingsPath),
+            providers.Secrets,
+            network,
+            // DeepSeek's search API bills the same account as its model API, so a configured DeepSeek provider's key serves both.
+            () => providers.Catalog.DeepSeekApiKey());
         settings.Add(new SettingsSection(
             Forge.App.Web.WebSettingsSectionViewModel.SectionId,
             WebStrings.SectionTitle,

@@ -25,7 +25,7 @@
 | `read_history` | 检索 | R | * | 取回被压缩的原文 |
 | `read_artifact` | 检索 | R | — | 读回超长输出 |
 | `web_fetch` | Web | R | * | http/https 抓取，默认拒私网，5 MB/30 s |
-| `web_search` | Web | R | * | Brave / Tavily / SearXNG，未配置不注册 |
+| `web_search` | Web | R | * | Exa（无密钥走公共 MCP，默认）/ Tavily / DeepSeek（可复用模型提供商密钥）/ Brave / SearXNG，无可用后端不注册 |
 | `git_status` | Git | R | * | 状态 |
 | `git_log` | Git | R | * | 提交历史 |
 | `git_diff` | Git | R | * | diff（`base`/`paths`/`stat_only`） |

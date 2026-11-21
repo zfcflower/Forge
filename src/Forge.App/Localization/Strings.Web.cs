@@ -12,6 +12,8 @@ internal static class WebStrings
     public const string ApiKeyLabel = "web.apiKey";
     public const string ApiKeyPlaceholder = "web.apiKey.placeholder";
     public const string ApiKeyStored = "web.apiKey.stored";
+    public const string ApiKeyOptional = "web.apiKey.optional";
+    public const string ApiKeySharedNote = "web.apiKey.shared";
     public const string SearxngUrlLabel = "web.searxngUrl";
     public const string AllowPrivateLabel = "web.allowPrivate";
     public const string AllowPrivateHint = "web.allowPrivate.hint";
@@ -33,13 +35,21 @@ internal static class WebStrings
         Loc.Register(SectionTitle, "Web 工具", "Web tools");
         Loc.Register(
             Hint,
-            "web_fetch 始终可用;web_search 需要先选择搜索后端。两个工具都会联网,每次调用默认需要你批准。API 密钥保存在加密密钥库,不写入 settings.json。",
-            "web_fetch is always available; web_search needs a search backend. Both tools use the network and ask for approval by default. API keys go to the encrypted secret store, never to settings.json.");
+            "web_fetch 始终可用;web_search 默认走 Exa(无需密钥)。下拉里带绿点的后端现在就能用。两个工具都会联网,每次调用默认需要你批准。API 密钥保存在加密密钥库,不写入 settings.json。",
+            "web_fetch is always available; web_search defaults to Exa, which needs no key. An entry with a green dot can search right now. Both tools use the network and ask for approval by default. API keys go to the encrypted secret store, never to settings.json.");
         Loc.Register(BackendLabel, "搜索后端", "Search backend");
         Loc.Register(BackendNone, "未配置", "Not configured");
         Loc.Register(ApiKeyLabel, "API 密钥", "API key");
         Loc.Register(ApiKeyPlaceholder, "粘贴新密钥后点击保存", "Paste a new key, then Save");
         Loc.Register(ApiKeyStored, "已保存密钥;输入新值可替换", "A key is stored; enter a new value to replace it");
+        Loc.Register(
+            ApiKeyOptional,
+            "可留空:留空时使用 Exa 公共 MCP(匿名、无需密钥,限额较低)。",
+            "Optional: leave it empty to use Exa's public MCP (anonymous, no key, lower limits).");
+        Loc.Register(
+            ApiKeySharedNote,
+            "DeepSeek 已经在你配置的 DeepSeek 模型提供商里填过密钥时,这里可以留空。",
+            "Leave this empty when the DeepSeek model provider you configured already carries the key.");
         Loc.Register(SearxngUrlLabel, "SearXNG 地址", "SearXNG URL");
         Loc.Register(AllowPrivateLabel, "允许访问内网和本机地址", "Allow private-network and loopback addresses");
         Loc.Register(

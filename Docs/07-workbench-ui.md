@@ -154,7 +154,7 @@
 | `rate-limit` 115 | AGENT | 本地限速开关、请求/令牌预算、自动化间隔、每提供商覆盖 |
 | `agents` 120 | AGENT | 合并页“对话与子 Agent”：子 Agent 并发上限（1–16）；评审四项（提供评审工具、完成步骤必须评审通过、评审意见自动修复、自动修复轮数上限 1–10），每项带作用说明；对话块（工具图片缩略图长边、是否把工具结果图片发给模型、Mermaid 图类型与渲染超时） |
 | `prompts` 130 | AGENT | 命令/Agent/内置提示词的编辑、复制、追加、还原 |
-| `web` 140 | AGENT | 搜索后端（brave/tavily/searxng/无）、SearXNG 地址、允许私网 |
+| `web` 140 | AGENT | 搜索后端（exa/tavily/deepseek/brave/searxng/无，默认 exa；可用项前置绿点）、SearXNG 地址、允许私网 |
 | `automations` 150 | AGENT | 自动化定义与运行历史 |
 | `appearance` 200 | 界面 | 主题模式（系统/浅色/深色）、界面/代码字体与字号、减少动画 |
 | `keymap` 210 | 界面 | 21 个可重绑动作、冲突检测、恢复默认 |

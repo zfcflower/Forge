@@ -283,7 +283,16 @@
                     AutomationProperties.AutomationId="web-backend">
             <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="webset:WebBackendOption">
-                <TextBlock Text="{Binding Label}" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <!-- The green dot marks a backend that can search right now; the fixed-width box keeps the labels aligned
+                       while an unusable entry has no dot. -->
+                  <Border Width="10">
+                    <Ellipse Width="7" Height="7" HorizontalAlignment="Left" VerticalAlignment="Center"
+                             Fill="{DynamicResource StatusSuccessBrush}"
+                             IsVisible="{Binding IsUsable}" />
+                  </Border>
+                  <TextBlock Text="{Binding Label}" />
+                </StackPanel>
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
@@ -295,6 +304,10 @@
                    AutomationProperties.AutomationId="web-api-key" />
           <TextBlock Classes="caption" IsVisible="{Binding HasStoredKey}"
                      Text="{Binding [web.apiKey.stored], Source={x:Static loc:Loc.Instance}}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding KeyIsOptional}"
+                     Text="{Binding [web.apiKey.optional], Source={x:Static loc:Loc.Instance}}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding ShowsSharedKeyNote}"
+                     Text="{Binding [web.apiKey.shared], Source={x:Static loc:Loc.Instance}}" />
         </StackPanel>
         <StackPanel Spacing="4" IsVisible="{Binding ShowsUrl}">
           <TextBlock Classes="label" Text="{Binding [web.searxngUrl], Source={x:Static loc:Loc.Instance}}" />

@@ -17,13 +17,16 @@ internal sealed record WebSettings(string? SearchBackend, string SearxngUrl, boo
     public const string Brave = "brave";
     public const string Tavily = "tavily";
     public const string Searxng = "searxng";
+    public const string Exa = "exa";
+    public const string Deepseek = "deepseek";
 
-    public static WebSettings Default { get; } = new(null, string.Empty, false);
+    /// <summary>Exa: it answers without a key (anonymous MCP), so search works before the user configures anything.</summary>
+    public static WebSettings Default { get; } = new(Exa, string.Empty, false);
 }
 
 /// <summary>
-/// The <c>web</c> section of <c>settings.json</c>: <c>searchBackend</c> (<c>brave</c>, <c>tavily</c>, <c>searxng</c> or
-/// absent), <c>searxngUrl</c> and <c>allowPrivateNetwork</c> (default false). Follows the file rules of
+/// The <c>web</c> section of <c>settings.json</c>: <c>searchBackend</c> (<c>exa</c>, <c>tavily</c>, <c>deepseek</c>, <c>brave</c>,
+/// <c>searxng</c> or absent), <c>searxngUrl</c> and <c>allowPrivateNetwork</c> (default false). Follows the file rules of
 /// <see cref="Agents.AgentDefaultsStore"/>: the whole file is read as a node tree and only the <c>web</c> node is replaced,
 /// so other sections and unknown fields survive; writes take <see cref="SettingsFileMutex"/> and are atomic.
 /// </summary>
@@ -114,7 +117,7 @@ internal sealed class WebSettingsStore
     private static WebSettings Normalize(WebSettings value)
     {
         var backend = value.SearchBackend?.Trim().ToLowerInvariant();
-        if (backend is not (WebSettings.Brave or WebSettings.Tavily or WebSettings.Searxng))
+        if (backend is not (WebSettings.Brave or WebSettings.Tavily or WebSettings.Searxng or WebSettings.Exa or WebSettings.Deepseek))
         {
             backend = null;
         }
@@ -136,21 +139,30 @@ internal sealed class WebServices : IDisposable
 {
     public const string BraveKeyReference = "web.brave.apiKey";
     public const string TavilyKeyReference = "web.tavily.apiKey";
+    public const string ExaKeyReference = "web.exa.apiKey";
+    public const string DeepseekKeyReference = "web.deepseek.apiKey";
 
     private readonly HttpClient http;
     private readonly HttpClient searchHttp;
     private readonly NetworkStack? network;
+    private readonly Func<string?>? deepSeekModelKey;
     private readonly bool ownsClients;
     private readonly ITool[] fetchOnly;
     private readonly ITool[] withSearch;
 
-    /// <summary>One client for both tools; a client passed in stays the caller's.</summary>
-    public WebServices(WebSettingsStore store, ProviderSecretStore secrets, HttpClient? http = null)
+    /// <summary>One client for both tools; a client passed in stays the caller's. <paramref name="deepSeekModelKey"/> supplies
+    /// the key of the DeepSeek model provider, which the DeepSeek search backend shares.</summary>
+    public WebServices(
+        WebSettingsStore store,
+        ProviderSecretStore secrets,
+        HttpClient? http = null,
+        Func<string?>? deepSeekModelKey = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(secrets);
         Store = store;
         Secrets = secrets;
+        this.deepSeekModelKey = deepSeekModelKey;
         ownsClients = http is null;
         this.http = http ?? CreateHttpClient();
         searchHttp = this.http;
@@ -162,13 +174,18 @@ internal sealed class WebServices : IDisposable
     /// allowed) and a search client (redirects, decompression, no address filter since SearXNG is often local), both
     /// routed through <paramref name="network"/> and owned by this instance.
     /// </summary>
-    public WebServices(WebSettingsStore store, ProviderSecretStore secrets, NetworkStack network)
+    public WebServices(
+        WebSettingsStore store,
+        ProviderSecretStore secrets,
+        NetworkStack network,
+        Func<string?>? deepSeekModelKey = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(secrets);
         ArgumentNullException.ThrowIfNull(network);
         Store = store;
         Secrets = secrets;
+        this.deepSeekModelKey = deepSeekModelKey;
         this.network = network;
         ownsClients = true;
         http = new HttpClient(network.CreateHandler(new NetworkHandlerOptions
@@ -212,36 +229,44 @@ internal sealed class WebServices : IDisposable
     {
         WebSettings.Brave => BraveKeyReference,
         WebSettings.Tavily => TavilyKeyReference,
+        WebSettings.Exa => ExaKeyReference,
+        WebSettings.Deepseek => DeepseekKeyReference,
         _ => null,
     };
 
     /// <summary>The backend for <paramref name="settings"/>, or null when it is not usable (no backend, no key, no URL).</summary>
     public IWebSearchBackend? CreateBackend(WebSettings settings, string? keyOverride = null)
     {
-        var key = string.IsNullOrWhiteSpace(keyOverride) ? Secrets.Get(KeyReference(settings.SearchBackend)) : keyOverride.Trim();
+        var key = string.IsNullOrWhiteSpace(keyOverride) ? ResolveKey(settings.SearchBackend) : keyOverride.Trim();
         return settings.SearchBackend switch
         {
             WebSettings.Brave when key is not null => new BraveSearchBackend(searchHttp, key),
             WebSettings.Tavily when key is not null => new TavilySearchBackend(searchHttp, key),
+            WebSettings.Deepseek when key is not null => new DeepSeekSearchBackend(searchHttp, key),
+
+            // Exa answers without a key, so it is usable whenever it is selected.
+            WebSettings.Exa => new ExaSearchBackend(searchHttp, key),
             WebSettings.Searxng when IsSearxngUrl(settings.SearxngUrl) => new SearxngSearchBackend(searchHttp, settings.SearxngUrl),
             _ => null,
         };
     }
 
     /// <summary>
-    /// Whether the current settings give a usable search backend – exactly when <see cref="CreateBackend"/> would return
-    /// one – without building it. Cheap (two short locks, no allocation), so a session checks it before every turn.
+    /// The key of <paramref name="backend"/>: the one stored for the web tool, or — for DeepSeek — the key its model provider
+    /// already carries, since DeepSeek's model and search APIs bill the same account.
     /// </summary>
-    public bool SearchAvailable()
-    {
-        var settings = Store.Current;
-        return settings.SearchBackend switch
-        {
-            WebSettings.Brave or WebSettings.Tavily => Secrets.Get(KeyReference(settings.SearchBackend)) is not null,
-            WebSettings.Searxng => IsSearxngUrl(settings.SearxngUrl),
-            _ => false,
-        };
-    }
+    private string? ResolveKey(string? backend) =>
+        Secrets.Get(KeyReference(backend)) ?? (backend == WebSettings.Deepseek ? deepSeekModelKey?.Invoke() : null);
+
+    /// <summary>
+    /// Whether <paramref name="backend"/> gives a usable search backend – exactly when <see cref="CreateBackend"/> would return
+    /// one, which is why it asks it. Cheap (a couple of short locks and one small object), so a session checks it before every
+    /// turn and the settings page draws one availability dot per entry.
+    /// </summary>
+    public bool IsUsable(string? backend) => CreateBackend(Store.Current with { SearchBackend = backend }) is not null;
+
+    /// <summary>Whether the settings as they stand give a usable search backend.</summary>
+    public bool SearchAvailable() => IsUsable(Store.Current.SearchBackend);
 
     private static bool IsSearxngUrl(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";

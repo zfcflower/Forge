@@ -577,6 +577,19 @@ internal sealed class ProviderCatalog
     /// <summary>The provider a new session starts on; <c>null</c> only when the list is empty.</summary>
     public ConnectedProvider? Default { get; }
 
+    /// <summary>
+    /// The API key of a configured DeepSeek model provider, or <c>null</c> when none is: the DeepSeek search backend shares it,
+    /// because the model and search APIs bill the same account. Matched by host, since the provider's id and name are the
+    /// user's to choose.
+    /// </summary>
+    public string? DeepSeekApiKey() =>
+        Providers.FirstOrDefault(provider => IsDeepSeekHost(provider.Definition.BaseUrl))?.ResolveApiKey();
+
+    private static bool IsDeepSeekHost(string baseUrl) =>
+        Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) &&
+        (uri.Host.Equals("deepseek.com", StringComparison.OrdinalIgnoreCase) ||
+         uri.Host.EndsWith(".deepseek.com", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Why there is no provider (or a summary of the default one), resolved in the current UI language.</summary>
     public LocText StatusText { get; }
 

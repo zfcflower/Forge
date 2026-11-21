@@ -17,10 +17,11 @@ public interface IWebSearchBackend
     Task<IReadOnlyList<WebSearchResult>> SearchAsync(string query, int count, CancellationToken ct);
 }
 
-/// <summary>Shared request/response plumbing of the three backends.</summary>
+/// <summary>Shared request/response plumbing of the backends.</summary>
 internal static class SearchHttp
 {
-    public static async Task<JsonDocument> SendAsync(HttpClient http, HttpRequestMessage request, string label, CancellationToken ct)
+    /// <summary>The response body, or a <see cref="WebSearchException"/> naming the backend and the HTTP failure.</summary>
+    public static async Task<string> SendTextAsync(HttpClient http, HttpRequestMessage request, string label, CancellationToken ct)
     {
         HttpResponseMessage response;
         try
@@ -39,15 +40,90 @@ internal static class SearchHttp
                 throw new WebSearchException($"{label} returned HTTP {(int)response.StatusCode} {response.ReasonPhrase}".TrimEnd() + ".");
             }
 
+            return await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    public static async Task<JsonDocument> SendAsync(HttpClient http, HttpRequestMessage request, string label, CancellationToken ct)
+    {
+        var text = await SendTextAsync(http, request, label, ct).ConfigureAwait(false);
+        try
+        {
+            return JsonDocument.Parse(text);
+        }
+        catch (JsonException)
+        {
+            throw new WebSearchException($"{label} returned a response that is not valid JSON.");
+        }
+    }
+
+    /// <summary>A JSON body, either written as-is or the <c>data:</c> payloads of a server-sent-events reply. The answer is
+    /// the first payload that parses to an object with <c>result</c> or <c>error</c>, so a keep-alive event before the
+    /// answer is skipped instead of breaking the parse.</summary>
+    public static JsonDocument ParseJsonOrSse(string text, string label)
+    {
+        if (text.TrimStart().StartsWith('{'))
+        {
+            return Parse(text, label);
+        }
+
+        var payloads = new List<string>();
+        var current = new StringBuilder();
+        foreach (var line in text.Split('\n'))
+        {
+            var trimmed = line.TrimEnd('\r');
+            if (trimmed.Length == 0)
+            {
+                if (current.Length > 0)
+                {
+                    payloads.Add(current.ToString());
+                    current.Clear();
+                }
+            }
+            else if (trimmed.StartsWith("data:", StringComparison.Ordinal))
+            {
+                current.Append(trimmed.AsSpan(5));
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            payloads.Add(current.ToString());
+        }
+
+        foreach (var payload in payloads)
+        {
             try
             {
-                await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-                return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+                var doc = JsonDocument.Parse(payload);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    (doc.RootElement.TryGetProperty("result", out _) || doc.RootElement.TryGetProperty("error", out _)))
+                {
+                    return doc;
+                }
+
+                doc.Dispose();
             }
             catch (JsonException)
             {
-                throw new WebSearchException($"{label} returned a response that is not valid JSON.");
+                // A keep-alive or comment payload is not this call's answer.
             }
+        }
+
+        throw new WebSearchException(payloads.Count == 0
+            ? $"{label} returned an empty response."
+            : $"{label} returned a response that is not valid JSON.");
+    }
+
+    private static JsonDocument Parse(string json, string label)
+    {
+        try
+        {
+            return JsonDocument.Parse(json);
+        }
+        catch (JsonException)
+        {
+            throw new WebSearchException($"{label} returned a response that is not valid JSON.");
         }
     }
 
@@ -56,7 +132,9 @@ internal static class SearchHttp
             ? v.GetString() ?? string.Empty
             : string.Empty;
 
-    public static List<WebSearchResult> Collect(JsonElement array, string snippetField, int count)
+    /// <summary>Up to <paramref name="count"/> items with a URL, reading <paramref name="snippetField"/> and, when that is
+    /// empty, <paramref name="fallbackSnippetField"/>.</summary>
+    public static List<WebSearchResult> Collect(JsonElement array, string snippetField, int count, string? fallbackSnippetField = null)
     {
         var list = new List<WebSearchResult>();
         if (array.ValueKind != JsonValueKind.Array)
@@ -72,10 +150,16 @@ internal static class SearchHttp
                 continue;
             }
 
+            var snippet = Str(item, snippetField);
+            if (snippet.Length == 0 && fallbackSnippetField is not null)
+            {
+                snippet = Str(item, fallbackSnippetField);
+            }
+
             list.Add(new WebSearchResult(
                 HtmlToText.ToPlain(Str(item, "title")),
                 url,
-                HtmlToText.ToPlain(Str(item, snippetField))));
+                HtmlToText.ToPlain(snippet)));
             if (list.Count >= count)
             {
                 break;
@@ -155,6 +239,210 @@ public sealed class SearxngSearchBackend(HttpClient http, string baseUrl) : IWeb
     }
 }
 
+/// <summary>
+/// Exa: with a key the REST <c>POST /search</c> answers clean JSON; without one the keyless public MCP endpoint answers a
+/// text listing of <c>Title:/URL:/…/Highlights:</c> blocks. The keyless path is what makes Exa the backend that works with
+/// nothing configured, so it must stay usable with no credential at all (it is anonymous and rate-limited).
+/// </summary>
+public sealed class ExaSearchBackend(HttpClient http, string? apiKey) : IWebSearchBackend
+{
+    public const string McpUrl = "https://mcp.exa.ai/mcp";
+    public const string RestUrl = "https://api.exa.ai/search";
+
+    /// <summary>Exa's highlights are long; the model gets at most this much of one.</summary>
+    private const int SnippetLimit = 600;
+
+    public string Id => "exa";
+
+    public Task<IReadOnlyList<WebSearchResult>> SearchAsync(string query, int count, CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(apiKey) ? SearchMcpAsync(query, count, ct) : SearchRestAsync(query, count, ct);
+
+    private async Task<IReadOnlyList<WebSearchResult>> SearchRestAsync(string query, int count, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, RestUrl);
+        request.Headers.TryAddWithoutValidation("x-api-key", apiKey);
+        request.Content = JsonContent(query, count);
+        using var doc = await SearchHttp.SendAsync(http, request, "Exa", ct).ConfigureAwait(false);
+        var root = doc.RootElement;
+        return root.ValueKind == JsonValueKind.Object && root.TryGetProperty("results", out var results)
+            ? SearchHttp.Collect(results, "text", count, "summary")
+            : [];
+    }
+
+    private async Task<IReadOnlyList<WebSearchResult>> SearchMcpAsync(string query, int count, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, McpUrl);
+        request.Headers.TryAddWithoutValidation("Accept", "application/json, text/event-stream");
+        request.Content = McpCallContent(query, count);
+        var text = await SearchHttp.SendTextAsync(http, request, "Exa", ct).ConfigureAwait(false);
+        using var doc = SearchHttp.ParseJsonOrSse(text, "Exa");
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new WebSearchException("Exa returned a response that is not an object.");
+        }
+
+        if (root.TryGetProperty("error", out var error))
+        {
+            throw new WebSearchException("Exa: " + SearchHttp.Str(error, "message"));
+        }
+
+        if (!root.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Object)
+        {
+            throw new WebSearchException("Exa returned a response without a result.");
+        }
+
+        if (result.TryGetProperty("isError", out var isError) && isError.ValueKind == JsonValueKind.True)
+        {
+            throw new WebSearchException("Exa: " + FirstText(result));
+        }
+
+        return ParseBlocks(FirstText(result), count);
+    }
+
+    private static string FirstText(JsonElement result) =>
+        result.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array && content.GetArrayLength() > 0
+            ? SearchHttp.Str(content[0], "text")
+            : string.Empty;
+
+    /// <summary>The MCP reply: blocks of <c>Title:</c>, <c>URL:</c>, <c>Published:</c>, <c>Author:</c>, <c>Highlights:</c>,
+    /// separated by a <c>---</c> line. Only the title, the URL and the highlights are kept.</summary>
+    private static List<WebSearchResult> ParseBlocks(string text, int count)
+    {
+        var list = new List<WebSearchResult>();
+        var title = string.Empty;
+        var url = string.Empty;
+        var snippet = new StringBuilder();
+        var inHighlights = false;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line == "---")
+            {
+                Flush();
+            }
+            else if (line.StartsWith("Title:", StringComparison.Ordinal))
+            {
+                Flush();
+                title = line[6..].Trim();
+            }
+            else if (line.StartsWith("URL:", StringComparison.Ordinal))
+            {
+                url = line[4..].Trim();
+            }
+            else if (line.Trim() == "Highlights:")
+            {
+                inHighlights = true;
+            }
+            else if (inHighlights)
+            {
+                snippet.Append(line).Append(' ');
+            }
+        }
+
+        Flush();
+        return list;
+
+        void Flush()
+        {
+            if (url.Length > 0 && list.Count < count)
+            {
+                var body = snippet.ToString().Trim();
+                list.Add(new WebSearchResult(
+                    HtmlToText.ToPlain(title),
+                    url,
+                    body.Length > SnippetLimit ? body[..SnippetLimit] : body));
+            }
+
+            title = string.Empty;
+            url = string.Empty;
+            snippet.Clear();
+            inHighlights = false;
+        }
+    }
+
+    private static StreamContent JsonContent(string query, int count)
+    {
+        var body = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(body))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("query", query);
+            writer.WriteNumber("numResults", count);
+            writer.WriteStartObject("contents");
+            writer.WriteStartObject("text");
+            writer.WriteNumber("maxCharacters", SnippetLimit);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        body.Position = 0;
+        var content = new StreamContent(body);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        return content;
+    }
+
+    private static StreamContent McpCallContent(string query, int count)
+    {
+        var body = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(body))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("jsonrpc", "2.0");
+            writer.WriteNumber("id", 1);
+            writer.WriteString("method", "tools/call");
+            writer.WriteStartObject("params");
+            writer.WriteString("name", "web_search_exa");
+            writer.WriteStartObject("arguments");
+            writer.WriteString("query", query);
+            writer.WriteString("objective", "Find the pages that best answer: " + query);
+
+            // The tool caps the default at 5 and the model at 10; Exa accepts any positive count.
+            writer.WriteNumber("numResults", count);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        body.Position = 0;
+        var content = new StreamContent(body);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        return content;
+    }
+}
+
+/// <summary>DeepSeek Search API: <c>POST /v1/tools/search</c> with the key as a Bearer token; the long <c>summary</c> is the
+/// snippet (it is written for a model), the short <c>snippet</c> the fallback.</summary>
+public sealed class DeepSeekSearchBackend(HttpClient http, string apiKey, string endpoint = "https://api.deepseek.com/v1/tools/search") : IWebSearchBackend
+{
+    public string Id => "deepseek";
+
+    public async Task<IReadOnlyList<WebSearchResult>> SearchAsync(string query, int count, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        var body = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(body))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("query", query);
+            writer.WriteNumber("count", Math.Clamp(count, 1, 50));
+            writer.WriteBoolean("need_content", false);
+            writer.WriteEndObject();
+        }
+
+        body.Position = 0;
+        request.Content = new StreamContent(body);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        using var doc = await SearchHttp.SendAsync(http, request, "DeepSeek Search", ct).ConfigureAwait(false);
+        var root = doc.RootElement;
+        return root.ValueKind == JsonValueKind.Object && root.TryGetProperty("results", out var results)
+            ? SearchHttp.Collect(results, "summary", count, "snippet")
+            : [];
+    }
+}
+
 /// <summary><c>web_search</c>: a numbered list of results from the configured backend.</summary>
 public sealed class WebSearchTool : ITool
 {
@@ -168,7 +456,7 @@ public sealed class WebSearchTool : ITool
 
     /// <summary>What a call returns when no backend is configured (the model is told where the user sets one).</summary>
     public const string NotConfiguredMessage =
-        "no search backend is configured. Ask the user to choose one (Brave, Tavily or SearXNG) in Settings -> Web tools.";
+        "no search backend is configured. Ask the user to choose one (Exa, Tavily, DeepSeek, Brave or SearXNG) in Settings -> Web tools.";
 
     private readonly Func<IWebSearchBackend?> backend;
     private readonly TimeSpan timeout;
