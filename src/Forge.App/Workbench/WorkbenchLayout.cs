@@ -60,7 +60,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <summary>The bottom group's intent to sit at title-bar height; held while the group has nothing to show.</summary>
     private bool bottomMinimized;
     private bool isDragging;
-    private RegionRole? openDrawer;
+    private PanelModel? drawerPanel;
     private bool isPreviewCoveringMain;
     private int dragSplitter = -1;
     private int dragMain = -1;
@@ -432,46 +432,61 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         }
 
         region.IsAutoHidden = autoHidden;
+        if (DrawerPanel?.Region == role)
+        {
+            DrawerPanel = null;
+        }
+
         if (autoHidden)
         {
-            if (OpenDrawer == role)
-            {
-                OpenDrawer = null;
-            }
-
             Fit();
         }
         else
         {
-            if (OpenDrawer == role)
-            {
-                OpenDrawer = null;
-            }
-
             Fit(IndexOf(role));
         }
 
         OnLayoutChanged();
     }
 
-    /// <summary>The auto-hidden region whose drawer is open over Main, or null.</summary>
-    public RegionRole? OpenDrawer
+    /// <summary>
+    /// The panel the open drawer shows over Main, or null. A drawer holds one panel, not the whole region: the strip tab
+    /// names the panel the user asked for.
+    /// </summary>
+    public PanelModel? DrawerPanel
     {
-        get => openDrawer;
-        private set => Set(ref openDrawer, value);
+        get => drawerPanel;
+        private set => Set(ref drawerPanel, value);
     }
 
-    public void ToggleDrawer(RegionRole role)
+    /// <summary>
+    /// Opens the drawer on this panel, switches it when another panel of an auto-hidden region is asked for, and closes it
+    /// when the panel is already the one on show. A minimized panel is restored first: the drawer has no splitter to drag,
+    /// so a panel folded to its title bar would leave the drawer almost empty.
+    /// </summary>
+    public void ToggleDrawer(PanelModel panel)
     {
-        if (role == RegionRole.Main || !GetRegion(role).IsAutoHidden)
+        ArgumentNullException.ThrowIfNull(panel);
+        if (panel.Region == RegionRole.Main || !GetRegion(panel.Region).IsAutoHidden)
         {
             return;
         }
 
-        OpenDrawer = OpenDrawer == role ? null : role;
+        if (ReferenceEquals(DrawerPanel, panel))
+        {
+            DrawerPanel = null;
+            return;
+        }
+
+        if (panel.IsMinimized)
+        {
+            ToggleMinimize(panel);
+        }
+
+        DrawerPanel = panel;
     }
 
-    public void CloseDrawer() => OpenDrawer = null;
+    public void CloseDrawer() => DrawerPanel = null;
 
     // ---------------------------------------------------------------- panels
 
@@ -517,6 +532,12 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         RefreshMinimizeStates();
     }
 
+    /// <summary>
+    /// Sets the preview column width from a splitter drag. The splitter has already clamped it to the space it can give the
+    /// column (its track: the inspector's own rect when pinned, the drawer's content when the drawer holds it), so this only
+    /// keeps the column from falling below its minimum - clamping against the docked region here would freeze the drag in a
+    /// drawer whose region is narrower than the drawer.
+    /// </summary>
     public void ResizePreviewColumn(double width)
     {
         if (!double.IsFinite(width))
@@ -524,14 +545,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             return;
         }
 
-        if (!inspectorHasPreviewColumn)
-        {
-            PreviewWidth = width;
-            return;
-        }
-
-        double maximum = inspector.Width - WorkbenchMetrics.SideMinWidth - WorkbenchMetrics.PanelSplitterWidth;
-        double clamped = Math.Clamp(width, WorkbenchMetrics.PreviewMinWidth, Math.Max(WorkbenchMetrics.PreviewMinWidth, maximum));
+        var clamped = Math.Max(WorkbenchMetrics.PreviewMinWidth, width);
         if (clamped == previewWidth)
         {
             return;
@@ -1359,11 +1373,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             order[i].IsAutoHidden = outHidden[i];
         }
 
-        if (OpenDrawer is RegionRole drawer && !GetRegion(drawer).IsAutoHidden)
-        {
-            OpenDrawer = null;
-        }
-
         RecomposeVisibility();
     }
 
@@ -1424,6 +1433,13 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         if (!previewTabs.IsVisible)
         {
             IsPreviewCoveringMain = false;
+        }
+
+        // The one place a drawer loses its panel: the panel stopped being visible (a closed preview group, floated files),
+        // or its region got pinned again. A drawer without a panel it can show is a drawer that may not stay open.
+        if (DrawerPanel is { } open && (!open.IsVisible || !GetRegion(open.Region).IsAutoHidden))
+        {
+            DrawerPanel = null;
         }
     }
 
@@ -1574,11 +1590,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             {
                 region.IsAutoHidden = entry.AutoHidden;
             }
-        }
-
-        if (OpenDrawer is RegionRole drawer && !GetRegion(drawer).IsAutoHidden)
-        {
-            OpenDrawer = null;
         }
     }
 

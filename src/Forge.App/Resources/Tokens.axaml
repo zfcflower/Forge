@@ -208,10 +208,10 @@
       <!-- A count badge's fill: one neutral step below the card body and its sidebar grey, so a number stays legible in
            a toolbar without becoming a second button. Never brand — the brand belongs to the selected item. -->
       <SolidColorBrush x:Key="CountBadgeBrush" Color="#E4EBEC" />
-      <!-- The 3px bar on a dock strip label: idle while the drawer is open (the accent takes over while it is closed, so
-           the closed state is the one that has to be found). One step stronger than a divider, because it is a control's
-           only affordance at 3px wide. -->
-      <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#B7C2C6" />
+      <!-- The 3px bar on a dock strip label, in its resting state: one step of the brand ramp above BrandActionBrush is
+           the label on show, so two steps above it is the strip that is not. Light #51A29F / dark #6BD8D5 are each theme's
+           SystemAccentColorLight2. -->
+      <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#51A29F" />
       <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#CFD7DA" />
       <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#C3CDD0" />
 
@@ -322,7 +322,7 @@
       <StaticResource x:Key="SystemControlErrorTextForegroundBrush" ResourceKey="StatusErrorBrush" />
       <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#0D1213" />
       <SolidColorBrush x:Key="CountBadgeBrush" Color="#2C3538" />
-      <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#556468" />
+      <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#6BD8D5" />
       <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#3A4447" />
       <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#465256" />
 

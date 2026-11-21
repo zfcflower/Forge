@@ -188,6 +188,13 @@ internal sealed class PanelSplitter : WorkbenchSplitter
         set => SetValue(IsVerticalProperty, value);
     }
 
+    /// <summary>
+    /// True while the preview column sits left of the files column in the host that arranges this line: the drag adds the
+    /// pointer travel to the preview width then, and subtracts it when the column is on the right (a swapped region order).
+    /// The floating files window always draws the preview on the left.
+    /// </summary>
+    public bool PreviewOnLeft { get; set; } = true;
+
     protected override bool IsVerticalLine => IsVertical;
 
 
@@ -253,7 +260,7 @@ internal sealed class PanelSplitter : WorkbenchSplitter
 
             case PanelSplitterKind.Preview:
             {
-                var direction = layout.IsPreviewLeftOfFiles ? 1 : -1;
+                var direction = PreviewOnLeft ? 1 : -1;
                 var maximum = Math.Max(WorkbenchMetrics.PreviewMinWidth, TrackLength - WorkbenchMetrics.SideMinWidth - WorkbenchMetrics.PanelSplitterWidth);
                 layout.ResizePreviewColumn(Math.Clamp(
                     startValue + (delta * direction),

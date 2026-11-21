@@ -25,8 +25,8 @@ internal static class WorkbenchStripText
 
 /// <summary>
 /// The dock bar on the window edge of a side region (image-4 style): one rotated tab per panel title, each with a thick
-/// indicator bar along its outer (window-edge) side. Strips are shown only for auto-hidden regions. Clicking a tab toggles
-/// that region's drawer.
+/// indicator bar along its outer (window-edge) side. Strips are shown only for auto-hidden regions. Clicking a tab floats
+/// that one panel in the drawer.
 /// </summary>
 internal sealed class AutoHideStrip : Panel
 {
@@ -36,9 +36,19 @@ internal sealed class AutoHideStrip : Panel
     private readonly StackPanel buttons = new() { Orientation = Orientation.Vertical, Spacing = 2, Margin = new Thickness(0, 4, 0, 4) };
     private readonly ScrollViewer scroller;
     private readonly Border separator = new();
-    private readonly List<Border> bars = [];
+    private readonly List<StripTab> tabs = [];
     private RegionEdge edge;
-    private bool isRegionShown;
+    private string? shownPanelId;
+
+    /// <summary>The label's inset at both ends of a tab; the indicator bar is inset by the same amount, so its ends meet the
+    /// text's ends instead of running past them (the label sits in a button whose padding is this number).</summary>
+    private const double LabelInset = 10;
+
+    /// <summary>Side margin of the indicator bar inside a tab.</summary>
+    private const double BarInset = 1;
+
+    /// <summary>One tab of the strip: the panel it stands for and the indicator bar beside its label.</summary>
+    private readonly record struct StripTab(PanelModel Panel, Border Bar);
 
     public AutoHideStrip()
     {
@@ -75,18 +85,18 @@ internal sealed class AutoHideStrip : Panel
         }
     }
 
-    /// <summary>True while the auto-hidden region's drawer is open; the indicator bars follow it.</summary>
-    public bool IsRegionShown
+    /// <summary>Id of the panel the drawer shows; only that one's indicator bar takes the active colour.</summary>
+    public string? ShownPanelId
     {
-        get => isRegionShown;
+        get => shownPanelId;
         set
         {
-            if (isRegionShown == value)
+            if (string.Equals(shownPanelId, value, StringComparison.Ordinal))
             {
                 return;
             }
 
-            isRegionShown = value;
+            shownPanelId = value;
             UpdateBars();
         }
     }
@@ -101,7 +111,7 @@ internal sealed class AutoHideStrip : Panel
     public void Rebuild()
     {
         buttons.Children.Clear();
-        bars.Clear();
+        tabs.Clear();
         AutomationProperties.SetAutomationId(this, "autohide-" + Role);
         if (Layout is not { } layout)
         {
@@ -120,11 +130,22 @@ internal sealed class AutoHideStrip : Panel
             var button = new AutoHideButton
             {
                 Content = WorkbenchStripText.Label(panel.Title),
+                // Rotated 90 degrees, the button's height becomes the tab's width: exactly what the strip leaves beside the
+                // bar and its margins, so the label is neither clipped nor shifted away from the bar.
+                Height = WorkbenchMetrics.AutoHideStripWidth
+                    - WorkbenchMetrics.AutoHideStripSeparatorWidth
+                    - WorkbenchMetrics.DockIndicatorWidth
+                    - (2 * BarInset),
+                Padding = new Thickness(LabelInset, 0),
             };
             ToolTip.SetTip(button, panel.Title);
             AutomationProperties.SetAutomationId(button, "autohide-" + Role + "-" + panel.Id);
             AutomationProperties.SetName(button, panel.Title);
-            button.Click += OnButtonClick;
+            button.Click += (_, e) =>
+            {
+                e.Handled = true;
+                Layout?.ToggleDrawer(panel);
+            };
 
             // Text reads top to bottom on both edges, like the reference dock bars.
             var rotate = new LayoutTransformControl { LayoutTransform = new RotateTransform(90), Child = button };
@@ -132,9 +153,9 @@ internal sealed class AutoHideStrip : Panel
             {
                 Width = WorkbenchMetrics.DockIndicatorWidth,
                 CornerRadius = new CornerRadius(1.5),
-                Margin = new Thickness(1, 2, 1, 2),
+                Margin = new Thickness(BarInset, LabelInset, BarInset, LabelInset),
             };
-            bars.Add(bar);
+            tabs.Add(new StripTab(panel, bar));
             var tab = new DockPanel { LastChildFill = true };
             DockPanel.SetDock(bar, edge == RegionEdge.Left ? Dock.Left : Dock.Right);
             tab.Children.Add(bar);
@@ -147,29 +168,22 @@ internal sealed class AutoHideStrip : Panel
 
     private void UpdateBars()
     {
-        for (var i = 0; i < bars.Count; i++)
+        for (var i = 0; i < tabs.Count; i++)
         {
-            WorkbenchResources.Link(bars[i], Border.BackgroundProperty, isRegionShown ? "DockIndicatorIdleBrush" : "BrandActionBrush");
+            var shown = shownPanelId is { } id && string.Equals(tabs[i].Panel.Id, id, StringComparison.Ordinal);
+            WorkbenchResources.Link(tabs[i].Bar, Border.BackgroundProperty, shown ? "BrandActionBrush" : "DockIndicatorIdleBrush");
         }
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        var x = edge == RegionEdge.Left ? Math.Max(0, finalSize.Width - 1) : 0;
-        separator.Arrange(new Rect(x, 0, 1, finalSize.Height));
-        var inner = edge == RegionEdge.Left ? new Rect(0, 0, Math.Max(0, finalSize.Width - 1), finalSize.Height) : new Rect(1, 0, Math.Max(0, finalSize.Width - 1), finalSize.Height);
+        var separatorWidth = WorkbenchMetrics.AutoHideStripSeparatorWidth;
+        var x = edge == RegionEdge.Left ? Math.Max(0, finalSize.Width - separatorWidth) : 0;
+        separator.Arrange(new Rect(x, 0, separatorWidth, finalSize.Height));
+        var inner = edge == RegionEdge.Left
+            ? new Rect(0, 0, Math.Max(0, finalSize.Width - separatorWidth), finalSize.Height)
+            : new Rect(separatorWidth, 0, Math.Max(0, finalSize.Width - separatorWidth), finalSize.Height);
         scroller.Arrange(inner);
         return finalSize;
-    }
-
-    private void OnButtonClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (Layout is not { } layout)
-        {
-            return;
-        }
-
-        layout.ToggleDrawer(Role);
     }
 }

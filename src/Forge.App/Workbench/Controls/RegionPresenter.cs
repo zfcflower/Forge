@@ -29,6 +29,7 @@ internal sealed class RegionPresenter : Panel
     private Rect[] childRects = [];
     private Rect regionRect;
     private Rect previewCoverRect;
+    private PanelModel? soloPanel;
 
     public RegionPresenter(WorkbenchLayout layout, RegionRole role)
     {
@@ -74,6 +75,23 @@ internal sealed class RegionPresenter : Panel
             if (previewCoverRect != value)
             {
                 previewCoverRect = value;
+                InvalidateMeasure();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Lays out this panel alone, filling the region, and leaves every sibling at zero; set while the region's drawer holds
+    /// that one panel. The drawer has no splitter, so the siblings are simply not there instead of being folded beside it.
+    /// </summary>
+    public PanelModel? SoloPanel
+    {
+        get => soloPanel;
+        set
+        {
+            if (!ReferenceEquals(soloPanel, value))
+            {
+                soloPanel = value;
                 InvalidateMeasure();
             }
         }
@@ -191,6 +209,27 @@ internal sealed class RegionPresenter : Panel
         var body = RegionRect;
         if (body.Width <= 0 || body.Height <= 0)
         {
+            return;
+        }
+
+        if (soloPanel is { } solo)
+        {
+            if (ReferenceEquals(solo, Layout.FilesPanel))
+            {
+                // The files column is never alone in a drawer: the preview column travels with it, laid out exactly as it is
+                // in the pinned inspector (preview column, 1 px line, files column), minus the panels stacked below it.
+                ArrangeInspector(body, includeBelow: false);
+                return;
+            }
+
+            if (ChromeOf(solo) is { Model: { IsVisible: true } } chrome)
+            {
+                // Covering Main widens the drawer past its own column, and the covered area is what the panel fills; there is no
+                // sibling column in a one-panel drawer that could sit on top of it.
+                var cover = PreviewCoverRect;
+                Place(chrome, cover.Width > 0 && cover.Height > 0 ? cover.Union(body) : body);
+            }
+
             return;
         }
 
@@ -377,7 +416,26 @@ internal sealed class RegionPresenter : Panel
         return false;
     }
 
-    private void ArrangeInspector(Rect body)
+    /// <summary>
+    /// Where the preview is painted: its own column, or - while it covers Main - the span of the cover rect and that column.
+    /// The files column is never part of it, so the preview and the tools on its title bar cannot run under the file tree. When
+    /// the cover rect arrives already unioned (a pinned inspector hands over the union) the cut removes nothing.
+    /// </summary>
+    private Rect Covered(Rect previewColumn)
+    {
+        var cover = PreviewCoverRect;
+        if (cover.Width <= 0 || cover.Height <= 0)
+        {
+            return previewColumn;
+        }
+
+        var spanned = cover.Union(previewColumn);
+        return Layout.IsPreviewLeftOfFiles
+            ? new Rect(spanned.X, spanned.Y, Math.Max(0, previewColumn.Right - spanned.X), spanned.Height)
+            : new Rect(previewColumn.X, spanned.Y, Math.Max(0, spanned.Right - previewColumn.X), spanned.Height);
+    }
+
+    private void ArrangeInspector(Rect body, bool includeBelow = true)
     {
         var previewChrome = ChromeOf(Layout.PreviewTabs);
         var filesChrome = ChromeOf(Layout.FilesPanel);
@@ -387,16 +445,19 @@ internal sealed class RegionPresenter : Panel
         // Everything docked below the files panel (Git, then the tool group), in panel order; the column is one stack whose
         // top slot is the files panel and whose lines all drag.
         below.Clear();
-        foreach (var panel in Layout.GetRegion(RegionRole.Inspector).Panels)
+        if (includeBelow)
         {
-            if (ReferenceEquals(panel, Layout.PreviewTabs) || ReferenceEquals(panel, Layout.FilesPanel))
+            foreach (var panel in Layout.GetRegion(RegionRole.Inspector).Panels)
             {
-                continue;
-            }
+                if (ReferenceEquals(panel, Layout.PreviewTabs) || ReferenceEquals(panel, Layout.FilesPanel))
+                {
+                    continue;
+                }
 
-            if (ChromeOf(panel) is { Model: { IsVisible: true } } chrome)
-            {
-                below.Add(chrome);
+                if (ChromeOf(panel) is { Model: { IsVisible: true } } chrome)
+                {
+                    below.Add(chrome);
+                }
             }
         }
 
@@ -434,6 +495,8 @@ internal sealed class RegionPresenter : Panel
             if (filesColumnVisible)
             {
                 previewSplitter.TrackLength = body.Width;
+                // The line is laid out by this host, so it is also this host that says which side the preview column is on.
+                previewSplitter.PreviewOnLeft = Layout.IsPreviewLeftOfFiles;
                 // The 1 px gap between the two columns; the hit band straddles it on whichever side the preview column sits.
                 var gapX = Layout.IsPreviewLeftOfFiles ? previewColumn.Right : filesColumn.Right;
                 Place(previewSplitter, new Rect(
@@ -446,8 +509,7 @@ internal sealed class RegionPresenter : Panel
 
         if (previewVisible && !previewMinimized)
         {
-            var coverRect = PreviewCoverRect;
-            Place(previewChrome!, coverRect.Width > 0 && coverRect.Height > 0 ? coverRect : previewColumn);
+            Place(previewChrome!, Covered(previewColumn));
         }
 
         if (!filesColumnVisible)

@@ -59,10 +59,9 @@
     </Style>
   </ControlTheme>
 
-  <!-- A dock-strip tab: 34 px across the 40 px strip (indicator bar, gaps and separator take the rest), as long as its rotated title needs. -->
+  <!-- A dock-strip tab. Its size across the strip is set in code beside the strip's own geometry (strip width - separator -
+       indicator bar - the bar's margins), because that number has to match the bar it sits next to; see AutoHideStrip. -->
   <ControlTheme x:Key="{x:Type controls:AutoHideButton}" TargetType="controls:AutoHideButton">
-    <Setter Property="Height" Value="34" />
-    <Setter Property="Padding" Value="10,0" />
     <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />

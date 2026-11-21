@@ -22,6 +22,48 @@ public partial class FilesToolView : UserControl
         // rebuild that a watcher tick performs between the right-click and the menu opening cannot lose it. The press is
         // handled on the way down, before the attached menu's own handler on this list opens it.
         TreeList.AddHandler(InputElement.PointerPressedEvent, OnTreePointerPressed, RoutingStrategies.Tunnel);
+
+        // A row is the whole hit target, not just its name - the same tap-to-activate rule the project tree uses, so the
+        // blank space right of a short name opens the file or folds the folder instead of doing nothing.
+        TreeList.AddHandler(InputElement.TappedEvent, OnRowTapped, RoutingStrategies.Bubble, handledEventsToo: true);
+        ChangedDiffList.AddHandler(InputElement.TappedEvent, OnRowTapped, RoutingStrategies.Bubble, handledEventsToo: true);
+    }
+
+    /// <summary>
+    /// Activates the row that was tapped anywhere outside the row's own buttons (a file opens, a folder folds), and leaves
+    /// presses on a button to the button itself.
+    /// </summary>
+    private void OnRowTapped(object? sender, TappedEventArgs e)
+    {
+        if (e.Source is not Visual source || IsInsideButton(source))
+        {
+            return;
+        }
+
+        switch (source.FindAncestorOfType<ListBoxItem>(includeSelf: true)?.DataContext)
+        {
+            case FileNodeViewModel file:
+                file.ToggleCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case ChangedTreeNodeViewModel changed:
+                changed.ToggleCommand.Execute(null);
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private static bool IsInsideButton(Visual source)
+    {
+        for (Visual? current = source; current is not null and not ListBoxItem; current = current.GetVisualParent())
+        {
+            if (current is Button)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Remembers which file the menu is about, from the press that opens it (or clears it on a normal click).</summary>

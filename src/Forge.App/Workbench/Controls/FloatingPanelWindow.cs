@@ -24,6 +24,7 @@ internal sealed class FloatingPanelWindow : Window
     private ContentControl? tabContent;
     private ContentControl? previewContent;
     private Border? previewColumn;
+    private PanelSplitter? previewSplitter;
     private PanelIconButton? dockButton;
     private TextBlock? titleLabel;
     private TabGroupModel? watchedPreview;
@@ -55,6 +56,8 @@ internal sealed class FloatingPanelWindow : Window
         WindowStartupLocation = geometry.IsUnplaced ? WindowStartupLocation.CenterOwner : WindowStartupLocation.Manual;
         Content = BuildContent();
         PositionChanged += OnPositionChanged;
+        SizeChanged += OnSizeChanged;
+        layout.PropertyChanged += OnLayoutPropertyChanged;
     }
 
     /// <summary>True from the moment the user closes the window: the host then only drops its tracking entry.</summary>
@@ -89,6 +92,8 @@ internal sealed class FloatingPanelWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        layout.PropertyChanged -= OnLayoutPropertyChanged;
+        SizeChanged -= OnSizeChanged;
 
         if (watchedTab is not null)
         {
@@ -238,7 +243,7 @@ internal sealed class FloatingPanelWindow : Window
 
     private Control BuildFilesBody()
     {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions($"Auto,{WorkbenchMetrics.PanelSplitterWidth},*") };
 
         if (item.PreviewTabs is { } preview)
         {
@@ -257,16 +262,15 @@ internal sealed class FloatingPanelWindow : Window
             previewColumn = new Border
             {
                 Child = column,
-                Width = layout.PreviewWidth > 0 ? layout.PreviewWidth : WorkbenchMetrics.DefaultPreviewWidth,
-                BorderThickness = new Thickness(0, 0, 1, 0),
                 IsVisible = preview.HasDockedTab,
             };
-            WorkbenchResources.Link(previewColumn, Border.BorderBrushProperty, "BorderBrush");
+            grid.Children.Add(previewColumn);
+
             preview.PropertyChanged += OnPreviewChanged;
             preview.Tabs.CollectionChanged += OnPreviewTabsChanged;
             watchedPreview = preview;
             SubscribePreviewTabs(preview.Tabs);
-            grid.Children.Add(previewColumn);
+            RefreshPreviewWidth();
         }
 
         var files = new ContentControl
@@ -275,9 +279,59 @@ internal sealed class FloatingPanelWindow : Window
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
         };
-        Grid.SetColumn(files, 1);
+        Grid.SetColumn(files, 2);
         grid.Children.Add(files);
+
+        if (item.PreviewTabs is { } previewGroup)
+        {
+            // The line between the preview and the files column is the same splitter the docked inspector uses: it draws the
+            // 1 px line itself and the drag writes the shared PreviewWidth, so both hosts agree on that width. It stays the
+            // last child and is centred in the 1 px column, so its 6 px hit band lies over both neighbours and takes the
+            // press as the docked one does, without pushing the columns apart.
+            previewSplitter = new PanelSplitter
+            {
+                Layout = layout,
+                Kind = PanelSplitterKind.Preview,
+                PreviewOnLeft = true,
+                IsVisible = previewGroup.HasDockedTab,
+                Width = WorkbenchMetrics.SplitterHitWidth,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            Grid.SetColumn(previewSplitter, 1);
+            grid.Children.Add(previewSplitter);
+        }
+
         return grid;
+    }
+
+    /// <summary>
+    /// Width of the preview column, clamped the way the docked inspector clamps it but against this window's own width; the
+    /// splitter next to it is fed the same length, so a drag in this window moves the column the same way it does in the
+    /// inspector.
+    /// </summary>
+    private void RefreshPreviewWidth()
+    {
+        if (previewColumn is null)
+        {
+            return;
+        }
+
+        var track = ClientSize.Width > 0 ? ClientSize.Width : Width;
+        previewColumn.Width = RegionPresenter.PreviewColumnWidth(layout, track, filesColumnVisible: true);
+        if (previewSplitter is not null)
+        {
+            previewSplitter.TrackLength = track;
+        }
+    }
+
+    private void OnSizeChanged(object? sender, SizeChangedEventArgs e) => RefreshPreviewWidth();
+
+    private void OnLayoutPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(WorkbenchLayout.PreviewWidth))
+        {
+            RefreshPreviewWidth();
+        }
     }
 
     private void OnDockClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -377,6 +431,10 @@ internal sealed class FloatingPanelWindow : Window
         if (previewColumn is not null && watchedPreview is not null)
         {
             previewColumn.IsVisible = watchedPreview.HasDockedTab;
+            if (previewSplitter is not null)
+            {
+                previewSplitter.IsVisible = previewColumn.IsVisible;
+            }
         }
     }
 

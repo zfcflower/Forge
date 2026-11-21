@@ -161,6 +161,10 @@ internal sealed class PanelChrome : TemplatedControl
         set => SetValue(LayoutProperty, value);
     }
 
+    /// <summary>True while this panel is drawn inside its region's drawer - not only the panel the drawer was opened on: a
+    /// files drawer also holds the preview column beside it.</summary>
+    private bool IsDrawerContent => Model is { } model && Layout?.DrawerPanel is { } drawer && drawer.Region == model.Region;
+
     public string? HeaderTitle
     {
         get => GetValue(HeaderTitleProperty);
@@ -612,9 +616,14 @@ internal sealed class PanelChrome : TemplatedControl
 
     private void OnLayoutChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(WorkbenchLayout.IsPreviewCoveringMain))
+        switch (e.PropertyName)
         {
-            RefreshChrome();
+            case nameof(WorkbenchLayout.IsPreviewCoveringMain):
+                RefreshChrome();
+                break;
+            case nameof(WorkbenchLayout.DrawerPanel):
+                RefreshModel();
+                break;
         }
     }
 
@@ -670,7 +679,9 @@ internal sealed class PanelChrome : TemplatedControl
         CloseAutomationId = "panel-" + model.Id + "-close";
 
         PinVisible = model.CanPin;
-        MinimizeVisible = model.CanMinimize;
+        // The drawer holds one panel and has no splitter to drag one back: folding it to its title bar would leave the
+        // drawer all but empty, so the minimize button is only offered to a panel docked in a region.
+        MinimizeVisible = model.CanMinimize && !IsDrawerContent;
         FloatVisible = !model.IsFloating && (model.CanFloat || group?.ActiveTab is not null);
         FloatIcon = WorkbenchIcons.Find(this, "IconWindowExternal");
         FloatTooltip = ShellStrings.Float;

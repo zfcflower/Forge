@@ -109,6 +109,9 @@ internal static class WorkbenchMetrics
     /// <summary>Width of the button strip an auto-hidden region leaves on its window edge.</summary>
     public const double AutoHideStripWidth = 32;
 
+    /// <summary>Width of the line the strip draws between itself and the panel content beside it.</summary>
+    public const double AutoHideStripSeparatorWidth = 1;
+
     /// <summary>Thickness of the indicator bar beside each dock-strip tab.</summary>
     public const double DockIndicatorWidth = 3;
 
@@ -130,6 +133,11 @@ internal static class WorkbenchMetrics
 
     public const double FloatingTabWidth = 900;
     public const double FloatingTabHeight = 640;
-    public const double FloatingFilesWidth = 320;
+
+    /// <summary>
+    /// Default size of the floating files window: the preview column travels into that window beside the files column, so it
+    /// opens wide enough to hold both at their docked defaults instead of squeezing the preview to nothing.
+    /// </summary>
+    public const double FloatingFilesWidth = DefaultPreviewWidth + DefaultInspectorWidth + PanelSplitterWidth;
     public const double FloatingFilesHeight = 420;
 }

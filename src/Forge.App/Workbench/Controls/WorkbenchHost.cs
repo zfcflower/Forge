@@ -41,6 +41,10 @@ internal sealed class WorkbenchHost : Panel
     private bool arranging;
     private bool zOrderPending;
     private Rect drawerRect;
+    private Rect drawerContentRect;
+    private PanelModel? sizedDrawer;
+    private bool sizedDrawerWithPreview;
+    private double sizedDrawerWidth;
     private WorkbenchLayout? subscribedLayout;
 
     static WorkbenchHost()
@@ -185,15 +189,41 @@ internal sealed class WorkbenchHost : Panel
             x += regionWidth + (placed < docked ? WorkbenchMetrics.RegionSplitterWidth : 0);
         }
 
-        var drawerRole = layout.OpenDrawer;
+        var drawer = layout.DrawerPanel;
+        var drawerRole = drawer?.Region;
         var drawerOpen = drawerRole is { } open && layout.GetRegion(open).IsAutoHidden;
         drawerRect = default;
-        if (drawerOpen && drawerRole is { } drawn)
+        drawerContentRect = default;
+        if (drawerOpen && drawer is not null)
         {
-            var region = layout.GetRegion(drawn);
-            var drawerWidth = Math.Min(Math.Max(region.Width, WorkbenchMetrics.SideMinWidth), Math.Max(0, width - leftPad - rightPad));
-            var drawerX = layout.EdgeOf(drawn) == RegionEdge.Left ? leftPad : Math.Max(0, width - rightPad - drawerWidth);
-            drawerRect = new Rect(drawerX, 0, drawerWidth, height);
+            var room = Math.Max(0, width - leftPad - rightPad);
+            var withPreview = layout.PreviewTabs.IsVisible;
+
+            // The drawer is measured when it opens or when a column joins or leaves it - never on every pass: a splitter drag
+            // inside the drawer moves the two columns against each other, it does not resize the drawer.
+            if (!ReferenceEquals(sizedDrawer, drawer) || sizedDrawerWithPreview != withPreview)
+            {
+                sizedDrawer = drawer;
+                sizedDrawerWithPreview = withPreview;
+                sizedDrawerWidth = DrawerWidthOf(layout, drawer);
+            }
+
+            var drawerWidth = Math.Min(sizedDrawerWidth, room);
+            var drawerX = layout.EdgeOf(drawer.Region) == RegionEdge.Left ? leftPad : Math.Max(0, width - rightPad - drawerWidth);
+            drawerContentRect = new Rect(drawerX, 0, drawerWidth, height);
+            drawerRect = drawerContentRect;
+
+            // Covering Main takes Main's area as well - the same union the pinned inspector covers - so the button means the
+            // same thing in the drawer as it does in the region.
+            var mainRect = regionRects[(int)RegionRole.Main];
+            if (layout.IsPreviewCoveringMain && withPreview && mainRect.Width > 0)
+            {
+                drawerRect = drawerContentRect.Union(mainRect);
+            }
+        }
+        else
+        {
+            sizedDrawer = null;
         }
 
         var covering = layout.IsPreviewCoveringMain
@@ -224,6 +254,7 @@ internal sealed class WorkbenchHost : Panel
 
             if (regionDocked[index])
             {
+                presenter.SoloPanel = null;
                 var rect = regionRects[index];
                 if (index == (int)RegionRole.Inspector && coverRect.Width > 0)
                 {
@@ -246,16 +277,40 @@ internal sealed class WorkbenchHost : Panel
                 continue;
             }
 
-            if (drawerOpen && drawerRole == region.Role)
+            if (drawerOpen && drawerRole == region.Role && drawer is not null)
             {
-                var inset = layout.EdgeOf(region.Role) == RegionEdge.Left ? 1 : 0;
-                var drawerWidth = Math.Max(0, drawerRect.Width - 1);
-                presenter.RegionRect = new Rect(0, 0, drawerWidth, drawerRect.Height);
+                // The surface's 1 px outline is the side facing Main, so the panel body starts after it and ends before it:
+                // widening the presenter over that column would paint the very line the drawer is meant to have.
+                var borderOnRight = layout.EdgeOf(region.Role) == RegionEdge.Left;
+                var content = new Rect(
+                    borderOnRight ? drawerContentRect.X : drawerContentRect.X + 1,
+                    drawerContentRect.Y,
+                    Math.Max(0, drawerContentRect.Width - 1),
+                    drawerContentRect.Height);
+                presenter.SoloPanel = drawer;
+
+                if (drawerRect.Width > drawerContentRect.Width)
+                {
+                    // Covering Main: the presenter spans the drawer plus Main, and it is told where Main is - the preview's own
+                    // covered span is worked out there against its column, so it never runs under the file tree.
+                    var mainRect = regionRects[(int)RegionRole.Main];
+                    presenter.RegionRect = new Rect(content.X - drawerRect.X, content.Y - drawerRect.Y, content.Width, content.Height);
+                    presenter.PreviewCoverRect = new Rect(
+                        mainRect.X - drawerRect.X,
+                        mainRect.Y - drawerRect.Y,
+                        mainRect.Width,
+                        mainRect.Height);
+                    Place(presenter, drawerRect, measureOnly);
+                    continue;
+                }
+
+                presenter.RegionRect = new Rect(0, 0, content.Width, content.Height);
                 presenter.PreviewCoverRect = default;
-                Place(presenter, new Rect(drawerRect.X + inset, drawerRect.Y, drawerWidth, drawerRect.Height), measureOnly);
+                Place(presenter, content, measureOnly);
                 continue;
             }
 
+            presenter.SoloPanel = null;
             presenter.RegionRect = default;
             presenter.PreviewCoverRect = default;
             Place(presenter, default, measureOnly);
@@ -272,21 +327,16 @@ internal sealed class WorkbenchHost : Panel
                 continue;
             }
 
-            if (region.Role == RegionRole.Main)
+            if (region.Role == RegionRole.Main || !region.IsAutoHidden)
             {
-                Place(strip, default, measureOnly);
-                continue;
-            }
-
-            if (!region.IsAutoHidden)
-            {
+                strip.ShownPanelId = null;
                 Place(strip, default, measureOnly);
                 continue;
             }
 
             var edge = EdgeOf(layout, region.Role);
             strip.Edge = edge;
-            strip.IsRegionShown = drawerOpen && drawerRole == region.Role;
+            strip.ShownPanelId = drawerOpen && drawerRole == region.Role ? drawer!.Id : null;
             var stripWidth = WorkbenchMetrics.AutoHideStripWidth;
             if (edge == RegionEdge.Left)
             {
@@ -321,8 +371,12 @@ internal sealed class WorkbenchHost : Panel
 
             var gapX = regionRects[dockedRoles[i]].Right;
             splitter.SplitterIndex = splitterIndex;
-            var blocked = drawerOpen || (coverRect.Width > 0 && gapX >= coverRect.X && gapX < coverRect.Right);
-            Place(splitter, blocked
+
+            // Only the lines the drawer or the covered preview actually lies on are taken out: a drawer over one side region
+            // must not cost the user the line between the regions that are still pinned.
+            var underDrawer = drawerOpen && drawerRect.Width > 0 && gapX >= drawerRect.X && gapX < drawerRect.Right;
+            var underCover = coverRect.Width > 0 && gapX >= coverRect.X && gapX < coverRect.Right;
+            Place(splitter, underDrawer || underCover
                 ? default
                 : new Rect(
                     gapX + ((WorkbenchMetrics.RegionSplitterWidth - WorkbenchMetrics.SplitterHitWidth) / 2),
@@ -400,7 +454,7 @@ internal sealed class WorkbenchHost : Panel
     /// <summary>A press anywhere outside the open drawer closes it; presses on an auto-hide strip belong to its buttons.</summary>
     private void OnDrawerOutsidePress(object? sender, PointerPressedEventArgs e)
     {
-        if (Layout is not { OpenDrawer: not null } layout || drawerRect.Contains(e.GetPosition(this)))
+        if (Layout is not { DrawerPanel: not null } layout || drawerRect.Contains(e.GetPosition(this)))
         {
             return;
         }
@@ -683,7 +737,7 @@ internal sealed class WorkbenchHost : Panel
             return;
         }
 
-        var drawerRole = layout.OpenDrawer is { } drawer && layout.GetRegion(drawer).IsAutoHidden ? layout.OpenDrawer : null;
+        var drawerRole = layout.DrawerPanel is { } drawer && layout.GetRegion(drawer.Region).IsAutoHidden ? drawer.Region : (RegionRole?)null;
         RegionRole? raise = drawerRole;
         if (raise is null && layout.IsPreviewCoveringMain && !layout.Inspector.IsAutoHidden && layout.PreviewTabs.IsVisible)
         {
@@ -728,7 +782,7 @@ internal sealed class WorkbenchHost : Panel
         }
 
         var surfaceIndex = Children.IndexOf(drawerSurface);
-        if (surfaceIndex >= 0 && layout.OpenDrawer is not null && surfaceIndex > overlayIndex - 1)
+        if (surfaceIndex >= 0 && layout.DrawerPanel is not null && surfaceIndex > overlayIndex - 1)
         {
             Children.Move(surfaceIndex, Math.Max(0, overlayIndex - 1));
             overlayIndex = Children.IndexOf(dropOverlay);
@@ -747,6 +801,29 @@ internal sealed class WorkbenchHost : Panel
     /// <summary>The auto-hide edge of a region; Main never collapses, so asking the model for it would throw.</summary>
     private static RegionEdge EdgeOf(WorkbenchLayout layout, RegionRole role) =>
         role == RegionRole.Main ? RegionEdge.Left : layout.EdgeOf(role);
+
+    /// <summary>
+    /// Width the drawer opens at. A drawer shows one column of its region, not the region: the preview keeps the width its
+    /// column has while the region is pinned (covering Main adds Main), the files column is the side region's default width
+    /// and the preview column joins it on the left as soon as it has a tab - the two are pinned together and travel together.
+    /// Anything else is the region's own default width, never the width it happened to be dragged to before auto-hiding.
+    /// </summary>
+    private static double DrawerWidthOf(WorkbenchLayout layout, PanelModel panel)
+    {
+        var previewWidth = Math.Max(WorkbenchMetrics.PreviewMinWidth, layout.PreviewWidth);
+        if (ReferenceEquals(panel, layout.PreviewTabs))
+        {
+            return previewWidth;
+        }
+
+        if (ReferenceEquals(panel, layout.FilesPanel))
+        {
+            return WorkbenchMetrics.DefaultInspectorWidth
+                + (layout.PreviewTabs.IsVisible ? previewWidth + WorkbenchMetrics.PanelSplitterWidth : 0);
+        }
+
+        return panel.Region == RegionRole.Project ? WorkbenchMetrics.DefaultProjectWidth : WorkbenchMetrics.DefaultInspectorWidth;
+    }
 
     private RegionRole? RegionAt(Point point)
     {
@@ -792,7 +869,7 @@ internal sealed class WorkbenchHost : Panel
             return;
         }
 
-        if (Layout is { OpenDrawer: not null } layout)
+        if (Layout is { DrawerPanel: not null } layout)
         {
             layout.CloseDrawer();
             e.Handled = true;
