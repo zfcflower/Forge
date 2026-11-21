@@ -248,6 +248,7 @@
                         Classes.active="{Binding SubAgentRegionOpen}"
                         Command="{Binding ToggleSubAgentsCommand}"
                         IsVisible="{Binding HasSubAgentActivity}"
+                        IsEnabled="{Binding CanToggleSubAgents}"
                         ToolTip.Tip="{Binding SubAgentToggleTooltip}"
                         AutomationProperties.AutomationId="strip-subagents"
                         AutomationProperties.Name="{Binding SubAgentToggleName}">

@@ -17,8 +17,8 @@ namespace Forge.App.Workbench.Controls;
 
 /// <summary>
 /// A panel of the workbench: a 28 px title bar (title or tab strip on the left, capability-driven icon buttons on the
-/// right) above the body. The control holds no layout state — every button calls back into <see cref="WorkbenchLayout"/>,
-/// and the title bar's blank space starts a region-swap drag on the host.
+/// right — the bottom group's two are drawn in every state) above the body. The control holds no layout state — every button
+/// calls back into <see cref="WorkbenchLayout"/>, and the title bar's blank space starts a region-swap drag on the host.
 /// </summary>
 internal sealed class PanelChrome : TemplatedControl
 {
@@ -113,11 +113,31 @@ internal sealed class PanelChrome : TemplatedControl
     public static readonly StyledProperty<string?> MinimizeAutomationIdProperty =
         AvaloniaProperty.Register<PanelChrome, string?>(nameof(MinimizeAutomationId));
 
+    /// <summary>Text the body shows instead of a tab's content, for a group opened while it holds none.</summary>
+    public static readonly StyledProperty<string?> EmptyTextProperty =
+        AvaloniaProperty.Register<PanelChrome, string?>(nameof(EmptyText));
+
+    public static readonly StyledProperty<bool> ShowEmptyTextProperty =
+        AvaloniaProperty.Register<PanelChrome, bool>(nameof(ShowEmptyText));
+
     public bool MinimizeVisible
     {
         get => GetValue(MinimizeVisibleProperty);
         set => SetValue(MinimizeVisibleProperty, value);
     }
+
+    public string? EmptyText
+    {
+        get => GetValue(EmptyTextProperty);
+        set => SetValue(EmptyTextProperty, value);
+    }
+
+    public bool ShowEmptyText
+    {
+        get => GetValue(ShowEmptyTextProperty);
+        set => SetValue(ShowEmptyTextProperty, value);
+    }
+
     public Geometry? MinimizeIcon
     {
         get => GetValue(MinimizeIconProperty);
@@ -648,6 +668,7 @@ internal sealed class PanelChrome : TemplatedControl
             CoverVisible = false;
             PinVisible = false;
             MinimizeVisible = false;
+            ShowEmptyText = false;
             FloatVisible = false;
             CloseVisible = false;
             return;
@@ -667,6 +688,9 @@ internal sealed class PanelChrome : TemplatedControl
         }
 
         Body = model.IsVisible ? (group is null ? model.Content : group.ActiveTab?.Content) : null;
+        // An empty bottom group can be opened by its own restore button: with no tab on show its body carries a line of text
+        // instead of a blank box. Only that group - the others have nothing to open without a tab.
+        ShowEmptyText = model.Id == WorkbenchIds.BottomTabs && model.IsVisible && !model.IsMinimized && group?.ActiveTab is null;
 
         var layout = Layout;
         CoverVisible = layout is not null && model.Id == WorkbenchIds.PreviewTabs && layout.PreviewTabs.IsVisible;
@@ -679,9 +703,13 @@ internal sealed class PanelChrome : TemplatedControl
         CloseAutomationId = "panel-" + model.Id + "-close";
 
         PinVisible = model.CanPin;
+        // The bottom group's title bar keeps one shape: its minimize/restore button is drawn in every state, so a tab docking
+        // or the last one leaving never shifts the tools beside it. The float button still follows the active tab - with
+        // nothing open there is nothing to float. Everything else is offered only while it can act.
+        var fixedMinimize = model.Id == WorkbenchIds.BottomTabs;
         // The drawer holds one panel and has no splitter to drag one back: folding it to its title bar would leave the
         // drawer all but empty, so the minimize button is only offered to a panel docked in a region.
-        MinimizeVisible = model.CanMinimize && !IsDrawerContent;
+        MinimizeVisible = fixedMinimize || (model.CanMinimize && !IsDrawerContent);
         FloatVisible = !model.IsFloating && (model.CanFloat || group?.ActiveTab is not null);
         FloatIcon = WorkbenchIcons.Find(this, "IconWindowExternal");
         FloatTooltip = ShellStrings.Float;
@@ -710,6 +738,7 @@ internal sealed class PanelChrome : TemplatedControl
         PinTooltip = ShellStrings.AutoHide;
 
         var minimized = model.IsMinimized;
+        EmptyText = ShellStrings.BottomGroupEmpty;
         // The restore glyph is the same FIS arrow_maximize_vertical the files panel's "expand all" draws, so the one shape
         // lives in one key rather than being copied a second time under a panel-specific name.
         MinimizeIcon = WorkbenchIcons.Find(this, minimized ? "IconArrowMaximizeVertical" : "IconMinimize");

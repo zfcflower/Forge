@@ -59,6 +59,16 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
     /// <summary>The bottom group's intent to sit at title-bar height; held while the group has nothing to show.</summary>
     private bool bottomMinimized;
+
+    /// <summary>Mirror of <see cref="TabGroupModel.HasDockedTab"/> for the bottom group; see <see cref="HasBottomTab"/>.</summary>
+    private bool hasBottomTab;
+
+    /// <summary>
+    /// Set while the user has opened the bottom group by hand although it holds no tab: the fold rule below would otherwise
+    /// shut it again in the same click. A tab docking, the group leaving the layout, or any write of the session's own intent
+    /// ends it.
+    /// </summary>
+    private bool bottomOpenWhileEmpty;
     private bool isDragging;
     private PanelModel? drawerPanel;
     private bool isPreviewCoveringMain;
@@ -518,6 +528,12 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
         if (panel.IsMinimized)
         {
+            // The bottom group's own button always acts, so the wish to fold it is the only thing the click can record.
+            if (ReferenceEquals(panel, bottomTabs))
+            {
+                bottomOpenWhileEmpty = !bottomTabs.HasDockedTab;
+            }
+
             panel.IsMinimized = false;
             RefreshMinimizeStates();
             return;
@@ -526,6 +542,11 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         if (!panel.CanMinimize || !panel.IsVisible)
         {
             return;
+        }
+
+        if (ReferenceEquals(panel, bottomTabs))
+        {
+            bottomOpenWhileEmpty = false;
         }
 
         panel.IsMinimized = true;
@@ -711,7 +732,11 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         get => bottomMinimized;
         set
         {
-            if (!Set(ref bottomMinimized, value))
+            // Every write comes from the shell pointing the group at a session, so a hand-opened empty group is a moment rather
+            // than a wish and never travels along.
+            var handOpened = bottomOpenWhileEmpty;
+            bottomOpenWhileEmpty = false;
+            if (!Set(ref bottomMinimized, value) && !handOpened)
             {
                 return;
             }
@@ -728,26 +753,43 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     public bool IsBottomBodyOpen => bottomTabs.IsVisible && !bottomTabs.IsMinimized;
 
     /// <summary>
-    /// The bottom group's minimize state, and its only writer. The body shows only while a tab is docked in the group and the
-    /// session has not collapsed it: a group living on its title-bar tools alone (the finished sub-agent dropdown, the
-    /// new-terminal tool) has nothing to expand, so it folds to its title bar and offers no restore button. The intent is left
-    /// untouched, so the next tab to dock opens the body again for a session the user never collapsed by hand. A group with a
-    /// tab shrinks only while its peer in Main stays expanded, which is why the intent is held until that is true: the group
-    /// keeps its tabs while nothing shows it.
+    /// True while the bottom group holds a docked tab. Only then has its body something to show or hide, so this is what the
+    /// composer's chip reads to decide whether its click can do anything at all.
+    /// </summary>
+    public bool HasBottomTab => hasBottomTab;
+
+    /// <summary>
+    /// The bottom group's minimize state, and its only writer. The body shows while a tab is docked in the group and the
+    /// session has not collapsed it; a group living on its title-bar tools alone (the finished sub-agent dropdown, the
+    /// new-terminal tool) has nothing to expand, so it folds to its title bar - unless the user just opened it from its own
+    /// button, which then shows the group's empty state. The intent is left untouched by these folds, so the next tab to dock
+    /// opens the body again for a session the user never collapsed by hand. Nothing here asks for an expanded peer: the title
+    /// bar's restore button is drawn and clickable in every one of these states, so a Main holding only title bars is never a
+    /// dead end.
     /// </summary>
     private void ApplyBottomMinimize()
     {
+        // Cached for the chip: HasDockedTab is derived from the tab list, so the notification needs a value that can change.
+        Set(ref hasBottomTab, bottomTabs.HasDockedTab, nameof(HasBottomTab));
+
         if (!bottomTabs.IsVisible)
         {
+            // Out of the layout, the group has no body and no title bar to carry: a hand-opened empty state cannot survive it.
+            bottomOpenWhileEmpty = false;
             bottomTabs.IsMinimized = false;
             bottomTabs.CanMinimize = false;
             return;
         }
 
-        bool hasTab = bottomTabs.HasDockedTab;
-        bool peer = hasTab && HasExpandedPeer(main, bottomTabs);
-        bottomTabs.IsMinimized = !hasTab || (bottomMinimized && peer);
-        bottomTabs.CanMinimize = hasTab && (bottomTabs.IsMinimized || peer);
+        bool hasTab = hasBottomTab;
+        // A tab docking ends the hand-opened state of an empty group: from here the fold follows the intent and the tabs again.
+        if (hasTab)
+        {
+            bottomOpenWhileEmpty = false;
+        }
+
+        bottomTabs.IsMinimized = bottomMinimized || (!hasTab && !bottomOpenWhileEmpty);
+        bottomTabs.CanMinimize = true;
     }
 
     // ---------------------------------------------------------------- tabs
@@ -1467,9 +1509,25 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         for (int i = 0; i < panels.Count; i++)
         {
             PanelModel panel = panels[i];
-            // The bottom group answers to its tabs as well as to its peer, so ApplyBottomMinimize is its only writer.
+            // The bottom group answers to its tabs, so ApplyBottomMinimize is its only writer.
             if (ReferenceEquals(panel, bottomTabs))
             {
+                continue;
+            }
+
+            // Main is allowed to sit on nothing but its title bars: both of its panels fold on request and both restore
+            // buttons are drawn and clickable in every state, so a folded Main costs no way back. The side regions still keep
+            // one panel expanded - their panels share one column, and folding the last one would leave nothing to drag a
+            // splitter from. Both of Main's panels must still be on screen: with one of them gone, a fold would leave a
+            // full-size empty card under a title bar, since the region places the only panel over the whole body.
+            if (ReferenceEquals(region, main))
+            {
+                panel.CanMinimize = panel.IsVisible && visible > 1;
+                if (!panel.CanMinimize)
+                {
+                    panel.IsMinimized = false;
+                }
+
                 continue;
             }
 

@@ -266,6 +266,15 @@ internal sealed class RegionPresenter : Panel
         if (Layout.MainTabs.IsMinimized || group.IsMinimized)
         {
             var title = Math.Min(PanelChrome.TitleBarHeight, space);
+            // Both folded: the two title bars sit one above the other and the rest of Main stays empty. That is the one state
+            // where neither panel has a body, so neither may claim the leftover height.
+            if (Layout.MainTabs.IsMinimized && group.IsMinimized)
+            {
+                Place(mainChrome, new Rect(body.X, body.Y, body.Width, title));
+                Place(bottomChrome, new Rect(body.X, body.Y + title, body.Width, title));
+                return;
+            }
+
             var topHeight = Layout.MainTabs.IsMinimized ? title : Math.Max(0, space - title);
             Place(mainChrome, new Rect(body.X, body.Y, body.Width, topHeight));
             Place(bottomChrome, new Rect(body.X, body.Y + topHeight + splitterHeight, body.Width, Math.Max(0, space - topHeight)));

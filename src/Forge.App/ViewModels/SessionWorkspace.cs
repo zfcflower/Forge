@@ -106,6 +106,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private bool rootRebuilt;
     private bool subAgentsCollapsed;
     private bool subAgentRegionOpen;
+    private bool canToggleSubAgents;
     private CancellationTokenSource? turn;
     private int turnNumber;
 
@@ -687,6 +688,17 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     {
         get => subAgentRegionOpen;
         internal set => Set(ref subAgentRegionOpen, value);
+    }
+
+    /// <summary>
+    /// Whether the bottom group holds a tab this session can show or hide. The chip is drawn from
+    /// <see cref="HasSubAgentActivity"/> but clickable only from here: with nothing docked the group has no body, so a click
+    /// could not do anything and the chip says so instead of swallowing it.
+    /// </summary>
+    public bool CanToggleSubAgents
+    {
+        get => canToggleSubAgents;
+        internal set => Set(ref canToggleSubAgents, value);
     }
 
     /// <summary>Anything to collapse or reopen: a live sub-agent or a finished one in the dropdown.</summary>

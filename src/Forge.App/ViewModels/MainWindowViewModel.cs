@@ -2460,8 +2460,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         // The chip reads the real thing, not the wish: a session whose sub-agents have all finished docks no tab, so the
-        // group folds to its title bar (its finished menu stays) and the chip rests until a tab lands again.
+        // group folds to its title bar (its finished menu stays) and the chip rests - disabled - until a tab lands again.
         session.SubAgentRegionOpen = Workbench.IsBottomBodyOpen;
+        session.CanToggleSubAgents = Workbench.HasBottomTab;
     }
 
     private void PruneSubAgentTabs(SessionWorkspaceViewModel? session, HashSet<string> live)
@@ -2603,15 +2604,17 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     /// <summary>
     /// The bottom group's own restore button minimizes it; the session keeps that state so it is not popped up again. Its
-    /// body coming and going (a tab docks, the last one leaves) is mirrored too, for the composer's chip.
+    /// body coming and going (a tab docks, the last one leaves) is mirrored too, for the composer's chip: the accent follows
+    /// whether the body is on screen, the click's availability follows whether there is a tab to show at all.
     /// </summary>
     private void OnWorkbenchPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(WorkbenchLayout.IsBottomBodyOpen))
+        if (e.PropertyName is nameof(WorkbenchLayout.IsBottomBodyOpen) or nameof(WorkbenchLayout.HasBottomTab))
         {
             if (activeSession is { } open)
             {
                 open.SubAgentRegionOpen = Workbench.IsBottomBodyOpen;
+                open.CanToggleSubAgents = Workbench.HasBottomTab;
             }
 
             return;

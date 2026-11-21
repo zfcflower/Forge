@@ -49,6 +49,7 @@ internal static class ShellStrings
     public const string AutoHideKey = "workbench.autoHide";
     public const string RestorePanelKey = "workbench.restorePanel";
     public const string MinimizePanelKey = "workbench.minimizePanel";
+    public const string BottomGroupEmptyKey = "workbench.bottomGroupEmpty";
     public const string MoreTabsKey = "workbench.moreTabs";
     public const string FloatKey = "workbench.float";
     public const string DockBackKey = "workbench.dockBack";
@@ -180,6 +181,9 @@ internal static class ShellStrings
 
     public static string RestorePanel => Loc.Instance[RestorePanelKey];
     public static string MinimizePanel => Loc.Instance[MinimizePanelKey];
+
+    /// <summary>The bottom group's body when the user opened it with no tab docked in it.</summary>
+    public static string BottomGroupEmpty => Loc.Instance[BottomGroupEmptyKey];
 
     public static string MoreTabs => Loc.Instance[MoreTabsKey];
 
@@ -347,6 +351,7 @@ internal static class ShellStrings
         Loc.Register(AutoHideKey, "自动隐藏", "Auto-hide");
         Loc.Register(RestorePanelKey, "还原", "Restore");
         Loc.Register(MinimizePanelKey, "缩小", "Minimize");
+        Loc.Register(BottomGroupEmptyKey, "暂无停靠的标签", "No tabs docked");
         Loc.Register(MoreTabsKey, "被遮挡的标签", "Hidden tabs");
         Loc.Register(FloatKey, "浮动到新窗口", "Float to a new window");
         Loc.Register(DockBackKey, "停靠回主窗口", "Dock back to the main window");

@@ -320,6 +320,14 @@
                             HorizontalContentAlignment="Stretch"
                             VerticalContentAlignment="Stretch"
                             ClipToBounds="True" />
+            <!-- A group the user opened while it holds no tab: its body would be an empty box, so it carries one line of text. -->
+            <TextBlock Name="PART_Empty"
+                       Grid.Row="1"
+                       Classes="caption"
+                       Text="{TemplateBinding EmptyText}"
+                       IsVisible="{TemplateBinding ShowEmptyText}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
           </Grid>
         </Border>
       </ControlTemplate>
