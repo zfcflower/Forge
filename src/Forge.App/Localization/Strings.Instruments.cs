@@ -24,7 +24,14 @@ internal static class InstrumentsStrings
     public const string ContextTooltipUnknownKey = "session.strip.context.tooltip.unknown";
     public const string ContextTooltipPendingKey = "session.strip.context.tooltip.pending";
     public const string ContextCompactNameKey = "session.strip.context.compact";
+
+    /// <summary>The line under the gauge's numbers on a host whose click compacts.</summary>
+    public const string ContextCompactHintKey = "session.strip.context.compactHint";
+
+    /// <summary>The same line on a host whose gauge only reads (a sub-agent's tab).</summary>
+    public const string ContextAutoHintKey = "session.strip.context.autoHint";
     public const string CacheReadKey = "session.strip.cacheRead";
+
     public const string UsageNoneKey = "session.strip.usage.none";
 
     // The provider's account windows. Shown only when the provider reported them with the last response; the numbers are
@@ -127,6 +134,10 @@ internal static class InstrumentsStrings
 
     /// <summary>The gauge button's accessible name: what clicking it does.</summary>
     public static string ContextCompactName => Loc.Instance[ContextCompactNameKey];
+
+    public static string ContextCompactHint => Loc.Instance[ContextCompactHintKey];
+
+    public static string ContextAutoHint => Loc.Instance[ContextAutoHintKey];
 
     /// <summary>"RC 98.5" — the cache-read hit rate in the strip, one decimal; the gauge beside it carries the percentage.</summary>
     public static string CacheRead(string ratio) => Loc.Instance.Format(CacheReadKey, ratio);
@@ -294,17 +305,22 @@ internal static class InstrumentsStrings
         Loc.Register(ContextTokensKey, "{0}", "{0}");
         Loc.Register(
             ContextTooltipKey,
-            "上下文 {0} / 可用 {1}（{2}%），到 {3}（{4}%）自动压缩。点击立即压缩",
-            "Context {0} of {1} usable ({2}%); compacts automatically at {3} ({4}%). Click to compact now");
+            "上下文 {0} / 可用 {1}（{2}%），到 {3}（{4}%）自动压缩",
+            "Context {0} of {1} usable ({2}%); compacts automatically at {3} ({4}%)");
         Loc.Register(
             ContextTooltipUnknownKey,
-            "上下文 {0}；模型窗口未知，不显示百分比。点击立即压缩",
-            "Context {0}; the model's window is unknown, so there is no percentage. Click to compact now");
+            "上下文 {0}；模型窗口未知，不显示百分比",
+            "Context {0}; the model's window is unknown, so there is no percentage");
         Loc.Register(
             ContextTooltipPendingKey,
-            "上下文用量在下一次模型请求后显示。点击立即压缩",
+            "上下文用量在下一次模型请求后显示",
             "Context usage appears after the next model request. Click to compact now");
         Loc.Register(ContextCompactNameKey, "压缩上下文", "Compact context");
+        Loc.Register(ContextCompactHintKey, "点击量规立即压缩上下文。", "Click the gauge to compact now.");
+        Loc.Register(
+            ContextAutoHintKey,
+            "子代理的上下文压缩由自动策略进行，量规只读。",
+            "A sub-agent compacts automatically; the gauge reads only.");
         Loc.Register(CacheReadKey, "RC {0}%", "RC {0}%");
         Loc.Register(UsageNoneKey, "暂无用量", "No usage yet");
 

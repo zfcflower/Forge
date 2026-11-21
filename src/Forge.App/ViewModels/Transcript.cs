@@ -714,9 +714,11 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 
     /// <summary>The provider and model that ran the turn: the composer's choice stamped when the turn began, or what the
     /// metrics table recorded for a replayed one. Null when neither source knew.</summary>
-    internal string? ProviderName => providerName;
-
     internal string? ModelName => modelName;
+
+    /// <summary>The provider half of the same reference; the sub-agent's replayed instruments read both back from the
+    /// turn's stored metrics row.</summary>
+    internal string? ProviderName => providerName;
 
     /// <summary>Stamps the live turn's model on the card, at the turn's start, so the divider line and tooltip can show it.</summary>
     internal void NoteModel(string? provider, string? model)
@@ -1354,6 +1356,10 @@ internal sealed class TranscriptViewModel : ObservableObject
 
         round++;
         var card = new TurnCardViewModel(round, at);
+        // A sub-agent's card can be begun anywhere - by a tool row, by the first streamed delta, by a usage flush - so
+        // the model that runs the turn is stamped here, through the one hook every creation path shares. The root sets
+        // none: its own turn flow names the composer's choice at the moment it began.
+        StampTurnModel?.Invoke(card);
         var wasCurrent = current;
         if (CollapseOlderTurns)
         {
@@ -1639,6 +1645,12 @@ internal sealed class TranscriptViewModel : ObservableObject
         return -1;
     }
 
+    /// <summary>
+    /// Names the model on every turn card this transcript begins; a sub-agent sets it once and every turn's divider then
+    /// says what ran it, exactly the way the root's dividers do. Null on the root's own transcript.
+    /// </summary>
+    internal Action<TurnCardViewModel>? StampTurnModel;
+
     /// <summary>Merges a worker-thread delta into the pending buffer; the owner schedules the UI-thread flush.</summary>
     public void QueueDelta(string chunk)
     {
@@ -1689,6 +1701,19 @@ internal sealed class TranscriptViewModel : ObservableObject
     {
         FlushPending();
         current?.Finish(elapsed, error);
+    }
+
+    /// <summary>
+    /// The turn boundary a sub-agent's own event stream reports: closes the turn like <see cref="EndTurn"/> and then forgets
+    /// the card, so the next content begins a fresh one instead of appending to the closed one. The root must <em>not</em>
+    /// use this - its trailing Background flush still owes the just-closed card its text - but a child's boundary arrives as
+    /// <c>AgentTurnCompleted</c>, and the coalescer has already drained that turn's text ahead of the event, so nothing of
+    /// the closed turn can follow it.
+    /// </summary>
+    public void EndIsolatedTurn(TimeSpan? elapsed, LocText? error)
+    {
+        EndTurn(elapsed, error);
+        current = null;
     }
 
     /// <summary>Re-raises every item's text after a language switch; the items derive their texts from their state.</summary>

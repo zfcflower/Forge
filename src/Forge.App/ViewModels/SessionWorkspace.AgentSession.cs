@@ -517,7 +517,8 @@ internal sealed partial class SessionWorkspaceViewModel
                 }
 
                 lastTurnError = error;
-                Transcript.EndTurn(DateTimeOffset.Now - turnStartedAt, error);
+                var turnElapsed = DateTimeOffset.Now - turnStartedAt;
+                Transcript.EndTurn(turnElapsed, error);
                 AgentSessionTurnEnded?.Invoke(this);
 
                 // The turn's own numbers, keyed by the child's session id: one metrics row and one closed checkpoint per turn,
@@ -527,7 +528,7 @@ internal sealed partial class SessionWorkspaceViewModel
                 if (childSessionId is { Length: > 0 })
                 {
                     var number = turnNo ?? card.Round;
-                    Instruments.NoteTurnEnded(number);
+                    Instruments.NoteTurnEnded(number, turnElapsed);
 
                     // This turn's numbers out of the child's own instance: the reading it had when the turn began against the
                     // one it has now, never the root runtime's counters and never a wall clock. An instance the host no longer

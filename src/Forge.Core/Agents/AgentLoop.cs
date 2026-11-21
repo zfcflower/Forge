@@ -128,6 +128,9 @@ public sealed class AgentLoop(AgentLoopServices services)
 
         using var slot = await AcquireAsync(instance, sink, ct).ConfigureAwait(false);
         using var scope = AgentScope.Enter(sink, instance.Id, slot);
+        // The turn's wall clock starts once the slot is held — the same moment the App's running marker counts from — so
+        // a queued child's wait for the slot never lands inside any turn's elapsed.
+        var turnStartedAt = DateTimeOffset.UtcNow;
         var control = instance.Control;
         if (control is not null && control.Admit() is { Length: > 0 } queued)
         {
@@ -254,7 +257,7 @@ public sealed class AgentLoop(AgentLoopServices services)
                     continue;
                 }
 
-                sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop, instance.StreamElapsed));
+                sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop, instance.StreamElapsed, turnStartedAt, DateTimeOffset.UtcNow));
                 return new AgentRunResult(Text(assistant), instance.Usage, stop);
             }
 

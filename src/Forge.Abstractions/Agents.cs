@@ -23,6 +23,8 @@ public sealed record AgentToolProgress(string AgentId, ToolCall Call, string Tai
 public sealed record AgentApprovalDenied(string AgentId, ToolCall Call) : AgentEvent(AgentId);
 public sealed record AgentCompacted(string AgentId, int TokensBefore, int TokensAfter) : AgentEvent(AgentId);
 /// <summary>Emitted by the parent when it spawns or resumes a child, before the child waits for a run slot.</summary>
+/// <param name="ProviderId">Which connected provider serves the child's model; null means the default one, the same
+/// resolution <c>ModelSettings.ProviderId</c> carries. The App's per-child readings price and match against it.</param>
 public sealed record AgentSubAgentStarted(
     string AgentId,
     string ChildId,
@@ -30,12 +32,23 @@ public sealed record AgentSubAgentStarted(
     string Task,
     string Model,
     string ChildSessionId,
-    DateTimeOffset At) : AgentEvent(AgentId);
+    DateTimeOffset At,
+    string? ProviderId = null) : AgentEvent(AgentId);
 /// <param name="StreamElapsed">How long the model spent streaming this turn's answers, first output increment to
 /// last, accumulated over every call the turn made (an instance-cumulative counter exactly like
 /// <paramref name="Usage"/>, so the turn's own share is the difference against the turn-start snapshot). Zero for a
 /// turn that streamed nothing; never "unknown" — a missing measurement is an adapter defect.</param>
-public sealed record AgentTurnCompleted(string AgentId, TokenUsage Usage, StopReason Stop, TimeSpan StreamElapsed = default) : AgentEvent(AgentId);
+/// <param name="StartedAt">When the turn began running — after its run slot was acquired, the same moment the strip's
+/// running marker counts from. Their difference is the turn's wall clock, the number the turn's divider shows.</param>
+/// <param name="EndedAt">When the turn's loop finished.</param>
+public sealed record AgentTurnCompleted(
+    string AgentId,
+    TokenUsage Usage,
+    StopReason Stop,
+    TimeSpan StreamElapsed = default,
+    DateTimeOffset StartedAt = default,
+    DateTimeOffset EndedAt = default) : AgentEvent(AgentId);
+
 
 /// <summary>
 /// A note about how the turn went that is not a failure: the request had to be downgraded, for one. Shown as a toast, never as an

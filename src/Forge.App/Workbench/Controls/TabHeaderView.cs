@@ -144,9 +144,9 @@ internal sealed class TabHeaderView : TemplatedControl
         IsActive = ReferenceEquals(tab, tab.Group?.ActiveTab);
         ApplyIcon();
         AutomationProperties.SetName(this, tab.Title);
-        // The strip can only show a compacted title (`▸ Worker · …`), so the tip carries the whole one: a sub-agent's task
-        // in full, otherwise the tab's own title. Wrapped, because the tooltip has a width cap of its own and a one-line
-        // string is clipped there without any ellipsis to tell the reader something was left out.
+        // The tab is titled by the sub-agent's own id (`▸ Worker-3`) and says nothing about the task, so the tip carries
+        // the task in full, otherwise the tab's own title. Wrapped, because the tooltip has a width cap of its own and a
+        // one-line string is clipped there without any ellipsis to tell the reader something was left out.
         tipText.Text = tab.Content is SubAgentViewModel agent ? agent.Task : tab.Title;
         ToolTip.SetTip(this, tipText);
     }

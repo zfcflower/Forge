@@ -187,6 +187,10 @@
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
     </Style>
+    <!-- Borderless means borderless: no field frame, so no field's bottom edge either. -->
+    <Style Selector="TextBox.composer-input /template/ Border#PART_EdgeLine">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
 
 
     <Style Selector="Border.image-thumb">

@@ -100,7 +100,6 @@ internal static class SessionStrings
     public const string ComposerNoMatchesKey = "session.composer.noMatches";
     // ---------------------------------------------------------------- turn card and the notices around it
     public const string TurnWorkingKey = "turn.working";
-    public const string TurnTokenSummaryKey = "turn.tokenSummary";
     public const string TurnCollapseKey = "turn.collapse";
     public const string TurnExpandKey = "turn.expand";
     public const string ToolArgumentsKey = "turn.toolArguments";
@@ -356,13 +355,6 @@ internal static class SessionStrings
     // ---------------------------------------------------------------- turn card
     /// <summary>The row a busy turn shows while nothing has arrived yet: what it is doing right now.</summary>
     public static string TurnWorking => Loc.Instance[TurnWorkingKey];
-
-    /// <summary><c>输入 900 · 输出 80</c>; a side the provider did not report becomes <see cref="TextFormat.None"/>.</summary>
-    public static string TokenSummary(int? inputTokens, int? outputTokens) =>
-        Loc.Instance.Format(TurnTokenSummaryKey, TokenCount(inputTokens), TokenCount(outputTokens));
-
-    /// <summary>One token count, grouped; <see cref="TextFormat.None"/> when the provider did not report it.</summary>
-    public static string TokenCount(int? tokens) => TextFormat.Number((long?)tokens);
 
     public static string CollapseTurn => Loc.Instance[TurnCollapseKey];
 
@@ -650,11 +642,9 @@ internal static class SessionStrings
         Loc.Register(BreadcrumbBackToParentKey, "返回父会话 {0}", "Back to {0}");
 
         // turn card and its notices
-        Loc.Register(TurnTokenSummaryKey, "输入 {0} · 输出 {1}", "in {0} · out {1}");
         Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");
         Loc.Register(TurnExpandKey, "展开本轮", "Expand this turn");
         Loc.Register(TurnWorkingKey, "正在处理下一步…", "Working on the next step…");
-        Loc.Register(TurnTokenSummaryKey, "输入 {0} · 输出 {1}", "in {0} · out {1}");
         Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");
         Loc.Register(ToolArgumentsKey, "参数", "Arguments");
         Loc.Register(ToolResultKey, "结果", "Result");
@@ -717,12 +707,12 @@ internal static class SessionStrings
         Loc.Register(SubAgentStoppedByUserKey, "已停止", "Stopped");
         Loc.Register(SubAgentTitleKey, "子 Agent", "Sub-agents");
         Loc.Register(SubAgentMainAgentKey, "主 Agent", "Main agent");
-        Loc.Register(SubAgentFinishedKey, "已结束", "Finished");
+        Loc.Register(SubAgentFinishedKey, "SubAgent 历史会话", "Sub-agent history");
         Loc.Register(
             SubAgentFinishedHintKey,
-            "按结束顺序排列，选择一个查看只读记录。",
-            "In finish order; pick one to see its read-only record.");
-        Loc.Register(SubAgentFinishedMenuKey, "已结束 ({0})", "Finished ({0})");
+            "本会话的子 Agent 历史会话，按最近一次运行排序；同一子 Agent 被再次领任务时会先回到活标签。选择一个查看只读记录。",
+            "The session's sub-agent sessions, ordered by their latest run; one handed a new task returns to the live tabs first. Pick one to see its read-only record.");
+        Loc.Register(SubAgentFinishedMenuKey, "SubAgent 历史会话 ({0})", "Sub-agent history ({0})");
         Loc.Register(SubAgentNoTranscriptKey, "这次子 Agent 没有存下可重放的消息。", "This sub-agent stored no messages to replay.");
         Loc.Register(SubAgentReadOnlyBadgeKey, "已结束", "Finished");
         Loc.Register(SubAgentNoModelKey, "未配置模型", "No model");

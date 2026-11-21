@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Data.Common;
 using System.Diagnostics;
 using System.IO;
@@ -119,6 +120,20 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// service block); null for a view built without one, which then records nothing.
     /// </summary>
     private readonly TurnMetricsRecorder? metricsRecorder;
+
+    /// <summary>Tool calls of each live sub-agent's current turn, counted on the dispatcher where the events are ordered;
+    /// exchanged into that turn's metrics row when the turn completes.</summary>
+    private readonly ConcurrentDictionary<string, int> subAgentToolCalls = new();
+
+    /// <summary>The card each live sub-agent's last completed turn closed: the run-end flush may still owe it usage.</summary>
+    private readonly ConcurrentDictionary<string, TurnCardViewModel> subAgentLastCards = new();
+
+    /// <summary>
+    /// Each run's usage baseline: the instance counter as it stood when the run's <c>AgentSubAgentStarted</c> arrived. A
+    /// resumed child keeps one <c>agentUsage</c> entry across its runs, and each run's unreported remainder - what
+    /// <c>AgentSubAgentFinished.Usage</c> carries, itself a per-run difference Core took - is measured against this.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, TokenUsage> subAgentRunStart = new();
 
     /// <summary>
     /// The session's sources, kept for the replay seeding only: the metrics table the dividers seed from and the model
@@ -784,25 +799,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         try
         {
-            var messages = await TranscriptReplay.ReadAsync(store, SessionId, ct).ConfigureAwait(true);
-            Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, messages));
+            Instruments.SeedHistory(await ReplayIntoAsync(Transcript, SessionId, ct).ConfigureAwait(true));
 
             // The divider tooltips price with the composer's current choice when a replayed row names no model;
             // live turns resolve the same way, so a model switch re-prices what the next hover shows.
             Transcript.ResolveCost = ResolveTurnCost;
-            if (instrumentSources.TurnMetrics is { } turnMetrics)
-            {
-                try
-                {
-                    Transcript.SeedTurnMetrics(await turnMetrics.ListAsync(SessionId, ct).ConfigureAwait(true));
-                }
-                catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException
-                    or ObjectDisposedException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
-                {
-                    // Metrics seed the dividers only: losing them leaves "—" where the clock would be, never a notice.
-                    AppLogs.Session.ZLogWarning($"turn metrics seed skipped: {exception.GetType().Name}: {exception.Message}");
-                }
-            }
 
             await RestoreSubAgentsAsync(SessionId, "root", ct).ConfigureAwait(true);
 
@@ -855,6 +856,42 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// link of its own children, and the children of this session hang under the main agent ("root"). Statuses come from
     /// what the store holds; when it holds nothing conclusive the row says it ended without claiming a result.
     /// </summary>
+    /// <summary>
+    /// The one replay sequence both a main session's open and a history sub-agent's open run: read the stored messages,
+    /// draw them, and seed the dividers from the turn metrics the session recorded. Returns the usage the replay summed,
+    /// for the caller's own instruments to seed. Reading and seeding failures are guarded here once: metrics only fill
+    /// blanks the replay cannot, so a lost read leaves "—", never a notice.
+    /// </summary>
+    private async Task<TokenUsage> ReplayIntoAsync(TranscriptViewModel transcript, string sessionId, CancellationToken ct)
+    {
+        if (store is null)
+        {
+            return TokenUsage.Empty;
+        }
+
+        var messages = await TranscriptReplay.ReadAsync(store, sessionId, ct).ConfigureAwait(true);
+        if (messages.Count == 0)
+        {
+            return TokenUsage.Empty;
+        }
+
+        var total = TranscriptReplay.Apply(transcript, messages);
+        if (instrumentSources.TurnMetrics is { } turnMetrics)
+        {
+            try
+            {
+                transcript.SeedTurnMetrics(await turnMetrics.ListAsync(sessionId, ct).ConfigureAwait(true));
+            }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException
+                or ObjectDisposedException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
+            {
+                AppLogs.Session.ZLogWarning($"turn metrics seed skipped: {exception.GetType().Name}: {exception.Message}");
+            }
+        }
+
+        return total;
+    }
+
     private async Task RestoreSubAgentsAsync(string parentSessionId, string parentAgentId, CancellationToken ct)
     {
         var live = runtime;
@@ -872,7 +909,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         {
             var status = await BackgroundRead.RunAsync(token => DeriveStoredStatusAsync(child.Id, token), ct)
                 .ConfigureAwait(true);
-            finished.Add(SubAgentViewModel.FromStored(SessionId, child, parentAgentId, status, Title, openSession));
+            finished.Add(SubAgentViewModel.FromStored(SessionId, child, parentAgentId, status, Title, openSession, instrumentSources));
             await RestoreSubAgentsAsync(child.Id, child.Id, ct).ConfigureAwait(true);
         }
     }
@@ -1029,14 +1066,19 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         try
         {
-            var messages = await TranscriptReplay.ReadAsync(store, agent.ChildSessionId, CancellationToken.None).ConfigureAwait(true);
-            if (messages.Count == 0)
+            var total = await ReplayIntoAsync(agent.Transcript, agent.ChildSessionId, CancellationToken.None).ConfigureAwait(true);
+            if (agent.Transcript.IsEmpty)
             {
+                // The store kept nothing for this child: the tab says so rather than showing an empty timeline.
                 agent.Transcript.AddNotice(SessionStrings.FinishedAgentsNoTranscript, isError: true);
                 return;
             }
 
-            TranscriptReplay.Apply(agent.Transcript, messages);
+            agent.Instruments.SeedHistory(total);
+            if (agent.Transcript.Current is { ModelName: { Length: > 0 } storedModel } last)
+            {
+                agent.SeedStoredModel(last.ProviderName, storedModel);
+            }
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
@@ -1822,12 +1864,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 }
 
                 lastTurnError = error;
-                Transcript.EndTurn(DateTimeOffset.Now - turnStartedAt, error);
+                var turnElapsed = DateTimeOffset.Now - turnStartedAt;
+                Transcript.EndTurn(turnElapsed, error);
 
                 // The turn's own numbers, handed over as one struct channel write: no await, no query, no formatting, and a
                 // recorder that is missing or has no table costs nothing. The denominator of the strip counts every turn,
-                // so it is told here (a failed or unreported turn is still a turn the averages are spread over).
-                Instruments.NoteTurnEnded(turnNo);
+                // so it is told here (a failed or unreported turn is still a turn the averages are spread over) - with the
+                // turn's own clock, so the summary's duration grows with the window instead of waiting for a reopen.
+                Instruments.NoteTurnEnded(turnNo, turnElapsed);
                 RecordTurnMetrics(turnNo, error);
                 if (checkpoints is not null)
                 {
@@ -2158,13 +2202,25 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     row.AttachLive(activity);
                 }
 
+                // The child's per-turn tool count lives here, on the dispatcher, where the events arrive in order: counting on
+                // the producer thread would let a next turn's first call race ahead of the flush that closes this one.
+                if (!string.Equals(started.AgentId, "root", StringComparison.Ordinal))
+                {
+                    subAgentToolCalls.AddOrUpdate(started.AgentId, 1, static (_, count) => count + 1);
+                }
+
                 break;
             case AgentToolFinished finishedTool:
                 FinishTool(finishedTool.AgentId, finishedTool.Call.Id);
                 Card(finishedTool.AgentId)?.CompleteTool(finishedTool.Call, finishedTool.Result);
                 break;
             case AgentTurnCompleted completed:
+                // The turn-start snapshots, read before AddTurnUsage replaces the instance counters: the child's turn row
+                // differences the same pair the root's row does.
+                var startUsage = agentUsage.TryGetValue(completed.AgentId, out var turnStartUsage) ? turnStartUsage : TokenUsage.Empty;
+                var startStream = agentStream.TryGetValue(completed.AgentId, out var turnStartStream) ? turnStartStream : TimeSpan.Zero;
                 AddTurnUsage(completed);
+                CloseSubAgentTurn(completed, startUsage, startStream);
                 break;
             case AgentNotice notice:
                 // A note about how the turn went, not a failure: a toast, never an error card.
@@ -2177,8 +2233,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 break;
             case AgentRateLimitUpdated limit:
                 // The account's windows, taken from whichever agent's request reported them: the meter is per account, not
-                // per agent, and the strip belongs to the session.
-                Instruments.NoteRateLimit(Composer.ProviderId, limit.RateLimit);
+                // per agent. The root's strip prices against the composer's provider; a child's tab reads the account of
+                // the provider its own model runs on.
+                InstrumentsOf(limit.AgentId)?.NoteRateLimit(
+                    string.Equals(limit.AgentId, "root", StringComparison.Ordinal) ? Composer.ProviderId : Find(limit.AgentId)?.ProviderId,
+                    limit.RateLimit);
                 break;
             case AgentBudgetWait waiting:
                 // A wait on the provider's local budget is why the turn is quiet, not something to interrupt the user
@@ -2195,8 +2254,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 Card(compacted.AgentId)?.AddNotice(SessionStrings.Compacted(compacted.TokensBefore, compacted.TokensAfter));
                 break;
             case AgentContextMeasured context:
-                Instruments.NoteContext(context.AgentId, context.ContextTokens, context.UsableTokens, context.TriggerTokens);
-                Instruments.NoteCacheTtl(context.CacheTtl);
+                // A sub-agent has its own window and its own budget: its tab reads the same event Core sent it, through
+                // the same instruments class the root's strip reads the root's from.
+                var instruments = InstrumentsOf(context.AgentId);
+                instruments?.NoteContext(context.AgentId, context.ContextTokens, context.UsableTokens, context.TriggerTokens);
+                instruments?.NoteCacheTtl(context.CacheTtl);
                 break;
             case AgentCompactionStalled stalled:
                 Card(stalled.AgentId)?.AddNotice(CompactionStrings.Stalled(stalled.ContextTokens, stalled.TriggerTokens), isError: true);
@@ -2343,8 +2405,61 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         else
         {
             Card(completed.AgentId)?.AddUsage(delta, completed.Stop);
+            Find(completed.AgentId)?.Instruments.AddTurn(completed.AgentId, delta);
         }
         NoteFullCacheRewrite(completed.AgentId, delta);
+    }
+
+    /// <summary>
+    /// Closes a live sub-agent's turn where the root's turn closes: the card keeps its own divider, its elapsed is the turn's
+    /// own wall clock (from the completion event, slot-acquire to finish), and one metrics row is recorded under the child's
+    /// session id - the row a reopened tab replays its elapsed, rate, status and model from, the same table the root's turns
+    /// use. A turn that showed nothing on screen leaves no card to close; its run-end Finish still ends the transcript.
+    /// </summary>
+    private void CloseSubAgentTurn(AgentTurnCompleted completed, TokenUsage turnStartUsage, TimeSpan turnStartStream)
+    {
+        if (string.Equals(completed.AgentId, "root", StringComparison.Ordinal) || Find(completed.AgentId) is not { } agent)
+        {
+            return;
+        }
+
+        var card = agent.Transcript.Current;
+        agent.Transcript.EndIsolatedTurn(completed.EndedAt - completed.StartedAt, null);
+        if (card is null)
+        {
+            return;
+        }
+
+        subAgentLastCards[agent.AgentId] = card;
+        agent.Instruments.NoteTurnEnded(card.Round, completed.EndedAt - completed.StartedAt);
+        // Consumed here whether or not a row is written: a recorder that is not listening must not let one turn's calls
+        // pile onto the next turn's first row.
+        var tools = subAgentToolCalls.TryRemove(agent.AgentId, out var calls) ? calls : 0;
+        if (metricsRecorder is { Enabled: true } recorder)
+        {
+            try
+            {
+                recorder.Record(TurnMetricsRowFactory.BuildForOutcome(
+                    agent.ChildSessionId,
+                    card.Round,
+                    completed.StartedAt,
+                    completed.EndedAt,
+                    completed.Stop == StopReason.MaxTokens ? TurnMetricStatus.Limit : TurnMetricStatus.Completed,
+                    error: null,
+                    completed.Usage,
+                    turnStartUsage,
+                    completed.StreamElapsed,
+                    turnStartStream,
+                    tools,
+                    agent.ProviderId,
+                    agent.Model.Length == 0 ? null : agent.Model));
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // The writer promises never to throw; this belt stays for the same reason the root's does.
+                AppLogs.Usage.ZLogWarning($"sub-agent turn metrics row not queued: {exception.GetType().Name}: {exception.Message}");
+            }
+        }
     }
 
     /// <summary>
@@ -2437,13 +2552,68 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         return agent is null ? null : agent.Transcript.Current ?? agent.Transcript.BeginTurn(DateTimeOffset.Now);
     }
 
+    /// <summary>
+    /// The part of a run's usage its own turns never reported: the run's difference, minus the counter's move since the
+    /// baseline the run began at, clamped at zero per column. <paramref name="reported"/> is the instance counter at the
+    /// last event the App saw; a counter that moved backwards contributes nothing.
+    /// </summary>
+    internal static TokenUsage UnreportedRunUsage(TokenUsage runUsage, TokenUsage reported, TokenUsage runStart)
+    {
+        var thisRun = new TokenUsage(
+            Math.Max(0, reported.InputTokens - runStart.InputTokens),
+            Math.Max(0, reported.OutputTokens - runStart.OutputTokens),
+            Math.Max(0, reported.CacheReadTokens - runStart.CacheReadTokens),
+            Math.Max(0, reported.CacheWriteTokens - runStart.CacheWriteTokens),
+            Math.Max(0, reported.CacheWrite1hTokens - runStart.CacheWrite1hTokens));
+        // The cache columns ride along (the terminal event carries them; its hour-lived share it does not), so a failed
+        // run's partial cache read still reaches the cumulative reading's hit rate.
+        return new TokenUsage(
+            Math.Max(0, runUsage.InputTokens - thisRun.InputTokens),
+            Math.Max(0, runUsage.OutputTokens - thisRun.OutputTokens),
+            Math.Max(0, runUsage.CacheReadTokens - thisRun.CacheReadTokens),
+            Math.Max(0, runUsage.CacheWriteTokens - thisRun.CacheWriteTokens));
+    }
+
+    /// <summary>The instruments that own an agent's events: the session's own strip for the root, the child's tab otherwise.</summary>
+    private SessionInstrumentsViewModel? InstrumentsOf(string agentId) =>
+        string.Equals(agentId, "root", StringComparison.Ordinal)
+            ? Instruments
+            : Find(agentId)?.Instruments;
+
     private SubAgentViewModel? Find(string agentId) =>
         subAgentById.TryGetValue(agentId, out var agent) ? agent : null;
 
     private void StartSubAgent(AgentSubAgentStarted started)
     {
+        // The baseline first: every run differences its own tokens against the counter as it stands here, so a resumed
+        // child never re-counts what its earlier runs already reported.
+        subAgentRunStart[started.ChildId] = agentUsage.TryGetValue(started.ChildId, out var known) ? known : TokenUsage.Empty;
+
         if (subAgentById.ContainsKey(started.ChildId))
         {
+            return;
+        }
+
+        // A resumed child (the parent handing the same agent its next task) comes back as the tab it already was: its
+        // transcript, round counter, cumulative usage reading and turn-metric rows all continue - a fresh tab would
+        // restart the rounds and collide (child session, turn 1) with the rows its earlier runs already wrote.
+        if (TakeFinishedSubAgent(started.ChildId) is { } resumed)
+        {
+            resumed.IsReadOnly = false;
+            resumed.MarkResumed();
+            subAgentById[started.ChildId] = resumed;
+            subAgents.Add(resumed);
+            resumed.Transcript.AddUserMessage(started.Task, started.At);
+            DrainEarlyDeltas(resumed);
+            OnPropertyChanged(nameof(HasSubAgents));
+            OnPropertyChanged(nameof(HasSubAgentActivity));
+            RaiseSubAgentCounters();
+            SubAgentsChanged?.Invoke();
+            OnAgentStateChanged();
+            OpenSubAgent(resumed);
+            // The menu holds a snapshot of the list, not the list itself, so pulling a tab back out of the history has
+            // to be told - or the count still lists a tab that is live again.
+            SyncFinishedMenu();
             return;
         }
 
@@ -2460,10 +2630,15 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             StartSubAgentStop,
             started.AgentId,
             Title,
-            openSession)
+            openSession,
+            instrumentSources,
+            started.ProviderId)
         {
             IsAutomation = automationChildIds.TryRemove(started.ChildId, out _),
         };
+        // The task is a user message - Core persists it as one, so a replayed tab draws it - and the live tab draws it
+        // here too: one transcript, the same rows live as replayed.
+        agent.Transcript.AddUserMessage(started.Task, started.At);
         subAgentById[started.ChildId] = agent;
         subAgents.Add(agent);
         DrainEarlyDeltas(agent);
@@ -2486,6 +2661,25 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
     }
 
+    /// <summary>
+    /// Pulls a finished child's tab back out of the finished menu, keeping its transcript and every counter: a resumed run
+    /// continues them. The finished list is in run-end order and small; a linear scan by child id is the whole cost.
+    /// </summary>
+    private SubAgentViewModel? TakeFinishedSubAgent(string childId)
+    {
+        for (var index = 0; index < finished.Count; index++)
+        {
+            if (string.Equals(finished[index].AgentId, childId, StringComparison.Ordinal))
+            {
+                var resumed = finished[index];
+                finished.RemoveAt(index);
+                return resumed;
+            }
+        }
+
+        return null;
+    }
+
     private void FinishSubAgent(AgentSubAgentFinished finishedEvent)
     {
         if (Find(finishedEvent.AgentId) is not { } agent)
@@ -2493,18 +2687,30 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return;
         }
 
-        // The terminal event carries this run's usage even when the child's last turn reported none.
-        var previous = agentUsage.TryGetValue(finishedEvent.AgentId, out var stored) ? stored : TokenUsage.Empty;
-        var delta = new TokenUsage(
-            Math.Max(0, finishedEvent.Usage.InputTokens - previous.InputTokens),
-            Math.Max(0, finishedEvent.Usage.OutputTokens - previous.OutputTokens));
+        // The terminal event carries THIS RUN's usage (a difference Core took before the run began), so the unreported
+        // part is what this run's own turns did not already count: the counter's move since the run started. A completed
+        // run leaves nothing; one that failed mid-turn still owes its partial spend to the open card and the reading.
+        var runStart = subAgentRunStart.TryGetValue(finishedEvent.AgentId, out var baseline) ? baseline : TokenUsage.Empty;
+        var reported = agentUsage.TryGetValue(finishedEvent.AgentId, out var counter) ? counter : TokenUsage.Empty;
+        var delta = UnreportedRunUsage(finishedEvent.Usage, reported, runStart);
         if (delta.InputTokens > 0 || delta.OutputTokens > 0)
         {
-            agent.Transcript.Current?.AddUsage(delta, StopReason.EndTurn);
+            (agent.Transcript.Current ?? (subAgentLastCards.TryGetValue(finishedEvent.AgentId, out var lastCard) ? lastCard : null))
+                ?.AddUsage(delta, StopReason.EndTurn);
+            agent.Instruments.AddTurn(finishedEvent.AgentId, delta);
+        }
+        subAgentRunStart.TryRemove(finishedEvent.AgentId, out _);
+
+        // A failed or stopped run had no completion event, so its turn never reached the count through the per-turn close;
+        // the run's own elapsed is that turn's clock (queueing included, which is how the run measured it).
+        if (agent.Transcript.Current is { } openCard)
+        {
+            agent.Instruments.NoteTurnEnded(openCard.Round, finishedEvent.Elapsed);
         }
 
-        agent.ApplyUsageIfMissing(finishedEvent.Usage);
-        agent.Finish(finishedEvent.Status, finishedEvent.Usage, finishedEvent.Elapsed, finishedEvent.Error);
+        agent.Finish(finishedEvent.Status, finishedEvent.Elapsed, finishedEvent.Error);
+        subAgentToolCalls.TryRemove(finishedEvent.AgentId, out _);
+        subAgentLastCards.TryRemove(finishedEvent.AgentId, out _);
 
         // A clean finish is already visible in the sub-agent tab; a failure or a stop is what the user has to hear about.
         if (finishedEvent.Status is SubAgentStatus.Failed or SubAgentStatus.Stopped)
@@ -2517,8 +2723,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
         subAgentById.TryRemove(finishedEvent.AgentId, out _);
         FinishToolsOf(finishedEvent.AgentId);
-        agentUsage.Remove(finishedEvent.AgentId);
-        agentStream.Remove(finishedEvent.AgentId);
+        // The usage and stream counters stay: a resumed run differences its turns against them, so its first turn reports
+        // only the new task's tokens and not the whole instance cumulative again.
         subAgents.Remove(agent);
         finished.Add(agent);
         SyncFinishedMenu();
@@ -2547,6 +2753,16 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         ClearLiveTools();
         ReleaseInspectorListeners();
         Instruments.Dispose();
+        foreach (var agent in subAgents)
+        {
+            agent.DisposeInstruments();
+        }
+
+        foreach (var agent in finished)
+        {
+            agent.DisposeInstruments();
+        }
+
         Composer.Dispose();
         foreach (var message in queued.ToArray())
         {
@@ -2612,8 +2828,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 /// </summary>
 internal sealed class SubAgentViewModel : NotifyingObject
 {
-    private const int TabTaskLimit = 18;
-
     private readonly Action<string>? stopRequested;
     private readonly string kind;
     private readonly string parentTitle;
@@ -2621,8 +2835,6 @@ internal sealed class SubAgentViewModel : NotifyingObject
     private SubAgentStatus status = SubAgentStatus.Queued;
     private DateTimeOffset startedAt;
     private TimeSpan elapsed;
-    private TokenUsage usage = TokenUsage.Empty;
-    private bool sawUsage;
     private LocText error;
     private LocText statusNote = SessionStrings.SubAgentWaitingSlot;
     private bool isReadOnly;
@@ -2633,6 +2845,9 @@ internal sealed class SubAgentViewModel : NotifyingObject
     /// <param name="parentAgentId">The agent that spawned this one; null for a direct child of the main session.</param>
     /// <param name="parentTitle">The title of the session (or agent) this tab hangs under; the breadcrumb's first segment.</param>
     /// <param name="backToParent">Switch the shell back to the parent's tab; null hides the breadcrumb's way back.</param>
+    /// <param name="sources">The shared instrument sources; null (a standalone view) reads a null object.</param>
+    /// <param name="providerId">The connected provider serving this child's model, as the start event carried it.</param>
+    /// <param name="childInfo">The child's own stored session row, when the caller has one; a synthetic stand-in otherwise.</param>
     public SubAgentViewModel(
         string sessionId,
         string agentId,
@@ -2643,7 +2858,10 @@ internal sealed class SubAgentViewModel : NotifyingObject
         Action<string>? stopRequested,
         string? parentAgentId = null,
         string? parentTitle = null,
-        Action? backToParent = null)
+        Action? backToParent = null,
+        ISessionInstrumentSources? sources = null,
+        string? providerId = null,
+        SessionInfo? childInfo = null)
     {
         SessionId = sessionId;
         AgentId = agentId;
@@ -2653,10 +2871,20 @@ internal sealed class SubAgentViewModel : NotifyingObject
         this.parentTitle = parentTitle ?? string.Empty;
         this.backToParent = backToParent;
         Task = task;
-        Model = model;
+        this.model = model;
         this.stopRequested = stopRequested;
         Transcript = new TranscriptViewModel(collapseOlderTurns: true);
+        // Every turn card this transcript begins names the model that ran it: the run's model from
+        // AgentSubAgentStarted, the same stamp the root's turns carry, so the turn's divider line reads the same.
+        Transcript.StampTurnModel = card => card.NoteModel(providerId, model.Length == 0 ? null : model);
         StopCommand = new RelayCommand(RequestStop, () => CanStop);
+        // A sub-agent is its own session with its own spend, context window and account meter, so it reads them off the
+        // same instruments the root's strip uses - one class, one rendering, one set of strings - scoped to this child's
+        // agent id and fed by the events routed to it. Built on first use: the history rows a session restores would
+        // otherwise pay a turn-metrics read each, for readouts only an opened tab ever reads.
+        this.providerId = providerId;
+        instrumentsSession = childInfo ?? new SessionInfo(ChildSessionId, string.Empty, kind, DateTimeOffset.UnixEpoch);
+        instrumentsSources = sources ?? EmptySessionInstrumentSources.Instance;
         BackToParentCommand = new RelayCommand(
             () => this.backToParent?.Invoke(),
             () => HasBackToParent);
@@ -2695,9 +2923,13 @@ internal sealed class SubAgentViewModel : NotifyingObject
 
     public string Task { get; }
 
-    public string Model { get; }
+    /// <summary>The model this child runs. A live child's comes from the start event; a stored row's is seeded from its
+    /// own last recorded turn, so its instruments price and window against the model that actually ran.</summary>
+    public string Model => model;
 
-    public string ModelText => Model.Length == 0 ? SessionStrings.NoModel : Model;
+    private string model;
+
+    private string? providerId;
 
     public string TaskSummary => ToolRowViewModel.Compact(Task, 120);
 
@@ -2711,15 +2943,43 @@ internal sealed class SubAgentViewModel : NotifyingObject
     /// </summary>
     public bool CanStop => status == SubAgentStatus.Running && !isStopRequested;
 
-    public string TabTitle => (IsReadOnly ? "○ " : "▸ ") + Kind + " · " + ToolRowViewModel.Compact(Task, TabTaskLimit);
+    /// <summary>
+    /// The name the tab and the breadcrumb share. A live child's id is Core's kind-prefixed counter ("Worker-3"): it
+    /// already says what it is and stays the word the model resumes it by, so the id alone - the task text moved to the
+    /// tab's and the breadcrumb's hover. A kind Core had to sanitize lost its name in the id, so the kind rides along in
+    /// the kind·id form. A stored row's live id died with the process that issued it and can never be resumed again:
+    /// showing it would be a number that means nothing, so the kind alone names it.
+    /// </summary>
+    public string DisplayName
+    {
+        get
+        {
+            if (FromStoredRow || AgentId.Length == 0)
+            {
+                return Kind;
+            }
+
+            return AgentId.StartsWith(Kind, StringComparison.OrdinalIgnoreCase)
+                ? AgentId
+                : Kind + " · " + AgentId;
+        }
+    }
+
+    /// <summary>True when this row came from the store rather than a live start event.</summary>
+    internal bool FromStoredRow { get; init; }
+
+    // The marker is the tab's own at-a-glance state: ○ a read-only history tab, ▸ one that is (or was last) live. The
+    // breadcrumb's badge and the status word say the same thing, but the tab strip shows only this line - the marker is
+    // how a tab tells its state without being open.
+    public string TabTitle => (IsReadOnly ? "○ " : "▸ ") + DisplayName;
 
     // ---------------------------------------------------------------- breadcrumb
 
     /// <summary>The session this sub-agent runs under, as its tab title reads it: the breadcrumb's first segment.</summary>
     public string ParentSessionTitle => parentTitle;
 
-    /// <summary>The sub-agent's own short name (its kind, or "sub-agent" when the store recorded none).</summary>
-    public string BreadcrumbName => Kind;
+    /// <summary>The sub-agent's own name in the breadcrumb: the same word its tab is titled by.</summary>
+    public string BreadcrumbName => DisplayName;
 
     /// <summary>True when there is a parent tab to switch back to and the shell wired the way there.</summary>
     public bool HasBackToParent => backToParent is not null && parentTitle.Length > 0;
@@ -2800,14 +3060,40 @@ internal sealed class SubAgentViewModel : NotifyingObject
 
     public bool HasStatusNote => !statusNote.IsEmpty;
 
-    public TokenUsage Usage => usage;
-
-    /// <summary>"模型 · 输入 N · 输出 M"; an unreported side is "—".</summary>
-    public string UsageText => ModelText + " · " +
-        SessionStrings.TokenSummary(sawUsage ? usage.InputTokens : null, sawUsage ? usage.OutputTokens : null);
-
     public string ElapsedText =>
         IsFinished || status == SubAgentStatus.Running ? TextFormat.Elapsed(elapsed) : TextFormat.None;
+
+    /// <summary>The connected provider serving this child's model, as the start event carried it (null: the default).</summary>
+    public string? ProviderId => providerId;
+
+    /// <summary>The child's own readings - the same instruments class the root's strip uses, scoped to this agent.</summary>
+    public SessionInstrumentsViewModel Instruments => instruments ??= new SessionInstrumentsViewModel(
+        instrumentsSession,
+        instrumentsSources,
+        () => model,
+        () => providerId,
+        agentId: AgentId);
+
+    /// <summary>Whether the child's instruments were ever built: the lazy gate the session's close respects.</summary>
+    internal bool InstrumentsBuilt => instruments is not null;
+
+    /// <summary>Releases the child's instruments, and only if they were ever built.</summary>
+    internal void DisposeInstruments() => instruments?.Dispose();
+
+    private SessionInstrumentsViewModel? instruments;
+    private readonly SessionInfo instrumentsSession;
+    private readonly ISessionInstrumentSources instrumentsSources;
+
+    /// <summary>
+    /// A stored row learns who it ran from its own last recorded turn: the replay already seeded that turn's divider with
+    /// the metrics row's provider and model, and the instruments read the same pair so the window and the cost of a history
+    /// tab are the model that actually ran, not an empty guess.
+    /// </summary>
+    public void SeedStoredModel(string? provider, string storedModel)
+    {
+        providerId = provider;
+        model = storedModel;
+    }
 
     /// <summary>The run's failure message, untranslated; null when the run did not fail.</summary>
     public string? Error => error.IsEmpty ? null : error.Resolve();
@@ -2838,40 +3124,32 @@ internal sealed class SubAgentViewModel : NotifyingObject
         Transcript.AddNotice(SessionStrings.FollowUpNotice(ToolRowViewModel.Compact(instruction, 160)));
     }
 
-    public void ApplyUsageIfMissing(TokenUsage value)
-    {
-        if (sawUsage || (value.InputTokens == 0 && value.OutputTokens == 0))
-        {
-            return;
-        }
-
-        usage = value;
-        sawUsage = true;
-        OnPropertyChanged(nameof(UsageText));
-        OnPropertyChanged(nameof(ElapsedText));
-    }
-
-    public void Finish(SubAgentStatus finalStatus, TokenUsage finalUsage, TimeSpan finalElapsed, string? finalError)
+    public void Finish(SubAgentStatus finalStatus, TimeSpan finalElapsed, string? finalError)
     {
         Status = finalStatus;
-        if (finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0)
-        {
-            usage = finalUsage;
-            sawUsage = true;
-        }
-        else if (!sawUsage)
-        {
-            usage = finalUsage;
-            sawUsage = finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0;
-        }
-
         elapsed = finalElapsed;
         error = finalError is null ? default : LocText.Literal(finalError);
         SetStatusNote(error);
-        Transcript.EndTurn(finalElapsed, error);
+        // Isolated: the run is over, nothing more may append to its turn's card - a resumed run's next content must
+        // begin a fresh one instead of piling into the closed (and possibly failed) card that "current" still names.
+        Transcript.EndIsolatedTurn(finalElapsed, error);
         OnPropertyChanged(nameof(Error));
-        OnPropertyChanged(nameof(UsageText));
         OnPropertyChanged(nameof(ElapsedText));
+        StopCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// The parent handed this child its next task: the per-run state starts clean. The stop gate reopens (a stop that was
+    /// requested closed it for that run's life), the last run's error stops being the footnote, the unknown-outcome mark
+    /// lifts - the new run will say how it went. The task and the model stay: a resumed run continues the same work.
+    /// </summary>
+    internal void MarkResumed()
+    {
+        isStopRequested = false;
+        error = default;
+        outcomeUnknown = false;
+        SetStatusNote(default);
+        OnPropertyChanged(nameof(Error));
         StopCommand.NotifyCanExecuteChanged();
     }
 
@@ -2900,8 +3178,7 @@ internal sealed class SubAgentViewModel : NotifyingObject
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(StatusNote));
         OnPropertyChanged(nameof(HasStatusNote));
-        OnPropertyChanged(nameof(ModelText));
-        OnPropertyChanged(nameof(UsageText));
+        // The child's own instruments follow the language switch by themselves (they subscribe like the root's do).
         OnPropertyChanged(nameof(ElapsedText));
         OnPropertyChanged(nameof(ReadOnlyBadgeText));
         OnPropertyChanged(nameof(BreadcrumbName));
@@ -2920,7 +3197,8 @@ internal sealed class SubAgentViewModel : NotifyingObject
         string parentAgentId,
         SubAgentStatus? status,
         string? parentTitle = null,
-        Action? backToParent = null)
+        Action? backToParent = null,
+        ISessionInstrumentSources? sources = null)
     {
         var agent = new SubAgentViewModel(
             sessionId,
@@ -2932,13 +3210,16 @@ internal sealed class SubAgentViewModel : NotifyingObject
             stopRequested: null,
             parentAgentId,
             parentTitle,
-            backToParent)
+            backToParent,
+            sources,
+            childInfo: session)
         {
             IsReadOnly = true,
+            FromStoredRow = true,
         };
         if (status is { } known)
         {
-            agent.Finish(known, TokenUsage.Empty, TimeSpan.Zero, null);
+            agent.Finish(known, TimeSpan.Zero, null);
         }
         else
         {
@@ -2953,7 +3234,7 @@ internal sealed class SubAgentViewModel : NotifyingObject
     {
         outcomeUnknown = true;
         SetStatusNote(default);
-        Transcript.EndTurn(null, null);
+        Transcript.EndIsolatedTurn(null, null);
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(IsFinished));
         OnPropertyChanged(nameof(IsLive));

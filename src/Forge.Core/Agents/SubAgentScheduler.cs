@@ -514,7 +514,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
                     task,
                     instance.Definition.Model.Model,
                     instance.SessionId,
-                    DateTimeOffset.UtcNow));
+                    DateTimeOffset.UtcNow,
+                    instance.Definition.Model.ProviderId));
             }
 
             var result = await Runner(instance, message, sink, run.Token).ConfigureAwait(false);

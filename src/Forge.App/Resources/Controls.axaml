@@ -115,12 +115,15 @@
     <Setter Property="BorderThickness" Value="1" />
   </Style>
 
+  <!-- The light tier keeps its 1 px divider line in all three states: only the fill moves. -->
   <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
   </Style>
 
   <Style Selector="Button.ghost:pressed /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
   </Style>
 
   <!-- Tier 1 of the one button system: no border, no fill, the small (26 px) geometry of the SPEC's button table - so
@@ -166,11 +169,13 @@
   </Style>
 
   <!-- An icon-only button is not the shape above: it keeps the 26 px box, no border and no fill, so `ghost icon` stays a
-       flat glyph in a row or a title bar. -->
+       flat glyph in a row or a title bar. Its radius is the small one (RadiusSm), not the button radius: the box is only
+       26 px across, and the rounder corner made it read as a chip. -->
   <Style Selector="Button.icon">
     <Setter Property="MinWidth" Value="26" />
     <Setter Property="MinHeight" Value="26" />
     <Setter Property="Padding" Value="4" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>

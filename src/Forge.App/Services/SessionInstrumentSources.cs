@@ -31,6 +31,13 @@ internal interface ISessionInstrumentSources
     ModelMetadata ModelMetadata(string modelId, string? providerId = null);
 
     /// <summary>
+    /// The cache lifetime this provider is configured for (auto/5m/1h), null when it has none: the value a freshly opened
+    /// session shows before its first request resolves the policy into a concrete ttl. Config, not measurement - the
+    /// measured value still arrives with the context event and takes over.
+    /// </summary>
+    string? PromptCacheTtl(string? providerId);
+
+    /// <summary>
     /// The main turns a session already recorded: how many it ran and how long they took, summed for the usage summary.
     /// The source is <c>turn_metrics</c> — every turn, a failed or unreported one included — and a database without that
     /// table falls back to <c>turn_checkpoints</c>. Runs off the UI thread; a session that recorded nothing (a scratch
@@ -193,6 +200,10 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
     /// <summary>Composition owns the store; a standalone view has none, and replay then simply shows "—" for the values
     /// only the metrics table knows.</summary>
     public ITurnMetricsStore? TurnMetrics => composition.TurnMetrics;
+
+    public string? PromptCacheTtl(string? providerId) => composition.Providers.Catalog.Providers
+        .FirstOrDefault(provider => string.Equals(provider.Id, providerId, StringComparison.Ordinal))
+        ?.Definition.PromptCacheTtl;
 
     public bool McpFailed()
     {
@@ -379,6 +390,8 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
     }
 
     public ModelMetadata ModelMetadata(string modelId, string? providerId = null) => Abstractions.ModelMetadata.Unknown;
+
+    public string? PromptCacheTtl(string? providerId) => null;
 
     public Task<SessionTurnHistory> TurnHistoryAsync(string sessionId, CancellationToken ct, int? maxTurnExclusive = null) =>
         Task.FromResult(SessionTurnHistory.Empty);

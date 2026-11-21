@@ -1,0 +1,126 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             x:Class="Forge.App.Views.InstrumentReadingsView"
+             x:DataType="vm:SessionInstrumentsViewModel">
+  <!-- The readings every instrument strip shows, as one control: the account windows, the cache lifetime, the usage
+       summary (its label IS the reading, its flyout the expanded form), and the context gauge. The composer strip hosts
+       it for the session; a sub-agent's breadcrumb hosts it for that child - same class, same data, one rendering, and
+       the differences (no manual compaction on a child) arrive as a missing CompactCommand. -->
+  <StackPanel Orientation="Horizontal"
+              Spacing="8"
+              VerticalAlignment="Center"
+              ToolTip.Tip="{Binding UsageTooltip}"
+              AutomationProperties.AutomationId="readings">
+    <TextBlock Classes="instrument-meta"
+               Classes.quota-warning="{Binding IsQuotaWarning}"
+               Classes.quota-rejected="{Binding IsQuotaRejected}"
+               VerticalAlignment="Center"
+               IsVisible="{Binding HasQuota}"
+               Text="{Binding QuotaLabel}"
+               ToolTip.Tip="{Binding QuotaTooltip}"
+               AutomationProperties.AutomationId="strip-quota" />
+    <TextBlock Classes="instrument-meta"
+               VerticalAlignment="Center"
+               IsVisible="{Binding HasCacheTtl}"
+               Text="{Binding CacheTtlText}"
+               ToolTip.Tip="{Binding CacheTtlTooltip}"
+               AutomationProperties.AutomationId="strip-cache-ttl" />
+    <!-- The session usage summary: the expanded form of the hover line above, plus the two numbers the hover line
+         has no room for — the turns and the time they took. A flyout, not a dialog: it reads and closes. -->
+    <Button Classes="instrument-chip"
+            ToolTip.Tip="{Binding UsageSummaryTooltip}"
+            AutomationProperties.AutomationId="strip-usage-summary"
+            AutomationProperties.Name="{Binding UsageSummaryTitle}">
+      <StackPanel Orientation="Horizontal" Spacing="5">
+        <wc:FluentIcon Data="{StaticResource IconLayers}" Width="13" Height="13" />
+        <!-- The label is the reading: tokens and the cache-hit rate live on the chip itself. -->
+        <TextBlock Text="{Binding UsageChipText}" VerticalAlignment="Center" />
+        <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="11" Height="11" />
+      </StackPanel>
+      <Button.Flyout>
+        <Flyout Placement="BottomEdgeAlignedRight">
+          <!-- The flyout presenter already draws the popup card (white, 1 px divider border, button radius):
+               this border only carries the panel's own padding and width. -->
+          <Border MinWidth="240"
+                  MaxWidth="320"
+                  Padding="8"
+                  AutomationProperties.AutomationId="strip-usage-summary-panel">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="h2" Text="{Binding UsageSummaryTitle}" />
+              <TextBlock Classes="caption"
+                         IsVisible="{Binding IsUsageSummaryEmpty}"
+                         TextWrapping="Wrap"
+                         Foreground="{DynamicResource TextMutedBrush}"
+                         Text="{Binding UsageSummaryEmptyText}" />
+              <ItemsControl ItemsSource="{Binding UsageSummaryRows}"
+                            AutomationProperties.AutomationId="strip-usage-summary-rows">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:UsageStatRow">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,1">
+                      <TextBlock Classes="caption"
+                                 Foreground="{DynamicResource TextSecondaryBrush}"
+                                 Text="{Binding Label}" />
+                      <TextBlock Grid.Column="1"
+                                 Classes="caption mono"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"
+                                 Text="{Binding Value}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Classes="caption"
+                         Margin="0,4,0,0"
+                         TextWrapping="Wrap"
+                         Foreground="{DynamicResource TextMutedBrush}"
+                         Text="{Binding UsageSummaryHint}" />
+            </StackPanel>
+          </Border>
+        </Flyout>
+      </Button.Flyout>
+    </Button>
+    <Button Classes="instrument-chip context-gauge"
+            Classes.warning="{Binding IsContextWarning}"
+            Classes.over="{Binding IsContextOver}"
+            Padding="4,0"
+            Command="{Binding $parent[views:InstrumentReadingsView].CompactCommand}"
+            ToolTip.Tip="{Binding $parent[views:InstrumentReadingsView].GaugeTooltip}"
+            AutomationProperties.AutomationId="strip-context-compact"
+            AutomationProperties.Name="{Binding [session.strip.context.compact], Source={x:Static loc:Loc.Instance}}">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <ItemsControl ItemsSource="{Binding ContextSegments}"
+                      VerticalAlignment="Center"
+                      AutomationProperties.AutomationId="strip-context-gauge">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:ContextSegment">
+              <!-- One slanted quadrilateral, same size for every segment; filled ones are solid, the rest outline
+                   only. The brush comes from the gauge's state styles. -->
+              <Panel Width="13" Height="8" VerticalAlignment="Center">
+                <Polygon Classes="gauge-fill"
+                         Points="0,8 3,0 13,0 10,8"
+                         IsVisible="{Binding IsFilled}" />
+                <Polygon Classes="gauge-outline"
+                         Points="0,8 3,0 13,0 10,8"
+                         StrokeThickness="1"
+                         Fill="Transparent"
+                         IsVisible="{Binding IsEmpty}" />
+              </Panel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Classes="instrument-meta gauge-label"
+                   VerticalAlignment="Center"
+                   Text="{Binding ContextLabel}"
+                   AutomationProperties.AutomationId="strip-context-label" />
+      </StackPanel>
+    </Button>
+  </StackPanel>
+</UserControl>

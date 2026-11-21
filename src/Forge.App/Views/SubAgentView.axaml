@@ -5,7 +5,7 @@
              xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.SubAgentView"
              x:DataType="vm:SubAgentViewModel">
-  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource CardBackgroundBrush}">
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource CardBackgroundBrush}">
     <!-- Where this tab sits: the parent session's title, then the sub-agent's own name. The parent segment switches the
          shell back to the parent's tab; the sub-agent keeps running and its tab stays in the bottom group. -->
     <Border Grid.Row="0"
@@ -15,24 +15,62 @@
             AutomationProperties.AutomationId="subagent-breadcrumb">
       <Border.Styles>
         <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+        <StyleInclude Source="avares://Forge.App/Resources/ComposerStyles.axaml" />
       </Border.Styles>
-      <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-        <Button Classes="breadcrumb"
-                IsVisible="{Binding HasBackToParent}"
-                Content="{Binding ParentSessionTitle}"
-                Command="{Binding BackToParentCommand}"
-                ToolTip.Tip="{Binding BackToParentText}"
-                AutomationProperties.AutomationId="subagent-breadcrumb-parent"
-                AutomationProperties.Name="{Binding BackToParentText}" />
-        <TextBlock Classes="breadcrumb-separator"
-                   IsVisible="{Binding HasBackToParent}"
-                   Text="&#x203A;" />
-        <TextBlock Classes="breadcrumb-current"
-                   MaxWidth="420"
-                   TextTrimming="CharacterEllipsis"
-                   Text="{Binding BreadcrumbName}"
-                   AutomationProperties.AutomationId="subagent-breadcrumb-name" />
-      </StackPanel>
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button Classes="breadcrumb"
+                  IsVisible="{Binding HasBackToParent}"
+                  Content="{Binding ParentSessionTitle}"
+                  Command="{Binding BackToParentCommand}"
+                  ToolTip.Tip="{Binding BackToParentText}"
+                  AutomationProperties.AutomationId="subagent-breadcrumb-parent"
+                  AutomationProperties.Name="{Binding BackToParentText}" />
+          <TextBlock Classes="breadcrumb-separator"
+                     IsVisible="{Binding HasBackToParent}"
+                     Text="&#x203A;" />
+          <TextBlock Classes="breadcrumb-current"
+                     MaxWidth="420"
+                     TextTrimming="CharacterEllipsis"
+                     Text="{Binding BreadcrumbName}"
+                     ToolTip.Tip="{Binding Task}"
+                     AutomationProperties.AutomationId="subagent-breadcrumb-name" />
+        </StackPanel>
+        <!-- The run's state lives beside the breadcrumb (the bottom status row is gone): the dot and the word, the one-line
+             note when there is one, the read-only badge of a replayed tab, and - only while stopping would do something -
+             the run's stop. The task, the run usage and the live clock the row also carried are covered elsewhere: the
+             tab title and the finished menu carry the task, and the turn's divider carries the tokens. -->
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    VerticalAlignment="Center">
+          <Ellipse Classes="status-dot" Classes.running="{Binding IsLive}" />
+          <TextBlock Classes="label" Text="{Binding StatusText}" VerticalAlignment="Center" />
+          <TextBlock Classes="caption"
+                     Text="{Binding StatusNote}"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding HasStatusNote}" />
+          <Border IsVisible="{Binding ReadOnlyBadgeVisible}"
+                  Background="{DynamicResource BrandTintBrush}"
+                  CornerRadius="{StaticResource RadiusSm}"
+                  Padding="5,0"
+                  VerticalAlignment="Center">
+            <TextBlock Classes="label" Text="{Binding ReadOnlyBadgeText}" Foreground="{DynamicResource BrandActionBrush}" />
+          </Border>
+          <!-- The child's own readings, the very control the composer strip hosts: its quota, its cache lifetime,
+               its usage chip with the summary flyout, its context gauge. A sub-agent is its own session, so it reads
+               its own numbers through the same instruments class; the gauge has no click action here - a child's
+               compaction stays automatic. -->
+          <views:InstrumentReadingsView DataContext="{Binding Instruments}" />
+          <Button Classes="ghost"
+                  Content="{Binding [subagent.stop], Source={x:Static loc:Loc.Instance}}"
+                  IsVisible="{Binding CanStop}"
+                  Command="{Binding StopCommand}"
+                  AutomationProperties.AutomationId="stop-subagent"
+                  AutomationProperties.Name="{Binding [subagent.stopName], Source={x:Static loc:Loc.Instance}}"
+                  ToolTip.Tip="{Binding [subagent.stopTooltip], Source={x:Static loc:Loc.Instance}}" />
+        </StackPanel>
+      </Grid>
     </Border>
 
     <views:TranscriptListBox x:Name="Transcript"
@@ -49,46 +87,5 @@
       </ListBox.ItemsPanel>
     </views:TranscriptListBox>
 
-    <Border Grid.Row="2"
-            Background="{DynamicResource CardBackgroundBrush}"
-            BorderBrush="{DynamicResource BorderBrush}"
-            BorderThickness="0,1,0,0"
-            Padding="12,6">
-      <Border.Styles>
-        <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-      </Border.Styles>
-      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
-        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-          <Ellipse Classes="status-dot" Classes.running="{Binding IsLive}" />
-          <TextBlock Classes="label" Text="{Binding StatusText}" VerticalAlignment="Center" />
-          <TextBlock Classes="caption" Text="{Binding StatusNote}" VerticalAlignment="Center" IsVisible="{Binding HasStatusNote}" />
-          <Border IsVisible="{Binding ReadOnlyBadgeVisible}"
-                  Background="{DynamicResource BrandTintBrush}"
-                  CornerRadius="{StaticResource RadiusSm}"
-                  Padding="5,0"
-                  VerticalAlignment="Center">
-            <TextBlock Classes="label" Text="{Binding ReadOnlyBadgeText}" Foreground="{DynamicResource BrandActionBrush}" />
-          </Border>
-        </StackPanel>
-        <TextBlock Grid.Column="1"
-                   Classes="caption"
-                   Margin="12,0,0,0"
-                   MaxWidth="280"
-                   VerticalAlignment="Center"
-                   Text="{Binding TaskSummary}"
-                   TextTrimming="CharacterEllipsis"
-                   ToolTip.Tip="{Binding Task}" />
-        <TextBlock Grid.Column="3" Classes="caption" Margin="0,0,12,0" Text="{Binding UsageText}" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="4" Classes="mono" Margin="0,0,12,0" Text="{Binding ElapsedText}" VerticalAlignment="Center" />
-        <Button Grid.Column="5"
-                Classes="ghost"
-                Content="{Binding [subagent.stop], Source={x:Static loc:Loc.Instance}}"
-                IsVisible="{Binding CanStop}"
-                Command="{Binding StopCommand}"
-                AutomationProperties.AutomationId="stop-subagent"
-                AutomationProperties.Name="{Binding [subagent.stopName], Source={x:Static loc:Loc.Instance}}"
-                ToolTip.Tip="{Binding [subagent.stopTooltip], Source={x:Static loc:Loc.Instance}}" />
-      </Grid>
-    </Border>
   </Grid>
 </UserControl>

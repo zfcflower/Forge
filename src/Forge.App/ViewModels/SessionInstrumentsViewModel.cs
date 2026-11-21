@@ -52,6 +52,9 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 {
     private readonly SessionInfo session;
     private readonly ISessionInstrumentSources sources;
+
+    /// <summary>Whose agent events this instance reads; "root" for the session's own strip.</summary>
+    private readonly string agentId;
     private readonly Func<string> currentModel;
     private readonly Func<string?> currentProvider;
 
@@ -94,15 +97,26 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// <summary>Guards the one corrective re-read: a history read that raced this window's first turn end is redone with the cutoff.</summary>
     private bool turnHistoryReread;
 
+    /// <summary>
+    /// The wall clock of the turns this window watched end. The stored rows of the same turns are excluded from the
+    /// history read by the cutoff, so the two sides never double-count - and the summary's duration stops being a number
+    /// only a reopened tab could see.
+    /// </summary>
+    private TimeSpan liveDuration;
+
     public SessionInstrumentsViewModel(
         SessionInfo session,
         ISessionInstrumentSources sources,
         Func<string> currentModel,
         Func<string?>? currentProvider = null,
-        Action? openInspector = null)
+        Action? openInspector = null,
+        string? agentId = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         this.session = session;
+        // The events this instance owns: the root's own id is "root"; a sub-agent tab passes its child's id and reads
+        // its own context, quota and spend from the same events, through the same code.
+        this.agentId = agentId ?? "root";
         this.sources = sources ?? EmptySessionInstrumentSources.Instance;
         this.currentModel = currentModel ?? (static () => string.Empty);
         this.currentProvider = currentProvider ?? (static () => null);
@@ -114,6 +128,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         this.sources.McpStateChanged += OnMcpStateChanged;
         mcpFailed = this.sources.McpFailed();
         RaiseQuota();
+        SeedCacheTtl();
         RefreshTurnHistory();
     }
 
@@ -190,13 +205,42 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// </summary>
     public bool HasCacheTtl => !string.IsNullOrEmpty(cacheTtl);
 
+    /// <summary>True once a request reported the ttl that actually went out; until then the chip shows the provider's
+    /// configuration, which a reopened session knows without waiting for a first request.</summary>
+    private bool cacheTtlMeasured;
+
     /// <summary>"缓存 1h" — the lifetime in force, empty before the first measured request.</summary>
     public string CacheTtlText => HasCacheTtl ? InstrumentsStrings.CacheTtlLabel(cacheTtl!) : string.Empty;
 
     /// <summary>The hover line: which lifetime, and the one sentence that says what changing it saves.</summary>
     public string CacheTtlTooltip => HasCacheTtl ? InstrumentsStrings.CacheTtlTooltip(cacheTtl!) : string.Empty;
 
+    /// <summary>
+    /// The provider's configured lifetime, shown until a request reports the one that really went out. The composer's
+    /// provider can change (or arrive after the strip was built), so this re-reads on every counter refresh - the measured
+    /// value, once noted, owns the chip and the seed never overwrites it.
+    /// </summary>
+    private void SeedCacheTtl()
+    {
+        if (cacheTtlMeasured)
+        {
+            return;
+        }
+
+        // Writes the field without marking it measured: a provider switch before the first request re-reads this, and a
+        // provider without a configured lifetime keeps the chip hidden rather than pinning "none" on it.
+        SetCacheTtl(sources.PromptCacheTtl(currentProvider()));
+    }
+
     public void NoteCacheTtl(string? ttl)
+    {
+        // A request went out and reported the ttl it used: from here the chip is measured, and the configuration seed
+        // never overwrites it (see SeedCacheTtl).
+        cacheTtlMeasured = true;
+        SetCacheTtl(ttl);
+    }
+
+    private void SetCacheTtl(string? ttl)
     {
         if (string.Equals(cacheTtl, ttl, StringComparison.Ordinal))
         {
@@ -379,7 +423,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         {
             if (contextTokens is not { } used)
             {
-                return InstrumentsStrings.ContextPercent("0");
+                // Not zero: an unmeasured context is unknown, and a reopened session reads it that way until its next request.
+                return TextFormat.None;
             }
 
             return usableTokens is > 0
@@ -388,7 +433,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         }
     }
 
-    /// <summary>The gauge's own hover line: the numbers behind it, the trigger line, and that a click compacts now.</summary>
+    /// <summary>The gauge's own hover line: the numbers behind it and the trigger line. What a click does belongs to
+    /// the host (see InstrumentsStrings' compact/auto hints), not to the reading.</summary>
     public string ContextTooltip
     {
         get
@@ -449,7 +495,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// </summary>
     public void AddTurn(string agentId, TokenUsage delta)
     {
-        if (!IsRoot(agentId))
+        if (!OwnsAgent(agentId))
         {
             return;
         }
@@ -467,7 +513,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// every turn the session ran (a free or failed turn still took its place), so this is counted at the turn end and not
     /// when usage arrives: <see cref="AddTurn"/> only sees a turn whose provider reported something.
     /// </summary>
-    public void NoteTurnEnded(int turn)
+    public void NoteTurnEnded(int turn, TimeSpan? elapsed = null)
     {
         if (disposed)
         {
@@ -478,6 +524,11 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         {
             windowFirstTurn = turn;
             MaybeRereadTurnHistory();
+        }
+
+        if (elapsed is { } wall && wall > TimeSpan.Zero)
+        {
+            liveDuration += wall;
         }
 
         liveTurns++;
@@ -505,7 +556,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// </summary>
     public void NoteContext(string agentId, int contextTokens, int? usableTokens, int? triggerTokens)
     {
-        if (!IsRoot(agentId))
+        if (!OwnsAgent(agentId))
         {
             return;
         }
@@ -561,7 +612,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// <summary>How far below the trigger line, in percentage points of U, the gauge starts to warn.</summary>
     internal const int WarningMarginPercent = 10;
 
-    private static bool IsRoot(string agentId) => string.Equals(agentId, "root", StringComparison.Ordinal);
+    private bool OwnsAgent(string id) => string.Equals(id, agentId, StringComparison.Ordinal);
 
     /// <summary>
     /// The usage a reopened session already spent, summed from its stored messages. The prompt size of its last request is
@@ -664,9 +715,16 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
             ? Turns(turnHistory.Turns)
             : UsageStrings.TurnsValueText(Turns(turnHistory.Turns), Turns(liveTurns));
 
-    /// <summary>"4.2 秒" / "3 分 05 秒": the wall clock the recorded turns took; "—" when none recorded one.</summary>
-    public string UsageDurationText =>
-        turnHistory.Duration > TimeSpan.Zero ? TextFormat.Elapsed(turnHistory.Duration) : UsageStrings.UnknownText;
+    /// <summary>"4.2 秒" / "3 分 05 秒": the wall clock of the recorded turns plus the ones this window watched end;
+    /// "—" when neither side has a second.</summary>
+    public string UsageDurationText
+    {
+        get
+        {
+            var total = turnHistory.Duration + liveDuration;
+            return total > TimeSpan.Zero ? TextFormat.Elapsed(total) : UsageStrings.UnknownText;
+        }
+    }
 
     /// <summary>The turns the totals are divided by: the stored history plus the ones this window watched end, failures included.</summary>
     public int UsageTurnCount => turnHistory.Turns + liveTurns;
@@ -815,6 +873,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
         // The composer's provider can have changed since the last request; a reading from another account stops showing here.
         RaiseQuota();
+        // So can the cache lifetime's configuration, until a request reports the ttl that actually went out.
+        SeedCacheTtl();
     }
 
     /// <summary>An MCP server changed state, possibly on a pool thread; the dot is only read on the UI thread.</summary>
@@ -890,8 +950,9 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(ResourcesTooltip));
     }
 
-    /// <summary>Token counts the way a strip reads them: <c>900</c>, <c>36k</c>, <c>1.0M</c>.</summary>
-    private static string Scale(int value) => value switch
+    /// <summary>The one token scaler (<c>900</c>, <c>36k</c>, <c>1.0M</c>), shared by the strip's readings and the
+    /// sub-agent tab's own readout so the two can never drift apart.</summary>
+    internal static string Scale(int value) => value switch
     {
         >= 1_000_000 => (value / 1_000_000d).ToString("0.0", CultureInfo.InvariantCulture) + "M",
         >= 1_000 => (value / 1_000d).ToString("0.#", CultureInfo.InvariantCulture) + "k",
