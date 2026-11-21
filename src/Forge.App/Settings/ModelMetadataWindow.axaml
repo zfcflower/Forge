@@ -78,7 +78,7 @@
     <DataTemplate x:Key="MetaVisibilityCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line" Padding="8,3">
         <CheckBox IsChecked="{Binding IsShown, Mode=TwoWay}"
-                  HorizontalAlignment="Left"
+                  HorizontalAlignment="Center"
                   VerticalAlignment="Center"
                   ToolTip.Tip="{Binding Model}"
                   AutomationProperties.AutomationId="{Binding Model, StringFormat=model-metadata-shown-{0}}"
