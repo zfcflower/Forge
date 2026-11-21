@@ -53,10 +53,6 @@ internal sealed class TranscriptFollower
             VerticalAlignment = VerticalAlignment.Center,
         };
         stickyText.Bind(TextBlock.ForegroundProperty, stickyText.GetResourceObservable("TextPrimaryBrush"));
-        // The row can only show the beginning of the message, so the tip carries all of it: wrapped inside the tooltip's
-        // own width cap, because a one-line text is clipped there and the rest of a long prompt stayed unreadable.
-        stickyTip = ToolTipText.Wrap(null);
-        ToolTip.SetTip(stickyText, stickyTip);
         sticky = new Border
         {
             VerticalAlignment = VerticalAlignment.Top,
@@ -68,6 +64,11 @@ internal sealed class TranscriptFollower
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = stickyText,
         };
+        // The row can only show the beginning of the message, so the tip carries all of it, wrapped inside the tooltip's own
+        // width cap. It hangs on the row, not on its text: a tooltip whose owner is a TextBlock is handed that owner's text
+        // layout, and a trimmed one-line owner would force MaxLines=1 plus an ellipsis onto the tip itself.
+        stickyTip = ToolTipText.Wrap(null);
+        ToolTip.SetTip(sticky, stickyTip);
         // Same identity as the user bubble it stands in for: the brand tint, hairline border below.
         sticky.Bind(Border.BackgroundProperty, sticky.GetResourceObservable("BrandTintBrush"));
         sticky.Bind(Border.BorderBrushProperty, sticky.GetResourceObservable("BorderBrush"));
