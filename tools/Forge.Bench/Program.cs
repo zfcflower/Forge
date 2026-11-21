@@ -180,6 +180,11 @@ internal static class Program
             yield return scenario;
         }
 
+        foreach (var scenario in MetadataScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
         foreach (var scenario in TranscriptScenarios.Create(fixtures))
         {
             yield return scenario;

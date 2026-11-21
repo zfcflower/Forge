@@ -146,6 +146,16 @@
       <SolidColorBrush x:Key="OnBrandSoftBrush" Color="#072625" />
       <SolidColorBrush x:Key="BrandTintBrush" Color="#E8F8F7" />
 
+      <!-- The requested Tiffany accent (the round marker's #1B9EAA in `App.axaml`), as surfaces: the pale tint marks the
+           editable cells of a table, the two deeper stops are its row states. A second family rather than another step of
+           the brand teal, because it is a different hue: the brand's mint reads "ours", this blue reads "this is a cell you
+           can act on / the row you are acting on". -->
+      <!-- Three quarters opaque on purpose: the tint sits inside a row, so a selected row's own Tiffany background still reads
+           through the editable cells (a solid fill would hide the selection in exactly the columns the user just clicked). -->
+      <SolidColorBrush x:Key="TiffanyTintBrush" Color="#BFE7F6F8" />
+      <SolidColorBrush x:Key="TiffanySelectionBrush" Color="#CFECF1" />
+      <SolidColorBrush x:Key="TiffanySelectionStrongBrush" Color="#BFE5EC" />
+
       <!-- Surfaces. Window is the canvas behind everything, Card is a panel body, Sidebar is the two side panels,
            Subtle is a static inset (gutter, inline code, code block), Hover and Selected are the two row states,
            Input is the composer's input band. -->
@@ -189,8 +199,17 @@
       <SolidColorBrush x:Key="BorderStrongBrush" Color="#C3CDD0" />
 
       <!-- Form controls take Forge's own line colours instead of Fluent's greys: the same hairline as every divider, one
-           step deeper under the pointer, and the brand tier for focus (the 2 px bottom edge Fluent already draws) and for
-           errors. Aliases, not copies, so an input can never drift from the divider it sits next to. -->
+           step deeper under the pointer, and the brand tier for the focused frame (whose thickness token below makes the
+           bottom edge the heaviest line) and for errors. Aliases, not copies, so an input can never drift from the divider
+           it sits next to. -->
+      <!-- The table's own states: pressed and selected rows are the Tiffany accent, not the brand mint - the requested blue
+           is what marks the row the pointer is acting on. Hover stays neutral (a row under the pointer is not a choice yet),
+           and the selected+pointerover / selected+pressed pair steps up together, as Fluent's three accent stops did. -->
+      <StaticResource x:Key="TableViewRowBackgroundPressed" ResourceKey="TiffanyTintBrush" />
+      <StaticResource x:Key="TableViewRowBackgroundSelected" ResourceKey="TiffanySelectionBrush" />
+      <StaticResource x:Key="TableViewRowBackgroundSelectedPointerOver" ResourceKey="TiffanySelectionStrongBrush" />
+      <StaticResource x:Key="TableViewRowBackgroundSelectedPressed" ResourceKey="TiffanySelectionStrongBrush" />
+
       <StaticResource x:Key="TextControlBorderBrush" ResourceKey="BorderBrush" />
       <StaticResource x:Key="TextControlBorderBrushPointerOver" ResourceKey="BorderStrongBrush" />
       <StaticResource x:Key="TextControlBorderBrushFocused" ResourceKey="BrandActionBrush" />
@@ -278,6 +297,12 @@
       <SolidColorBrush x:Key="OnBrandSoftBrush" Color="#072625" />
       <SolidColorBrush x:Key="BrandTintBrush" Color="#0D3F3E" />
 
+      <!-- The Tiffany surfaces on dark: the same three steps, kept in the bluish range above the panel body so the editable
+           cells still read as a band without glowing against the window. -->
+      <SolidColorBrush x:Key="TiffanyTintBrush" Color="#B3103036" />
+      <SolidColorBrush x:Key="TiffanySelectionBrush" Color="#14424A" />
+      <SolidColorBrush x:Key="TiffanySelectionStrongBrush" Color="#1A5158" />
+
       <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#121617" />
       <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#181E20" />
       <SolidColorBrush x:Key="CardBackgroundBrush" Color="#1C2224" />
@@ -309,6 +334,14 @@
 
       <SolidColorBrush x:Key="BorderBrush" Color="#3A4447" />
       <SolidColorBrush x:Key="BorderStrongBrush" Color="#465256" />
+
+      <!-- The table's own states: pressed and selected rows are the Tiffany accent, not the brand mint - the requested blue
+           is what marks the row the pointer is acting on. Hover stays neutral (a row under the pointer is not a choice yet),
+           and the selected+pointerover / selected+pressed pair steps up together, as Fluent's three accent stops did. -->
+      <StaticResource x:Key="TableViewRowBackgroundPressed" ResourceKey="TiffanyTintBrush" />
+      <StaticResource x:Key="TableViewRowBackgroundSelected" ResourceKey="TiffanySelectionBrush" />
+      <StaticResource x:Key="TableViewRowBackgroundSelectedPointerOver" ResourceKey="TiffanySelectionStrongBrush" />
+      <StaticResource x:Key="TableViewRowBackgroundSelectedPressed" ResourceKey="TiffanySelectionStrongBrush" />
 
       <StaticResource x:Key="TextControlBorderBrush" ResourceKey="BorderBrush" />
       <StaticResource x:Key="TextControlBorderBrushPointerOver" ResourceKey="BorderStrongBrush" />

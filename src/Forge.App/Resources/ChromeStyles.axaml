@@ -1,11 +1,18 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+  <Styles.Resources />
+
+
   <!-- Button, text and surface classes that only the panels, dialogs and settings pages use (not the transcript).
        Every view that uses one of them includes this sheet on its own subtree: a sheet that applies to every Button, Border
        or TextBlock costs every control of those types a match when it attaches, and the transcript builds hundreds of
        rows (see src/Forge.App/SPEC.md, transcript scroll). The classes used inside the transcript rows (ghost, icon, link,
        caption, label, muted, mono, the row and bubble borders, the tree chevron) stay in `Controls.axaml`. -->
+
+  <!-- The form controls (text field, dropdown, number field) live in their own sheet: three control themes, because each
+       needs a bottom edge that is its own element. Everything else a panel, a dialog or a settings page styles is here. -->
+  <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
 
   <!-- The one heading above a block of content (a settings group, a dialog's title): 14 px bold. Bold, not SemiBold - the
        CJK faces in the default chain have no 600 and would resolve SemiBold to 700 anyway, splitting the weight by script. -->

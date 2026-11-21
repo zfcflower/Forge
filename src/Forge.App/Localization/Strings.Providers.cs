@@ -526,8 +526,8 @@ internal static class ProviderStrings
         Loc.Register(MetadataTitleKey, "模型 · {0}", "Models · {0}");
         Loc.Register(
             MetadataIntroKey,
-            "上下文窗口按 token 计，单价按每百万 token 的美元计；留空表示未知，不按 0 计算。",
-            "Context window is in tokens and prices are US dollars per million tokens; empty means unknown, not zero.");
+            "上下文窗口按 token 计，单价按每百万 token 的美元计：留空表示未知，浅蓝底的单元格点击可直接编辑，回车或点别处收起。",
+            "Context window is in tokens and prices are US dollars per million tokens: empty means unknown. Click a cell with a pale blue background to edit it; Enter or a click elsewhere puts it back.");
         Loc.Register(MetadataModelKey, "模型", "Model");
         Loc.Register(MetadataContextKey, "上下文窗口", "Context window");
         Loc.Register(MetadataInputKey, "输入", "Input");

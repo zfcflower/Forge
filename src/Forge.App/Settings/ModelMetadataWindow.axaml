@@ -12,25 +12,43 @@
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}">
+  <!-- The settings sheet (buttons, headings, the field themes) is attached to the two small subtrees that need it - the
+       title and the footer - instead of the window: every element in scope pays a match against each of its rules, and the
+       table realizes a few hundred elements per screen for nothing (bench: table.metadata.open, ~87 ms of it). -->
   <Window.Styles>
-    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
     <Style Selector="TextBlock.meta-header">
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
-    <!-- A cell input is the stock control: only its alignment is the table's business. Type size, height and padding stay
-         with Fluent's TextControl* keys (28 px, 13 px), like every other input in the app. -->
-    <Style Selector="TextBox.meta-cell">
+    <!-- A number cell is the app's one number field (stepper and all), sized for the column instead of the 130 px the stock
+         theme asks for: the cell is 94-120 px wide and the table already owns the layout. Its format is the column's -
+         whole numbers for the window, up to six decimals for a price, the same digits InputRules accepts - and an empty box
+         stays empty: a null value formats to nothing, not to "0". -->
+    <Style Selector="NumericUpDown.meta-cell">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="Padding" Value="6,4" />
+      <!-- The control refuses a value outside its bounds and keeps the typed text, so the bounds are the whole number line:
+           a negative or a zero window is InputRules' call (red cell, save blocked), not a silently dropped keystroke. -->
+      <Setter Property="Minimum" Value="0" />
+      <Setter Property="Maximum" Value="{x:Static settings:ModelMetadataRowViewModel.MaxCellValue}" />
     </Style>
-    <Style Selector="TextBox.meta-cell.invalid">
-      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
-    </Style>
-    <Style Selector="TextBox.meta-cell.invalid /template/ Border#PART_BorderElement">
-      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
-    </Style>
+    <!-- The cell keeps the field's bottom edge: without it the box looked cut off by the row line underneath. -->
     <Style Selector="Border.meta-line">
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
       <Setter Property="BorderThickness" Value="0,0,1,0" />
+    </Style>
+    <!-- The editable cells wear the pale Tiffany tint and the cell the arrow keys are on steps one shade deeper. Both are
+         styles rather than a Background in the templates: a local value outranks a style, and the highlight has to win. -->
+    <Style Selector="Border.meta-line.editable">
+      <Setter Property="Background" Value="{DynamicResource TiffanyTintBrush}" />
+    </Style>
+    <Style Selector="Border.meta-line.current">
+      <Setter Property="Background" Value="{DynamicResource TiffanySelectionBrush}" />
+    </Style>
+    <!-- A resting number cell that cannot be saved draws the frame its field would: red on all four sides, same 1 px. -->
+    <Style Selector="Border.meta-line.invalid">
+      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="TextBlock.meta-status">
       <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
@@ -156,58 +174,160 @@
         </Grid>
       </Border>
     </DataTemplate>
+    <!-- A number cell rests as text and builds its field only while it is being edited (the editor templates below, chosen
+         by the window when the cell is clicked). A live NumericUpDown per cell is the whole table's cost: its template plus
+         the stepper's two repeat buttons come to ~1.1 ms and ~0.5 MB each, and a screen of rows carries 75-95 of them
+         (bench: table.metadata.open, 275-390 ms -> ~100 ms). The text is the row's own formatted number, so an unknown
+         value shows nothing rather than a zero. -->
     <DataTemplate x:Key="MetaContextCell" x:DataType="settings:ModelMetadataRowViewModel">
-      <Border Classes="meta-line" Padding="6,3">
-        <TextBox Classes="meta-cell"
-                 Classes.invalid="{Binding HasContextWindowError}"
-                 ToolTip.Tip="{Binding ContextWindowError}"
-                 Text="{Binding ContextWindow, Mode=TwoWay}" />
+      <Border Classes="meta-line editable"
+              Classes.invalid="{Binding HasContextWindowError}"
+              Padding="6,3"
+              ToolTip.Tip="{Binding ContextWindowError}">
+        <Panel x:Name="CellBody">
+          <TextBlock x:Name="ValueText"
+                     Text="{Binding ContextWindowText}"
+                     TextWrapping="NoWrap"
+                     VerticalAlignment="Center"
+                     AutomationProperties.Name="{Binding ContextWindowText}" />
+        </Panel>
       </Border>
     </DataTemplate>
     <DataTemplate x:Key="MetaInputCell" x:DataType="settings:ModelMetadataRowViewModel">
-      <Border Classes="meta-line" Padding="6,3">
-        <TextBox Classes="meta-cell"
-                 Classes.invalid="{Binding InputPriceInvalid}"
-                 ToolTip.Tip="{Binding InputPriceTooltip}"
-                 Text="{Binding Input, Mode=TwoWay}" />
+      <Border Classes="meta-line editable"
+              Classes.invalid="{Binding InputPriceInvalid}"
+              Padding="6,3"
+              ToolTip.Tip="{Binding InputPriceTooltip}">
+        <Panel x:Name="CellBody">
+          <TextBlock x:Name="ValueText"
+                     Text="{Binding InputText}"
+                     TextWrapping="NoWrap"
+                     VerticalAlignment="Center"
+                     AutomationProperties.Name="{Binding InputText}" />
+        </Panel>
       </Border>
     </DataTemplate>
     <DataTemplate x:Key="MetaOutputCell" x:DataType="settings:ModelMetadataRowViewModel">
-      <Border Classes="meta-line" Padding="6,3">
-        <TextBox Classes="meta-cell"
-                 Classes.invalid="{Binding OutputPriceInvalid}"
-                 ToolTip.Tip="{Binding OutputPriceTooltip}"
-                 Text="{Binding Output, Mode=TwoWay}" />
+      <Border Classes="meta-line editable"
+              Classes.invalid="{Binding OutputPriceInvalid}"
+              Padding="6,3"
+              ToolTip.Tip="{Binding OutputPriceTooltip}">
+        <Panel x:Name="CellBody">
+          <TextBlock x:Name="ValueText"
+                     Text="{Binding OutputText}"
+                     TextWrapping="NoWrap"
+                     VerticalAlignment="Center"
+                     AutomationProperties.Name="{Binding OutputText}" />
+        </Panel>
       </Border>
     </DataTemplate>
     <DataTemplate x:Key="MetaCacheReadCell" x:DataType="settings:ModelMetadataRowViewModel">
-      <Border Classes="meta-line" Padding="6,3">
-        <TextBox Classes="meta-cell"
-                 Classes.invalid="{Binding CacheReadPriceInvalid}"
-                 ToolTip.Tip="{Binding CacheReadPriceTooltip}"
-                 Text="{Binding CacheRead, Mode=TwoWay}" />
+      <Border Classes="meta-line editable"
+              Classes.invalid="{Binding CacheReadPriceInvalid}"
+              Padding="6,3"
+              ToolTip.Tip="{Binding CacheReadPriceTooltip}">
+        <Panel x:Name="CellBody">
+          <TextBlock x:Name="ValueText"
+                     Text="{Binding CacheReadText}"
+                     TextWrapping="NoWrap"
+                     VerticalAlignment="Center"
+                     AutomationProperties.Name="{Binding CacheReadText}" />
+        </Panel>
       </Border>
     </DataTemplate>
     <DataTemplate x:Key="MetaCacheWriteCell" x:DataType="settings:ModelMetadataRowViewModel">
-      <Border Classes="meta-line" Padding="6,3">
-        <TextBox Classes="meta-cell"
-                 Classes.invalid="{Binding CacheWritePriceInvalid}"
-                 ToolTip.Tip="{Binding CacheWritePriceTooltip}"
-                 Text="{Binding CacheWrite, Mode=TwoWay}" />
+      <Border Classes="meta-line editable"
+              Classes.invalid="{Binding CacheWritePriceInvalid}"
+              Padding="6,3"
+              ToolTip.Tip="{Binding CacheWritePriceTooltip}">
+        <Panel x:Name="CellBody">
+          <TextBlock x:Name="ValueText"
+                     Text="{Binding CacheWriteText}"
+                     TextWrapping="NoWrap"
+                     VerticalAlignment="Center"
+                     AutomationProperties.Name="{Binding CacheWriteText}" />
+        </Panel>
       </Border>
+    </DataTemplate>
+    <!-- The field a cell shows while it is edited. It carries its own copy of the field sheet, so the Forge frame, the
+         stepper and the red error frame are in scope for this one field instead of for every element of the table. The cells
+         bind Value, not Text: the control parses what is typed into a decimal? and hands back the absence of a number for an
+         empty box, which is exactly the "unknown" the stored section must keep (binding Text writes the control's empty
+         template state back over the value when it is first realized - measured: the stored window came back as "" after the
+         window was shown). -->
+    <DataTemplate x:Key="MetaContextEditor" x:DataType="settings:ModelMetadataRowViewModel">
+      <NumericUpDown Classes="meta-cell"
+                     Classes.invalid="{Binding HasContextWindowError}"
+                     ToolTip.Tip="{Binding ContextWindowError}"
+                     Value="{Binding ContextWindow, Mode=TwoWay}"
+                     FormatString="0">
+        <NumericUpDown.Styles>
+          <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
+        </NumericUpDown.Styles>
+      </NumericUpDown>
+    </DataTemplate>
+    <DataTemplate x:Key="MetaInputEditor" x:DataType="settings:ModelMetadataRowViewModel">
+      <NumericUpDown Classes="meta-cell"
+                     Classes.invalid="{Binding InputPriceInvalid}"
+                     ToolTip.Tip="{Binding InputPriceTooltip}"
+                     Value="{Binding Input, Mode=TwoWay}"
+                     FormatString="0.######">
+        <NumericUpDown.Styles>
+          <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
+        </NumericUpDown.Styles>
+      </NumericUpDown>
+    </DataTemplate>
+    <DataTemplate x:Key="MetaOutputEditor" x:DataType="settings:ModelMetadataRowViewModel">
+      <NumericUpDown Classes="meta-cell"
+                     Classes.invalid="{Binding OutputPriceInvalid}"
+                     ToolTip.Tip="{Binding OutputPriceTooltip}"
+                     Value="{Binding Output, Mode=TwoWay}"
+                     FormatString="0.######">
+        <NumericUpDown.Styles>
+          <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
+        </NumericUpDown.Styles>
+      </NumericUpDown>
+    </DataTemplate>
+    <DataTemplate x:Key="MetaCacheReadEditor" x:DataType="settings:ModelMetadataRowViewModel">
+      <NumericUpDown Classes="meta-cell"
+                     Classes.invalid="{Binding CacheReadPriceInvalid}"
+                     ToolTip.Tip="{Binding CacheReadPriceTooltip}"
+                     Value="{Binding CacheRead, Mode=TwoWay}"
+                     FormatString="0.######">
+        <NumericUpDown.Styles>
+          <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
+        </NumericUpDown.Styles>
+      </NumericUpDown>
+    </DataTemplate>
+    <DataTemplate x:Key="MetaCacheWriteEditor" x:DataType="settings:ModelMetadataRowViewModel">
+      <NumericUpDown Classes="meta-cell"
+                     Classes.invalid="{Binding CacheWritePriceInvalid}"
+                     ToolTip.Tip="{Binding CacheWritePriceTooltip}"
+                     Value="{Binding CacheWrite, Mode=TwoWay}"
+                     FormatString="0.######">
+        <NumericUpDown.Styles>
+          <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
+        </NumericUpDown.Styles>
+      </NumericUpDown>
     </DataTemplate>
   </Window.Resources>
 
   <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="18,16">
     <StackPanel Grid.Row="0" Spacing="4">
+      <StackPanel.Styles>
+        <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+      </StackPanel.Styles>
       <TextBlock Classes="h2" Text="{Binding Title}" />
       <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Intro}" />
     </StackPanel>
 
     <!-- The frame is the control's own border, so it cannot sit a pixel off the last row or column; VerticalAlignment=Top
          makes it hug the rows instead of running to the bottom of the window (more rows than fit still fill and scroll). -->
+    <!-- Focusable so the arrow keys reach the table itself: the cells are not focusable controls, and the field the table
+         builds exists only while a cell is being edited. -->
     <TableView x:Name="Table"
                Grid.Row="1"
+               Focusable="True"
                Margin="0,14,0,0"
                VerticalAlignment="Top"
                ItemsSource="{Binding Rows}"
@@ -226,6 +346,9 @@
                Text="{Binding EmptyText}" />
 
     <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,14,0,0">
+      <Grid.Styles>
+        <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+      </Grid.Styles>
       <TextBlock Grid.Column="0"
                  Classes="caption"
                  VerticalAlignment="Center"

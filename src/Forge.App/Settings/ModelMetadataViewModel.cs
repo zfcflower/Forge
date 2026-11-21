@@ -407,15 +407,27 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
     private readonly record struct RowSeed(string Model, ModelMetadata Metadata, ModelCapabilities? Capabilities);
 }
 
-/// <summary>One model's editable metadata. Numbers stay strings while editing so a half-typed value is not rounded away.</summary>
+/// <summary>
+/// One model's editable metadata. Each number is a <c>decimal?</c> bound to a cell's <c>Value</c>, so an empty cell is the
+/// absence of a number rather than an empty string that has yet to be parsed: unknown survives as null all the way into the
+/// stored section, where a 0 would have meant a free model with a zero window.
+/// </summary>
 internal sealed class ModelMetadataRowViewModel : ObservableObject
 {
-    private string contextWindow;
-    private string input;
-    private string output;
-    private string cacheRead;
-    private string cacheWrite;
+    /// <summary>
+    /// The top of a cell's number line. The control refuses a typed value past its bounds, so the bound has to be the top
+    /// of the range a number can have at all: an unknown price or a long context window must reach the cell's rules, not be
+    /// dropped by the field. Zero is the bottom - a negative window or price is what <c>InputRules</c> rejects into a red cell.
+    /// </summary>
+    public const decimal MaxCellValue = decimal.MaxValue;
+
+    private decimal? contextWindow;
+    private decimal? input;
+    private decimal? output;
+    private decimal? cacheRead;
+    private decimal? cacheWrite;
     private bool isShown;
+
     private readonly ModelCapabilities capabilityValue;
     private readonly int? reasoningSteps;
     private InputError? contextWindowError;
@@ -454,11 +466,11 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
         {
             HasReasoning = true;
         }
-        contextWindow = Format(metadata.ContextWindow);
-        input = Format(metadata.Pricing?.Input);
-        output = Format(metadata.Pricing?.Output);
-        cacheRead = Format(metadata.Pricing?.CacheRead);
-        cacheWrite = Format(metadata.Pricing?.CacheWrite);
+        contextWindow = metadata.ContextWindow is > 0 ? metadata.ContextWindow.Value : null;
+        input = ToDecimal(metadata.Pricing?.Input);
+        output = ToDecimal(metadata.Pricing?.Output);
+        cacheRead = ToDecimal(metadata.Pricing?.CacheRead);
+        cacheWrite = ToDecimal(metadata.Pricing?.CacheWrite);
         Validate();
     }
 
@@ -509,70 +521,90 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     /// <summary>Applies a value from the preference without sounding like a user edit.</summary>
     internal void SetShown(bool value) => Set(ref isShown, value, nameof(IsShown));
 
-    public string ContextWindow
+    public decimal? ContextWindow
     {
         get => contextWindow;
         set
         {
-            if (Set(ref contextWindow, value ?? string.Empty))
+            if (Set(ref contextWindow, value))
             {
-                SetError(ref contextWindowError, InputRules.ValidatePositiveInteger(contextWindow),
+                OnPropertyChanged(nameof(ContextWindowText));
+                SetError(ref contextWindowError, WindowRule(contextWindow),
                     nameof(ContextWindowError), nameof(HasContextWindowError));
             }
         }
     }
 
-    public string Input
+    public decimal? Input
     {
         get => input;
         set
         {
-            if (Set(ref input, value ?? string.Empty))
+            if (Set(ref input, value))
             {
-                SetError(ref inputError, InputRules.ValidateNonNegativeDecimal(input), nameof(InputPriceError), nameof(HasInputPriceError));
+                OnPropertyChanged(nameof(InputText));
+                SetError(ref inputError, PriceRule(input), nameof(InputPriceError), nameof(HasInputPriceError));
                 ValidatePriceSet();
             }
         }
     }
 
-    public string Output
+    public decimal? Output
     {
         get => output;
         set
         {
-            if (Set(ref output, value ?? string.Empty))
+            if (Set(ref output, value))
             {
-                SetError(ref outputError, InputRules.ValidateNonNegativeDecimal(output), nameof(OutputPriceError), nameof(HasOutputPriceError));
+                OnPropertyChanged(nameof(OutputText));
+                SetError(ref outputError, PriceRule(output), nameof(OutputPriceError), nameof(HasOutputPriceError));
                 ValidatePriceSet();
             }
         }
     }
 
-    public string CacheRead
+    public decimal? CacheRead
     {
         get => cacheRead;
         set
         {
-            if (Set(ref cacheRead, value ?? string.Empty))
+            if (Set(ref cacheRead, value))
             {
-                SetError(ref cacheReadError, InputRules.ValidateNonNegativeDecimal(cacheRead), nameof(CacheReadPriceError), nameof(HasCacheReadPriceError));
+                OnPropertyChanged(nameof(CacheReadText));
+                SetError(ref cacheReadError, PriceRule(cacheRead), nameof(CacheReadPriceError), nameof(HasCacheReadPriceError));
                 ValidatePriceSet();
             }
         }
     }
 
-    public string CacheWrite
+    public decimal? CacheWrite
     {
         get => cacheWrite;
         set
         {
-            if (Set(ref cacheWrite, value ?? string.Empty))
+            if (Set(ref cacheWrite, value))
             {
-                SetError(ref cacheWriteError, InputRules.ValidateNonNegativeDecimal(cacheWrite), nameof(CacheWritePriceError), nameof(HasCacheWritePriceError));
+                OnPropertyChanged(nameof(CacheWriteText));
+                SetError(ref cacheWriteError, PriceRule(cacheWrite), nameof(CacheWritePriceError), nameof(HasCacheWritePriceError));
                 ValidatePriceSet();
             }
         }
     }
+
+    /// <summary>
+    /// The five numbers as a cell shows them while it is not being edited: nothing at all when the value is unknown (never a
+    /// zero) and the column's own format otherwise. The cell is a plain text until the user clicks it, so this string is the
+    /// resting table's whole number rendering - it is what keeps a field per cell out of the row.
+    /// </summary>
+    public string ContextWindowText => Display(contextWindow, "0");
+
+    public string InputText => Display(input, "0.######");
+
+    public string OutputText => Display(output, "0.######");
+
+    public string CacheReadText => Display(cacheRead, "0.######");
+
+    public string CacheWriteText => Display(cacheWrite, "0.######");
 
     public string? ContextWindowError => Describe(contextWindowError);
 
@@ -625,13 +657,13 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     /// <summary>Runs every field rule; called for fresh rows and again before a save so stored invalid values cannot slip through.</summary>
     internal void Validate()
     {
-        SetError(ref contextWindowError, InputRules.ValidatePositiveInteger(contextWindow), nameof(ContextWindowError), nameof(HasContextWindowError));
-        SetError(ref inputError, InputRules.ValidateNonNegativeDecimal(input), nameof(InputPriceError), nameof(HasInputPriceError));
-        SetError(ref outputError, InputRules.ValidateNonNegativeDecimal(output), nameof(OutputPriceError), nameof(HasOutputPriceError));
-        SetError(ref cacheReadError, InputRules.ValidateNonNegativeDecimal(cacheRead), nameof(CacheReadPriceError), nameof(HasCacheReadPriceError));
+        SetError(ref contextWindowError, WindowRule(contextWindow), nameof(ContextWindowError), nameof(HasContextWindowError));
+        SetError(ref inputError, PriceRule(input), nameof(InputPriceError), nameof(HasInputPriceError));
+        SetError(ref outputError, PriceRule(output), nameof(OutputPriceError), nameof(HasOutputPriceError));
+        SetError(ref cacheReadError, PriceRule(cacheRead), nameof(CacheReadPriceError), nameof(HasCacheReadPriceError));
         SetError(
             ref cacheWriteError,
-            ShowCacheWrite ? InputRules.ValidateNonNegativeDecimal(cacheWrite) : null,
+            ShowCacheWrite ? PriceRule(cacheWrite) : null,
             nameof(CacheWritePriceError),
             nameof(HasCacheWritePriceError));
         ValidatePriceSet();
@@ -640,8 +672,8 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     /// <summary>Prices are a package: one filled cell without the rest would make the converter write 0 for the gaps.</summary>
     private void ValidatePriceSet()
     {
-        var hasPrice = HasText(Input) || HasText(Output) || HasText(CacheRead) || (ShowCacheWrite && HasText(CacheWrite));
-        var allPrices = HasText(Input) && HasText(Output) && HasText(CacheRead) && (!ShowCacheWrite || HasText(CacheWrite));
+        var hasPrice = Input is not null || Output is not null || CacheRead is not null || (ShowCacheWrite && CacheWrite is not null);
+        var allPrices = Input is not null && Output is not null && CacheRead is not null && (!ShowCacheWrite || CacheWrite is not null);
         SetError(
             ref priceSetError,
             hasPrice && !allPrices ? new InputError(InputRuleKind.PriceSet) : null,
@@ -656,8 +688,6 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
         OnPropertyChanged(nameof(CacheReadPriceTooltip));
         OnPropertyChanged(nameof(CacheWritePriceTooltip));
     }
-
-    private static bool HasText(string text) => !string.IsNullOrWhiteSpace(text);
 
     /// <summary>Re-reads the shared messages after a language change; the rules themselves did not change.</summary>
     public void RefreshText()
@@ -688,23 +718,18 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     /// <summary>The row as stored metadata; <c>null</c> when every field is empty (nothing is known, nothing is written).</summary>
     public ModelMetadataSection? ToSection()
     {
-        var window = InputRules.TryParsePositiveInteger(ContextWindow, out var windowValue) ? windowValue : (int?)null;
-        var inputPrice = InputRules.TryParseNonNegativeDecimal(Input, out var inputValue) ? inputValue : (double?)null;
-        var outputPrice = InputRules.TryParseNonNegativeDecimal(Output, out var outputValue) ? outputValue : (double?)null;
-        var cacheReadPrice = InputRules.TryParseNonNegativeDecimal(CacheRead, out var cacheReadValue) ? cacheReadValue : (double?)null;
-        var cacheWritePrice = InputRules.TryParseNonNegativeDecimal(CacheWrite, out var cacheWriteValue) ? cacheWriteValue : (double?)null;
-        if (window is null && inputPrice is null && outputPrice is null && cacheReadPrice is null && cacheWritePrice is null)
+        if (contextWindow is null && input is null && output is null && cacheRead is null && cacheWrite is null)
         {
             return null;
         }
 
         return new ModelMetadataSection
         {
-            ContextWindow = window,
-            Input = inputPrice,
-            Output = outputPrice,
-            CacheRead = cacheReadPrice,
-            CacheWrite = cacheWritePrice,
+            ContextWindow = contextWindow is { } window ? (int)window : null,
+            Input = input is { } inputPrice ? (double)inputPrice : null,
+            Output = output is { } outputPrice ? (double)outputPrice : null,
+            CacheRead = cacheRead is { } readPrice ? (double)readPrice : null,
+            CacheWrite = cacheWrite is { } writePrice ? (double)writePrice : null,
         };
     }
 
@@ -723,9 +748,32 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
         OnPropertyChanged(hasErrorName);
     }
 
-    private static string Format(int? value) => value is > 0 ? value.Value.ToString(CultureInfo.InvariantCulture) : string.Empty;
+    /// <summary>One number in a cell's own format, or nothing when it is unknown.</summary>
+    private static string Display(decimal? value, string format) =>
+        value?.ToString(format, CultureInfo.InvariantCulture) ?? string.Empty;
 
-    private static string Format(double? value) => value is not null
-        ? value.Value.ToString("0.######", CultureInfo.InvariantCulture)
-        : string.Empty;
+    /// <summary>
+    /// The window is a whole number of tokens: a typed "1.5" or "0" is a red cell rather than a value that would make every
+    /// session's context bar read nonsense. Unknown (null) is not a failure - the cell is simply empty.
+    /// </summary>
+    private static InputError? WindowRule(decimal? value) =>
+        value is null ? null : InputRules.ValidatePositiveInteger(NumberText(value.Value), allowEmpty: false);
+
+    /// <summary>A price is a non-negative decimal with at most <see cref="InputRules.PriceMaxDecimals"/> fraction digits.</summary>
+    private static InputError? PriceRule(decimal? value) => value is null ? null : InputRules.ValidateNonNegativeDecimal(NumberText(value.Value));
+
+    /// <summary>
+    /// A cell's number as the rules read it. Trailing zeros are dropped first, so digits the user did not mean are not counted:
+    /// a window typed as 1000000.00 is a whole number, and a price of 0.1000000 has one decimal, not seven.
+    /// </summary>
+    private static string NumberText(decimal value) =>
+        value.ToString("0.############################", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// A stored price as the cell shows it. The rounding is not cosmetic: <c>(decimal)0.3</c> is the double's long binary
+    /// tail (0.2999999999999999888977697537), which the six-decimal rule would then reject as too precise. Prices live at
+    /// <see cref="InputRules.PriceMaxDecimals"/> digits, so that is where the conversion lands.
+    /// </summary>
+    private static decimal? ToDecimal(double? value) =>
+        value is { } number ? Math.Round((decimal)number, InputRules.PriceMaxDecimals) : null;
 }

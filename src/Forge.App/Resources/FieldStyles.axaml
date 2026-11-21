@@ -1,0 +1,554 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- The three controls a form is built from, each with a Forge frame instead of Fluent's: the frame is a hairline on the
+       top and the sides, and the bottom edge is a line of its own so it can be the heaviest line and change with the state
+       (resting ink, 2 px brand while focused, error red). A Border paints all four sides with one brush, so the frame and
+       the bottom edge have to be two elements - that is the whole reason these themes exist. Everything else in them is
+       Fluent's structure copied verbatim (same part names, same bindings, same states), so text editing, the dropdown's
+       popup and the spinner wiring keep working exactly as they did.
+
+       Included by `ChromeStyles.axaml`, i.e. by panels, dialogs and settings pages. The transcript and the editor never pull
+       this sheet in, so their own text controls are untouched. -->
+
+  <Styles.Resources>
+    <!-- The stock cut/copy/paste menu Fluent attaches to a text field; losing it would be a regression, so the theme keeps
+         it (same Fluent strings, so it follows the interface language). -->
+    <MenuFlyout x:Key="ForgeTextBoxContextFlyout">
+      <MenuItem Header="{DynamicResource StringTextFlyoutCutText}"
+                Command="{Binding $parent[TextBox].Cut}"
+                IsEnabled="{Binding $parent[TextBox].CanCut}"
+                InputGesture="{x:Static TextBox.CutGesture}" />
+      <MenuItem Header="{DynamicResource StringTextFlyoutCopyText}"
+                Command="{Binding $parent[TextBox].Copy}"
+                IsEnabled="{Binding $parent[TextBox].CanCopy}"
+                InputGesture="{x:Static TextBox.CopyGesture}" />
+      <MenuItem Header="{DynamicResource StringTextFlyoutPasteText}"
+                Command="{Binding $parent[TextBox].Paste}"
+                IsEnabled="{Binding $parent[TextBox].CanPaste}"
+                InputGesture="{x:Static TextBox.PasteGesture}" />
+    </MenuFlyout>
+
+    <ControlTheme x:Key="ForgeTextField" TargetType="TextBox">
+      <Setter Property="Foreground" Value="{DynamicResource TextControlForeground}" />
+      <Setter Property="CaretBrush" Value="{DynamicResource TextControlForeground}" />
+      <Setter Property="Background" Value="{DynamicResource TextControlBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrush}" />
+      <Setter Property="BorderThickness" Value="{StaticResource FieldFrameThickness}" />
+      <Setter Property="SelectionBrush" Value="{DynamicResource TextControlSelectionHighlightColor}" />
+      <Setter Property="PlaceholderForeground" Value="{DynamicResource TextControlPlaceholderForeground}" />
+      <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+      <Setter Property="MinHeight" Value="{DynamicResource TextControlThemeMinHeight}" />
+      <Setter Property="MinWidth" Value="{DynamicResource TextControlThemeMinWidth}" />
+      <Setter Property="Padding" Value="{DynamicResource TextControlThemePadding}" />
+      <Setter Property="FocusAdorner" Value="{x:Null}" />
+      <Setter Property="ScrollViewer.IsScrollChainingEnabled" Value="True" />
+      <Setter Property="ContextFlyout" Value="{StaticResource ForgeTextBoxContextFlyout}" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <DataValidationErrors>
+            <Panel>
+              <!-- The frame: top and sides only. Its bottom is the edge below. -->
+              <Border Name="PART_BorderElement"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="{TemplateBinding CornerRadius}"
+                      MinWidth="{TemplateBinding MinWidth}"
+                      MinHeight="{TemplateBinding MinHeight}" />
+
+              <Border Margin="{TemplateBinding BorderThickness}">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <ContentPresenter Grid.Column="0"
+                                    Grid.ColumnSpan="1"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding InnerLeftContent}" />
+                  <DockPanel x:Name="PART_InnerDockPanel"
+                             Grid.Column="1"
+                             Grid.ColumnSpan="1"
+                             Margin="{TemplateBinding Padding}">
+                    <TextBlock Name="PART_FloatingPlaceholder"
+                               Foreground="{TemplateBinding PlaceholderForeground}"
+                               IsVisible="False"
+                               Text="{TemplateBinding PlaceholderText}"
+                               DockPanel.Dock="Top" />
+
+                    <ScrollViewer Name="PART_ScrollViewer"
+                                  HorizontalScrollBarVisibility="{TemplateBinding (ScrollViewer.HorizontalScrollBarVisibility)}"
+                                  VerticalScrollBarVisibility="{TemplateBinding (ScrollViewer.VerticalScrollBarVisibility)}"
+                                  IsScrollChainingEnabled="{TemplateBinding (ScrollViewer.IsScrollChainingEnabled)}"
+                                  AllowAutoHide="{TemplateBinding (ScrollViewer.AllowAutoHide)}"
+                                  BringIntoViewOnFocusChange="{TemplateBinding (ScrollViewer.BringIntoViewOnFocusChange)}">
+                      <Panel>
+                        <TextBlock Name="PART_Placeholder"
+                                   Foreground="{TemplateBinding PlaceholderForeground}"
+                                   Opacity="{DynamicResource TextControlPlaceholderOpacity}"
+                                   Text="{TemplateBinding PlaceholderText}"
+                                   TextAlignment="{TemplateBinding TextAlignment}"
+                                   TextWrapping="{TemplateBinding TextWrapping}"
+                                   HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                   VerticalAlignment="{TemplateBinding VerticalContentAlignment}">
+                          <TextBlock.IsVisible>
+                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                              <Binding ElementName="PART_TextPresenter" Path="PreeditText" Converter="{x:Static StringConverters.IsNullOrEmpty}" />
+                              <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Text" Converter="{x:Static StringConverters.IsNullOrEmpty}" />
+                            </MultiBinding>
+                          </TextBlock.IsVisible>
+                        </TextBlock>
+
+                        <TextPresenter Name="PART_TextPresenter"
+                                       Text="{TemplateBinding Text, Mode=TwoWay}"
+                                       CaretBlinkInterval="{TemplateBinding CaretBlinkInterval}"
+                                       CaretIndex="{TemplateBinding CaretIndex}"
+                                       SelectionStart="{TemplateBinding SelectionStart}"
+                                       SelectionEnd="{TemplateBinding SelectionEnd}"
+                                       TextAlignment="{TemplateBinding TextAlignment}"
+                                       TextWrapping="{TemplateBinding TextWrapping}"
+                                       LineHeight="{TemplateBinding LineHeight}"
+                                       LetterSpacing="{TemplateBinding LetterSpacing}"
+                                       PasswordChar="{TemplateBinding PasswordChar}"
+                                       RevealPassword="{TemplateBinding RevealPassword}"
+                                       SelectionBrush="{TemplateBinding SelectionBrush}"
+                                       SelectionForegroundBrush="{TemplateBinding SelectionForegroundBrush}"
+                                       CaretBrush="{TemplateBinding CaretBrush}"
+                                       HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                      </Panel>
+                      <ScrollViewer.Styles>
+                        <Style Selector="ScrollContentPresenter#PART_ContentPresenter">
+                          <Setter Property="Cursor" Value="IBeam" />
+                        </Style>
+                      </ScrollViewer.Styles>
+                    </ScrollViewer>
+                  </DockPanel>
+                  <ContentPresenter Grid.Column="2"
+                                    Grid.ColumnSpan="1"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding InnerRightContent}" />
+                </Grid>
+              </Border>
+
+              <!-- Last in the panel so nothing the field paints can cover it, and filled rather than stroked so its ends
+                   curve with the field's bottom corners. -->
+              <Border Name="PART_EdgeLine"
+                      VerticalAlignment="Bottom"
+                      Margin="1,0"
+                      Background="{DynamicResource FieldEdgeBrush}"
+                      CornerRadius="{StaticResource FieldEdgeCornerRadius}" />
+            </Panel>
+          </DataValidationErrors>
+        </ControlTemplate>
+      </Setter>
+
+      <Style Selector="^ /template/ Border#PART_EdgeLine">
+        <Setter Property="Height" Value="1" />
+      </Style>
+
+      <!-- The resting edge is ink; the pointer deepens the hairline around it, focus turns the edge into the 2 px brand
+           line while the top and the sides stay on the divider colour, and an error paints both parts red. -->
+      <Style Selector="^:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource TextControlBackgroundPointerOver}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrushPointerOver}" />
+      </Style>
+
+      <Style Selector="^:focus /template/ Border#PART_EdgeLine">
+        <Setter Property="Background" Value="{DynamicResource TextControlBorderBrushFocused}" />
+        <Setter Property="Height" Value="2" />
+      </Style>
+
+      <Style Selector="^:error /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource SystemControlErrorTextForegroundBrush}" />
+      </Style>
+
+      <Style Selector="^:error /template/ Border#PART_EdgeLine">
+        <Setter Property="Background" Value="{DynamicResource SystemControlErrorTextForegroundBrush}" />
+      </Style>
+
+      <Style Selector="^:disabled">
+        <Setter Property="Foreground" Value="{DynamicResource TextControlForegroundDisabled}" />
+      </Style>
+
+      <Style Selector="^:disabled /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="{DynamicResource TextControlBackgroundDisabled}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrushDisabled}" />
+      </Style>
+
+      <Style Selector="^:disabled /template/ Border#PART_EdgeLine">
+        <Setter Property="Background" Value="{DynamicResource TextControlBorderBrushDisabled}" />
+      </Style>
+
+      <Style Selector="^ /template/ TextBlock#PART_FloatingPlaceholder">
+        <Setter Property="Cursor" Value="IBeam" />
+      </Style>
+
+      <Style Selector="^[UseFloatingPlaceholder=true]:not(:empty) /template/ TextBlock#PART_FloatingPlaceholder">
+        <Setter Property="IsVisible" Value="True" />
+      </Style>
+    </ControlTheme>
+
+    <ControlTheme x:Key="ForgeComboBox" TargetType="ComboBox">
+      <Setter Property="Padding" Value="{DynamicResource ComboBoxPadding}" />
+      <Setter Property="FocusAdorner" Value="{x:Null}" />
+      <Setter Property="MaxDropDownHeight" Value="504" />
+      <Setter Property="Foreground" Value="{DynamicResource ComboBoxForeground}" />
+      <Setter Property="Background" Value="{DynamicResource ComboBoxBackground}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxBorderBrush}" />
+      <Setter Property="BorderThickness" Value="{StaticResource FieldFrameThickness}" />
+      <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+      <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+      <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+      <Setter Property="MinHeight" Value="{DynamicResource ComboBoxMinHeight}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="PlaceholderForeground" Value="{DynamicResource ComboBoxPlaceHolderForeground}" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <DataValidationErrors>
+            <Grid ColumnDefinitions="*,32">
+              <Border x:Name="Background"
+                      Grid.Column="0"
+                      Grid.ColumnSpan="2"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="{TemplateBinding CornerRadius}"
+                      MinWidth="{DynamicResource ComboBoxThemeMinWidth}" />
+
+              <Border x:Name="HighlightBackground"
+                      Grid.Column="0"
+                      Grid.ColumnSpan="2"
+                      Background="{DynamicResource ComboBoxBackgroundUnfocused}"
+                      BorderBrush="{DynamicResource ComboBoxBackgroundBorderBrushUnfocused}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="{TemplateBinding CornerRadius}"
+                      IsVisible="False" />
+              <TextBlock x:Name="PlaceholderTextBlock"
+                         Grid.Column="0"
+                         HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                         VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                         Opacity="{DynamicResource TextControlPlaceholderOpacity}"
+                         Margin="{TemplateBinding Padding}"
+                         Text="{TemplateBinding PlaceholderText}"
+                         Foreground="{TemplateBinding PlaceholderForeground}">
+                <TextBlock.IsVisible>
+                  <MultiBinding Converter="{x:Static BoolConverters.And}">
+                    <Binding Path="SelectionBoxItem" RelativeSource="{RelativeSource TemplatedParent}" Converter="{x:Static ObjectConverters.IsNull}" />
+                    <Binding Path="!IsEditable" RelativeSource="{RelativeSource TemplatedParent}" />
+                  </MultiBinding>
+                </TextBlock.IsVisible>
+              </TextBlock>
+              <ContentControl x:Name="ContentPresenter"
+                              Content="{TemplateBinding SelectionBoxItem}"
+                              Grid.Column="0"
+                              Margin="{TemplateBinding Padding}"
+                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                              IsVisible="{TemplateBinding IsEditable, Converter={x:Static BoolConverters.Not}}" />
+
+              <TextBox Name="PART_EditableTextBox"
+                       Grid.Column="0"
+                       Padding="{TemplateBinding Padding}"
+                       HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                       Foreground="{TemplateBinding Foreground}"
+                       Background="Transparent"
+                       Text="{TemplateBinding Text, Mode=TwoWay}"
+                       PlaceholderText="{TemplateBinding PlaceholderText}"
+                       BorderThickness="0"
+                       IsVisible="{TemplateBinding IsEditable}">
+                <TextBox.Resources>
+                  <SolidColorBrush x:Key="TextControlBackgroundFocused">Transparent</SolidColorBrush>
+                  <SolidColorBrush x:Key="TextControlBackgroundPointerOver">Transparent</SolidColorBrush>
+                </TextBox.Resources>
+              </TextBox>
+
+              <Border x:Name="DropDownOverlay"
+                      Grid.Column="1"
+                      Background="Transparent"
+                      Margin="0,1,1,1"
+                      Width="30"
+                      IsVisible="False"
+                      HorizontalAlignment="Right" />
+
+              <PathIcon x:Name="DropDownGlyph"
+                        Grid.Column="1"
+                        UseLayoutRounding="False"
+                        IsHitTestVisible="False"
+                        Height="12"
+                        Width="12"
+                        Margin="0,0,10,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Foreground="{DynamicResource ComboBoxDropDownGlyphForeground}"
+                        Data="M1939 486L2029 576L1024 1581L19 576L109 486L1024 1401L1939 486Z" />
+
+              <Border x:Name="PART_EdgeLine"
+                      Grid.Column="0"
+                      Grid.ColumnSpan="2"
+                      VerticalAlignment="Bottom"
+                      Margin="1,0"
+                      Background="{DynamicResource FieldEdgeBrush}"
+                      CornerRadius="{StaticResource FieldEdgeCornerRadius}" />
+
+              <Popup Name="PART_Popup"
+                     WindowManagerAddShadowHint="False"
+                     IsOpen="{TemplateBinding IsDropDownOpen, Mode=TwoWay}"
+                     MinWidth="{Binding Bounds.Width, RelativeSource={RelativeSource TemplatedParent}}"
+                     MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                     PlacementTarget="Background"
+                     IsLightDismissEnabled="True"
+                     InheritsTransform="True">
+                <Border x:Name="PopupBorder"
+                        Background="{DynamicResource ComboBoxDropDownBackground}"
+                        BorderBrush="{DynamicResource ComboBoxDropDownBorderBrush}"
+                        BorderThickness="{DynamicResource ComboBoxDropdownBorderThickness}"
+                        Padding="{DynamicResource ComboBoxDropdownBorderPadding}"
+                        HorizontalAlignment="Stretch"
+                        CornerRadius="{DynamicResource OverlayCornerRadius}">
+                  <ScrollViewer HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                IsScrollChainingEnabled="False"
+                                VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"
+                                IsDeferredScrollingEnabled="{TemplateBinding (ScrollViewer.IsDeferredScrollingEnabled)}">
+                    <ItemsPresenter Name="PART_ItemsPresenter"
+                                    Margin="{DynamicResource ComboBoxDropdownContentMargin}"
+                                    ItemsPanel="{TemplateBinding ItemsPanel}" />
+                  </ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+          </DataValidationErrors>
+        </ControlTemplate>
+      </Setter>
+
+      <Style Selector="^ /template/ Border#PART_EdgeLine">
+        <Setter Property="Height" Value="1" />
+      </Style>
+
+      <Style Selector="^:pointerover /template/ Border#Background">
+        <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundPointerOver}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxBorderBrushPointerOver}" />
+      </Style>
+
+      <Style Selector="^:pressed /template/ Border#Background">
+        <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundPressed}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxBorderBrushPressed}" />
+      </Style>
+
+      <!-- Error paints the frame and the bottom edge; focus hands the field over to Fluent's 1 px brand ring, so the edge
+           steps aside instead of drawing a second, darker line under it. -->
+      <Style Selector="^:error /template/ Border#Background">
+        <Setter Property="BorderBrush" Value="{DynamicResource SystemControlErrorTextForegroundBrush}" />
+      </Style>
+
+      <Style Selector="^:error /template/ Border#PART_EdgeLine">
+        <Setter Property="Background" Value="{DynamicResource SystemControlErrorTextForegroundBrush}" />
+      </Style>
+
+      <Style Selector="^:focus-visible /template/ Border#HighlightBackground">
+        <Setter Property="IsVisible" Value="True" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxBackgroundBorderBrushFocused}" />
+        <Setter Property="BorderThickness" Value="1" />
+      </Style>
+
+      <Style Selector="^:focus-visible /template/ Border#PART_EdgeLine">
+        <Setter Property="IsVisible" Value="False" />
+      </Style>
+
+      <Style Selector="^:focus:pressed /template/ ContentControl#ContentPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxForegroundFocusedPressed}" />
+      </Style>
+
+      <Style Selector="^:focus:pressed /template/ TextBlock#PlaceholderTextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxPlaceHolderForegroundFocusedPressed}" />
+      </Style>
+
+      <Style Selector="^:focus:pressed /template/ PathIcon#DropDownGlyph">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxDropDownGlyphForegroundFocusedPressed}" />
+      </Style>
+
+      <Style Selector="^:focus-visible /template/ ContentControl#ContentPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxForegroundFocused}" />
+      </Style>
+
+      <Style Selector="^:focus-visible /template/ TextBlock#PlaceholderTextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxForegroundFocused}" />
+      </Style>
+
+      <Style Selector="^:focus-visible /template/ PathIcon#DropDownGlyph">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxDropDownGlyphForegroundFocused}" />
+      </Style>
+
+      <Style Selector="^:disabled /template/ Border#Background">
+        <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundDisabled}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxBorderBrushDisabled}" />
+      </Style>
+
+      <Style Selector="^:disabled /template/ Border#PART_EdgeLine">
+        <Setter Property="Background" Value="{DynamicResource ComboBoxBorderBrushDisabled}" />
+      </Style>
+
+      <Style Selector="^:disabled /template/ ContentControl#ContentPresenter">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxForegroundDisabled}" />
+      </Style>
+
+      <Style Selector="^:disabled /template/ TextBlock#PlaceholderTextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxForegroundDisabled}" />
+      </Style>
+
+      <Style Selector="^:disabled /template/ PathIcon#DropDownGlyph">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxDropDownGlyphForegroundDisabled}" />
+      </Style>
+
+      <Style Selector="^[IsEditable=true]">
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="KeyboardNavigation.TabNavigation" Value="Local" />
+      </Style>
+    </ControlTheme>
+
+    <ControlTheme x:Key="ForgeNumberStepper" TargetType="ButtonSpinner">
+      <Setter Property="Template">
+        <ControlTemplate>
+          <!-- The frame and the content keep Fluent's layering: the frame under everything, the content filling the area
+               the stepper leaves free, so a NumericUpDown's own border and background still land on this Border - and the
+               bottom edge is a line of its own, like every other field's. -->
+          <DataValidationErrors>
+            <Panel>
+              <Border Name="PART_BorderElement"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="{TemplateBinding CornerRadius}" />
+
+              <DockPanel Margin="{TemplateBinding BorderThickness}">
+                <StackPanel Name="PART_SpinnerPanel"
+                            DockPanel.Dock="Right"
+                            Orientation="Vertical"
+                            Spacing="2"
+                            Margin="0,0,3,0"
+                            VerticalAlignment="Center"
+                            IsVisible="{TemplateBinding ShowButtonSpinner}">
+                  <RepeatButton Name="PART_IncreaseButton"
+                                Width="16"
+                                Height="12"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                CornerRadius="{StaticResource RadiusSm}"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center">
+                    <PathIcon Data="{StaticResource IconChevronUp}"
+                              Width="10"
+                              Height="6"
+                              Foreground="{DynamicResource TextMutedBrush}" />
+                  </RepeatButton>
+                  <RepeatButton Name="PART_DecreaseButton"
+                                Width="16"
+                                Height="12"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                CornerRadius="{StaticResource RadiusSm}"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center">
+                    <PathIcon Data="{StaticResource IconChevronDown}"
+                              Width="10"
+                              Height="6"
+                              Foreground="{DynamicResource TextMutedBrush}" />
+                  </RepeatButton>
+                </StackPanel>
+                <ContentPresenter Name="PART_ContentPresenter"
+                                  Content="{TemplateBinding Content}"
+                                  ContentTemplate="{TemplateBinding ContentTemplate}" />
+              </DockPanel>
+
+              <Border Name="PART_EdgeLine"
+                      VerticalAlignment="Bottom"
+                      Margin="1,0"
+                      Background="{DynamicResource FieldEdgeBrush}"
+                      CornerRadius="{StaticResource FieldEdgeCornerRadius}" />
+            </Panel>
+          </DataValidationErrors>
+        </ControlTemplate>
+      </Setter>
+
+      <Style Selector="^ /template/ Border#PART_EdgeLine">
+        <Setter Property="Height" Value="1" />
+      </Style>
+
+      <Style Selector="^:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrushPointerOver}" />
+      </Style>
+
+      <Style Selector="^:focus-within /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      </Style>
+
+      <Style Selector="^:focus-within /template/ Border#PART_EdgeLine">
+        <Setter Property="Background" Value="{DynamicResource TextControlBorderBrushFocused}" />
+        <Setter Property="Height" Value="2" />
+      </Style>
+
+      <Style Selector="^:disabled /template/ Border#PART_EdgeLine">
+        <Setter Property="Background" Value="{DynamicResource TextControlBorderBrushDisabled}" />
+      </Style>
+    </ControlTheme>
+  </Styles.Resources>
+
+  <!-- One mapping per field control: the theme above is what a field inside a panel, a dialog or a settings page uses. -->
+  <Style Selector="TextBox">
+    <Setter Property="Theme" Value="{StaticResource ForgeTextField}" />
+  </Style>
+
+  <Style Selector="ComboBox">
+    <Setter Property="Theme" Value="{StaticResource ForgeComboBox}" />
+  </Style>
+
+  <Style Selector="ButtonSpinner">
+    <Setter Property="Theme" Value="{StaticResource ForgeNumberStepper}" />
+  </Style>
+
+  <!-- A number field's own text box is the field's *content*: the stepper draws the frame and the bottom edge, so the inner
+       box keeps its frame (it sits exactly on top of the stepper's, which is what makes its hover line land on the field's
+       outline) but never draws an edge of its own. -->
+  <!-- Not "transparent": the field's state styles would ink it again on hover/focus, which is exactly the stray vertical
+       line the text area showed against the stepper. The part only draws the frame, so hiding it removes the line and
+       leaves the layout untouched. -->
+  <Style Selector="ButtonSpinner TextBox /template/ Border#PART_BorderElement">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+
+  <Style Selector="ButtonSpinner TextBox /template/ Border#PART_EdgeLine">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+
+  <!-- The multi-line field (the prototype's textarea): 64 px minimum and 8/10 of padding, because a box that holds several
+       lines needs the room a one-line box does not. Anything taller (the prompt body editor) sets its own Height on top. -->
+  <Style Selector="TextBox.multiline">
+    <Setter Property="MinHeight" Value="64" />
+    <Setter Property="Padding" Value="8,10" />
+  </Style>
+
+  <!-- The error state of a field. The pages that validate on their own carry no DataValidationErrors, so they put this class
+       on the control: one colour, on the frame and on the bottom edge, so the line is red whether or not the field has
+       focus. -->
+  <Style Selector="TextBox.invalid /template/ Border#PART_BorderElement">
+    <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+
+  <Style Selector="TextBox.invalid /template/ Border#PART_EdgeLine">
+    <Setter Property="Background" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+
+  <!-- A number field carries the same convention on its own frame: the stepper draws the outline and the bottom edge, so a
+       red cell is those two elements, exactly like the text box's. -->
+  <Style Selector="NumericUpDown.invalid /template/ ButtonSpinner /template/ Border#PART_BorderElement">
+    <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+
+  <Style Selector="NumericUpDown.invalid /template/ ButtonSpinner /template/ Border#PART_EdgeLine">
+    <Setter Property="Background" Value="{DynamicResource StatusErrorBrush}" />
+  </Style>
+</Styles>
