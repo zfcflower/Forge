@@ -184,6 +184,16 @@ internal static class Program
         {
             yield return scenario;
         }
+
+        foreach (var scenario in EditorScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
+        foreach (var scenario in StartupScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
     }
 
     /// <summary>Applies the filter and <c>--quick</c>, recording what was left out so the report can say so.</summary>
