@@ -1211,6 +1211,33 @@ internal sealed class TranscriptViewModel : ObservableObject
     /// <summary>The latest user message not yet claimed by a turn; the next <c>BeginTurn</c> anchors its blocks after it.</summary>
     private UserMessageViewModel? pendingUserMessage;
 
+    /// <summary>
+    /// Numbers the rounds that follow this call. A transcript read backwards from the end of a session starts part-way in: the
+    /// page's first round is number <paramref name="playedRounds"/> + 1, so "第 N 轮" stays the session's own number instead of
+    /// restarting at 1 on every restore.
+    /// </summary>
+    internal void SeedRoundCounter(long playedRounds) => round = (int)Math.Clamp(playedRounds, 0, int.MaxValue);
+
+    /// <summary>
+    /// Puts an older page in front of what is already here. The page comes from a transcript of its own (numbered by
+    /// <see cref="SeedRoundCounter"/>), so its rounds keep the numbers they were built with and nothing already read is renumbered.
+    /// </summary>
+    internal void PrependRounds(TranscriptViewModel older)
+    {
+        ArgumentNullException.ThrowIfNull(older);
+        for (var i = 0; i < older.rounds.Count; i++)
+        {
+            rounds.Insert(i, older.rounds[i]);
+        }
+
+        for (var i = 0; i < older.items.Count; i++)
+        {
+            items.Insert(i, older.items[i]);
+        }
+
+        OnPropertyChanged(nameof(IsEmpty));
+    }
+
     public TranscriptViewModel(bool collapseOlderTurns)
     {
         CollapseOlderTurns = collapseOlderTurns;

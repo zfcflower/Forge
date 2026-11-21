@@ -249,17 +249,81 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var seq = reader.GetInt64(0);
-            var message = MessageJson.Deserialize(reader.GetString(1));
-            var usage = reader.IsDBNull(2) ? null : MessageJson.ParseUsage(reader.GetString(2));
-            var row = $"message {seq.ToString(CultureInfo.InvariantCulture)} of session {sessionId}";
-            var at = StorageDb.ParseCanonicalTimestamp(
-                StorageDb.ReadText(reader, 3, "at", _databasePath, row),
-                "at",
-                _databasePath,
-                row);
-            yield return new StoredMessage(seq, message, usage, at);
+            yield return ReadMessage(reader, sessionId);
         }
+    }
+
+    public async Task<SessionPage> ReadTailAsync(string sessionId, long beforeSeq, int maxMessages, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxMessages, 1);
+        await EnsureInitializedAsync().ConfigureAwait(false);
+        await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
+        var messages = new List<StoredMessage>(Math.Min(maxMessages, 512));
+        await using (var command = StorageDb.Command(
+                         connection,
+                         """
+                         SELECT seq, content_json, usage_json, at FROM (
+                             SELECT seq, content_json, usage_json, at FROM messages
+                             WHERE session_id = $id AND seq < $before ORDER BY seq DESC LIMIT $limit)
+                         ORDER BY seq
+                         """))
+        {
+            command.Parameters.AddWithValue("$id", sessionId);
+            command.Parameters.AddWithValue("$before", beforeSeq);
+            command.Parameters.AddWithValue("$limit", maxMessages);
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                messages.Add(ReadMessage(reader, sessionId));
+            }
+        }
+
+        if (messages.Count == 0)
+        {
+            return new SessionPage(messages, 0, HasMore: false);
+        }
+
+        var oldest = messages[0].Seq;
+        long turnsBefore;
+        await using (var command = StorageDb.Command(
+                         connection,
+                         """
+                         SELECT COUNT(*) FROM messages
+                         WHERE session_id = $id AND seq < $oldest AND json_extract(content_json, '$.role') = 'user'
+                         """))
+        {
+            command.Parameters.AddWithValue("$id", sessionId);
+            command.Parameters.AddWithValue("$oldest", oldest);
+            turnsBefore = Convert.ToInt64(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        }
+
+        bool hasMore;
+        await using (var command = StorageDb.Command(
+                         connection,
+                         "SELECT EXISTS(SELECT 1 FROM messages WHERE session_id = $id AND seq < $oldest)"))
+        {
+            command.Parameters.AddWithValue("$id", sessionId);
+            command.Parameters.AddWithValue("$oldest", oldest);
+            hasMore = Convert.ToInt64(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture) != 0;
+        }
+
+        return new SessionPage(messages, turnsBefore, hasMore);
+    }
+
+    /// <summary>One message row as the schema stores it; every read path maps it the same way.</summary>
+    private StoredMessage ReadMessage(Microsoft.Data.Sqlite.SqliteDataReader reader, string sessionId)
+    {
+        var seq = reader.GetInt64(0);
+        var message = MessageJson.Deserialize(reader.GetString(1));
+        var usage = reader.IsDBNull(2) ? null : MessageJson.ParseUsage(reader.GetString(2));
+        var row = $"message {seq.ToString(CultureInfo.InvariantCulture)} of session {sessionId}";
+        var at = StorageDb.ParseCanonicalTimestamp(
+            StorageDb.ReadText(reader, 3, "at", _databasePath, row),
+            "at",
+            _databasePath,
+            row);
+        return new StoredMessage(seq, message, usage, at);
     }
 
     public async Task<long> LastSeqAsync(string sessionId, CancellationToken ct)

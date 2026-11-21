@@ -449,6 +449,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             var previous = activeSession;
             if (Set(ref activeSession, value))
             {
+                // A tab restored at start-up replays its history here, on the first time it is shown, rather than during
+                // restore (SessionWorkspaceViewModel.EnsureHistoryAsync never throws and runs once per tab).
+                if (value is { } shown)
+                {
+                    _ = shown.EnsureHistoryAsync(CancellationToken.None);
+                }
+
                 CloseChecks();
                 SetTreesActiveSession(activeSession?.SessionId);
                 OnPropertyChanged(nameof(HasActiveSession));
@@ -791,17 +798,24 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
+        // Every remembered tab first, in one UI pass: the rows are read concurrently and the tabs are then built without an
+        // await between them, so the strip appears at once. Only the stored active session replays its history (its
+        // activation does that); the rest defer it to their first activation.
+        var order = new List<string>(tabs.Sessions.Count);
+        if (tabs.ActiveSession is { } activeFirst && tabs.Sessions.Contains(activeFirst))
+        {
+            order.Add(activeFirst);
+        }
+
         foreach (var id in tabs.Sessions)
         {
-            try
+            if (!string.Equals(id, tabs.ActiveSession, StringComparison.Ordinal))
             {
-                await OpenSessionByIdAsync(id, CancellationToken.None).ConfigureAwait(true);
-            }
-            catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException)
-            {
-                AppLogs.Layout.ZLogWarning($"skipped session {id}: {exception.Message}");
+                order.Add(id);
             }
         }
+
+        await RestoreSessionTabsAsync(order, tabs.ActiveSession).ConfigureAwait(true);
 
         if (tabs.PreviewFile is { } file && File.Exists(file))
         {
@@ -821,12 +835,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             ShowChangesTab(activate: false);
         }
 
-        if (tabs.ActiveSession is { } active && sessions.TryGetValue(active, out var session))
-        {
-            ActivateSessionTab(session.SessionId);
-            ActiveSession = session;
-        }
-
+        // The stored active session was restored (and activated) with the batch above; the preview and the floating windows
+        // then take the foreground in the same order they were saved in.
         if (tabs.ActivePreview is { } previewId && Workbench.FindTab(previewId) is { } previewTab)
         {
             Workbench.ActivateTab(previewTab);
@@ -946,7 +956,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     // ---------------------------------------------------------------- sessions
 
-    internal async Task OpenSessionByIdAsync(string sessionId, CancellationToken ct)
+    internal Task OpenSessionByIdAsync(string sessionId, CancellationToken ct) =>
+        OpenSessionByIdCoreAsync(sessionId, ct, deferHistory: false, index: null);
+
+    private async Task OpenSessionByIdCoreAsync(string sessionId, CancellationToken ct, bool deferHistory, int? index)
     {
         var sessions = composition.Sessions;
         var info = await BackgroundRead.RunAsync(token => sessions.GetSessionAsync(sessionId, token), ct)
@@ -966,10 +979,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         // Opening never changes a session's status (6.3): a session that is not Active opens as a read-only view, and
         // only "continue" (ActivateAsync, which honours the one-active-session-per-workspace rule) makes it Active again.
-        await OpenSessionAsync(info, ct).ConfigureAwait(true);
+        await OpenSessionAsync(info, ct, deferHistory, index).ConfigureAwait(true);
     }
 
-    private async Task OpenSessionAsync(SessionInfo info, CancellationToken ct)
+    private async Task OpenSessionAsync(SessionInfo info, CancellationToken ct, bool deferHistory = false, int? index = null)
     {
         ComposerCarry? carried = null;
         if (sessions.TryGetValue(info.Id, out var existing))
@@ -993,6 +1006,34 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         var readOnly = info.Status != SessionStatus.Active;
+        var session = BuildSession(info, readOnly, carried);
+
+        // A remembered read-only tab keeps its history in the store until it is first shown (SessionWorkspaceViewModel
+        // .EnsureHistoryAsync). A tab that can run turns never defers: a live turn would append rows under the replay.
+        var deferred = deferHistory && readOnly;
+
+        if (deferred)
+        {
+            // The tab exists and is titled from its stored row; the transcript stays empty until it is first shown.
+            ShowSessionTab(session, activate: false, index);
+            openTabs.Add(info.Id);
+            ScheduleLayoutSave();
+            return;
+        }
+
+        await session.LoadHistoryAsync(ct).ConfigureAwait(true);
+        ShowSessionTab(session, index: index);
+        openTabs.Add(info.Id);
+        ActiveSession = session;
+        ScheduleLayoutSave();
+    }
+
+    /// <summary>
+    /// The view model of one session tab plus the handlers the shell owns, registered where every opener needs them. Reading
+    /// the history is the caller's business: restore builds every tab in one UI pass and only lets the one on screen replay it.
+    /// </summary>
+    private SessionWorkspaceViewModel BuildSession(SessionInfo info, bool readOnly, ComposerCarry? carried)
+    {
         var catalog = composition.Catalog;
         SessionWorkspaceViewModel? created = null;
         var session = new SessionWorkspaceViewModel(
@@ -1038,11 +1079,95 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             session.RestoreComposerState(state);
         }
 
-        await session.LoadHistoryAsync(ct).ConfigureAwait(true);
-        ShowSessionTab(session);
-        openTabs.Add(info.Id);
-        ActiveSession = session;
+        return session;
+    }
+
+    /// <summary>
+    /// Restores the remembered root sessions as one batch: every stored row is read first (concurrently, off the dispatcher) and
+    /// then every tab is built in a single UI pass with nothing awaited between them, so the strip appears at once instead of
+    /// one tab per read. Only the session that ends up on screen replays its history (its activation does it); the rest defer
+    /// that to their first activation. Agent-session tabs need their root's row too and keep the single-tab path.
+    /// </summary>
+    private async Task RestoreSessionTabsAsync(IReadOnlyList<string> order, string? activeId)
+    {
+        var store = composition.Sessions;
+        var rows = await Task.WhenAll(order.Select(id => ReadSessionRowAsync(store, id))).ConfigureAwait(true);
+
+        var lastRestored = (string?)null;
+        var agentTabs = (List<string>?)null;
+        for (var i = 0; i < order.Count; i++)
+        {
+            if (rows[i] is not { } info)
+            {
+                continue;
+            }
+
+            if (info.ParentSessionId is not null)
+            {
+                (agentTabs ??= []).Add(info.Id);
+                continue;
+            }
+
+            if (sessions.TryGetValue(info.Id, out var existing))
+            {
+                ShowSessionTab(existing, activate: false);
+                openTabs.Add(info.Id);
+                lastRestored = info.Id;
+                continue;
+            }
+
+            var readOnly = info.Status != SessionStatus.Active;
+            var session = BuildSession(info, readOnly, carried: null);
+            ShowSessionTab(session, activate: false, index: i);
+            openTabs.Add(info.Id);
+            lastRestored = info.Id;
+        }
+
         ScheduleLayoutSave();
+
+        if (agentTabs is not null)
+        {
+            foreach (var id in agentTabs)
+            {
+                try
+                {
+                    await OpenAgentSessionByIdAsync(id, CancellationToken.None).ConfigureAwait(true);
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException)
+                {
+                    AppLogs.Layout.ZLogWarning($"skipped agent session {id}: {exception.Message}");
+                }
+            }
+        }
+
+        if (activeId is { } active && sessions.TryGetValue(active, out var activeSession))
+        {
+            ActivateSessionTab(activeSession.SessionId);
+            ActiveSession = activeSession;
+        }
+        else if (lastRestored is { } last && sessions.TryGetValue(last, out var fallback))
+        {
+            // The stored active session is gone (archived, deleted, or its tab failed to open): the last tab restored is what
+            // the window used to end up on, so it stays the one on screen.
+            ActivateSessionTab(fallback.SessionId);
+            ActiveSession = fallback;
+        }
+    }
+
+    /// <summary>One session row for the batch above; a store failure skips that tab instead of failing the whole restore.</summary>
+    private static async Task<SessionInfo?> ReadSessionRowAsync(ISessionStore store, string sessionId)
+    {
+        try
+        {
+            return await BackgroundRead
+                .RunAsync(token => store.GetSessionAsync(sessionId, token), CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            AppLogs.Layout.ZLogWarning($"skipped session {sessionId}: {exception.Message}");
+            return null;
+        }
     }
 
     /// <summary>
@@ -2095,7 +2220,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// Shows the tab of one session. A session has at most one tab: the match is by session id, so a tab left over from an
     /// earlier view model of the same session is re-bound instead of a second <c>session:</c> tab being added.
     /// </summary>
-    private void ShowSessionTab(SessionWorkspaceViewModel session)
+    private void ShowSessionTab(SessionWorkspaceViewModel session, bool activate = true, int? index = null)
     {
         var id = WorkbenchIds.SessionTab(session.SessionId);
         if (Workbench.FindTab(id) is { } existing)
@@ -2112,11 +2237,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             }
 
             existing.Title = session.TabTitle;
-            Workbench.ActivateTab(existing);
+            if (activate)
+            {
+                Workbench.ActivateTab(existing);
+            }
+
             return;
         }
 
-        Workbench.OpenTab(Workbench.MainTabs, id, TabKind.Session, session, session.TabTitle);
+        Workbench.OpenTab(
+            Workbench.MainTabs, id, TabKind.Session, session, session.TabTitle, activate: activate, index: index);
         session.TabTitleChanged += OnSessionTitleChanged;
     }
 

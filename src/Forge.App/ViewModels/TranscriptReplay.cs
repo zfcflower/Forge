@@ -22,6 +22,26 @@ internal static class TranscriptReplay
             },
             ct);
 
+    /// <summary>
+    /// Reads one page backwards from the end of the session (<paramref name="beforeSeq"/> = long.MaxValue for the newest page,
+    /// otherwise the oldest sequence already shown), off the UI thread.
+    /// </summary>
+    public static Task<SessionPage> ReadPageAsync(
+        ISessionStore store, string sessionId, long beforeSeq, int maxMessages, CancellationToken ct) =>
+        Task.Run(() => store.ReadTailAsync(sessionId, beforeSeq, maxMessages, ct), ct);
+
+    /// <summary>
+    /// Replays a page into a transcript of its own, numbered from the rounds that precede it: the caller either takes it as the
+    /// first content of a tab or prepends it in front of what is already on screen.
+    /// </summary>
+    public static (TranscriptViewModel Page, TokenUsage Usage) ReplayPage(SessionPage page, bool collapseOlderTurns = false)
+    {
+        var transcript = new TranscriptViewModel(collapseOlderTurns);
+        transcript.SeedRoundCounter(page.TurnsBefore);
+        var usage = Apply(transcript, page.Messages);
+        return (transcript, usage);
+    }
+
     /// <summary>Replays <paramref name="messages"/> into <paramref name="transcript"/> and returns the usage they carried.</summary>
     public static TokenUsage Apply(TranscriptViewModel transcript, IReadOnlyList<StoredMessage> messages)
     {

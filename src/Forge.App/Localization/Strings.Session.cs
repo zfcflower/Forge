@@ -22,6 +22,12 @@ internal static class SessionStrings
     // ---------------------------------------------------------------- session view
     public const string StartConversationKey = "session.startConversation";
     public const string ChatHintKey = "session.chatHint";
+
+    /// <summary>A restored tab whose stored history is still being replayed (it was not loaded at start-up).</summary>
+    public const string HistoryLoadingKey = "session.historyLoading";
+
+    /// <summary>The strip above the transcript that reads the page of turns older than the one on screen.</summary>
+    public const string LoadOlderKey = "session.loadOlder";
     public const string MessagePlaceholderKey = "session.messagePlaceholder";
     public const string MessageNameKey = "session.messageName";
     public const string SendKey = "session.send";
@@ -183,6 +189,10 @@ internal static class SessionStrings
     public static string StartConversation => Loc.Instance[StartConversationKey];
 
     public static string ChatHint => Loc.Instance[ChatHintKey];
+
+    public static string HistoryLoading => Loc.Instance[HistoryLoadingKey];
+
+    public static string LoadOlder => Loc.Instance[LoadOlderKey];
 
     /// <summary>The sub-agent breadcrumb's parent segment: its tooltip and its accessible name.</summary>
     public static string BreadcrumbBackToParent(string parent) =>
@@ -549,6 +559,8 @@ internal static class SessionStrings
     {
         // session view
         Loc.Register(StartConversationKey, "开始对话", "Start a conversation");
+        Loc.Register(HistoryLoadingKey, "历史信息加载中…", "Loading history…");
+        Loc.Register(LoadOlderKey, "载入更早的对话", "Load older messages");
         Loc.Register(
             ChatHintKey,
             "输入消息后按 Enter 发送，Shift+Enter 换行。工具调用与每一轮都会显示为卡片。",

@@ -65,6 +65,19 @@
   </UserControl.DataTemplates>
   <Grid RowDefinitions="*,Auto,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <Panel Grid.Row="0">
+      <Grid RowDefinitions="Auto,*">
+      <!-- A restored tab reads one page of its history, so the store may still hold older turns: this strip is the way back
+           to them. It sits above the list (not in it), so prepending a page cannot move the reader's own rows around. -->
+      <Button Grid.Row="0"
+              Classes="link"
+              Margin="0,6,0,2"
+              HorizontalAlignment="Center"
+              IsVisible="{Binding HasOlderHistory}"
+              Click="OnLoadOlderClick"
+              Content="{Binding [session.loadOlder], Source={x:Static loc:Loc.Instance}}"
+              AutomationProperties.AutomationId="transcript-load-older"
+              AutomationProperties.Name="{Binding [session.loadOlder], Source={x:Static loc:Loc.Instance}}" />
+      <Panel Grid.Row="1">
       <views:TranscriptListBox x:Name="Transcript"
                ItemsSource="{Binding Transcript.Rounds}"
                Padding="{DynamicResource ChatTranscriptPadding}"
@@ -77,22 +90,41 @@
           </ItemsPanelTemplate>
         </ListBox.ItemsPanel>
       </views:TranscriptListBox>
-      <StackPanel IsVisible="{Binding Transcript.IsEmpty}"
+      <StackPanel IsVisible="{Binding !IsHistoryLoading}">
+        <StackPanel IsVisible="{Binding Transcript.IsEmpty}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="6"
+                    MaxWidth="440">
+          <StackPanel.Styles>
+            <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+          </StackPanel.Styles>
+          <TextBlock Classes="h2"
+                     Text="{Binding [session.startConversation], Source={x:Static loc:Loc.Instance}}"
+                     HorizontalAlignment="Center" />
+          <!-- The workspace button above already names the folder; the empty state keeps the hint only. -->
+          <TextBlock Classes="caption"
+                     TextAlignment="Center"
+                     Text="{Binding [session.chatHint], Source={x:Static loc:Loc.Instance}}" />
+        </StackPanel>
+      </StackPanel>
+      <!-- A tab restored at start-up keeps its history in the store and replays it on first activation; until then the
+           transcript is empty, which is not the same thing as a session without messages. -->
+      <StackPanel IsVisible="{Binding IsHistoryLoading}"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Center"
-                  Spacing="6"
-                  MaxWidth="440">
-        <StackPanel.Styles>
-          <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-        </StackPanel.Styles>
-        <TextBlock Classes="h2"
-                   Text="{Binding [session.startConversation], Source={x:Static loc:Loc.Instance}}"
-                   HorizontalAlignment="Center" />
-        <!-- The workspace button above already names the folder; the empty state keeps the hint only. -->
+                  Spacing="8"
+                  AutomationProperties.AutomationId="session-history-loading">
+        <views:WaitingGlyph Data="{StaticResource IconRefresh}"
+                            Width="18"
+                            Height="18"
+                            HorizontalAlignment="Center"
+                            Foreground="{DynamicResource TextMutedBrush}" />
         <TextBlock Classes="caption"
-                   TextAlignment="Center"
-                   Text="{Binding [session.chatHint], Source={x:Static loc:Loc.Instance}}" />
+                   Text="{Binding [session.historyLoading], Source={x:Static loc:Loc.Instance}}" />
       </StackPanel>
+      </Panel>
+      </Grid>
     </Panel>
 
     <!-- An automation attached to this session (waiting for the quota or for the session to be idle, or running): it

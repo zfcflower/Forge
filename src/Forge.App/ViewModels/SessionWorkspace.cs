@@ -186,6 +186,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private string? rootFailure;
     private LocText? lastTurnError;
     private bool isReadOnlyView;
+    private Task? historyLoad;
+    private bool historyLoaded;
+    private bool isHistoryLoading;
+    private long historyBeforeSeq = long.MaxValue;
+    private bool hasOlderHistory;
+    private bool loadingOlderHistory;
     private bool isHandingOver;
     private AsyncRelayCommand? continueCommand;
     private AsyncRelayCommand? compactCommand;
@@ -289,6 +295,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             () => Composer.Model,
             () => Composer.ProviderId,
             openInspector);
+        if (runtime is not null)
+        {
+            // The budget line is the model's view of the very gauge this panel shows; the preference can turn it off.
+            runtime.ContextBudget = BudgetLine;
+        }
         if (!providers.IsConfigured)
         {
             var missing = SessionStrings.ProviderMissing(providers.StatusText.Resolve());
@@ -414,6 +425,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     /// <summary>The readout above the input: usage, the resource button, the project and the git markers.</summary>
     public SessionInstrumentsViewModel Instruments { get; }
+
+    /// <summary>
+    /// The trailing line the model reads about its own budget (the same measurement the gauge shows), or null when the
+    /// preference turned it off. Called on every request, from the agent loop's thread.
+    /// </summary>
+    private string? BudgetLine() => appPreferences?.ChatContextBudget == false ? null : Instruments.ContextBudgetLine;
 
     /// <summary>Names of the tools this session can call; empty until its first turn built the agent host.</summary>
     internal IReadOnlyList<string> ToolNames() => runtime?.ToolNames() ?? [];
@@ -789,7 +806,95 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         TabTitleChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Rebuilds the transcript and the finished sub-agent list from the session store, reading off the dispatcher.</summary>
+    /// <summary>
+    /// Replays the stored history and the agent roster at most once, and never throws.
+    /// <para>Only a read-only tab can be restored without it: the window used to replay every remembered session's whole
+    /// transcript on the UI thread before it was usable, while only the tab on screen was ever looked at. Those tabs are
+    /// loaded by the first activation (the shell calls this from <c>ActiveSession</c>), which shows the waiting state of
+    /// <see cref="IsHistoryLoading"/> while it runs. A tab that can run turns is never deferred: a live turn would append rows
+    /// under a replay that is still to come.</para>
+    /// </summary>
+    public Task EnsureHistoryAsync(CancellationToken ct) =>
+        disposed || historyLoaded ? Task.CompletedTask : historyLoad ??= ReplayHistoryAsync(ct);
+
+    /// <summary>True while the deferred replay of a restored tab is running; the transcript shows its waiting state.</summary>
+    public bool IsHistoryLoading
+    {
+        get => isHistoryLoading;
+        private set => Set(ref isHistoryLoading, value);
+    }
+
+    /// <summary>Whether the store still holds turns older than the page on screen (the transcript's 「载入更早」 strip).</summary>
+    public bool HasOlderHistory
+    {
+        get => hasOlderHistory;
+        private set => Set(ref hasOlderHistory, value);
+    }
+
+    /// <summary>
+    /// Reads the page before the oldest round on screen and puts it in front of the transcript. The caller scrolls the round
+    /// that was first back to the top afterwards, so reading continues where it was.
+    /// </summary>
+    public async Task LoadOlderHistoryAsync(CancellationToken ct)
+    {
+        if (store is null || !HasOlderHistory || loadingOlderHistory)
+        {
+            return;
+        }
+
+        loadingOlderHistory = true;
+        try
+        {
+            var page = await TranscriptReplay.ReadPageAsync(store, SessionId, historyBeforeSeq, HistoryPageMessages, ct)
+                .ConfigureAwait(true);
+            if (page.Messages.Count == 0)
+            {
+                HasOlderHistory = false;
+                return;
+            }
+
+            var (older, _) = TranscriptReplay.ReplayPage(page);
+            Transcript.PrependRounds(older);
+            historyBeforeSeq = page.Messages[0].Seq;
+            HasOlderHistory = page.HasMore;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
+        {
+            Transcript.AddNotice(SessionStrings.ReadFailed(exception.Message), isError: true);
+        }
+        finally
+        {
+            loadingOlderHistory = false;
+        }
+    }
+
+    /// <summary>Messages per history page: a page is the unit the transcript loads, reads and prepends.</summary>
+    internal const int HistoryPageMessages = 100;
+
+    private async Task ReplayHistoryAsync(CancellationToken ct)
+    {
+        IsHistoryLoading = true;
+        try
+        {
+            await LoadHistoryAsync(ct).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // A deferred replay has no caller to observe it: log rather than leave an unobserved task exception behind.
+            AppLogs.Session.ZLogWarning($"history replay failed: {exception.Message}");
+        }
+        finally
+        {
+            // One attempt per tab: a store that failed once is not asked again on every activation.
+            historyLoaded = true;
+            IsHistoryLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the transcript and the finished sub-agent list from the session store, reading off the dispatcher. A tab that
+    /// was restored at start-up runs this on first activation instead of during restore: see <see cref="EnsureHistoryAsync"/>.
+    /// </summary>
     public async Task LoadHistoryAsync(CancellationToken ct)
     {
         if (store is null)
@@ -799,7 +904,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         try
         {
-            Instruments.SeedHistory(await ReplayIntoAsync(Transcript, SessionId, ct).ConfigureAwait(true));
+            var page = await TranscriptReplay
+                .ReadPageAsync(store, SessionId, long.MaxValue, HistoryPageMessages, ct)
+                .ConfigureAwait(true);
+            Transcript.SeedRoundCounter(page.TurnsBefore);
+            Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, page.Messages));
+            historyBeforeSeq = page.Messages.Count > 0 ? page.Messages[0].Seq : 1;
+            HasOlderHistory = page.HasMore;
 
             // The divider tooltips price with the composer's current choice when a replayed row names no model;
             // live turns resolve the same way, so a model switch re-prices what the next hover shows.

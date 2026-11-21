@@ -225,6 +225,13 @@ public interface ISessionCatalog
 
 public sealed record StoredMessage(long Seq, ChatMessage Message, TokenUsage? Usage, DateTimeOffset At);
 
+/// <summary>
+/// One page of a session's messages read from the end: the messages in order, and how many user messages precede the page -
+/// the number of rounds already played, which is what the transcript numbers its next round from.
+/// </summary>
+/// <param name="HasMore">The session has messages before this page.</param>
+public sealed record SessionPage(IReadOnlyList<StoredMessage> Messages, long TurnsBefore, bool HasMore);
+
 /// <summary>Summary layers: 1 = stage summaries, 2 = session-level summary. Layer 0 (recent raw) is not stored as a summary.</summary>
 public sealed record SummaryRecord(string SessionId, int Layer, long FromSeq, long ToSeq, string Text, DateTimeOffset At);
 
@@ -243,6 +250,34 @@ public interface ISessionStore
     /// <summary>Reads messages with fromSeq &lt;= Seq &lt;= toSeq (toSeq null = to the end), in order.</summary>
     IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct);
     Task<long> LastSeqAsync(string sessionId, CancellationToken ct);
+
+    /// <summary>
+    /// The newest <paramref name="maxMessages"/> messages below <paramref name="beforeSeq"/> (<see cref="long.MaxValue"/> = the
+    /// end), in order, with the turn count that precedes them: a transcript pages backwards from the end and has to number its
+    /// rounds as if the whole session had been read. The default reads everything and takes the tail, so an implementer that
+    /// cannot page is correct but slow; the SQLite store answers it with one bounded query.
+    /// </summary>
+    async Task<SessionPage> ReadTailAsync(string sessionId, long beforeSeq, int maxMessages, CancellationToken ct)
+    {
+        var all = new List<StoredMessage>();
+        await foreach (var message in ReadAsync(sessionId, 1, beforeSeq == long.MaxValue ? null : beforeSeq - 1, ct))
+        {
+            all.Add(message);
+        }
+
+        var from = Math.Max(0, all.Count - Math.Max(1, maxMessages));
+        var page = all.GetRange(from, all.Count - from);
+        var turnsBefore = 0L;
+        for (var i = 0; i < from; i++)
+        {
+            if (all[i].Message.Role == MessageRole.User)
+            {
+                turnsBefore++;
+            }
+        }
+
+        return new SessionPage(page, turnsBefore, from > 0);
+    }
 
     Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct);
     Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct);

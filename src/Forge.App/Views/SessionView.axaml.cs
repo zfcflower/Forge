@@ -32,6 +32,25 @@ public partial class SessionView : UserControl
         }
     }
 
+    /// <summary>
+    /// Reads the page of turns older than the one on screen and keeps the reader's place: the page lands above, so the round
+    /// that was first is brought back to the top of the viewport instead of letting the list jump.
+    /// </summary>
+    private async void OnLoadOlderClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not SessionWorkspaceViewModel model)
+        {
+            return;
+        }
+
+        var first = model.Transcript.Rounds.Count > 0 ? model.Transcript.Rounds[0] : null;
+        await model.LoadOlderHistoryAsync(CancellationToken.None);
+        if (first is not null)
+        {
+            Transcript.ScrollIntoView(model.Transcript.Rounds.IndexOf(first));
+        }
+    }
+
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);
