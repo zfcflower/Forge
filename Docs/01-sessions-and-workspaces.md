@@ -8,7 +8,7 @@
 - 状态三值：`Active`（可跑回合）、`Archived`（只读，可“继续”）、`Deleted`（软删除，可恢复或彻底删除）。
 - **一个工作区同一时刻只有一个活动根会话**，由部分唯一索引 `ux_sessions_occupancy`（`status='Active' AND parent_session_id IS NULL`）强制；占用键由存储层计算（规范化路径，Windows 大写）。冲突映射为 `WorktreeOccupiedException(HolderSessionId)`，界面进入占用对话框，而不是通用错误。
 - 子会话带 `ParentSessionId` / `AgentKind` / `Task`，继承父会话的项目与 worktree；子会话不参与占用唯一索引。
-- **Agent 会话（运行时见 02 §2.3）**：用户在一个活动根会话下手动增加的**用户驱动**子会话，共用根会话的目录（`parent_session_id` = 根、深度 1、初始上下文空白），不参与占用索引。它从属于根：根的忙判定包含它、根离开 `Active` 时它随之只读、软删与彻底删除级联；**只有根会话能改 git 状态**（可选的 Agent 种类不得持有 git 写与 PR 工具）。根与它之间唯一的通道是用户点名的 `message_session`。入口是 worktree 行“+”的第二项，常规对话不提供。
+- **Agent 会话（运行时见 02 §2.3）**：用户在一个活动根会话下手动增加的**用户驱动**子会话，共用根会话的目录（`parent_session_id` = 根、深度 1、初始上下文空白），不参与占用索引。它从属于根：根的忙判定包含它、根离开 `Active` 时它随之只读、软删与彻底删除级联；**只有根会话能改 git 状态**（可选的 Agent 种类不得持有 git 写与 PR 工具）。根与它之间唯一的通道是用户点名的 `message_session`。入口是 worktree 行“+”的第二项，常规对话不提供。回合进行中关掉它的标签不结束那个回合，重开同一子会话**回到仍在跑的那个视图**（不另建视图、不按存储回放）。
 - 常规工作区 `General` 是单例项目（部分唯一索引保证），默认目录为 `文档/Forge/General`，可用 `FORGE_GENERAL_WORKSPACE` 覆盖。
 
 ## 1.2 三种会话环境

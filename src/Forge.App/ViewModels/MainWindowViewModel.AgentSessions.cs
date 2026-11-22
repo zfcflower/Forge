@@ -101,7 +101,9 @@ internal sealed partial class MainWindowViewModel
 
     /// <summary>
     /// Opens a stored agent session by its session id: the tab of a tree row, and the one the restored layout names. A tab
-    /// that is already open is brought forward instead of opened twice.
+    /// that is already open is brought forward instead of opened twice, and a tab that was closed while its turn ran comes
+    /// back as the same live view - that turn keeps streaming and its pending approval cards keep answering - never as a
+    /// second view replayed from the store under the run that is still writing to it.
     /// </summary>
     internal async Task OpenAgentSessionByIdAsync(string childSessionId, CancellationToken ct)
     {
@@ -149,6 +151,20 @@ internal sealed partial class MainWindowViewModel
         if (root is null || root.Status != SessionStatus.Active)
         {
             Status.SetWorkspaceProblem(LocText.Literal(AgentSessionStrings.RootNotActive(root?.Title ?? rootId)));
+            return;
+        }
+
+        // A second open of this same agent session - a double-click, the row and the palette at once - may have filed its tab
+        // while this one was reading the store: that tab owns the child session now, so this one only brings it forward.
+        if (agentTabs.ContainsKey(child.Id))
+        {
+            ActivateAgentSessionTab(child.Id);
+            return;
+        }
+
+        if (FindClosedAgentSessionView(child.Id) is { } live)
+        {
+            ReopenAgentSessionTab(live);
             return;
         }
 
@@ -202,13 +218,61 @@ internal sealed partial class MainWindowViewModel
             TurnGate = token => CheckTurnAsync(root.Id, token),
         };
         created = session;
-        session.AgentSessionCreated += OnAgentSessionCreated;
-        session.TurnStarted += OnAgentSessionTurnStarted;
-        session.AgentSessionTurnEnded += OnAgentSessionTurnEnded;
         session.TurnCompleted += OnAgentSessionViewTurnCompleted;
+        AttachAgentSessionView(session);
+        return session;
+    }
+
+    /// <summary>
+    /// Hooks what the shell owns about an agent-session view; <see cref="DetachAgentSessionView"/> is its counter, so a view
+    /// whose tab was closed and then opened again gets exactly the subscriptions it had on screen.
+    /// </summary>
+    private void AttachAgentSessionView(SessionWorkspaceViewModel session)
+    {
+        session.AgentSessionCreated += OnAgentSessionCreated;
+        session.AgentSessionTurnEnded += OnAgentSessionTurnEnded;
+        session.TurnStarted += OnAgentSessionTurnStarted;
         session.TabTitleChanged += OnAgentSessionTitleChanged;
         session.AgentNameFollowedKind += OnAgentNameFollowedKind;
-        return session;
+    }
+
+    private void DetachAgentSessionView(SessionWorkspaceViewModel session)
+    {
+        session.AgentSessionCreated -= OnAgentSessionCreated;
+        session.AgentSessionTurnEnded -= OnAgentSessionTurnEnded;
+        session.TurnStarted -= OnAgentSessionTurnStarted;
+        session.TabTitleChanged -= OnAgentSessionTitleChanged;
+        session.AgentNameFollowedKind -= OnAgentNameFollowedKind;
+    }
+
+    /// <summary>
+    /// The live view of an agent session whose tab was closed while its turn ran, by the child session id it holds now; null
+    /// when there is none. It is the one view of that child session that exists, so reopening has to find it here: the view
+    /// left <c>agentTabs</c>, <c>agentViews</c> and <c>sessions</c> when its tab closed, and only the closing set still holds it.
+    /// </summary>
+    private SessionWorkspaceViewModel? FindClosedAgentSessionView(string childSessionId)
+    {
+        foreach (var view in agentViewsClosing)
+        {
+            if (string.Equals(view.AgentChildSessionId, childSessionId, StringComparison.Ordinal))
+            {
+                return view;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Puts a closed-but-running agent-session view back on screen: it leaves the closing set (its turn end must no longer
+    /// release it), gets the shell's subscriptions back and files itself under its tab again - no replay, because the run it
+    /// shows is the one still in flight.
+    /// </summary>
+    private void ReopenAgentSessionTab(SessionWorkspaceViewModel session)
+    {
+        agentViewsClosing.Remove(session);
+        AttachAgentSessionView(session);
+        OpenAgentSessionTab(session, activate: true);
     }
 
     /// <summary>Puts the view in a main-group tab; a draft tab is not written to the layout until it has a session id.</summary>
@@ -535,11 +599,7 @@ internal sealed partial class MainWindowViewModel
             return;
         }
 
-        session.TabTitleChanged -= OnAgentSessionTitleChanged;
-        session.AgentNameFollowedKind -= OnAgentNameFollowedKind;
-        session.AgentSessionCreated -= OnAgentSessionCreated;
-        session.AgentSessionTurnEnded -= OnAgentSessionTurnEnded;
-        session.TurnStarted -= OnAgentSessionTurnStarted;
+        DetachAgentSessionView(session);
         agentTabs.Remove(AgentTabKey(session));
         var root = session.AgentSessionRoot;
         if (session.AgentChildSessionId is { } childId)
