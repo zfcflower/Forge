@@ -40,14 +40,14 @@
                AutomationProperties.AutomationId="settings-projects-directory"
                AutomationProperties.Name="{Binding [settings.projects.directoryLabel], Source={x:Static loc:Loc.Instance}}" />
       <Button Grid.Column="2"
-              Classes="outline"
+              Classes="ghost"
               Margin="8,0,0,0"
               Content="{Binding [settings.projects.browse], Source={x:Static loc:Loc.Instance}}"
               Command="{Binding BrowseCommand}"
               AutomationProperties.AutomationId="settings-projects-browse"
               AutomationProperties.Name="{Binding [settings.projects.browse], Source={x:Static loc:Loc.Instance}}" />
       <Button Grid.Column="3"
-              Classes="outline"
+              Classes="ghost"
               Margin="8,0,0,0"
               Content="{Binding [settings.projects.clear], Source={x:Static loc:Loc.Instance}}"
               Command="{Binding ClearCommand}"

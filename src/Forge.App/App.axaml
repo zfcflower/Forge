@@ -351,7 +351,7 @@
         <StackPanel Spacing="4" IsVisible="{Binding IsDnsServers}">
           <TextBlock Classes="caption" TextWrapping="Wrap"
                      Text="{Binding [network.dns.servers.label], Source={x:Static loc:Loc.Instance}}" />
-          <TextBox Text="{Binding ServersText, Mode=TwoWay}" AcceptsReturn="True" MinHeight="56"
+          <TextBox Classes="multiline" Text="{Binding ServersText, Mode=TwoWay}" AcceptsReturn="True"
                    PlaceholderText="1.1.1.1"
                    AutomationProperties.AutomationId="network-dns-servers-text" />
           <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"
@@ -396,7 +396,7 @@
                      AutomationProperties.AutomationId="network-proxy-socks4-hint" />
           <TextBlock Classes="caption" TextWrapping="Wrap"
                      Text="{Binding [network.proxy.bypass], Source={x:Static loc:Loc.Instance}}" />
-          <TextBox Text="{Binding BypassText, Mode=TwoWay}" AcceptsReturn="True" MinHeight="56"
+          <TextBox Classes="multiline" Text="{Binding BypassText, Mode=TwoWay}" AcceptsReturn="True"
                    PlaceholderText="*.corp.example"
                    AutomationProperties.AutomationId="network-proxy-bypass" />
           <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource StatusErrorBrush}"

@@ -293,22 +293,22 @@
                  AutomationProperties.AutomationId="question-waiting" />
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2,0,0">
         <Button Grid.Column="0"
-                Classes="outline large"
+                Classes="ghost"
                 Command="{Binding DismissCommand}"
                 Content="{Binding [questions.card.dismiss], Source={x:Static loc:Loc.Instance}}"
                 AutomationProperties.AutomationId="question-dismiss" />
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-          <Button Classes="outline large"
+          <Button Classes="ghost"
                   IsVisible="{Binding HasPrevious}"
                   Command="{Binding PreviousCommand}"
                   Content="{Binding [questions.panel.previous], Source={x:Static loc:Loc.Instance}}"
                   AutomationProperties.AutomationId="question-previous" />
-          <Button Classes="outline large"
+          <Button Classes="ghost"
                   IsVisible="{Binding HasNext}"
                   Command="{Binding NextCommand}"
                   Content="{Binding [questions.panel.next], Source={x:Static loc:Loc.Instance}}"
                   AutomationProperties.AutomationId="question-next" />
-          <Button Classes="primary large"
+          <Button Classes="primary"
                   IsVisible="{Binding ShowsSubmit}"
                   Command="{Binding SubmitCommand}"
                   Content="{Binding SubmitText}"

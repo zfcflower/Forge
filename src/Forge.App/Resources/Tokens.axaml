@@ -72,9 +72,10 @@
        over these static defaults, so the interface-font preference keeps reaching built-in controls.
 
        ButtonPadding deliberately stays with Fluent: the clear button inside a TextBox template is sized from it, and a
-       wider value clips its 12 px glyph. The border brushes of the same controls are aliased to Forge's line and status
-       tokens further down (see the `TextControl*` / `ComboBox*` entries in each theme), so an input box, the divider above
-       it and the button beside it all draw the same hairline; their backgrounds and foregrounds still come from the theme. -->
+       wider value clips its 12 px glyph. The border brushes, the fill and the type of the same controls are aliased to
+       Forge's line, surface, text and status tokens further down (see the `TextControl*` / `ComboBox*` entries in each
+       theme), so an input box, the divider above it and the button beside it all draw the same hairline and share one set
+       of foregrounds; the template, the heights and the corner radius stay Fluent's. -->
   <!-- The smallest radius the system has: Fluent's own default for a control. Spelled out rather than dropped, because
        OverlayCornerRadius defaults to 5 and the two must not drift apart, and because Forge's button classes bind this same
        key (see Controls.axaml) — so an input box, the button beside it and the flyout they open share one radius, and a
@@ -88,7 +89,16 @@
        buttons all move together; the framework's plain buttons keep `ControlCornerRadius`. -->
   <CornerRadius x:Key="ButtonCornerRadius">5</CornerRadius>
   <sys:Double x:Key="TextControlThemeMinHeight">28</sys:Double>
-  <Thickness x:Key="TextControlThemePadding">10,4,6,4</Thickness>
+  <!-- 10 on both sides, like the field the prototype draws. Fluent's own default keeps 6 on the right for a clear button
+       a plain TextBox does not have. -->
+  <Thickness x:Key="TextControlThemePadding">10,4</Thickness>
+  <!-- The field frame: a hairline on the top and the sides, nothing at the bottom - the bottom is a line of its own
+       (`FieldStyles.axaml` draws it as a second element), because a Border paints all four edges with one brush and this
+       edge has to be able to be the heaviest line and change with the state. -->
+  <Thickness x:Key="FieldFrameThickness">1,1,1,0</Thickness>
+  <!-- The bottom edge is a filled band. It stops one pixel short of each side (the frame's own line) and carries the field's
+       bottom corner radius, so it tapers into the corner arc instead of ending square against it. -->
+  <CornerRadius x:Key="FieldEdgeCornerRadius">0,0,3,3</CornerRadius>
   <sys:Double x:Key="ComboBoxMinHeight">28</sys:Double>
   <Thickness x:Key="ComboBoxPadding">12,4,0,4</Thickness>
   <!-- 24 leaves the 20 px tick box itself alone (Fluent pins the box, not the row) while keeping the row on the same
@@ -171,7 +181,7 @@
       <SolidColorBrush x:Key="SurfaceInputBrush" Color="#FFFFFF" />
       <!-- The reply card of the transcript: a neutral near-white one step below the white page, so a long answer reads as a
            single surface without competing with the turn beside it. -->
-      <SolidColorBrush x:Key="AssistantCardBrush" Color="#F8F8F8" />
+      <SolidColorBrush x:Key="AssistantCardBrush" Color="#FBFCFD" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1D2129" />
       <SolidColorBrush x:Key="TextSecondaryBrush" Color="#4E5969" />
@@ -219,6 +229,29 @@
       <StaticResource x:Key="ComboBoxBorderBrushPressed" ResourceKey="BorderStrongBrush" />
       <StaticResource x:Key="ComboBoxBorderBrushDisabled" ResourceKey="BorderBrush" />
       <StaticResource x:Key="ComboBoxBackgroundBorderBrushFocused" ResourceKey="BrandActionBrush" />
+      <!-- The fill and the type inside a field are Forge's too: SurfaceInputBrush (white in light, one step below the body
+           in dark) instead of Fluent's translucent wash, TextPrimaryBrush instead of pure black, and the muted grey for the
+           placeholder and the dropdown's chevron. Hover and focus keep the same fill - the prototype changes only the line
+           on hover and only the edge on focus - and the chevron inks brand while the list is focused. -->
+      <StaticResource x:Key="TextControlBackground" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="TextControlBackgroundPointerOver" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="TextControlBackgroundFocused" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="TextControlForeground" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="TextControlForegroundPointerOver" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="TextControlForegroundFocused" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="ComboBoxBackground" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="ComboBoxBackgroundPointerOver" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="ComboBoxForeground" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="ComboBoxForegroundFocused" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="ComboBoxPlaceholderForeground" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="ComboBoxDropDownGlyphForeground" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="ComboBoxDropDownGlyphForegroundFocused" ResourceKey="BrandActionBrush" />
+      <!-- The bottom edge of an input at rest: the field closes on a line of ink, while its top and sides keep the divider
+           colour. It is a brush, not a recoloured border, because the frame's four edges share one BorderBrush. -->
+      <SolidColorBrush x:Key="FieldEdgeBrush" Color="#4E5969" />
       <StaticResource x:Key="SystemControlErrorTextForegroundBrush" ResourceKey="StatusErrorBrush" />
       <!-- One chrome colour: the window header row, every panel title bar (and the tab strip drawn on it), the dock
            strips and a floated panel's own title bar. One step below the darkest surface, so chrome never borrows the
@@ -313,7 +346,7 @@
       <!-- The one surface that goes the other way in dark: an input sits below the card it lives on. -->
       <SolidColorBrush x:Key="SurfaceInputBrush" Color="#161D1F" />
       <!-- The reply card keeps the light theme's relationship: one step below the card it sits on, above the page. -->
-      <SolidColorBrush x:Key="AssistantCardBrush" Color="#171C1E" />
+      <SolidColorBrush x:Key="AssistantCardBrush" Color="#181E20" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F2F4F5" />
       <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A9B2B8" />
@@ -352,6 +385,25 @@
       <StaticResource x:Key="ComboBoxBorderBrushPressed" ResourceKey="BorderStrongBrush" />
       <StaticResource x:Key="ComboBoxBorderBrushDisabled" ResourceKey="BorderBrush" />
       <StaticResource x:Key="ComboBoxBackgroundBorderBrushFocused" ResourceKey="BrandActionBrush" />
+      <!-- Same aliases as the light dictionary: the two theme dictionaries must define the identical key set. -->
+      <StaticResource x:Key="TextControlBackground" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="TextControlBackgroundPointerOver" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="TextControlBackgroundFocused" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="TextControlForeground" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="TextControlForegroundPointerOver" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="TextControlForegroundFocused" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="ComboBoxBackground" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="ComboBoxBackgroundPointerOver" ResourceKey="SurfaceInputBrush" />
+      <StaticResource x:Key="ComboBoxForeground" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="ComboBoxForegroundFocused" ResourceKey="TextPrimaryBrush" />
+      <StaticResource x:Key="ComboBoxPlaceholderForeground" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="ComboBoxDropDownGlyphForeground" ResourceKey="TextMutedBrush" />
+      <StaticResource x:Key="ComboBoxDropDownGlyphForegroundFocused" ResourceKey="BrandActionBrush" />
+      <!-- Same bottom edge as the light theme, in the theme's muted grey: against #161D1F a darker line would vanish. -->
+      <SolidColorBrush x:Key="FieldEdgeBrush" Color="#87939D" />
       <StaticResource x:Key="SystemControlErrorTextForegroundBrush" ResourceKey="StatusErrorBrush" />
       <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#0D1213" />
       <SolidColorBrush x:Key="CountBadgeBrush" Color="#2C3538" />

@@ -7,7 +7,6 @@
         Width="560"
         Height="680"
         MinHeight="400"
-        CanResize="True"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}">

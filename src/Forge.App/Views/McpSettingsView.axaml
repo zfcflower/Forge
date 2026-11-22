@@ -333,10 +333,10 @@
                        VerticalAlignment="Top"
                        Text="{Binding [settings.mcp.editor.args], Source={x:Static loc:Loc.Instance}}" />
             <TextBox Grid.Column="1"
+                     Classes="multiline"
                      Text="{Binding Editor.ArgsText, Mode=TwoWay}"
                      AcceptsReturn="True"
                      TextWrapping="Wrap"
-                     Height="80"
                      PlaceholderText="{Binding [settings.mcp.editor.argsPlaceholder], Source={x:Static loc:Loc.Instance}}"
                      AutomationProperties.AutomationId="mcp-editor-args"
                      AutomationProperties.Name="{Binding [settings.mcp.editor.args], Source={x:Static loc:Loc.Instance}}" />
@@ -425,10 +425,10 @@
                        VerticalAlignment="Top"
                        Text="{Binding [settings.mcp.editor.readOnlyTools], Source={x:Static loc:Loc.Instance}}" />
             <TextBox Grid.Column="1"
+                     Classes="multiline"
                      Text="{Binding Editor.ReadOnlyToolsText, Mode=TwoWay}"
                      AcceptsReturn="True"
-                     TextWrapping="Wrap"
-                     Height="60" />
+                     TextWrapping="Wrap" />
           </Grid>
 
           <Grid ColumnDefinitions="150,*" Margin="0,2">
