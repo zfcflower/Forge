@@ -16,7 +16,8 @@
 | `todo` | 会话 | R/W | * | 7 种操作：清单、分组、计划摘要 |
 | `ask_user` | 会话 | R | * | 问题卡（选项/自由文本/多选） |
 | `skill` | 会话 | R | — | 按名取技能全文（≤64000 字符） |
-| `spawn_agent` | Agent | R | * | 派生 Scout/Worker/Plan/Reviewer 或用户 Agent |
+| `spawn_agent` | Agent | R | * | 派生 Scout/Worker/Plan/Reviewer 或用户 Agent；可带这一次的模型与档位 |
+| `models` | Agent | R | * | 列已连接模型与接受档位，隐藏模型不列，内置子 Agent 不持有 |
 | `subagent_steer` | Agent | R | — | 批次边界转向 |
 | `subagent_followup` | Agent | R | — | 结束时追加后续指令 |
 | `subagent_stop` | Agent | R | — | 只取消该子 Agent |

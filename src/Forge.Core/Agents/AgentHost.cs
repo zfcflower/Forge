@@ -27,6 +27,14 @@ public sealed record AgentHostOptions
     /// <summary>Extra agent kinds layered on top of <see cref="BuiltInAgents"/>; same name replaces the built-in.</summary>
     public IEnumerable<AgentDefinition>? Agents { get; init; }
 
+    /// <summary>
+    /// Resolves <c>spawn_agent</c>'s optional per-spawn model override (<c>model</c>, <c>provider</c>, <c>thinking</c>).
+    /// The model catalogue belongs to the app, so Core carries the request and the app answers it; a refusal is an error
+    /// result the model can act on. Null = the tool carries no override parameters at all, which is what a host without
+    /// an app behind it (a script, a test) gets, and its definition bytes stay as they were.
+    /// </summary>
+    public Func<SpawnModelRequest, SpawnModelChoice>? SpawnModels { get; init; }
+
     public required PromptLayers Layers { get; init; }
 
     public IPromptComposer Composer { get; init; } = new PromptComposer();
@@ -208,7 +216,7 @@ public sealed class AgentHost
         }
 
         scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);
-        builtIns.Add(new SpawnAgentTool(scheduler, catalog.All));
+        builtIns.Add(new SpawnAgentTool(scheduler, catalog.All, options.SpawnModels));
         builtIns.Add(new SubAgentSteerTool(scheduler.ModelControl));
         builtIns.Add(new SubAgentFollowUpTool(scheduler.ModelControl));
         builtIns.Add(new SubAgentStopTool(scheduler.ModelControl));

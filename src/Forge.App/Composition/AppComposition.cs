@@ -657,6 +657,9 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.Approvals = approvals;
         runtimeServices.PromptTemplates = promptTemplates;
         runtimeServices.AgentDefaults = agentId => agentDefaults.Resolve(agentId, providers.Catalog);
+        runtimeServices.Providers = () => providers.Catalog;
+        runtimeServices.IsModelHidden = model => preferences.Current.IsModelHidden(model);
+        runtimeServices.SpawnModels = new SpawnModelResolver(() => providers.Catalog).Resolve;
         runtimeServices.ClaimsOfficialIdentity = () => providers.Catalog.ClaimsOfficialIdentity;
         runtimeServices.PullRequestTools = pullRequestTools;
         runtimeServices.Projects = projects;

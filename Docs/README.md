@@ -75,7 +75,7 @@ Forge.App（Native AOT，Avalonia UI，唯一知道全部主程序项目）
 | 文档 | 内容 | 关键点 |
 |---|---|---|
 | [01-sessions-and-workspaces.md](01-sessions-and-workspaces.md) | 会话、占用、接手、分叉、合并、移除、恢复 | 一工作区一活动根会话；交接事务；回收站 |
-| [02-agent-runtime.md](02-agent-runtime.md) | Agent 循环、48 个内置工具、子 Agent、压缩、TODO/评审门禁、用量与限速、自动化 | 深度 2、并发 4、触发线 85%；算法细节见 16 |
+| [02-agent-runtime.md](02-agent-runtime.md) | Agent 循环、49 个内置工具、子 Agent、压缩、TODO/评审门禁、用量与限速、自动化 | 深度 2、并发 4、触发线 85%；算法细节见 16 |
 | [03-providers-and-network.md](03-providers-and-network.md) | 三家协议、七种认证、模型目录、缓存、官方身份、代理与 DNS | models.dev 快照；TTL auto/5m/1h |
 | [04-git-diff-pr.md](04-git-diff-pr.md) | worktree、改动浏览、diff 审阅、步骤提交、PR 工具与检查面板 | `pr_create` 五道闸门；只允许 force-with-lease |
 | [05-spec-graph.md](05-spec-graph.md) | 规格树模型、7 个 spec 工具、面板与写入守卫 | frontmatter 往返无损 |

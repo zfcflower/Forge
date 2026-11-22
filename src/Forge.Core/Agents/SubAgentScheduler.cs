@@ -179,7 +179,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
         IAgentEventSink sink,
         string parentId,
         CancellationToken ct,
-        AgentOwner owner = AgentOwner.Model)
+        AgentOwner owner = AgentOwner.Model,
+        ModelSettings? model = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(sink);
@@ -202,6 +203,21 @@ public sealed class SubAgentScheduler : ISubAgentControl
         if (definition.ToolNames is not { Count: > 0 })
         {
             return new SubAgentOutcome(resumeId ?? string.Empty, MissingToolsMessage(definition.Name), IsError: true);
+        }
+
+        if (model is not null)
+        {
+            // A resume continues an instance that already carries its model: changing it would swap the prefix under a
+            // conversation that is being continued, so the override is refused rather than silently dropped.
+            if (resumeId is not null)
+            {
+                return new SubAgentOutcome(
+                    resumeId,
+                    "A resumed sub-agent keeps the model it started with; start a new spawn to change it.",
+                    IsError: true);
+            }
+
+            definition = definition with { Model = model };
         }
 
         WarnWhenBroaderThanParent(definition, parentId, sink);

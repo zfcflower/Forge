@@ -11,6 +11,7 @@ using Forge.HostClient;
 using Forge.Mcp;
 using Forge.Workspace;
 using Forge.App.Logging;
+using Forge.App.Providers;
 using ZLogger;
 
 namespace Forge.App.Agents;
@@ -41,6 +42,26 @@ internal sealed record AgentRuntimeServices(
 
     /// <summary>Agent defaults resolved from settings.json; null when the runtime has no store.</summary>
     public Func<string, ModelSettings?>? AgentDefaults { get; set; }
+
+    /// <summary>
+    /// The live provider catalogue (<c>ProviderServices.Catalog</c>): the models tool lists it and a per-spawn model
+    /// override is matched against it. Read on every use rather than captured, so a provider saved while a session runs
+    /// is visible to the next tool call. Null without the composition root, which then has neither the models tool nor
+    /// an override parameter on <c>spawn_agent</c>.
+    /// </summary>
+    public Func<ProviderCatalog>? Providers { get; set; }
+
+    /// <summary>
+    /// Whether the user hid a model from the pickers (<c>preferences.modelsHidden</c>); the models tool skips those, the
+    /// same rule the agent-defaults row applies. Null = nothing is hidden.
+    /// </summary>
+    public Func<string, bool>? IsModelHidden { get; set; }
+
+    /// <summary>
+    /// Resolves <c>spawn_agent</c>'s optional per-spawn model override against the catalogue. Null = the tool carries no
+    /// <c>model</c>/<c>provider</c>/<c>thinking</c> parameters at all.
+    /// </summary>
+    public Func<SpawnModelRequest, SpawnModelChoice>? SpawnModels { get; set; }
 
     /// <summary>
     /// Whether subscription requests claim the official client's identity (<c>claudeWire.enabled</c>). Decides which built-in
@@ -1753,6 +1774,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 SessionMessages = services.SessionMessages,
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),
+                SpawnModels = services.SpawnModels,
                 // The model's own budget line: a dynamic suffix, never part of the cached prefix or the history.
                 DynamicContext = ContextBudget,
                 Options = new AgentOptions
@@ -2037,6 +2059,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         }
 
         into.Add(new ToolDescriptor(SkillTool.Name, ToolOrigin.BuiltIn, ToolGroups.Session));
+        if (services.Providers is not null)
+        {
+            into.Add(new ToolDescriptor(ModelsTool.Name, ToolOrigin.BuiltIn, ToolGroups.Agents));
+        }
 
         foreach (var tool in services.PullRequestTools)
         {
@@ -2148,6 +2174,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         IReadOnlyList<ITool> web = [];
         fixedTools.AddRange(services.FileTools);
         fixedTools.Add(skillTool ??= new SkillTool(DiscoverSkills));
+        if (services.Providers is { } providerCatalog)
+        {
+            fixedTools.Add(new ModelsTool(providerCatalog, services.IsModelHidden));
+        }
         if (services.HostClient is not null && services.Approvals?.Extensions is { } extensions)
         {
             conditional.AddRange(ExtensionTools.Create(extensions));
@@ -2259,6 +2289,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         reserved.UnionWith([ExtensionToolNames.List, ExtensionToolNames.Create, ExtensionToolNames.Update, ExtensionToolNames.Disable, ExtensionToolNames.Delete]);
         AddNames(reserved, services.FileTools);
         reserved.Add(SkillTool.Name);
+        reserved.Add(ModelsTool.Name);
         AddNames(reserved, services.PullRequestTools);
         AddNames(reserved, web);
         if (services.Git is { } git)

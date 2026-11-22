@@ -7,22 +7,49 @@ namespace Forge.Core.Agents;
 /// <summary>
 /// Delegates one scoped task to a sub-agent. It is read-only on purpose: several spawn calls in one turn
 /// then run concurrently, and the caller gives its parallelism permit back for as long as they run.
+/// <para>
+/// The optional <c>model</c>/<c>provider</c>/<c>thinking</c> arguments apply to this one spawn only. They are
+/// resolved by the host's <see cref="AgentHostOptions.SpawnModels"/> callback (the app owns the model catalogue),
+/// and they are absent from the tool's definition when that callback is missing, so a host without an app behind
+/// it keeps the old bytes. Nothing here writes settings: a saved default is changed in the settings page, not by a
+/// delegation.
+/// </para>
 /// </summary>
 public sealed class SpawnAgentTool : ITool
 {
     public const string Name = "spawn_agent";
 
-    private const string SchemaJson =
+    private const string BaseSchemaJson =
         """{"type":"object","properties":{"kind":{"type":"string","description":"Agent kind to run, from the kinds listed in this tool's description."},"task":{"type":"string","description":"The complete, self-contained task for the sub-agent."},"resume_id":{"type":"string","description":"Id of a finished sub-agent of the same kind whose context should continue instead of starting fresh."}},"required":["kind","task"],"additionalProperties":false}""";
 
-    private readonly SubAgentScheduler scheduler;
+    private const string OverrideSchemaJson =
+        """{"type":"object","properties":{"kind":{"type":"string","description":"Agent kind to run, from the kinds listed in this tool's description."},"task":{"type":"string","description":"The complete, self-contained task for the sub-agent."},"resume_id":{"type":"string","description":"Id of a finished sub-agent of the same kind whose context should continue instead of starting fresh."},"model":{"type":"string","description":"Model id for this spawn only, exactly as the models tool lists it. Omit to run on the agent's saved default; cannot be combined with resume_id."},"provider":{"type":"string","description":"Connected provider id or display name, to disambiguate a model more than one provider lists."},"thinking":{"type":"string","description":"Reasoning step for this spawn only (off, minimal, low, medium, high, xhigh, max); clamped down to one the model accepts."}},"required":["kind","task"],"additionalProperties":false}""";
 
-    public SpawnAgentTool(SubAgentScheduler scheduler, IEnumerable<AgentDefinition> kinds)
+    private const string OverrideHelp =
+        "\n\nModel override: pass 'model' with the exact id from the models tool to run this one spawn on a different model, "
+        + "'provider' to name the connected provider when several list that model, and 'thinking' to pick a reasoning step "
+        + "(it is clamped down to one the model accepts). The override applies to this spawn only and never changes the "
+        + "agent's saved default, which the user changes in Settings. It cannot be combined with resume_id: a resumed "
+        + "sub-agent keeps the model it started with.";
+
+    private readonly SubAgentScheduler scheduler;
+    private readonly AgentDefinition[] kinds;
+    private readonly Func<SpawnModelRequest, SpawnModelChoice>? spawnModels;
+
+    public SpawnAgentTool(
+        SubAgentScheduler scheduler,
+        IEnumerable<AgentDefinition> kinds,
+        Func<SpawnModelRequest, SpawnModelChoice>? spawnModels = null)
     {
         ArgumentNullException.ThrowIfNull(scheduler);
         ArgumentNullException.ThrowIfNull(kinds);
         this.scheduler = scheduler;
-        Definition = new ToolDefinition(Name, Describe(kinds), SchemaJson);
+        this.spawnModels = spawnModels;
+        this.kinds = [.. kinds.OrderBy(static kind => kind.Name, StringComparer.Ordinal)];
+        Definition = new ToolDefinition(
+            Name,
+            Describe(this.kinds) + (spawnModels is null ? string.Empty : OverrideHelp),
+            spawnModels is null ? BaseSchemaJson : OverrideSchemaJson);
     }
 
     public ToolDefinition Definition { get; }
@@ -41,6 +68,9 @@ public sealed class SpawnAgentTool : ITool
         string kind;
         string task;
         string? resumeId;
+        string? model;
+        string? provider;
+        string? thinking;
         try
         {
             using var document = JsonDocument.Parse(call.ArgumentsJson);
@@ -58,6 +88,9 @@ public sealed class SpawnAgentTool : ITool
             kind = kindElement.GetString()!;
             task = taskElement.GetString()!;
             resumeId = JsonArguments.OptionalString(root, "resume_id");
+            model = StringArgument(root, "model");
+            provider = StringArgument(root, "provider");
+            thinking = StringArgument(root, "thinking");
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
@@ -69,10 +102,69 @@ public sealed class SpawnAgentTool : ITool
             return new ToolResult("spawn_agent requires a non-empty 'kind' and 'task'.", IsError: true);
         }
 
-        var outcome = await SpawnAsync(scope, kind, task, resumeId, context, ct).ConfigureAwait(false);
+        model = model?.Trim();
+        provider = provider?.Trim();
+        thinking = thinking?.Trim();
+        if (model is { Length: 0 } || provider is { Length: 0 } || thinking is { Length: 0 })
+        {
+            return new ToolResult("spawn_agent's 'model', 'provider' and 'thinking' must not be empty when given.", IsError: true);
+        }
+
+        ModelSettings? resolved = null;
+        string? note = null;
+        if (model is not null || provider is not null || thinking is not null)
+        {
+            if (spawnModels is null)
+            {
+                return new ToolResult("spawn_agent on this host cannot resolve a model override; drop 'model', 'provider' and 'thinking'.", IsError: true);
+            }
+
+            if (resumeId is not null)
+            {
+                return new ToolResult(
+                    "spawn_agent cannot combine 'model', 'provider' or 'thinking' with 'resume_id': a resumed sub-agent keeps the model it started with. Start a new spawn instead.",
+                    IsError: true);
+            }
+
+            // The kind's current settings are the baseline (a model-only override keeps its thinking, a thinking-only
+            // override keeps its model). An unknown kind is left to the scheduler, whose message lists what exists.
+            if (kinds.FirstOrDefault(agent => string.Equals(agent.Name, kind, StringComparison.OrdinalIgnoreCase)) is { } definition)
+            {
+                var choice = spawnModels(new SpawnModelRequest(model, provider, thinking, definition.Model));
+                if (choice.Error is { } error)
+                {
+                    return new ToolResult(error, IsError: true);
+                }
+
+                if (choice.Settings is null)
+                {
+                    return new ToolResult("spawn_agent could not resolve the model override.", IsError: true);
+                }
+
+                resolved = choice.Settings;
+                note = choice.Note;
+            }
+        }
+
+        var outcome = await SpawnAsync(scope, kind, task, resumeId, context, resolved, ct).ConfigureAwait(false);
         var content = outcome.AgentId.Length == 0
             ? outcome.Text
             : string.Concat(outcome.Text, "\n\n[agent_id: ", outcome.AgentId, "]");
+        if (resolved is not null && outcome.AgentId.Length > 0)
+        {
+            content = string.Concat(
+                content,
+                "\n[model: ",
+                resolved.Model,
+                " on ",
+                resolved.ProviderId ?? "the default provider",
+                " @ ",
+                ThinkingName(resolved.Thinking),
+                "; this spawn only",
+                note is null ? string.Empty : "; " + note,
+                "]");
+        }
+
         return new ToolResult(content, outcome.IsError);
     }
 
@@ -82,25 +174,51 @@ public sealed class SpawnAgentTool : ITool
         string task,
         string? resumeId,
         ToolContext context,
+        ModelSettings? model,
         CancellationToken ct)
     {
         await using var detached = scope.Permit.Detach(ct);
         return await scheduler
-            .SpawnAsync(kind, task, resumeId, context, scope.Sink, scope.AgentId, ct)
+            .SpawnAsync(kind, task, resumeId, context, scope.Sink, scope.AgentId, ct, model: model)
             .ConfigureAwait(false);
     }
 
-    private static string Describe(IEnumerable<AgentDefinition> kinds)
+    private static string Describe(IReadOnlyList<AgentDefinition> kinds)
     {
-        var ordered = kinds.OrderBy(static kind => kind.Name, StringComparer.Ordinal).ToArray();
         var builder = new StringBuilder(256);
         builder.Append("Delegate one self-contained task to a sub-agent and get its final report back. ")
             .Append("Parallel spawns run concurrently; nested depth is limited. Use resume_id to continue a finished sub-agent of the same kind.\n\nKinds:\n");
-        foreach (var kind in ordered)
+        foreach (var kind in kinds)
         {
             builder.Append("- ").Append(kind.Name).Append(": ").Append(kind.Description).Append('\n');
         }
 
         return builder.ToString().TrimEnd();
     }
+
+    private static string? StringArgument(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException($"'{name}' must be a string.");
+        }
+
+        return value.GetString();
+    }
+
+    private static string ThinkingName(ThinkingEffort effort) => effort switch
+    {
+        ThinkingEffort.Minimal => "minimal",
+        ThinkingEffort.Low => "low",
+        ThinkingEffort.Medium => "medium",
+        ThinkingEffort.High => "high",
+        ThinkingEffort.XHigh => "xhigh",
+        ThinkingEffort.Max => "max",
+        _ => "off",
+    };
 }

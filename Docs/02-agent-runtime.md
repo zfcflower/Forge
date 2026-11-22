@@ -17,7 +17,7 @@
 
 工具由四类来源合成：Core 内置、App 内置（文件/git/PR/web/spec/扩展编写）、插件工具、MCP 适配器。同名以**首个注册者**为准（内置优先）；`run_code` 的脚本面里插件工具在前、同名先注册者生效。
 
-### 内置工具清单（48 个内置工具 + MCP 服务器工具）
+### 内置工具清单（49 个内置工具 + MCP 服务器工具）
 
 | 组 | 工具 | 副作用 | 说明 |
 |---|---|---|---|
@@ -33,11 +33,12 @@
 | 会话 | `todo` | 读/写按参数 | 7 种操作：`list`/`add`/`update`/`remove`/`promote`/`plan_summary_get`/`plan_summary_set`；写操作先确认条目属于本会话 |
 | | `ask_user` | 只读 | 仅在宿主提供问题处理器时注册；问题卡 + 选项/自由文本；支持多选 min/max |
 | | `skill` | 只读 | 按名返回 `SKILL.md` 全文（上限 64000 字符）；名字只在本会话发现的四个技能根里解析 |
-| Agent | `spawn_agent` | 只读 | 派生内置 Scout/Worker/Plan/Reviewer 或用户 Agent；`<kind>-<n>` 登记；深度上限 2；没有 `tools` 列表的用户 Agent 会被拒绝派生（返回错误并引导模型问用户选角色）；不能关闭子 Agent 时用它停 |
+| Agent | `spawn_agent` | 只读 | 派生内置 Scout/Worker/Plan/Reviewer 或用户 Agent；`<kind>-<n>` 登记；深度上限 2；没有 `tools` 列表的用户 Agent 会被拒绝派生（返回错误并引导模型问用户选角色）；不能关闭子 Agent 时用它停；可选 `model`/`provider`/`thinking` 只作用于这一次派生（`models` 给确切 id，多命中列候选绝不猜），不写设置，与 `resume_id` 互斥 |
 | | `subagent_steer` | 只读 | 在工具批次边界重定向子 Agent（已发调用跑完，未开始的补 `skipped`） |
 | | `subagent_followup` | 只读 | 子 Agent 本应结束时注入后续指令并继续 |
 | | `subagent_stop` | 只读 | 只取消该子 Agent，待决工具补 `Cancelled.`，父收到非错误结果 |
 | | `request_review` | 只读 | 派生 Reviewer 评审变更集，返回结论行 + 原文；结论落 `reviews.db`（见 2.7） |
+| | `models` | 只读 | 列已连接提供商的模型与各自接受的思考档位（隐藏模型不列，`provider` 可收窄，单次上限 400 行） |
 | 检索 | `search_history` | 只读 | 全文检索历史消息（FTS5，缺失时回退表） |
 | | `read_history` | 只读 | 取回被压缩的原文 |
 | | `read_artifact` | 只读 | 读回超长输出转存的 Artifact（不可关闭） |
@@ -69,7 +70,7 @@
 ## 2.3 子 Agent
 
 - 内置四种：**Scout**（只读侦察，read/grep/find/ls）、**Worker**（实现一个任务，加 edit/write/bash）、**Plan**（只读产出有序计划）、**Reviewer**（只读评审，多一个只读 `git_diff`）。模型与思考强度可分别设置。
-- 生成：`spawn_agent` 按 `<kind>-<n>` 登记实例，同类型共享稳定提示词前缀以命中缓存；同类型实例可按 id 续跑（当前未在运行）。
+- 生成：`spawn_agent` 按 `<kind>-<n>` 登记实例，同类型共享稳定提示词前缀以命中缓存；同类型实例可按 id 续跑（当前未在运行）。可选 `model`/`provider`/`thinking` 只作用于这一次派生：`models` 给出确切 id 与接受档位，解析器绝不猜（多命中一律列候选），thinking 夹到模型接受档并在回执注明，覆盖不写设置、与 `resume_id` 互斥。
 - 并发与深度：嵌套深度上限 2；整棵树的活跃 Agent 数默认 4，可在 `agents` 分区调到 1–16（扩容立即唤醒排队中的 Agent，缩容不打断已在跑的一轮）；父 Agent 等子结果时交还名额，避免嵌套死锁。
 - 生命周期事件：`Started`（父发出）→ 仅在确实等名额时 `Queued` → `Running` → 每个 run 恰一次 `Finished`（含异常与父取消；父取消记 `Stopped "parent cancelled"`）。用量是本 run 增量，耗时从 spawn 起算（含排队）。
 - 控制语义：转向只在工具批次边界生效（批次内多条转向合并成一条消息、一个事件）；后续指令在子 Agent 本应结束时注入；停止只取消该子 Agent。
