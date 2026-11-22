@@ -152,7 +152,8 @@ public sealed class ToolRegistry : IToolRegistry
 /// The tools a host supplies besides Core's own, grouped by how stable their presence is, because the group decides the
 /// position in the tool array (and so how much of the prompt cache a change costs): <see cref="Fixed"/> tools are always
 /// there, <see cref="Conditional"/> built-ins exist only while a condition holds, <see cref="Outside"/> tools come from
-/// outside the product (plugins, MCP servers). Each group is sorted by name by the surface; the groups are never merged.
+/// outside the product (plugins, MCP servers). The surface keeps <see cref="Fixed"/> in the order it is given (an authored
+/// list, appended after Core's own) and sorts the other two groups by name; the groups are never merged.
 /// </summary>
 public sealed record ExternalTools(IReadOnlyList<ITool> Fixed, IReadOnlyList<ITool> Conditional, IReadOnlyList<ITool> Outside)
 {
@@ -200,15 +201,17 @@ public sealed class ToolSurface
             }
         }
 
-        this.builtIns = new ToolRegistry(list);
+        this.builtIns = new ToolRegistry(list, preserveOrder: true);
         current = new ToolSet(0, this.builtIns);
     }
 
     /// <summary>
-    /// Current tool set, deduplicated and without disabled names, in three segments that are each sorted by name and never
-    /// re-sorted together: the fixed tools (Core's built-ins plus the host's always-present ones), then the conditional
-    /// built-ins (present only while their condition holds), then the external tools (plugins, MCP). A change in a later
-    /// segment leaves every earlier tool definition where it was, so it only breaks the prompt cache from its own position on.
+    /// Current tool set, deduplicated and without disabled names, in three segments that are never re-sorted together: the
+    /// fixed tools (Core's built-ins plus the host's always-present ones, in declaration order), then the conditional
+    /// built-ins (present only while their condition holds, by name), then the external tools (plugins, MCP, by name). A change
+    /// in a later segment leaves every earlier tool definition where it was, so it only breaks the prompt cache from its own
+    /// position on. The first segment is an authored list rather than an assembled one, so its declaration order is what the
+    /// model reads — and it never changes at runtime, which is what keeps the prefix byte-stable just the same.
     /// </summary>
     public ToolRegistry Tools => Volatile.Read(ref current).Tools;
 
@@ -247,9 +250,10 @@ public sealed class ToolSurface
     }
 
     /// <summary>
-    /// Publishes a new external tool set split by segment: <paramref name="fixedTools"/> are always present (sorted together
-    /// with the Core built-ins), <paramref name="conditionalTools"/> exist only while a condition holds, and
-    /// <paramref name="externalTools"/> come from outside the product (plugins, MCP). Order inside a segment is by name.
+    /// Publishes a new external tool set split by segment: <paramref name="fixedTools"/> are always present (appended after the
+    /// Core built-ins in the order given), <paramref name="conditionalTools"/> exist only while a condition holds, and
+    /// <paramref name="externalTools"/> come from outside the product (plugins, MCP). The last two segments are sorted by name:
+    /// they are assembled from data, so only their set is meaningful.
     /// </summary>
     public void ReplaceExternal(IEnumerable<ITool> fixedTools, IEnumerable<ITool> conditionalTools, IEnumerable<ITool> externalTools)
     {
@@ -308,14 +312,18 @@ public sealed class ToolSurface
     private void Publish()
     {
         var merged = new List<ITool>(builtIns.Tools.Count + externalFixed.Length + externalConditional.Length + externalOther.Length);
-        AddEnabled(merged, builtIns.Tools, externalFixed);
-        AddEnabled(merged, externalConditional);
-        AddEnabled(merged, externalOther);
+        AddEnabled(merged, sortedByName: false, builtIns.Tools, externalFixed);
+        AddEnabled(merged, sortedByName: true, externalConditional);
+        AddEnabled(merged, sortedByName: true, externalOther);
         Volatile.Write(ref current, new ToolSet(unchecked(current.Version + 1), new ToolRegistry(merged, preserveOrder: true)));
     }
 
-    /// <summary>Appends the enabled tools of the given sources to <paramref name="into"/> as one segment, sorted by name.</summary>
-    private void AddEnabled(List<ITool> into, params IReadOnlyList<ITool>[] sources)
+    /// <summary>
+    /// Appends the enabled tools of the given sources to <paramref name="into"/> as one segment. <paramref name="sortedByName"/>
+    /// makes a segment's bytes independent of the order its tools arrived in (those segments are assembled from data, so only
+    /// the set is meaningful); the first segment keeps the declaration order of an authored list.
+    /// </summary>
+    private void AddEnabled(List<ITool> into, bool sortedByName, params IReadOnlyList<ITool>[] sources)
     {
         var start = into.Count;
         foreach (var source in sources)
@@ -329,7 +337,10 @@ public sealed class ToolSurface
             }
         }
 
-        into.Sort(start, into.Count - start, SegmentOrder.Instance);
+        if (sortedByName)
+        {
+            into.Sort(start, into.Count - start, SegmentOrder.Instance);
+        }
     }
 
     private sealed class SegmentOrder : IComparer<ITool>

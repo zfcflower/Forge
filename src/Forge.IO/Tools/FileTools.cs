@@ -64,7 +64,10 @@ public sealed class FileTools
 
     public ITool Bash { get; }
 
-    /// <summary>Every tool in registration order; <see cref="ToolRegistry"/> sorts them by name anyway.</summary>
+    /// <summary>
+    /// Every tool in the order the model reads them: the file and directory tools first, the shell last (the published tool
+    /// array keeps this declaration order, so `bash` is never the first thing a model sees in the list).
+    /// </summary>
     public IReadOnlyList<ITool> All { get; }
 
     private static Func<ToolOptions> FixedOptions(ToolOptions options)
