@@ -909,24 +909,16 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>
     /// Rebuilds the transcript and the finished sub-agent list from the session store, reading off the dispatcher. A tab that
     /// was restored at start-up runs this on first activation instead of during restore: see <see cref="EnsureHistoryAsync"/>.
-    /// <para>One pass per tab, whichever entry point asks first: the shell loads the tab it is about to show here and a
-    /// restored tab is loaded through <see cref="EnsureHistoryAsync"/> on its first activation, and the activation that
-    /// follows either one asks again. A second replay would append the same rounds to the transcript and the same stored
-    /// children to the finished list on top of the first copy, which is what drew a session's sub-agent rows twice in the
-    /// project tree.</para>
+    /// <para>One pass per tab, whichever entry point asks first. The caller that owns the pass awaits it here; one that arrives
+    /// after the pass was claimed - a tab the shell has already shown, whose activation fired
+    /// <see cref="EnsureHistoryAsync"/> - returns at once and is filled by that pass through the view's own loading state,
+    /// because a second replay would append the same rounds to the transcript and the same stored children to the finished
+    /// list on top of the first copy, which is what drew a session's sub-agent rows twice in the project tree.</para>
     /// </summary>
     public async Task LoadHistoryAsync(CancellationToken ct)
     {
         if (store is null || disposed || historyLoaded)
         {
-            return;
-        }
-
-        // A replay already on its way is this tab's one pass: awaiting it keeps the caller's "history is in" promise
-        // without stacking a second copy on top of it.
-        if (historyLoad is { } pending)
-        {
-            await pending.ConfigureAwait(true);
             return;
         }
 
