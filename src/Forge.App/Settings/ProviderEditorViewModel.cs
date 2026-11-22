@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.App.Localization;
@@ -38,6 +39,9 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
     /// <summary>Prefix of the temporary reference a test writes its typed key under; never a real provider's reference.</summary>
     private const string DraftReferencePrefix = "provider-draft:";
 
+    /// <summary>The most a provider's reply cap may be set to; anything larger is a typo, not a window.</summary>
+    private const int MaxOutputCeiling = 1_000_000;
+
     private readonly ProviderServices services;
     private readonly ProviderDefinition? original;
     private readonly IReadOnlyCollection<string> existingIds;
@@ -49,6 +53,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
     private bool keyIsSecret = true;
     private string keyText = string.Empty;
     private string headersText = string.Empty;
+    private string maxOutputText = string.Empty;
     private ProviderTestState testState;
     private IReadOnlyList<string>? testedModels;
     private string? draftId;
@@ -63,6 +68,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
     private InputError? baseUrlError;
     private InputError? keyError;
     private string? headersError;
+    private string? maxOutputError;
 
     /// <summary>
     /// Opens the dialog for a new provider (<paramref name="startPreset"/> is the built-in vendor, or the custom entry) or for an
@@ -101,6 +107,9 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
             keyIsSecret = definition.EnvironmentVariable is null;
             keyText = definition.EnvironmentVariable ?? string.Empty;
             headersText = FormatHeaders(definition.Headers);
+            maxOutputText = definition.MaxOutputTokens is { } cap
+                ? cap.ToString(CultureInfo.InvariantCulture)
+                : string.Empty;
             testedModels = definition.Models;
             // Editing a provider that already works: saving needs no re-test until the URL or the key changes.
             testState = ProviderTestState.Passed;
@@ -137,6 +146,10 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
     public string HeadersLabel => Loc.Instance[ProviderStrings.EditorHeadersKey];
 
     public string HeadersHint => Loc.Instance[ProviderStrings.EditorHeadersHintKey];
+
+    public string MaxOutputLabel => Loc.Instance[ProviderStrings.EditorMaxOutputKey];
+
+    public string MaxOutputHint => Loc.Instance[ProviderStrings.EditorMaxOutputHintKey];
 
     public string KeyAsSecretText => Loc.Instance[ProviderStrings.EditorKeyAsSecretKey];
 
@@ -290,6 +303,62 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
 
     public bool HasHeadersError => headersError is { Length: > 0 };
 
+    public string? MaxOutputError => maxOutputError;
+
+    public bool HasMaxOutputError => maxOutputError is { Length: > 0 };
+
+    /// <summary>
+    /// The largest single reply this provider's models accept, in tokens; empty means unknown, which makes compaction reserve
+    /// 20% of the window instead. It is also the request's <c>max_tokens</c>, so a wrong value truncates replies or wastes input.
+    /// </summary>
+    public string MaxOutputText
+    {
+        get => maxOutputText;
+        set
+        {
+            if (Set(ref maxOutputText, value ?? string.Empty))
+            {
+                RevalidateMaxOutput();
+            }
+        }
+    }
+
+    private void RevalidateMaxOutput()
+    {
+        if (maxOutputError is not null)
+        {
+            SetMaxOutputError(DescribeMaxOutput());
+        }
+    }
+
+    /// <summary>The box's error, or null when it is empty (unknown) or a positive number up to the ceiling.</summary>
+    private string? DescribeMaxOutput()
+    {
+        var text = maxOutputText.Trim();
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
+        return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var value) && value is > 0 and <= MaxOutputCeiling
+            ? null
+            : Loc.Instance.Format(ProviderStrings.EditorMaxOutputInvalidKey, MaxOutputCeiling);
+    }
+
+    private int? ParseMaxOutput() =>
+        int.TryParse(maxOutputText.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : null;
+
+    private void SetMaxOutputError(string? value)
+    {
+        if (!Set(ref maxOutputError, value))
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(MaxOutputError));
+        OnPropertyChanged(nameof(HasMaxOutputError));
+    }
+
     private void RevalidateName()
     {
         if (nameError is not null)
@@ -371,7 +440,8 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
 
         var headersOk = TryParseHeaders(HeadersText, out var headers, out var badLine);
         SetHeadersError(headersOk ? null : Loc.Instance.Format(ProviderStrings.EditorHeadersInvalidKey, badLine));
-        if (nameError is not null || baseUrlError is not null || keyError is not null || headersError is not null)
+        SetMaxOutputError(DescribeMaxOutput());
+        if (nameError is not null || baseUrlError is not null || keyError is not null || headersError is not null || HasMaxOutputError)
         {
             Error = null;
             return null;
@@ -401,6 +471,7 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
             DefaultModel = defaultModel,
             Thinking = original?.Thinking ?? DefaultThinking,
             Headers = headers,
+            MaxOutputTokens = ParseMaxOutput(),
         };
     }
 
@@ -457,6 +528,8 @@ internal sealed class ProviderEditorViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(HasBaseUrlError));
         OnPropertyChanged(nameof(KeyError));
         OnPropertyChanged(nameof(HasKeyError));
+        OnPropertyChanged(nameof(MaxOutputError));
+        OnPropertyChanged(nameof(HasMaxOutputError));
         if (headersError is not null)
         {
             RevalidateHeaders();

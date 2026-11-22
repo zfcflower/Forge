@@ -12,12 +12,6 @@
         Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-    <Style Selector="TextBox.invalid">
-      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
-    </Style>
-    <Style Selector="TextBox.invalid /template/ Border#PART_BorderElement">
-      <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
-    </Style>
   </Window.Styles>
 
   <Grid RowDefinitions="Auto,Auto" Margin="18,16">
@@ -45,6 +39,22 @@
                    IsVisible="{Binding HasBaseUrlError}"
                    TextWrapping="Wrap"
                    Text="{Binding BaseUrlError}" />
+      </StackPanel>
+
+      <StackPanel Spacing="4">
+        <TextBlock Classes="label" Text="{Binding MaxOutputLabel}" />
+        <TextBox Text="{Binding MaxOutputText, Mode=TwoWay}"
+                 Width="120"
+                 HorizontalAlignment="Left"
+                 Classes.invalid="{Binding HasMaxOutputError}"
+                 ToolTip.Tip="{Binding MaxOutputError}"
+                 AutomationProperties.Name="{Binding MaxOutputLabel}"
+                 AutomationProperties.AutomationId="provider-editor-max-output" />
+        <TextBlock Classes="caption" Foreground="{DynamicResource StatusErrorBrush}"
+                   IsVisible="{Binding HasMaxOutputError}"
+                   TextWrapping="Wrap"
+                   Text="{Binding MaxOutputError}" />
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding MaxOutputHint}" />
       </StackPanel>
 
       <StackPanel Spacing="6" IsVisible="{Binding ShowsKey}">

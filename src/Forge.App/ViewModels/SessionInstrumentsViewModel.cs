@@ -71,6 +71,12 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private int? contextTokens;
     private int? usableTokens;
     private int? triggerTokens;
+
+    /// <summary>
+    /// The line the model reads about its own budget, rebuilt whenever the measurement changes and read from the agent
+    /// loop's thread, so it is an immutable string swapped as a whole rather than three fields read one by one.
+    /// </summary>
+    private volatile string? budgetLine;
     private ContextLevel contextLevel;
     private bool disposed;
 
@@ -572,11 +578,40 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// </summary>
     public void NoteCompacted(int contextTokens) => SetContext(contextTokens);
 
+    /// <summary>
+    /// The root agent's budget as one line for the model: C against U and the trigger line, or C alone when the window is
+    /// unknown. Null before the first request of the session. Deliberately English and fixed in shape: it is model input,
+    /// not UI text, and it is appended to every request as a trailing dynamic suffix.
+    /// </summary>
+    public string? ContextBudgetLine => budgetLine;
+
+    private string? BuildBudgetLine()
+    {
+        if (contextTokens is not > 0)
+        {
+            return null;
+        }
+
+        return usableTokens is > 0 && triggerTokens is > 0
+            ? string.Concat(
+                "Context ",
+                Scale(contextTokens.Value),
+                "/",
+                Scale(usableTokens.Value),
+                " (",
+                PercentText(),
+                "%); auto-compaction at ",
+                Scale(triggerTokens.Value),
+                ".")
+            : string.Concat("Context ", Scale(contextTokens.Value), " tokens; window unknown.");
+    }
+
     private void SetContext(int value)
     {
         contextTokens = Math.Max(0, value);
         contextLevel = LevelOf(contextTokens.Value, usableTokens, triggerTokens);
         ContextSegments = BuildSegments(ContextRatio ?? 0);
+        budgetLine = BuildBudgetLine();
         OnPropertyChanged(nameof(HasContextMeasure));
         OnPropertyChanged(nameof(HasContextWindow));
         OnPropertyChanged(nameof(ContextPercent));

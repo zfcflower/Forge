@@ -73,6 +73,8 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
 
     public string ContextHeader => Loc.Instance[ProviderStrings.MetadataContextKey];
 
+    public string MaxOutputHeader => Loc.Instance[ProviderStrings.MetadataMaxOutputKey];
+
     public string InputHeader => Loc.Instance[ProviderStrings.MetadataInputKey];
 
     public string OutputHeader => Loc.Instance[ProviderStrings.MetadataOutputKey];
@@ -422,6 +424,7 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     public const decimal MaxCellValue = decimal.MaxValue;
 
     private decimal? contextWindow;
+    private decimal? maxOutput;
     private decimal? input;
     private decimal? output;
     private decimal? cacheRead;
@@ -431,6 +434,7 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     private readonly ModelCapabilities capabilityValue;
     private readonly int? reasoningSteps;
     private InputError? contextWindowError;
+    private InputError? maxOutputError;
     private InputError? inputError;
     private InputError? outputError;
     private InputError? cacheReadError;
@@ -467,6 +471,7 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
             HasReasoning = true;
         }
         contextWindow = metadata.ContextWindow is > 0 ? metadata.ContextWindow.Value : null;
+        maxOutput = metadata.MaxOutputTokens is > 0 ? metadata.MaxOutputTokens.Value : null;
         input = ToDecimal(metadata.Pricing?.Input);
         output = ToDecimal(metadata.Pricing?.Output);
         cacheRead = ToDecimal(metadata.Pricing?.CacheRead);
@@ -535,6 +540,24 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// The largest single reply the model accepts. It is also compaction's output reserve, so an empty cell is the honest
+    /// "unknown" (20% of the window is reserved instead), never a guessed number.
+    /// </summary>
+    public decimal? MaxOutput
+    {
+        get => maxOutput;
+        set
+        {
+            if (Set(ref maxOutput, value))
+            {
+                OnPropertyChanged(nameof(MaxOutputText));
+                SetError(ref maxOutputError, WindowRule(maxOutput),
+                    nameof(MaxOutputError), nameof(HasMaxOutputError));
+            }
+        }
+    }
+
     public decimal? Input
     {
         get => input;
@@ -598,6 +621,8 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     /// </summary>
     public string ContextWindowText => Display(contextWindow, "0");
 
+    public string MaxOutputText => Display(maxOutput, "0");
+
     public string InputText => Display(input, "0.######");
 
     public string OutputText => Display(output, "0.######");
@@ -609,6 +634,10 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     public string? ContextWindowError => Describe(contextWindowError);
 
     public bool HasContextWindowError => contextWindowError is not null;
+
+    public string? MaxOutputError => Describe(maxOutputError);
+
+    public bool HasMaxOutputError => maxOutputError is not null;
 
     public string? InputPriceError => Describe(inputError);
 
@@ -648,6 +677,7 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
 
     public bool HasErrors =>
         contextWindowError is not null ||
+        maxOutputError is not null ||
         priceSetError is not null ||
         inputError is not null ||
         outputError is not null ||
@@ -658,6 +688,7 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     internal void Validate()
     {
         SetError(ref contextWindowError, WindowRule(contextWindow), nameof(ContextWindowError), nameof(HasContextWindowError));
+        SetError(ref maxOutputError, WindowRule(maxOutput), nameof(MaxOutputError), nameof(HasMaxOutputError));
         SetError(ref inputError, PriceRule(input), nameof(InputPriceError), nameof(HasInputPriceError));
         SetError(ref outputError, PriceRule(output), nameof(OutputPriceError), nameof(HasOutputPriceError));
         SetError(ref cacheReadError, PriceRule(cacheRead), nameof(CacheReadPriceError), nameof(HasCacheReadPriceError));
@@ -718,7 +749,7 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     /// <summary>The row as stored metadata; <c>null</c> when every field is empty (nothing is known, nothing is written).</summary>
     public ModelMetadataSection? ToSection()
     {
-        if (contextWindow is null && input is null && output is null && cacheRead is null && cacheWrite is null)
+        if (contextWindow is null && maxOutput is null && input is null && output is null && cacheRead is null && cacheWrite is null)
         {
             return null;
         }
@@ -726,6 +757,7 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
         return new ModelMetadataSection
         {
             ContextWindow = contextWindow is { } window ? (int)window : null,
+            MaxOutputTokens = maxOutput is { } maxOutputTokens ? (int)maxOutputTokens : null,
             Input = input is { } inputPrice ? (double)inputPrice : null,
             Output = output is { } outputPrice ? (double)outputPrice : null,
             CacheRead = cacheRead is { } readPrice ? (double)readPrice : null,

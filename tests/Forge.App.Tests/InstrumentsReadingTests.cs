@@ -109,4 +109,43 @@ public class InstrumentsReadingTests
         Assert.False(strip.HasCacheTtl);
         Assert.Equal(string.Empty, strip.CacheTtlText);
     }
+
+    [Fact]
+    public void The_budget_line_the_model_reads_carries_the_gauge_numbers()
+    {
+        using var strip = Strip(ttl: null);
+
+        // Before the first request nothing is measured, so the model is told nothing rather than told zero.
+        Assert.Null(strip.ContextBudgetLine);
+
+        // The same numbers the gauge shows, in one line: used, usable, percentage, trigger line.
+        strip.NoteContext("root", 62_000, 136_000, 115_600);
+        Assert.Equal("Context 62k/136k (46%); auto-compaction at 115.6k.", strip.ContextBudgetLine);
+
+        // A sub-agent reports its own window; the root's line must not move under it.
+        strip.NoteContext("worker-1", 5_000, 20_000, 18_000);
+        Assert.Equal("Context 62k/136k (46%); auto-compaction at 115.6k.", strip.ContextBudgetLine);
+    }
+
+    [Fact]
+    public void The_budget_line_reports_the_context_alone_when_the_window_is_unknown()
+    {
+        using var strip = Strip(ttl: null);
+
+        // Unknown window: C is measured but there is no usable budget or trigger line to compare it with.
+        strip.NoteContext("root", 62_000, null, null);
+        Assert.Equal("Context 62k tokens; window unknown.", strip.ContextBudgetLine);
+    }
+
+    [Fact]
+    public void The_budget_line_follows_a_manual_compaction()
+    {
+        using var strip = Strip(ttl: null);
+        strip.NoteContext("root", 118_000, 136_000, 115_600);
+        Assert.Equal("Context 118k/136k (87%); auto-compaction at 115.6k.", strip.ContextBudgetLine);
+
+        // A compaction reports the new size with the budget it last knew; the line must shrink with it.
+        strip.NoteCompacted(60_000);
+        Assert.Equal("Context 60k/136k (44%); auto-compaction at 115.6k.", strip.ContextBudgetLine);
+    }
 }

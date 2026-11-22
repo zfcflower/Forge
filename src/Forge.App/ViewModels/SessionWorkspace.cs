@@ -428,10 +428,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public SessionInstrumentsViewModel Instruments { get; }
 
     /// <summary>
-    /// The trailing line the model reads about its own budget (the same measurement the gauge shows), or null when the
-    /// preference turned it off. Called on every request, from the agent loop's thread.
+    /// The trailing line a given agent reads about its own budget (the same measurement its gauge shows), or null when the
+    /// preference turned it off or that agent has no instruments yet. Called on every request, from the agent loop's thread:
+    /// the line is an immutable string, and the agent id selects the instance's own numbers.
     /// </summary>
-    private string? BudgetLine() => appPreferences?.ChatContextBudget == false ? null : Instruments.ContextBudgetLine;
+    private string? BudgetLine(string agentId) =>
+        appPreferences?.ChatContextBudget == false ? null : InstrumentsOf(agentId)?.ContextBudgetLine;
 
     /// <summary>Names of the tools this session can call; empty until its first turn built the agent host.</summary>
     internal IReadOnlyList<string> ToolNames() => runtime?.ToolNames() ?? [];

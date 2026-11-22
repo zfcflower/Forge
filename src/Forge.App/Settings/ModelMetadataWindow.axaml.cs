@@ -42,6 +42,12 @@ internal sealed partial class ModelMetadataWindow : Window
     private const double CapabilitiesMinWidth = 88;
     private const double ReasoningMinWidth = 124;
     private const double ContextMinWidth = 72;
+
+    /// <summary>The reply cap's column: a short number, so it takes the price columns' width.</summary>
+    private const double MaxOutputWidth = 94;
+
+    /// <summary>The floor that keeps its header (「最大输出」) readable when the user drags it narrow.</summary>
+    private const double MaxOutputMinWidth = 64;
     private const double PriceMinWidth = 56;
     private const double CacheMinWidth = 60;
 
@@ -224,6 +230,7 @@ internal sealed partial class ModelMetadataWindow : Window
         // model name keeps the leftover so widening the window never squeezes the list again.
         Add(ReasoningMinWidth, new GridLength(ReasoningWidth), "MetaReasoningCell", TextHeader(viewModel.ReasoningHeader));
         AddNumber(ContextMinWidth, new GridLength(ContextWidth), "MetaContextCell", "MetaContextEditor", viewModel.ContextHeader);
+        AddNumber(MaxOutputMinWidth, new GridLength(MaxOutputWidth), "MetaMaxOutputCell", "MetaMaxOutputEditor", viewModel.MaxOutputHeader);
         AddNumber(PriceMinWidth, new GridLength(PriceWidth), "MetaInputCell", "MetaInputEditor", viewModel.InputHeader);
         AddNumber(PriceMinWidth, new GridLength(PriceWidth), "MetaOutputCell", "MetaOutputEditor", viewModel.OutputHeader);
         AddNumber(CacheMinWidth, new GridLength(CacheWidth), "MetaCacheReadCell", "MetaCacheReadEditor", viewModel.CacheReadHeader);
@@ -619,7 +626,7 @@ internal sealed partial class ModelMetadataWindow : Window
 
     /// <summary>The number of columns <see cref="BuildColumns"/> produces, used to recognize the set it is replacing.</summary>
     private static int ColumnCount(ModelMetadataViewModel viewModel)
-        => (viewModel.HasVisibilityColumn ? 1 : 0) + 8;
+        => (viewModel.HasVisibilityColumn ? 1 : 0) + 9;
 
     private static Control TextHeader(string text) => new TextBlock { Text = text, Classes = { "meta-header" } };
 

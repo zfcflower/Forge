@@ -43,7 +43,7 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
         this.preferences = preferences;
-        Compaction = new CompactionSettingsViewModel(compaction ?? new CompactionSettingsStore(services.Store.SettingsPath));
+        Compaction = new CompactionSettingsViewModel(compaction ?? new CompactionSettingsStore(services.Store.SettingsPath), preferences);
         Usage = new UsageLogSettingsViewModel(services.UsageLog, () => services.UsageRecorder.Directory);
         this.agentDefaults = agentDefaults ?? new AgentDefaultsStore(services.Store.SettingsPath);
         this.modelCatalogRefresh = modelCatalogRefresh;

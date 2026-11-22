@@ -89,6 +89,68 @@
                    Text="{Binding [codeMode.settings.toolsHint], Source={x:Static loc:Loc.Instance}}" />
       </StackPanel>
       <Separator Margin="0,4,0,0" />
+      <!-- Context footprint: what one tool result may put into the conversation. Read per call (bash, grep) or when a
+           session host is built (artifact spill and preview). -->
+      <StackPanel Spacing="6">
+        <TextBlock Classes="h2" Text="{Binding LimitsTitle}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding BashCaptureLabel}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinBashCaptureKilobytes}"
+                         Maximum="{Binding MaxBashCaptureKilobytes}"
+                         Increment="16"
+                         FormatString="0"
+                         Value="{Binding BashCaptureKilobytes, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-bash-capture"
+                         AutomationProperties.Name="{Binding BashCaptureLabel}" />
+        </Grid>
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding BashCaptureHint}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding GrepResultsLabel}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinGrepResults}"
+                         Maximum="{Binding MaxGrepResults}"
+                         Increment="100"
+                         FormatString="0"
+                         Value="{Binding GrepMaxResults, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-grep-results"
+                         AutomationProperties.Name="{Binding GrepResultsLabel}" />
+        </Grid>
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GrepResultsHint}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding SpillLabel}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinSpillChars}"
+                         Maximum="{Binding MaxSpillChars}"
+                         Increment="4000"
+                         FormatString="0"
+                         Value="{Binding SpillChars, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-artifact-spill"
+                         AutomationProperties.Name="{Binding SpillLabel}" />
+        </Grid>
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding SpillHint}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding PreviewLabel}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinPreviewChars}"
+                         Maximum="{Binding MaxPreviewChars}"
+                         Increment="500"
+                         FormatString="0"
+                         Value="{Binding PreviewChars, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-artifact-preview"
+                         AutomationProperties.Name="{Binding PreviewLabel}" />
+        </Grid>
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding PreviewHint}" />
+      </StackPanel>
+      <Separator Margin="0,4,0,0" />
       <!-- Wave W17a: how the terminal looks and which shell it starts. The font fields follow the code font of the appearance
            section until they are given a value of their own. -->
       <StackPanel Spacing="6">

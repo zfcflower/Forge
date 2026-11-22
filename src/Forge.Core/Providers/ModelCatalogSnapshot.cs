@@ -35,9 +35,9 @@ public sealed record ModelCatalogModel(
 
     /// <summary>
     /// The same facts as <see cref="ModelMetadata"/>, so the catalog layer can be merged into the resolution chain: the
-    /// context window, the prices and the capabilities, with the reply limit left out because nothing prices it.
+    /// context window, the largest single reply, the prices and the capabilities.
     /// </summary>
-    public ModelMetadata ToMetadata() => new(ContextWindow, Pricing) { Capabilities = Capabilities };
+    public ModelMetadata ToMetadata() => new(ContextWindow, Pricing, MaxOutputTokens) { Capabilities = Capabilities };
 }
 
 /// <summary>

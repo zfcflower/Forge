@@ -119,6 +119,13 @@ internal sealed record AgentRuntimeServices(
     public IArtifactStore? Artifacts { get; set; }
 
     /// <summary>
+    /// How much of one tool result stays inline before the rest is stored as an artifact, and how much preview the model
+    /// still sees. Read when a host is built (both live in <c>AgentOptions</c>), so a change applies to the next host rather
+    /// than to the next request. Null keeps Core's defaults.
+    /// </summary>
+    public Func<(int Threshold, int Preview)>? ArtifactLimits { get; set; }
+
+    /// <summary>
     /// The pull request tools (<c>pr_*</c>, <c>pr_screenshots</c>, <c>review_comments</c>, <c>review_comment_resolve</c>),
     /// registered after the git tools. Stateless across sessions like <see cref="Git"/>; empty without the composition root. Read-only ones
     /// pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones always ask, and
@@ -344,6 +351,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     {
         public string? SessionId;
     }
+
+    /// <summary>
+    /// The trailing line every request of this session carries for its model — that instance's own context budget, keyed by
+    /// agent id (a sub-agent has its own window, so it gets its own line, never the root's). Null appends nothing; read when
+    /// a host is built, so the shell sets it once the instruments exist.
+    /// </summary>
+    public Func<string, string?>? ContextBudget { get; set; }
 
     public SessionRuntime(AgentRuntimeServices services, SessionInfo session)
     {
@@ -1701,6 +1715,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         remoteAdded = false;
         pullRequestToolsOn = gitToolsOn && ProbeRemote();
         var compaction = services.CurrentCompaction();
+        var defaults = new AgentOptions();
+        var artifactLimits = services.ArtifactLimits?.Invoke()
+                             ?? (defaults.ArtifactThresholdChars, defaults.ArtifactPreviewChars);
         var toolSegments = BuildTools();
         var built = new AgentHost(
             new AgentHostOptions
@@ -1729,6 +1746,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 SessionMessages = services.SessionMessages,
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),
+                // The model's own budget line: a dynamic suffix, never part of the cached prefix or the history.
+                DynamicContext = ContextBudget,
                 Options = new AgentOptions
                 {
                     DefaultModel = mainModel,
@@ -1738,6 +1757,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                     // compaction (feature B): thresholds relative to each model's effective window. Later saves reach
                     // this host through ApplyCompaction.
                     Compaction = compaction.ToPolicy(services.ContextWindow, services.MaxOutputTokens),
+                    ArtifactThresholdChars = artifactLimits.Item1,
+                    ArtifactPreviewChars = artifactLimits.Item2,
                     SendToolImagesToModel = services.SendToolImages ?? (static () => true),
                     ModelInputs = services.ModelInputs,
                 },

@@ -95,6 +95,60 @@
                  AutomationProperties.AutomationId="providers-compaction-target"
                  AutomationProperties.Name="{Binding TargetLabel}" />
       </Grid>
+      <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="10">
+        <TextBlock Grid.Column="0"
+                   Classes="label"
+                   Text="{Binding KeepRecentLabel}"
+                   VerticalAlignment="Center" />
+        <TextBox Grid.Column="1"
+                 Width="120"
+                 Text="{Binding KeepRecentText, Mode=TwoWay}"
+                 IsEnabled="{Binding Enabled}"
+                 Classes.invalid="{Binding HasKeepRecentError}"
+                 ToolTip.Tip="{Binding KeepRecentError}"
+                 LostFocus="OnCompactionCommit"
+                 KeyDown="OnCompactionKeyDown"
+                 AutomationProperties.AutomationId="providers-compaction-keep-recent"
+                 AutomationProperties.Name="{Binding KeepRecentLabel}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource StatusErrorBrush}"
+                 IsVisible="{Binding HasKeepRecentError}"
+                 Text="{Binding KeepRecentError}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding KeepRecentHint}" />
+      <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="10">
+        <TextBlock Grid.Column="0"
+                   Classes="label"
+                   Text="{Binding EmergencyLabel}"
+                   VerticalAlignment="Center" />
+        <TextBox Grid.Column="1"
+                 Width="64"
+                 Text="{Binding EmergencyText, Mode=TwoWay}"
+                 IsEnabled="{Binding Enabled}"
+                 Classes.invalid="{Binding HasEmergencyError}"
+                 ToolTip.Tip="{Binding EmergencyError}"
+                 LostFocus="OnCompactionCommit"
+                 KeyDown="OnCompactionKeyDown"
+                 AutomationProperties.AutomationId="providers-compaction-emergency"
+                 AutomationProperties.Name="{Binding EmergencyLabel}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource StatusErrorBrush}"
+                 IsVisible="{Binding HasEmergencyError}"
+                 Text="{Binding EmergencyError}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding EmergencyHint}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding TriggerHint}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding TargetHint}" />
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
                  Foreground="{DynamicResource StatusErrorBrush}"
@@ -113,6 +167,13 @@
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
                  Text="{Binding Hint}" />
+      <CheckBox IsChecked="{Binding ShowBudgetToModel, Mode=TwoWay}"
+                Content="{Binding BudgetLabel}"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="providers-compaction-budget" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding BudgetHint}" />
     </StackPanel>
 
     <!-- The usage log: off by default, and the only place a user turns it on. One JSONL line per model request under the data root. -->
@@ -150,7 +211,7 @@
                  AutomationProperties.AutomationId="providers-catalog-source"
                  AutomationProperties.Name="{Binding CatalogSourceLabel}" />
         <Button Grid.Column="2"
-                Classes="outline"
+                Classes="ghost"
                 Command="{Binding UpdateCatalogCommand}"
                 AutomationProperties.AutomationId="providers-catalog-update">
           <StackPanel Orientation="Horizontal" Spacing="6">
@@ -175,7 +236,7 @@
                  Text="{Binding ModelStatsText}"
                  AutomationProperties.AutomationId="providers-model-stats" />
       <Button Grid.Column="2"
-              Classes="outline"
+              Classes="ghost"
               Command="{Binding RefreshCommand}"
               AutomationProperties.AutomationId="providers-refresh">
         <StackPanel Orientation="Horizontal" Spacing="6">

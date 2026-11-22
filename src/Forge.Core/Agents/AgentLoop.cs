@@ -23,7 +23,7 @@ public sealed record AgentLoopServices(
     ITokenCounter TokenCounter,
     AgentOptions Options,
     IReadOnlyList<string> SubAgentToolNames,
-    Func<string?>? DynamicContext,
+    Func<string, string?>? DynamicContext,
     Action<FirstRequestCacheReport>? CacheDiagnostics = null);
 
 /// <summary>
@@ -153,7 +153,10 @@ public sealed class AgentLoop(AgentLoopServices services)
         for (var turn = 0; turn < services.Options.MaxTurns; turn++)
         {
             ct.ThrowIfCancellationRequested();
-            await CompactIfNeededAsync(instance, tools, sink, ct).ConfigureAwait(false);
+            // The first request of a turn is where a compaction may happen: the context is then whatever the previous turn
+            // left, so a turn never loses the evidence it is in the middle of collecting. Later requests of the same turn
+            // only compact at the emergency line near the window (or when the provider refuses the request as too long).
+            await CompactIfNeededAsync(instance, tools, sink, urgent: turn > 0, ct).ConfigureAwait(false);
 
             ChatMessage? assistant = null;
             var usage = TokenUsage.Empty;
@@ -567,10 +570,14 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
     }
 
+    /// <summary>
+    /// The trailing text of one request: the instance's own dynamic suffix, then whatever the host adds for that agent id.
+    /// The id matters — a sub-agent's window and budget are its own, so the host must not answer with the root's numbers.
+    /// </summary>
     private string DynamicText(AgentInstance instance)
     {
         var suffix = instance.Prompt.DynamicSuffix;
-        var callback = services.DynamicContext?.Invoke();
+        var callback = services.DynamicContext?.Invoke(instance.Id);
         if (string.IsNullOrEmpty(suffix))
         {
             return string.IsNullOrEmpty(callback) ? string.Empty : callback;
@@ -585,12 +592,19 @@ public sealed class AgentLoop(AgentLoopServices services)
     }
 
     /// <summary>
-    /// Automatic compaction before a request: C ≥ trigger·U starts it and it aims at target·U, where U is the usable input
-    /// budget of the instance's own model. An attempt that leaves C at or above the trigger line (for example an inherited
-    /// prefix that alone exceeds it) is fruitless: the next attempt waits until the instance's own content grew by
-    /// 0.1·U, and after two consecutive fruitless attempts automatic compaction stops until a manual one or another model.
+    /// Automatic compaction before a request. On the first request of a turn C ≥ trigger·U starts it; a request later in
+    /// the same turn only compacts at the emergency line, so a turn that is still collecting evidence keeps its raw tool
+    /// results. Either way it aims at target·U, where U is the usable input budget of the instance's own model. An attempt
+    /// that leaves C at or above the line it used (for example an inherited prefix that alone exceeds it) is fruitless: the
+    /// next attempt waits until the instance's own content grew by 0.1·U, and after two consecutive fruitless attempts
+    /// automatic compaction stops until a manual one or another model.
     /// </summary>
-    private async Task CompactIfNeededAsync(AgentInstance instance, ToolSelection tools, IAgentEventSink sink, CancellationToken ct)
+    private async Task CompactIfNeededAsync(
+        AgentInstance instance,
+        ToolSelection tools,
+        IAgentEventSink sink,
+        bool urgent,
+        CancellationToken ct)
     {
         var policy = CurrentCompaction;
         if (!policy.Enabled || services.Compactor is NoopCompactor)
@@ -605,8 +619,9 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         var trigger = budget.TriggerTokens(policy.TriggerRatio);
+        var line = urgent ? budget.EmergencyTokens(policy.EmergencyRatio) : trigger;
         var current = ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter));
-        if (current < trigger)
+        if (current < line)
         {
             return;
         }
@@ -627,7 +642,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             sink.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
             after = ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter));
             sink.Emit(new AgentContextMeasured(instance.Id, after, budget.Usable, trigger));
-            if (after < trigger)
+            if (after < line)
             {
                 state.ResetHysteresis();
                 return;

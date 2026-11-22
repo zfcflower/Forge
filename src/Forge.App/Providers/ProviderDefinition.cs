@@ -348,10 +348,11 @@ internal sealed record ProviderDefinition
             }
 
             var window = section.ContextWindow is > 0 ? section.ContextWindow : null;
+            var maxOutput = section.MaxOutputTokens is > 0 ? section.MaxOutputTokens : null;
             var pricing = section.Input is not null || section.Output is not null
                 ? new ModelPricing(section.Input ?? 0, section.Output ?? 0, section.CacheRead ?? 0, section.CacheWrite ?? 0)
                 : null;
-            var entry = new ModelMetadata(window, pricing);
+            var entry = new ModelMetadata(window, pricing, maxOutput);
             if (entry.IsKnown)
             {
                 metadata[id] = entry;
@@ -374,6 +375,7 @@ internal sealed record ProviderDefinition
             document[modelId] = new ModelMetadataSection
             {
                 ContextWindow = metadata.ContextWindow,
+                MaxOutputTokens = metadata.MaxOutputTokens is > 0 ? metadata.MaxOutputTokens : null,
                 Input = metadata.Pricing?.Input,
                 Output = metadata.Pricing?.Output,
                 CacheRead = metadata.Pricing?.CacheRead,

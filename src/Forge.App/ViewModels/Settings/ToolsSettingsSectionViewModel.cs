@@ -175,6 +175,86 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
         }
     }
 
+    // ---------------------------------------------------------------- context footprint: what one tool result may put into the conversation
+
+    public string LimitsTitle => ToolsLimitsStrings.Section;
+
+    public string BashCaptureLabel => ToolsLimitsStrings.BashCapture;
+
+    public string BashCaptureHint => ToolsLimitsStrings.BashCaptureHint;
+
+    public int MinBashCaptureKilobytes => AppPreferences.MinToolsBashCaptureKilobytes;
+
+    public int MaxBashCaptureKilobytes => AppPreferences.MaxToolsBashCaptureKilobytes;
+
+    /// <summary>Kilobytes of one command's output kept (16 to 4096); re-read after writing, so the field shows the clamped value.</summary>
+    public int BashCaptureKilobytes
+    {
+        get => composition.Preferences.ToolsBashCaptureKilobytes;
+        set
+        {
+            composition.Preferences.ToolsBashCaptureKilobytes = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string GrepResultsLabel => ToolsLimitsStrings.GrepResults;
+
+    public string GrepResultsHint => ToolsLimitsStrings.GrepResultsHint;
+
+    public int MinGrepResults => AppPreferences.MinToolsGrepMaxResults;
+
+    public int MaxGrepResults => AppPreferences.MaxToolsGrepMaxResults;
+
+    /// <summary>Matching lines one search returns (1 to 10000).</summary>
+    public int GrepMaxResults
+    {
+        get => composition.Preferences.ToolsGrepMaxResults;
+        set
+        {
+            composition.Preferences.ToolsGrepMaxResults = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string SpillLabel => ToolsLimitsStrings.Spill;
+
+    public string SpillHint => ToolsLimitsStrings.SpillHint;
+
+    public int MinSpillChars => AppPreferences.MinChatArtifactSpillChars;
+
+    public int MaxSpillChars => AppPreferences.MaxChatArtifactSpillChars;
+
+    /// <summary>Characters of a tool result kept inline before the rest is stored as an artifact (4000 to 256000).</summary>
+    public int SpillChars
+    {
+        get => composition.Preferences.ChatArtifactSpillChars;
+        set
+        {
+            composition.Preferences.ChatArtifactSpillChars = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string PreviewLabel => ToolsLimitsStrings.Preview;
+
+    public string PreviewHint => ToolsLimitsStrings.PreviewHint;
+
+    public int MinPreviewChars => AppPreferences.MinChatArtifactPreviewChars;
+
+    public int MaxPreviewChars => AppPreferences.MaxChatArtifactPreviewChars;
+
+    /// <summary>Characters of a spilled result that stay inline (500 to 100000; the host caps it at half the threshold).</summary>
+    public int PreviewChars
+    {
+        get => composition.Preferences.ChatArtifactPreviewChars;
+        set
+        {
+            composition.Preferences.ChatArtifactPreviewChars = value;
+            OnPropertyChanged();
+        }
+    }
+
     public void Reload()
     {
         InventoryText = composition.Inventory is { } inventory
@@ -197,6 +277,10 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
         OnPropertyChanged(nameof(CodeScriptResultChars));
         OnPropertyChanged(nameof(CodeScriptInnerResultChars));
         OnPropertyChanged(nameof(CodeScriptTools));
+        OnPropertyChanged(nameof(BashCaptureKilobytes));
+        OnPropertyChanged(nameof(GrepMaxResults));
+        OnPropertyChanged(nameof(SpillChars));
+        OnPropertyChanged(nameof(PreviewChars));
         OnPropertyChanged(nameof(TerminalFontFamily));
         OnPropertyChanged(nameof(TerminalFontSize));
         OnPropertyChanged(nameof(TerminalShell));

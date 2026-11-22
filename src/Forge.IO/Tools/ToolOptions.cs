@@ -18,6 +18,7 @@ public sealed record ToolOptions
     public const int MaxEditMaxFileBytes = 32 * 1024 * 1024;
 
     public const int DefaultShellCaptureBytes = 512 * 1024;
+    public const int MinShellCaptureBytes = 16 * 1024;
     public const int MaxShellCaptureBytes = 4 * 1024 * 1024;
     public const int DefaultShellTimeoutSeconds = 120;
     public const int MinShellTimeoutSeconds = 1;
@@ -25,6 +26,7 @@ public sealed record ToolOptions
     public const int DefaultMaxConcurrentProcesses = 8;
 
     public const int DefaultGrepMaxResults = 1000;
+    public const int MinGrepMaxResults = 1;
     public const int MaxGrepMaxResults = 10000;
     public const int DefaultGrepMaxFileBytes = 8 * 1024 * 1024;
     public const int DefaultGrepContextLines = 0;

@@ -105,8 +105,10 @@ public sealed record AgentHostOptions
     /// <summary>
     /// Per-turn text sent as one extra trailing user message after the stable prefix and the persisted
     /// history, such as the current time or workspace state; it is never written to history or to the store.
+    /// The argument is the agent id, because the text is per instance: a sub-agent has its own model, window
+    /// and budget, and must not be handed the root's numbers.
     /// </summary>
-    public Func<string?>? DynamicContext { get; init; }
+    public Func<string, string?>? DynamicContext { get; init; }
 
     /// <summary>Registers read_artifact, search_history and read_history when their store is available.</summary>
     public bool IncludeRetrievalTools { get; init; } = true;

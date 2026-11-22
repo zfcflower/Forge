@@ -5,9 +5,9 @@
         x:Class="Forge.App.Settings.ModelMetadataWindow"
         x:DataType="settings:ModelMetadataViewModel"
         Title="{Binding Title}"
-        Width="1040"
+        Width="1134"
         Height="620"
-        MinWidth="920"
+        MinWidth="1014"
         MinHeight="400"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
@@ -193,6 +193,20 @@
         </Panel>
       </Border>
     </DataTemplate>
+    <DataTemplate x:Key="MetaMaxOutputCell" x:DataType="settings:ModelMetadataRowViewModel">
+      <Border Classes="meta-line editable"
+              Classes.invalid="{Binding HasMaxOutputError}"
+              Padding="6,3"
+              ToolTip.Tip="{Binding MaxOutputError}">
+        <Panel x:Name="CellBody">
+          <TextBlock x:Name="ValueText"
+                     Text="{Binding MaxOutputText}"
+                     TextWrapping="NoWrap"
+                     VerticalAlignment="Center"
+                     AutomationProperties.Name="{Binding MaxOutputText}" />
+        </Panel>
+      </Border>
+    </DataTemplate>
     <DataTemplate x:Key="MetaInputCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line editable"
               Classes.invalid="{Binding InputPriceInvalid}"
@@ -260,6 +274,17 @@
                      Classes.invalid="{Binding HasContextWindowError}"
                      ToolTip.Tip="{Binding ContextWindowError}"
                      Value="{Binding ContextWindow, Mode=TwoWay}"
+                     FormatString="0">
+        <NumericUpDown.Styles>
+          <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
+        </NumericUpDown.Styles>
+      </NumericUpDown>
+    </DataTemplate>
+    <DataTemplate x:Key="MetaMaxOutputEditor" x:DataType="settings:ModelMetadataRowViewModel">
+      <NumericUpDown Classes="meta-cell"
+                     Classes.invalid="{Binding HasMaxOutputError}"
+                     ToolTip.Tip="{Binding MaxOutputError}"
+                     Value="{Binding MaxOutput, Mode=TwoWay}"
                      FormatString="0">
         <NumericUpDown.Styles>
           <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />

@@ -68,20 +68,24 @@ public sealed record ModelCapabilities(ModelInputs? Inputs, IReadOnlyList<Thinki
 }
 
 /// <summary>
-/// Everything the shell knows about one model: how large its context window is, what it costs and what it accepts. Every
-/// half may be unknown (<c>null</c>), and a provider that reports nothing leaves it unknown; the session instrumentation
-/// then shows the token counts it does have instead of inventing a percentage or a price.
+/// Everything the shell knows about one model: how large its context window is, how much one reply may spend, what it costs
+/// and what it accepts. Every half may be unknown (<c>null</c>), and a provider that reports nothing leaves it unknown; the
+/// session instrumentation then shows the token counts it does have instead of inventing a percentage or a price.
 /// </summary>
-public sealed record ModelMetadata(int? ContextWindow, ModelPricing? Pricing)
+/// <param name="MaxOutputTokens">
+/// The largest single reply the model accepts, which is also the output reserve compaction must leave free. <c>null</c> when
+/// no source named one.
+/// </param>
+public sealed record ModelMetadata(int? ContextWindow, ModelPricing? Pricing, int? MaxOutputTokens = null)
 {
-    /// <summary>Nothing is known: no window, no prices, no capabilities.</summary>
+    /// <summary>Nothing is known: no window, no reply limit, no prices, no capabilities.</summary>
     public static ModelMetadata Unknown { get; } = new(null, null);
 
     /// <summary>What the model accepts, when any source described it.</summary>
     public ModelCapabilities? Capabilities { get; init; }
 
     /// <summary>At least one half carries a value; a fully unknown metadata is never worth showing.</summary>
-    public bool IsKnown => ContextWindow is > 0 || Pricing is not null || Capabilities is { IsKnown: true };
+    public bool IsKnown => ContextWindow is > 0 || Pricing is not null || MaxOutputTokens is > 0 || Capabilities is { IsKnown: true };
 
     /// <summary>
     /// Field-wise merge: every field <paramref name="other"/> knows replaces the one here, every unknown field of
@@ -101,7 +105,10 @@ public sealed record ModelMetadata(int? ContextWindow, ModelPricing? Pricing)
                 ? Capabilities
                 : Capabilities.With(other.Capabilities);
 
-        return new ModelMetadata(other.ContextWindow is > 0 ? other.ContextWindow : ContextWindow, other.Pricing ?? Pricing)
+        return new ModelMetadata(
+            other.ContextWindow is > 0 ? other.ContextWindow : ContextWindow,
+            other.Pricing ?? Pricing,
+            other.MaxOutputTokens is > 0 ? other.MaxOutputTokens : MaxOutputTokens)
         {
             Capabilities = capabilities?.IsKnown == true ? capabilities : null,
         };

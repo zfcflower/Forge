@@ -124,6 +124,39 @@ public sealed class ModelMetadataWindowTests : IDisposable
     });
 
     [Fact]
+    public Task The_reply_cap_is_an_editable_column_of_the_same_kind() => SharedUi.RunAsync(() =>
+    {
+        var (win, table, model) = Open();
+        try
+        {
+            var row = model.Rows[0];
+            var cell = Cell(table, row, "maxOutput");
+
+            // Unknown is an empty cell, not a zero: a zero cap would be a model that may not answer.
+            Assert.Equal(string.Empty, Display(cell).Text);
+            Assert.Null(row.MaxOutput);
+
+            // Typing a cap writes through to the row and to the section the window saves.
+            Click(win, cell);
+            var box = Field(cell).GetVisualDescendants().OfType<TextBox>().Single(t => t.Name == "PART_TextBox");
+            box.Text = "8192";
+            Assert.Equal(8192m, row.MaxOutput);
+            Assert.Equal(8192, row.ToSection()!.MaxOutputTokens);
+
+            // Zero is not a reply cap: the row reports it and the save gate blocks.
+            box.Text = "0";
+            Assert.True(row.HasMaxOutputError);
+            Assert.True(row.HasErrors);
+
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            win.Close();
+        }
+    });
+
+    [Fact]
     public Task A_price_that_cannot_be_saved_is_red_on_the_cell_and_on_its_field() => SharedUi.RunAsync(() =>
     {
         var (win, table, model) = Open();
@@ -276,8 +309,8 @@ public sealed class ModelMetadataWindowTests : IDisposable
             Press(win, Key.Enter);
             Assert.Single(below.GetVisualDescendants().OfType<NumericUpDown>());
             Press(win, Key.Tab);
-            var input = Cell(table, second, "input");
-            Assert.True(Part(Field(input)).IsFocused);
+            var next = Cell(table, second, "maxOutput");
+            Assert.True(Part(Field(next)).IsFocused);
             Press(win, Key.Tab, KeyModifiers.Shift);
             Assert.True(Part(Field(below)).IsFocused);
 
@@ -306,21 +339,21 @@ public sealed class ModelMetadataWindowTests : IDisposable
             Click(win, context);
             Press(win, Key.Escape);
 
-            // Left/right step along the five editable columns, down/up along the rows.
+            // Left/right step along the six editable columns, down/up along the rows.
             Press(win, Key.Right);
-            var input = Cell(table, first, "input");
-            Assert.True(IsCurrent(input));
+            var next = Cell(table, first, "maxOutput");
+            Assert.True(IsCurrent(next));
             Assert.False(IsCurrent(context));
 
             Press(win, Key.Down);
-            var below = Cell(table, second, "input");
+            var below = Cell(table, second, "maxOutput");
             Assert.True(IsCurrent(below));
 
             Press(win, Key.Left);
             Assert.True(IsCurrent(Cell(table, second, "context")));
 
-            // Five steps right from the first editable column come back to it (the row is the last one, so the wrap stays).
-            for (var step = 0; step < 5; step++)
+            // Six steps right from the first editable column come back to it (the row is the last one, so the wrap stays).
+            for (var step = 0; step < 6; step++)
             {
                 Press(win, Key.Right);
             }
@@ -368,9 +401,9 @@ public sealed class ModelMetadataWindowTests : IDisposable
             box.SelectionStart = box.CaretIndex;
             box.SelectionEnd = box.CaretIndex;
             Press(win, Key.Right);
-            var input = Cell(table, row, "input");
-            Assert.True(IsCurrent(input));
-            Assert.Single(input.GetVisualDescendants().OfType<NumericUpDown>());
+            var next = Cell(table, row, "maxOutput");
+            Assert.True(IsCurrent(next));
+            Assert.Single(next.GetVisualDescendants().OfType<NumericUpDown>());
 
             return Task.CompletedTask;
         }
@@ -504,8 +537,9 @@ public sealed class ModelMetadataWindowTests : IDisposable
         var index = columns.IndexOf(columns.Single(column => column.Width.IsStar)) + (name switch
         {
             "context" => 3,
-            "input" => 4,
-            "output" => 5,
+            "maxOutput" => 4,
+            "input" => 5,
+            "output" => 6,
             "model" => 0,
             _ => throw new ArgumentOutOfRangeException(nameof(name), name, "no such column"),
         });

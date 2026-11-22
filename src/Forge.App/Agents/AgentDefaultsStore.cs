@@ -243,7 +243,11 @@ internal sealed class AgentDefaultsStore
 
         var accepted = (levels ?? ((modelId, providerId) => catalog.ThinkingStepsFor(modelId, providerId)))(model, target.Id);
         var thinking = ThinkingEfforts.Clamp(entry?.Thinking ?? ThinkingEffort.Off, accepted);
-        return new ModelSettings(model, thinking, target.Definition.MaxOutputTokens, target.Id);
+        return new ModelSettings(
+            model,
+            thinking,
+            target.MetadataFor(model).MaxOutputTokens ?? target.Definition.MaxOutputTokens,
+            target.Id);
     }
 
     private static AgentDefault? Parse(JsonNode? node)

@@ -20,6 +20,15 @@ internal static class ToolPreferences
                 preferences.ToolsBashTimeoutSeconds,
                 ToolOptions.MinShellTimeoutSeconds,
                 ToolOptions.MaxShellTimeoutSeconds),
+            // The fields are human-sized (kilobytes, result counts); the caps stay the tool's own hard limits.
+            ShellCaptureBytes = Math.Clamp(
+                preferences.ToolsBashCaptureKilobytes * 1024,
+                ToolOptions.MinShellCaptureBytes,
+                ToolOptions.MaxShellCaptureBytes),
+            GrepMaxResults = Math.Clamp(
+                preferences.ToolsGrepMaxResults,
+                ToolOptions.MinGrepMaxResults,
+                ToolOptions.MaxGrepMaxResults),
             ShellPath = Empty(preferences.ToolsShellPath),
             RipgrepPath = Empty(preferences.ToolsRipgrepPath),
         };

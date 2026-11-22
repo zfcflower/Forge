@@ -134,6 +134,27 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxChatToolImageThumbnailPixels = 1024;
     public const int DefaultChatToolImageThumbnailPixels = 256;
     public const bool DefaultChatToolImagesToModel = true;
+    public const bool DefaultChatContextBudget = true;
+
+    /// <summary>How much of one command's output is kept, in kilobytes; clamped to [16, 4096] by the setter.</summary>
+    public const int MinToolsBashCaptureKilobytes = 16;
+    public const int MaxToolsBashCaptureKilobytes = 4096;
+    public const int DefaultToolsBashCaptureKilobytes = 512;
+
+    /// <summary>How many matching lines one search returns; clamped to [1, 10000].</summary>
+    public const int MinToolsGrepMaxResults = 1;
+    public const int MaxToolsGrepMaxResults = 10000;
+    public const int DefaultToolsGrepMaxResults = 1000;
+
+    /// <summary>Characters of one tool result that stay inline before the rest becomes an artifact; clamped to [4000, 256000].</summary>
+    public const int MinChatArtifactSpillChars = 4000;
+    public const int MaxChatArtifactSpillChars = 256000;
+    public const int DefaultChatArtifactSpillChars = 32000;
+
+    /// <summary>Characters of that result kept as a preview (head and tail); clamped to [500, 100000].</summary>
+    public const int MinChatArtifactPreviewChars = 500;
+    public const int MaxChatArtifactPreviewChars = 100000;
+    public const int DefaultChatArtifactPreviewChars = 2000;
     public const int MinFilesCsvMaxRows = 100;
     public const int MaxFilesCsvMaxRows = 100000;
     public const int DefaultFilesCsvMaxRows = 1000;
@@ -290,6 +311,11 @@ internal sealed class AppPreferences : ObservableObject
     private int palettePerSourceLimit = DefaultPalettePerSourceLimit;
     private int chatToolImageThumbnailPixels = DefaultChatToolImageThumbnailPixels;
     private bool chatToolImagesToModel = DefaultChatToolImagesToModel;
+    private bool chatContextBudget = DefaultChatContextBudget;
+    private int toolsBashCaptureKilobytes = DefaultToolsBashCaptureKilobytes;
+    private int toolsGrepMaxResults = DefaultToolsGrepMaxResults;
+    private int chatArtifactSpillChars = DefaultChatArtifactSpillChars;
+    private int chatArtifactPreviewChars = DefaultChatArtifactPreviewChars;
     private int filesCsvMaxRows = DefaultFilesCsvMaxRows;
     private int filesNotebookOutputKilobytes = DefaultFilesNotebookOutputKilobytes;
     private int filesImagePreviewMaxMegabytes = DefaultFilesImagePreviewMaxMegabytes;
@@ -583,6 +609,40 @@ internal sealed class AppPreferences : ObservableObject
 
     /// <summary>Whether images a tool returned are sent back to the model (wave W4).</summary>
     public bool ChatToolImagesToModel { get => chatToolImagesToModel; set => Set(ref chatToolImagesToModel, value); }
+
+    /// <summary>
+    /// Whether every request carries one trailing line telling the model its own context usage and trigger line. On by
+    /// default: the model then knows how much room is left instead of inferring it from truncated tool output.
+    /// </summary>
+    public bool ChatContextBudget { get => chatContextBudget; set => Set(ref chatContextBudget, value); }
+
+    /// <summary>Kilobytes of one command's output the model sees; the rest is dropped and the result says so.</summary>
+    public int ToolsBashCaptureKilobytes
+    {
+        get => toolsBashCaptureKilobytes;
+        set => Set(ref toolsBashCaptureKilobytes, Math.Clamp(value, MinToolsBashCaptureKilobytes, MaxToolsBashCaptureKilobytes));
+    }
+
+    /// <summary>Matching lines one search returns; past it the result reports how many matched in all.</summary>
+    public int ToolsGrepMaxResults
+    {
+        get => toolsGrepMaxResults;
+        set => Set(ref toolsGrepMaxResults, Math.Clamp(value, MinToolsGrepMaxResults, MaxToolsGrepMaxResults));
+    }
+
+    /// <summary>Characters of a tool result kept inline; past it the result is stored as an artifact and only a preview stays.</summary>
+    public int ChatArtifactSpillChars
+    {
+        get => chatArtifactSpillChars;
+        set => Set(ref chatArtifactSpillChars, Math.Clamp(value, MinChatArtifactSpillChars, MaxChatArtifactSpillChars));
+    }
+
+    /// <summary>Characters of that preview, split between the head and the tail of the stored output.</summary>
+    public int ChatArtifactPreviewChars
+    {
+        get => chatArtifactPreviewChars;
+        set => Set(ref chatArtifactPreviewChars, Math.Clamp(value, MinChatArtifactPreviewChars, MaxChatArtifactPreviewChars));
+    }
 
     /// <summary>Most rows the CSV/TSV preview shows (wave W4). Clamped to [<see cref="MinFilesCsvMaxRows"/>, <see cref="MaxFilesCsvMaxRows"/>].</summary>
     public int FilesCsvMaxRows
@@ -965,6 +1025,19 @@ internal sealed class AppPreferences : ObservableObject
             ? Math.Clamp(chatToolImageThumbnailPixelsLoaded, MinChatToolImageThumbnailPixels, MaxChatToolImageThumbnailPixels)
             : DefaultChatToolImageThumbnailPixels;
         chatToolImagesToModel = section.ChatToolImagesToModel ?? DefaultChatToolImagesToModel;
+        chatContextBudget = section.ChatContextBudget ?? DefaultChatContextBudget;
+        toolsBashCaptureKilobytes = section.ToolsBashCaptureKilobytes is { } bashCaptureLoaded
+            ? Math.Clamp(bashCaptureLoaded, MinToolsBashCaptureKilobytes, MaxToolsBashCaptureKilobytes)
+            : DefaultToolsBashCaptureKilobytes;
+        toolsGrepMaxResults = section.ToolsGrepMaxResults is { } grepLoaded
+            ? Math.Clamp(grepLoaded, MinToolsGrepMaxResults, MaxToolsGrepMaxResults)
+            : DefaultToolsGrepMaxResults;
+        chatArtifactSpillChars = section.ChatArtifactSpillChars is { } spillLoaded
+            ? Math.Clamp(spillLoaded, MinChatArtifactSpillChars, MaxChatArtifactSpillChars)
+            : DefaultChatArtifactSpillChars;
+        chatArtifactPreviewChars = section.ChatArtifactPreviewChars is { } previewLoaded
+            ? Math.Clamp(previewLoaded, MinChatArtifactPreviewChars, MaxChatArtifactPreviewChars)
+            : DefaultChatArtifactPreviewChars;
         filesCsvMaxRows = section.FilesCsvMaxRows is { } filesCsvMaxRowsLoaded
             ? Math.Clamp(filesCsvMaxRowsLoaded, MinFilesCsvMaxRows, MaxFilesCsvMaxRows)
             : DefaultFilesCsvMaxRows;
@@ -1104,6 +1177,11 @@ internal sealed class AppPreferences : ObservableObject
             PalettePerSourceLimit = palettePerSourceLimit,
             ChatToolImageThumbnailPixels = chatToolImageThumbnailPixels,
             ChatToolImagesToModel = chatToolImagesToModel,
+            ChatContextBudget = chatContextBudget,
+            ToolsBashCaptureKilobytes = toolsBashCaptureKilobytes,
+            ToolsGrepMaxResults = toolsGrepMaxResults,
+            ChatArtifactSpillChars = chatArtifactSpillChars,
+            ChatArtifactPreviewChars = chatArtifactPreviewChars,
             FilesCsvMaxRows = filesCsvMaxRows,
             FilesNotebookOutputKilobytes = filesNotebookOutputKilobytes,
             FilesImagePreviewMaxMegabytes = filesImagePreviewMaxMegabytes,
@@ -1536,6 +1614,21 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("chatToolImagesToModel")]
     public bool? ChatToolImagesToModel { get; set; }
+
+    [JsonPropertyName("chatContextBudget")]
+    public bool? ChatContextBudget { get; set; }
+
+    [JsonPropertyName("toolsBashCaptureKilobytes")]
+    public int? ToolsBashCaptureKilobytes { get; set; }
+
+    [JsonPropertyName("toolsGrepMaxResults")]
+    public int? ToolsGrepMaxResults { get; set; }
+
+    [JsonPropertyName("chatArtifactSpillChars")]
+    public int? ChatArtifactSpillChars { get; set; }
+
+    [JsonPropertyName("chatArtifactPreviewChars")]
+    public int? ChatArtifactPreviewChars { get; set; }
 
     [JsonPropertyName("filesCsvMaxRows")]
     public int? FilesCsvMaxRows { get; set; }

@@ -1088,7 +1088,13 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         get
         {
             var provider = catalog.Find(providerId);
-            return new ModelSettings(model, effort, provider?.Definition.MaxOutputTokens, providerId);
+            // The per-model cap wins over the provider's default: a vendor's models differ (8k vs 64k replies), and compaction
+            // reserves exactly this much output out of the window.
+            return new ModelSettings(
+                model,
+                effort,
+                provider?.MetadataFor(model).MaxOutputTokens ?? provider?.Definition.MaxOutputTokens,
+                providerId);
         }
     }
 

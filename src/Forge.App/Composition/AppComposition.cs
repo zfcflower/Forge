@@ -663,7 +663,9 @@ internal sealed class AppComposition : IAsyncDisposable
         // Compaction thresholds follow each model's effective window: the same resolution chain the context gauge shows
         // (catalog snapshot → provider report → default context window → per-model override).
         runtimeServices.ContextWindow = model => providers.Catalog.MetadataFor(model.Model, model.ProviderId).ContextWindow;
-        runtimeServices.MaxOutputTokens = model => providers.ModelCatalog.View.Find(null, model.Model)?.MaxOutputTokens;
+        runtimeServices.MaxOutputTokens = model =>
+            providers.Catalog.MetadataFor(model.Model, model.ProviderId).MaxOutputTokens
+            ?? providers.Catalog.Find(model.ProviderId)?.Definition.MaxOutputTokens;
         // A model the catalog knows to take no image input gets a tool result's text, not its pictures; unknown stays
         // "may take images", the same rule the composer applies to a user attachment.
         runtimeServices.ModelInputs = model =>
@@ -679,6 +681,14 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.FileTools = fileTools.All;
         // Switched-off built-in tools: read before every turn, so a toggle applies from the next turn of every session.
         runtimeServices.DisabledTools = () => preferences.Current.ToolsDisabled;
+        // Artifact spill and preview sizes: read when a session host is built (both live in AgentOptions), so a change
+        // applies to the next host. The preview is also capped at half the spill budget, so raising one never makes the
+        // preview larger than what stays inline.
+        runtimeServices.ArtifactLimits = () =>
+        {
+            var spread = preferences.Current.ChatArtifactSpillChars;
+            return (spread, Math.Min(preferences.Current.ChatArtifactPreviewChars, spread / 2));
+        };
         // The two sub-agent dials of the `agents` section: the cap is applied to every host as it is built and again before
         // each turn (a raised cap wakes agents already queued), and switching spawning off takes spawn_agent out of the tools.
         runtimeServices.SubAgents = () => SubAgentLimits.From(preferences.Current);

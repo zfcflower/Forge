@@ -175,6 +175,12 @@ internal static class ProviderStrings
 
     public const string EditorHeadersInvalidKey = "providers.editor.headersInvalid";
 
+    public const string EditorMaxOutputKey = "providers.editor.maxOutput";
+
+    public const string EditorMaxOutputHintKey = "providers.editor.maxOutputHint";
+
+    public const string EditorMaxOutputInvalidKey = "providers.editor.maxOutputInvalid";
+
     public const string EditorEditKey = "providers.editor.edit";
 
     public const string EditorNameKey = "providers.editor.name";
@@ -281,6 +287,8 @@ internal static class ProviderStrings
     public const string MetadataModelKey = "providers.meta.model";
 
     public const string MetadataContextKey = "providers.meta.context";
+
+    public const string MetadataMaxOutputKey = "providers.meta.maxOutput";
 
     public const string MetadataInputKey = "providers.meta.input";
 
@@ -448,6 +456,12 @@ internal static class ProviderStrings
             "每行一个「名称: 值」，随每个请求发送。值里的 {session} 会替换为当前会话 id，例如 OpenCode Zen/Go 的 x-opencode-session: {session}。",
             "One \"Name: Value\" per line, sent with every request. {session} in a value becomes the current session id, e.g. x-opencode-session: {session} for OpenCode Zen/Go.");
         Loc.Register(EditorHeadersInvalidKey, "请求头第 {0} 行应为「名称: 值」", "Request header line {0} must be \"Name: Value\"");
+        Loc.Register(EditorMaxOutputKey, "最大输出（token）", "Max output (tokens)");
+        Loc.Register(
+            EditorMaxOutputHintKey,
+            "这个提供商单条回复的上限，也是每个请求的 max_tokens。留空 = 未知，压缩会按窗口的 20% 预留输出（偏大，少用一些可用输入）。Claude 系列通常 8192，部分模型 32000–64000；每模型可单独覆盖。",
+            "The largest single reply this provider's models accept — also each request's max_tokens. Empty = unknown, and compaction then reserves 20% of the window for output (larger than needed). Claude models are usually 8192, some take 32000–64000; each model can override it.");
+        Loc.Register(EditorMaxOutputInvalidKey, "最大输出须在 1–{0} 之间", "Max output must be between 1 and {0}");
         Loc.Register(EditorTestKey, "测试连接", "Test connection");
         Loc.Register(EditorTestingKey, "测试中…", "Testing…");
         Loc.Register(EditorTestPassedKey, "连接成功，已获取 {0} 个模型", "Connected — {0} models fetched");
@@ -530,6 +544,7 @@ internal static class ProviderStrings
             "Context window is in tokens and prices are US dollars per million tokens: empty means unknown. Click a cell with a pale blue background to edit it; Enter or a click elsewhere puts it back.");
         Loc.Register(MetadataModelKey, "模型", "Model");
         Loc.Register(MetadataContextKey, "上下文窗口", "Context window");
+        Loc.Register(MetadataMaxOutputKey, "最大输出", "Max output");
         Loc.Register(MetadataInputKey, "输入", "Input");
         Loc.Register(MetadataOutputKey, "输出", "Output");
         Loc.Register(MetadataCacheReadKey, "缓存读", "Cache read");

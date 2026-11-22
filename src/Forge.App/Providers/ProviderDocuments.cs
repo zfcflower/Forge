@@ -233,6 +233,10 @@ internal sealed class ModelMetadataSection
     [JsonPropertyName("contextWindow")]
     public int? ContextWindow { get; set; }
 
+    /// <summary>The largest single reply the model accepts; also the output reserve compaction leaves free.</summary>
+    [JsonPropertyName("maxOutputTokens")]
+    public int? MaxOutputTokens { get; set; }
+
     [JsonPropertyName("input")]
     public double? Input { get; set; }
 
