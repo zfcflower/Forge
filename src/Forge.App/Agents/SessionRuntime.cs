@@ -215,6 +215,13 @@ internal sealed record AgentRuntimeServices(
     public Func<ModelSettings, int?>? MaxOutputTokens { get; set; }
 
     /// <summary>
+    /// The output cap a request for the model is really sent with, when the protocol always carries one — the catalogue's
+    /// limit with the adapter's own thinking lift applied. Compaction's output reserve has to be this figure, otherwise a
+    /// trigger line can sit above the request's real prompt limit. Null = the protocol sends no cap unless the model pins one.
+    /// </summary>
+    public Func<ModelSettings, int?>? WireMaxOutputTokens { get; set; }
+
+    /// <summary>
     /// What a model accepts from the catalog, handed to <see cref="AgentOptions.ModelInputs"/>: a model known to take no
     /// image input receives a tool result's text instead of its pictures. A lookup rather than a value because the session
     /// can be pointed at another provider between hosts.
@@ -1576,7 +1583,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             return;
         }
 
-        target.SetCompactionPolicy(settings.ToPolicy(services.ContextWindow, services.MaxOutputTokens));
+        target.SetCompactionPolicy(settings.ToPolicy(services.ContextWindow, services.MaxOutputTokens, services.WireMaxOutputTokens));
         appliedCompaction = settings;
     }
 
@@ -1756,7 +1763,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                     CacheTtl = services.PromptCacheTtl?.Invoke(mainModel.ProviderId),
                     // compaction (feature B): thresholds relative to each model's effective window. Later saves reach
                     // this host through ApplyCompaction.
-                    Compaction = compaction.ToPolicy(services.ContextWindow, services.MaxOutputTokens),
+                    Compaction = compaction.ToPolicy(services.ContextWindow, services.MaxOutputTokens, services.WireMaxOutputTokens),
                     ArtifactThresholdChars = artifactLimits.Item1,
                     ArtifactPreviewChars = artifactLimits.Item2,
                     SendToolImagesToModel = services.SendToolImages ?? (static () => true),

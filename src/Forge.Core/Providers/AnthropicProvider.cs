@@ -25,9 +25,6 @@ public sealed class AnthropicProvider : HttpChatProvider
     public static bool CanCarry(string mediaType) =>
         ProviderAttachments.KindOf(mediaType) is ModelInputs.Image or ModelInputs.Pdf;
 
-    private const int DefaultMaxTokens = 8192;
-    private const int ThinkingHeadroom = 4096;
-
     /// <summary>
     /// Providers whose account already refused the announced betas in this process. A capability of the account, not of the
     /// request, so remembering it saves one wasted round trip per turn for the rest of the run.
@@ -182,13 +179,8 @@ public sealed class AnthropicProvider : HttpChatProvider
 
     protected override byte[] BuildBody(ChatRequest request) => ProviderJson.Write(writer =>
     {
-        var budget = ThinkingBudget(request.Model.Thinking);
-        var maxTokens = request.Model.MaxOutputTokens ?? DefaultMaxTokens;
-        if (budget >= maxTokens)
-        {
-            maxTokens = budget + ThinkingHeadroom;
-        }
-
+        var budget = OutputCeiling.ThinkingBudget(request.Model.Thinking);
+        var maxTokens = OutputCeiling.Wire(request.Model);
         writer.WriteString("model", request.Model.Model);
         writer.WriteNumber("max_tokens", maxTokens);
         writer.WriteBoolean("stream", true);
@@ -625,19 +617,6 @@ public sealed class AnthropicProvider : HttpChatProvider
 
         writer.WriteEndObject();
     }
-
-    // The extended-thinking budget per step: 1k, 2k, 8k, 24k, 32k and 48k tokens, each still under the output ceiling
-    // Anthropic allows (see the ThinkingHeadroom clamp above, which lifts max_tokens whenever the budget would exceed it).
-    private static int ThinkingBudget(ThinkingEffort effort) => effort switch
-    {
-        ThinkingEffort.Minimal => 1024,
-        ThinkingEffort.Low => 2048,
-        ThinkingEffort.Medium => 8192,
-        ThinkingEffort.High => 24576,
-        ThinkingEffort.XHigh => 32768,
-        ThinkingEffort.Max => 49152,
-        _ => 0,
-    };
 
     protected override async IAsyncEnumerable<ChatStreamEvent> ParseAsync(
         SseReader reader,

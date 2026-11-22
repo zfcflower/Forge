@@ -175,7 +175,17 @@ internal static class Program
             yield return scenario;
         }
 
+        foreach (var scenario in CompactionScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
         foreach (var scenario in ComposerPopupScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
+        foreach (var scenario in FieldScenarios.Create(fixtures))
         {
             yield return scenario;
         }

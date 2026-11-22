@@ -1,4 +1,5 @@
 using Forge.Abstractions;
+using Forge.Core.Agents;
 using Forge.Core.Providers;
 using Xunit;
 
@@ -120,5 +121,30 @@ public sealed class ProviderOutputCapTests : IDisposable
         // The turn ends as MaxTokens, which the transcript renders as 截断 and the loop never retries as an error.
         var completed = Assert.IsType<MessageCompleted>(events[^1]);
         Assert.Equal(StopReason.MaxTokens, completed.Stop);
+    }
+
+    [Theory]
+    [InlineData(ThinkingEffort.Off, 4_096, 4_096)]
+    [InlineData(ThinkingEffort.Off, null, 8_192)]
+    [InlineData(ThinkingEffort.Low, null, 8_192)]       // 2 048 is below the cap: the cap stands
+    [InlineData(ThinkingEffort.Medium, null, 12_288)]    // exactly at the cap: lifted to 8 192 + 4 096
+    [InlineData(ThinkingEffort.High, 8_192, 28_672)]     // 24 576 + 4 096
+    [InlineData(ThinkingEffort.XHigh, 64_000, 64_000)]   // 32 768 is below the pin: the pin stands
+    public async Task The_output_reserve_is_the_max_tokens_the_request_carries(
+        ThinkingEffort thinking,
+        int? pin,
+        int expected)
+    {
+        var handler = new CapturingHandler(AnthropicStream("end_turn"));
+        var model = new ModelSettings("m", thinking, pin);
+        await DrainAsync(Anthropic(handler), new ChatRequest("sys", [], [ChatMessage.User("hi")], model));
+
+        // The body says `expected`; the reserve compaction subtracts from the window is that same number, so a trigger line
+        // can never sit above the request's real prompt limit.
+        Assert.Contains($"\"max_tokens\":{expected}", handler.Body, StringComparison.Ordinal);
+        Assert.Equal(expected, OutputCeiling.Wire(model));
+        Assert.Equal(
+            expected,
+            CompactionPolicy.Budget(200_000, null, wireMaxOutput: OutputCeiling.Wire(model))!.Value.Reserve);
     }
 }

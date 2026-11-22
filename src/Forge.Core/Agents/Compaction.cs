@@ -950,11 +950,31 @@ public sealed class CompactionFiles
             ["move"] = "to",
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Characters the whole <c>&lt;read-files&gt;</c> block may take — tags, newlines and the dropped-count line included. The
+    /// summary body is bounded by the summarizer's output limit, but these lists are written by code and grow with every
+    /// compaction that meets a new file, so they need a cap of their own or they would own the context budget eventually.
+    /// </summary>
+    public const int ReadListChars = 4_000;
+
+    /// <summary>
+    /// Characters the whole <c>&lt;modified-files&gt;</c> block may take. Twice the read budget: a path that was changed is
+    /// evidence of what the work touched, while a read is only a hint that can be repeated.
+    /// </summary>
+    public const int ModifiedListChars = 8_000;
+
     /// <summary>Path → its merged, ascending ranges. <see cref="LineRange.Whole"/> means the whole file.</summary>
     public Dictionary<string, List<LineRange>> Read { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Paths a tool changed; these are listed apart from the read ones and never under both.</summary>
     public SortedSet<string> Modified { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Paths this collection added on top of the seed it started from. They are rendered first, so a list that outgrows its
+    /// budget drops the oldest paths instead of the work the newest messages are about. Ordering cannot come from a
+    /// timestamp: nothing but the rendered lines survives a compaction, so "newest" means "seen by this pass".
+    /// </summary>
+    public HashSet<string> Recent { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Adds one read of <paramref name="path"/>, merged into what is already known about that file.</summary>
     public void AddRead(string path, in LineRange range)
@@ -992,20 +1012,47 @@ public sealed class CompactionFiles
         Read[path] = kept;
     }
 
+    /// <summary>
+    /// One path a tool changed. Accepts what a live call reports, with one exception: a line carrying <c>…</c> is dropped,
+    /// because the same entry point seeds the list from a stored summary, where those lines are the dropped-count notice and
+    /// paths the cap shortened. The cost is a file whose real name contains U+2026 never appearing in the modified list — such
+    /// names are vanishingly rare, and losing a hint costs a re-read while keeping one costs the list's fixed point.
+    /// </summary>
     public void AddModified(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        Modified.Add(path.Trim());
+        var line = path.Trim();
+        if (IsStoredListText(line))
+        {
+            return;
+        }
+
+        Modified.Add(line);
     }
 
     /// <summary>
+    /// Whether a line read back out of a stored list is a notice (<c>… 3 more</c>) or a path the cap shortened rather than a
+    /// path a tool reported. Seeding a list from its own rendering goes through this: keeping either would make the next
+    /// rendering longer than the one it came from, and would show the model a file named after a count.
+    /// </summary>
+    private static bool IsStoredListText(string line) => line.Contains('…', StringComparison.Ordinal);
+
+    /// <summary>
     /// One stored list line: a bare path (the whole file) or <c>path:1-420,600-</c>. The range half is only read when the
-    /// text after the last colon is a comma-separated list of ranges, so a Windows drive letter stays part of the path.
+    /// text after the last colon is a comma-separated list of ranges, so a Windows drive letter stays part of the path. A
+    /// line carrying <c>…</c> is not a path at all — see <see cref="AddModified"/> for the trade-off that costs.
     /// </summary>
     public void AddEntry(string entry)
     {
         var line = entry.Trim();
         if (line.Length == 0)
+        {
+            return;
+        }
+
+        // A summary is re-seeded from its own rendered lists, so a line that is a notice ("… 3 more") or a path the cap
+        // shortened is not a file: keeping either would make the next rendering longer than the one it came from.
+        if (IsStoredListText(line))
         {
             return;
         }
@@ -1031,6 +1078,8 @@ public sealed class CompactionFiles
     {
         ArgumentNullException.ThrowIfNull(raw);
         var files = seed ?? new CompactionFiles();
+        var known = new HashSet<string>(files.Read.Keys, StringComparer.Ordinal);
+        known.UnionWith(files.Modified);
         var limit = Math.Min(end, raw.Count);
         var answers = ReadAnswers(raw, limit);
         for (var index = 0; index < limit; index++)
@@ -1059,6 +1108,23 @@ public sealed class CompactionFiles
                         files.AddModified(path);
                     }
                 }
+            }
+        }
+
+        // Paths the seed already listed stay where they are; only what this pass discovered counts as recent.
+        foreach (var path in files.Read.Keys)
+        {
+            if (!known.Contains(path))
+            {
+                files.Recent.Add(path);
+            }
+        }
+
+        foreach (var path in files.Modified)
+        {
+            if (!known.Contains(path))
+            {
+                files.Recent.Add(path);
             }
         }
 
@@ -1092,18 +1158,31 @@ public sealed class CompactionFiles
         return answers;
     }
 
-    /// <summary>The two <c>&lt;tag&gt;…&lt;/tag&gt;</c> blocks, or the empty string when there is nothing to store.</summary>
+    /// <summary>
+    /// The two <c>&lt;tag&gt;…&lt;/tag&gt;</c> blocks, or the empty string when there is nothing to store. Each block is at most
+    /// <see cref="ReadListChars"/> / <see cref="ModifiedListChars"/> characters long, this pass's paths first and the rest in
+    /// ordinal order; what did not fit is counted in a last line, and a probe path longer than the budget is shortened in the
+    /// middle so that one entry can never break the cap.
+    /// </summary>
     public string Render()
     {
-        var read = Read
-            .Where(pair => !Modified.Contains(pair.Key))
-            .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
-            .Select(RenderRead)
-            .ToList();
+        var read = Ordered(Read.Where(pair => !Modified.Contains(pair.Key)).Select(static pair => (pair.Key, RenderRead(pair))));
+        var modified = Ordered(Modified.Select(static path => (path, path)));
         var builder = new StringBuilder(256);
-        AppendBlock(builder, SummaryCompactor.ReadFilesTag, read);
-        AppendBlock(builder, SummaryCompactor.ModifiedFilesTag, Modified);
+        AppendBlock(builder, SummaryCompactor.ReadFilesTag, read, ReadListChars);
+        AppendBlock(builder, SummaryCompactor.ModifiedFilesTag, modified, ModifiedListChars);
         return builder.ToString();
+    }
+
+    /// <summary>This pass's paths first, then the rest, ordinal inside each group so two runs render the same text.</summary>
+    private List<string> Ordered(IEnumerable<(string Key, string Line)> lines)
+    {
+        var recent = Recent;
+        return lines
+            .OrderByDescending(line => recent.Contains(line.Key))
+            .ThenBy(static line => line.Key, StringComparer.Ordinal)
+            .Select(static line => line.Line)
+            .ToList();
     }
 
     private static string RenderRead(KeyValuePair<string, List<LineRange>> entry)
@@ -1116,24 +1195,100 @@ public sealed class CompactionFiles
         return string.Concat(entry.Key, ":", string.Join(',', entry.Value.Select(static range => range.Render())));
     }
 
-    private static void AppendBlock(StringBuilder builder, string tag, IEnumerable<string> lines)
+    /// <summary>
+    /// One block, kept within <paramref name="budget"/> characters including its tags. Everything that fits is written as
+    /// is; only when the list is longer does the block reserve room for <c>… N more</c> and refill, so a list that exactly
+    /// fills its budget loses nothing.
+    /// </summary>
+    private static void AppendBlock(StringBuilder builder, string tag, IReadOnlyList<string> lines, int budget)
     {
-        var opened = false;
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        var open = string.Concat("\n\n<", tag, ">\n");
+        var close = string.Concat("</", tag, ">");
+        var room = budget - open.Length - close.Length;
+        if (room <= 0)
+        {
+            return;
+        }
+
+        var body = new StringBuilder(256);
+        var kept = Fill(body, lines, room, room);
+        var tail = string.Empty;
+        if (kept < lines.Count)
+        {
+            // Room for the notice is known up front (its widest form is "\n… 9999999 more"), so the refill is one pass.
+            // The elision test still uses the whole block: shortening compares a line with the block, not with what is left
+            // of it, so the refill can only drop lines and never resurrects one as a shortened path (which is also why
+            // the notice can never say "0 more": the first pass already fell short of the full list).
+            const int NoticeRoom = 32;
+            kept = Fill(body, lines, room - NoticeRoom, room);
+            tail = string.Concat(kept > 0 ? "\n… " : "… ", (lines.Count - kept).ToString(CultureInfo.InvariantCulture), " more");
+        }
+
+        if (body.Length + tail.Length > room)
+        {
+            return;
+        }
+
+        builder.Append(open).Append(body).Append(tail).Append(close);
+    }
+
+    /// <summary>Smallest room that still makes a shortened path worth writing: below it the line would say nothing.</summary>
+    private const int MinElidedChars = 48;
+
+    /// <summary>
+    /// Writes as many whole lines as fit in <paramref name="room"/> characters, one <c>\n</c> each, and returns how many.
+    /// A line that would fit the block but not the space left is dropped rather than shortened, so every line the list
+    /// carries is a path a later compaction can re-seed verbatim; only a path longer than the whole block (<paramref name="blockRoom"/>,
+    /// which does not shrink when the notice is reserved) is cut.
+    /// </summary>
+    private static int Fill(StringBuilder body, IReadOnlyList<string> lines, int room, int blockRoom)
+    {
+        body.Clear();
+        var used = 0;
+        var kept = 0;
         foreach (var line in lines)
         {
-            if (!opened)
+            var space = room - used - 1;
+            var fitted = line.Length <= space
+                ? line
+                : line.Length + 1 > blockRoom && space >= MinElidedChars ? Fit(line, space) : null;
+            if (fitted is null)
             {
-                builder.Append("\n\n<").Append(tag).Append(">\n");
-                opened = true;
+                break;
             }
 
-            builder.Append(line).Append('\n');
+            body.Append(fitted).Append('\n');
+            used += fitted.Length + 1;
+            kept++;
         }
 
-        if (opened)
+        return kept;
+    }
+
+    /// <summary>
+    /// <paramref name="line"/> cut in the middle to <paramref name="room"/> characters (at least
+    /// <see cref="MinElidedChars"/>). The head keeps the directory, the tail keeps the file name and its line range.
+    /// </summary>
+    private static string Fit(string line, int room)
+    {
+        var head = room / 4;
+        var tail = room - head - 1;
+        if (char.IsHighSurrogate(line[head - 1]))
         {
-            builder.Append("</").Append(tag).Append('>');
+            head--;
         }
+
+        if (char.IsLowSurrogate(line[line.Length - tail]))
+        {
+            tail--;
+        }
+
+        return string.Concat(line.AsSpan(0, head), "…", line.AsSpan(line.Length - tail));
     }
 
     /// <summary>

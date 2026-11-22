@@ -666,6 +666,15 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.MaxOutputTokens = model =>
             providers.Catalog.MetadataFor(model.Model, model.ProviderId).MaxOutputTokens
             ?? providers.Catalog.Find(model.ProviderId)?.Definition.MaxOutputTokens;
+        // What the request is really sent with, which is the only figure worth reserving:
+        // - Anthropic always carries max_tokens (its own 8192 default, or the thinking budget's room) — OutputCeiling.Wire
+        //   is that same call, so the reserve cannot drift from the request.
+        // - The compatible and Responses protocols write the field only when the model pins one, so the pin is the wire
+        //   figure there. It must not go through the 0.2·W clamp: a pinned 100k on a 200k window would otherwise reserve
+        //   40k and let the trigger line sit above the real prompt limit.
+        // - With no pin those two send nothing, and the catalogue chain above stays the capability input for the 20% proxy.
+        runtimeServices.WireMaxOutputTokens = model =>
+            IsAnthropic(providers.Catalog, model) ? OutputCeiling.Wire(model) : model.MaxOutputTokens;
         // A model the catalog knows to take no image input gets a tool result's text, not its pictures; unknown stays
         // "may take images", the same rule the composer applies to a user attachment.
         runtimeServices.ModelInputs = model =>
@@ -957,6 +966,13 @@ internal sealed class AppComposition : IAsyncDisposable
     /// </summary>
     private static string ReadInformationalVersion() =>
         Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+
+    /// <summary>
+    /// Whether this model is served over the Anthropic protocol — the one whose requests always carry <c>max_tokens</c>, so
+    /// the only one with an output cap to reserve. Resolution is the provider factory's: the named provider, else the default.
+    /// </summary>
+    private static bool IsAnthropic(ProviderCatalog catalog, ModelSettings model) =>
+        (catalog.Find(model.ProviderId) ?? catalog.Default)?.Definition.Protocol == ProviderProtocol.Anthropic;
 
     /// <summary>
     /// Writes the product's own skills where the skill catalog and the <c>skill</c> tool can reach them. A failure is not
