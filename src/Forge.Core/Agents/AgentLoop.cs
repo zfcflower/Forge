@@ -592,12 +592,18 @@ public sealed class AgentLoop(AgentLoopServices services)
     }
 
     /// <summary>
-    /// Automatic compaction before a request. On the first request of a turn C ≥ trigger·U starts it; a request later in
-    /// the same turn only compacts at the emergency line, so a turn that is still collecting evidence keeps its raw tool
-    /// results. Either way it aims at target·U, where U is the usable input budget of the instance's own model. An attempt
-    /// that leaves C at or above the line it used (for example an inherited prefix that alone exceeds it) is fruitless: the
-    /// next attempt waits until the instance's own content grew by 0.1·U, and after two consecutive fruitless attempts
-    /// automatic compaction stops until a manual one or another model.
+    /// Automatic compaction before a request. The zero-cost reduction rung runs first: when the context is over the
+    /// line it replaces old tool results (never the inherited prefix, never the keepRecent window) with receipts, and
+    /// the summarizer is only asked when the receipts were not enough. A reduction that brings the context back under
+    /// the line also revives a stalled instance; one that does not leaves the fruitless bookkeeping untouched. Next comes
+    /// the irreducible floor: when the inherited prefix, the stable prefix, the tool definitions and the messages the
+    /// summarizer must keep already exceed the line, no summary can help, so the instance stalls with
+    /// <see cref="CompactionStallReason.Irreducible"/> instead of spending a request. On the first request of a turn
+    /// C ≥ trigger·U starts either; a request later in the same turn only acts at the emergency line, so a turn that is
+    /// still collecting evidence keeps its raw tool results. An attempt that leaves C at or above the line it used is
+    /// fruitless: the next attempt waits until the instance's own content grew by 0.1·U, and after two consecutive
+    /// fruitless attempts automatic summarization stops until a manual compaction, another model, or a reduction that
+    /// succeeds.
     /// </summary>
     private async Task CompactIfNeededAsync(
         AgentInstance instance,
@@ -613,16 +619,77 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         var state = SyncModel(instance);
-        if (state.Stalled || policy.BudgetFor(instance.Definition.Model) is not { } budget)
+        if (policy.BudgetFor(instance.Definition.Model) is not { } budget)
         {
             return;
         }
 
         var trigger = budget.TriggerTokens(policy.TriggerRatio);
         var line = urgent ? budget.EmergencyTokens(policy.EmergencyRatio) : trigger;
-        var current = ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter));
+        var toolTokens = tools.DefinitionTokens(instance.Compaction, services.TokenCounter);
+        var current = ContextTokens(instance, toolTokens);
         if (current < line)
         {
+            return;
+        }
+
+        // The reduction rung: no model call, so it runs even for a stalled instance (it is also the one thing that can
+        // bring one back under the line) and without the fruitless wait. It aims at the midpoint between the trigger
+        // line and the summarizer's target, derived rather than configured.
+        var midpoint = budget.TargetTokens((policy.TriggerRatio + policy.TargetRatio) / 2);
+        var reduction = ToolResultReduction.Apply(
+            instance.Messages,
+            budget.KeepRecentTokens,
+            current - midpoint,
+            services.TokenCounter);
+        if (reduction is { Messages: { } reduced })
+        {
+            instance.ReplaceHistory(reduced);
+            var reducedAfter = ContextTokens(instance, toolTokens);
+            sink.Emit(new AgentContextReduced(
+                instance.Id, current, reducedAfter, reduction.DroppedResults,
+                reduction.ReadTokens, reduction.BashTokens, reduction.ImageTokens, reduction.OtherTokens));
+            sink.Emit(new AgentContextMeasured(instance.Id, reducedAfter, budget.Usable, line));
+            if (reducedAfter < line)
+            {
+                state.ResetHysteresis();
+                return;
+            }
+
+            // A partial reduction does not clear the fruitless bookkeeping: an inherited prefix that alone exceeds the
+            // line must not earn a summarizer request every turn just because the receipts moved a little.
+            current = reducedAfter;
+        }
+
+        if (state.Stalled)
+        {
+            // An irreducible block can lift by itself: a higher line (another trigger setting) or a smaller tool set. New
+            // numbers are the only way a floor that exceeded the line stops exceeding it; anything else would just spend
+            // another summarizer request to learn the same thing. An ineffective summary stays off until a manual
+            // compaction or another model resets it.
+            if (state.StallReason != CompactionStallReason.Irreducible
+                || (line <= state.IrreducibleLine && toolTokens >= state.IrreducibleToolTokens))
+            {
+                return;
+            }
+
+            state.ResetHysteresis();
+        }
+
+        var target = budget.TargetTokens(policy.TargetRatio);
+        var keepRecent = KeepRecent(budget.KeepRecentTokens, target);
+
+        // The floor no summary can get below. When it already exceeds the line the summarizer cannot help, and asking it
+        // would spend a request (and its batches) to prove that; a lower floor than the line means the attempt is still
+        // worth making even when the target is out of reach.
+        var floor = IrreducibleTokens(instance, toolTokens, keepRecent);
+        if (floor >= line)
+        {
+            state.Stalled = true;
+            state.StallReason = CompactionStallReason.Irreducible;
+            state.IrreducibleLine = line;
+            state.IrreducibleToolTokens = toolTokens;
+            sink.Emit(new AgentCompactionStalled(instance.Id, current, trigger) { Reason = CompactionStallReason.Irreducible });
             return;
         }
 
@@ -631,10 +698,9 @@ public sealed class AgentLoop(AgentLoopServices services)
             return;
         }
 
-        var target = budget.TargetTokens(policy.TargetRatio);
         var result = await TryCompactAsync(
             instance,
-            new CompactionRequest(target, KeepRecent(budget.KeepRecentTokens, target), CompactionReason.Auto),
+            new CompactionRequest(target, keepRecent, CompactionReason.Auto),
             ct).ConfigureAwait(false);
         var after = current;
         if (result is not null)
@@ -654,6 +720,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         if (state.FruitlessAttempts >= CompactionPolicy.MaxFruitlessAttempts)
         {
             state.Stalled = true;
+            state.StallReason = CompactionStallReason.Ineffective;
             sink.Emit(new AgentCompactionStalled(instance.Id, after, trigger));
         }
     }
@@ -802,6 +869,32 @@ public sealed class AgentLoop(AgentLoopServices services)
     }
 
     private int OwnTokens(AgentInstance instance) => Estimate(instance.Messages, 0, ownOnly: true);
+
+    /// <summary>
+    /// Tokens automatic summarization can never drop: the inherited prefix (untouchable — it is what makes a fork's prompt
+    /// cache reusable), the stable prefix and tool definitions every request carries, and the newest messages the summarizer
+    /// must keep (<paramref name="keepRecent"/> is what it is asked for, cut to what the instance actually has). The current
+    /// summary counts as zero: a pass can always rewrite it smaller, so charging its size here would abandon an instance
+    /// that a summary could still help. This is a lower bound, and it is only computed once the context is over the line.
+    /// </summary>
+    private int IrreducibleTokens(AgentInstance instance, int toolTokens, int keepRecent)
+    {
+        var inherited = new List<ChatMessage>();
+        foreach (var entry in instance.Messages)
+        {
+            if (entry.Inherited)
+            {
+                inherited.Add(entry.Message);
+            }
+        }
+
+        return (int)Math.Min(
+            int.MaxValue,
+            (long)services.TokenCounter.Count(inherited)
+            + services.TokenCounter.Count(instance.Prompt.StablePrefix)
+            + Math.Max(0, toolTokens)
+            + Math.Min(keepRecent, OwnTokens(instance)));
+    }
 
     private int Estimate(List<AgentMessage> messages, int from, bool ownOnly)
     {

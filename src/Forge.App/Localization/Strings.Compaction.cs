@@ -37,6 +37,7 @@ internal static class CompactionStrings
     // ---------------------------------------------------------------- session
     public const string CommandDescriptionKey = "compaction.command.description";
     public const string StalledKey = "compaction.stalled";
+    public const string BlockedKey = "compaction.blocked";
     public const string NothingKey = "compaction.manual.nothing";
     public const string BusyKey = "compaction.manual.busy";
     public const string FailedKey = "compaction.manual.failed";
@@ -87,9 +88,13 @@ internal static class CompactionStrings
 
     public static string GaugeTooltip => Loc.Instance[GaugeTooltipKey];
 
-    /// <summary>Transcript notice: automatic compaction stopped for this agent.</summary>
+    /// <summary>Transcript notice: automatic compaction stopped for this agent after attempts that could not reach the line.</summary>
     public static LocText Stalled(int contextTokens, int triggerTokens) =>
         new(StalledKey, TextFormat.Number(contextTokens), TextFormat.Number(triggerTokens));
+
+    /// <summary>Transcript notice: what no summary can drop already exceeds the line, so no attempt was made.</summary>
+    public static LocText Blocked(int contextTokens, int triggerTokens) =>
+        new(BlockedKey, TextFormat.Number(contextTokens), TextFormat.Number(triggerTokens));
 
     public static LocText Nothing() => new(NothingKey);
 
@@ -148,8 +153,12 @@ internal static class CompactionStrings
         Loc.Register(CommandDescriptionKey, "压缩上下文（保留最近的原文；可在后面写关注点）", "Compact the context (keeps the recent messages; add text to set a focus)");
         Loc.Register(
             StalledKey,
-            "上下文无法再压缩（{0} tokens，触发线 {1}），已停止自动压缩；可用 /compact 手动压缩或换模型",
-            "The context cannot be compacted further ({0} tokens, trigger {1}); automatic compaction is off until /compact or another model.");
+            "上下文仍高于触发线（{0} tokens，触发线 {1}），已停止自动摘要；旧的工具输出仍会被自动裁剪回收，也可用 /compact 手动压缩或换模型",
+            "The context is still above the trigger line ({0} tokens, trigger {1}); automatic summarization is off. Old tool output is still reclaimed as receipts; /compact or another model restarts it.");
+        Loc.Register(
+            BlockedKey,
+            "不可压缩的部分太多（{0} tokens，触发线 {1}）：继承前缀、系统前缀与工具定义已经占满窗口，摘要无法让上下文降到线下，所以这次没有调用摘要器；换一个窗口更大的模型或减少工具才能继续",
+            "Too much of the window is beyond compaction ({0} tokens, trigger {1}): the inherited prefix, the system prefix and the tool definitions already exceed the line, so no summary could help and none was requested; a model with a larger window, or fewer tools, is the way forward.");
         Loc.Register(NothingKey, "没有可压缩的内容", "Nothing to compact.");
         Loc.Register(BusyKey, "当前轮次运行中，无法压缩", "Cannot compact while a turn is running.");
         Loc.Register(FailedKey, "压缩失败：{0}", "Compaction failed: {0}");

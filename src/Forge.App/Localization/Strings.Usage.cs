@@ -39,6 +39,14 @@ internal static class UsageStrings
     /// <summary>The cache-write total with its hour-lived share split out: <c>{0}（5m {1} · 1h {2}）</c>.</summary>
     public const string CacheWriteSplit = "usage.summary.cacheWrite.split";
 
+    /// <summary>The context reclaimed by receipts (old tool results replaced by one line each), and how often that
+    /// was enough on its own. The per-tool split names the tools; only the image and other rows need words.</summary>
+    public const string Reduction = "usage.summary.reduction";
+    public const string ReductionImage = "usage.summary.reduction.image";
+    public const string ReductionOther = "usage.summary.reduction.other";
+    public const string ReductionCount = "usage.summary.reduction.count";
+    public const string ReductionRatio = "usage.summary.reduction.ratio";
+
     /// <summary>Where the numbers come from, and which part of them a non-git session cannot report.</summary>
     public const string Hint = "usage.summary.hint";
 
@@ -88,6 +96,17 @@ internal static class UsageStrings
     public static string CacheWriteSplitText(string total, string shortLived, string hourLived) =>
         Loc.Instance.Format(CacheWriteSplit, total, shortLived, hourLived);
 
+    public static string ReductionLabel => Loc.Instance[Reduction];
+
+    public static string ReductionImageText(string value) => Loc.Instance.Format(ReductionImage, value);
+
+    public static string ReductionOtherText(string value) => Loc.Instance.Format(ReductionOther, value);
+
+    public static string ReductionCountText(string total, string parts, int count) =>
+        Loc.Instance.Format(ReductionCount, total, parts, count);
+
+    public static string ReductionRatioLabel => Loc.Instance[ReductionRatio];
+
     public static string TurnsValueText(string recorded, string live) =>
         Loc.Instance.Format(TurnsValue, recorded, live);
 
@@ -120,5 +139,10 @@ internal static class UsageStrings
         Loc.Register(Window, "窗口", "Window");
         Loc.Register(CacheWriteSplit, "{0}（5m {1} · 1h {2}）", "{0} (5m {1} · 1h {2})");
         Loc.Register(TurnsValue, "{0} 已记录 · {1} 本次", "{0} recorded · {1} this window");
+        Loc.Register(Reduction, "裁剪释放", "Reclaimed by receipts");
+        Loc.Register(ReductionImage, "图片 {0}", "images {0}");
+        Loc.Register(ReductionOther, "其它 {0}", "other {0}");
+        Loc.Register(ReductionCount, "{0}（{1}）· {2} 条", "{0} ({1}) · {2} dropped");
+        Loc.Register(ReductionRatio, "裁剪即够 / 仍需摘要", "Receipts enough / summarizer needed");
     }
 }

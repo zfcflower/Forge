@@ -2385,8 +2385,24 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 instruments?.NoteContext(context.AgentId, context.ContextTokens, context.UsableTokens, context.TriggerTokens);
                 instruments?.NoteCacheTtl(context.CacheTtl);
                 break;
+            case AgentContextReduced reduced:
+                // The measurement that follows settles which side of the receipts/summary split this pass counts on.
+                InstrumentsOf(reduced.AgentId)?.NoteReduction(
+                    reduced.AgentId,
+                    reduced.TokensBefore,
+                    reduced.TokensAfter,
+                    reduced.DroppedResults,
+                    reduced.ReadTokens,
+                    reduced.BashTokens,
+                    reduced.ImageTokens,
+                    reduced.OtherTokens);
+                break;
             case AgentCompactionStalled stalled:
-                Card(stalled.AgentId)?.AddNotice(CompactionStrings.Stalled(stalled.ContextTokens, stalled.TriggerTokens), isError: true);
+                Card(stalled.AgentId)?.AddNotice(
+                    stalled.Reason == CompactionStallReason.Irreducible
+                        ? CompactionStrings.Blocked(stalled.ContextTokens, stalled.TriggerTokens)
+                        : CompactionStrings.Stalled(stalled.ContextTokens, stalled.TriggerTokens),
+                    isError: true);
                 break;
             case AgentInterjected interjected:
                 OnInterjected(interjected);

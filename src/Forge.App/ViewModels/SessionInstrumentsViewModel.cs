@@ -72,6 +72,21 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private int? usableTokens;
     private int? triggerTokens;
 
+    /// <summary>Cumulative context reclaimed by receipts, and where it came from — the per-tool split the usage row shows.</summary>
+    private int reductionReleased;
+    private int reductionRead;
+    private int reductionBash;
+    private int reductionImage;
+    private int reductionOther;
+    private int reductionDropped;
+
+    /// <summary>How many reduction passes ended under the trigger line on their own, and how many needed the summarizer.</summary>
+    private int reductionsStopped;
+    private int reductionsFellShort;
+
+    /// <summary>True between a reduction and the measurement that follows it: that measurement decides which side it counts on.</summary>
+    private bool reductionPending;
+
     /// <summary>
     /// The line the model reads about its own budget, rebuilt whenever the measurement changes and read from the agent
     /// loop's thread, so it is an immutable string swapped as a whole rather than three fields read one by one.
@@ -569,7 +584,47 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
         this.usableTokens = usableTokens is > 0 ? usableTokens : null;
         this.triggerTokens = this.usableTokens is null ? null : triggerTokens;
+        if (reductionPending)
+        {
+            // The measurement right after a reduction settles which side it counts on, against the very line the loop
+            // judged it by — the trigger line at a turn's first request, the emergency line inside a running turn —
+            // not against whatever line the previous measurement carried.
+            reductionPending = false;
+            if (triggerTokens is { } line && contextTokens < line)
+            {
+                reductionsStopped++;
+            }
+            else
+            {
+                reductionsFellShort++;
+            }
+
+            RaiseUsageSummary();
+        }
+
         SetContext(contextTokens);
+    }
+
+    /// <summary>
+    /// The zero-cost rung reclaimed context: old tool results became receipts. The tokens come from the loop's own
+    /// before/after measurement; the per-tool split is the loop's estimate of what the dropped text was worth. The pass
+    /// is counted as enough or not when the measurement that follows it arrives (<see cref="NoteContext").
+    /// </summary>
+    public void NoteReduction(string agentId, int tokensBefore, int tokensAfter, int dropped, int read, int bash, int image, int other)
+    {
+        if (!OwnsAgent(agentId))
+        {
+            return;
+        }
+
+        reductionReleased += Math.Max(0, tokensBefore - tokensAfter);
+        reductionRead += read;
+        reductionBash += bash;
+        reductionImage += image;
+        reductionOther += other;
+        reductionDropped += dropped;
+        reductionPending = true;
+        RaiseUsageSummary();
     }
 
     /// <summary>
@@ -700,6 +755,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         new(UsageStrings.AverageInputLabel, UsageAverageInputText),
         new(UsageStrings.AverageOutputLabel, UsageAverageOutputText),
         new(UsageStrings.AverageCostLabel, UsageAverageCostText),
+        new(UsageStrings.ReductionLabel, UsageReductionText),
+        new(UsageStrings.ReductionRatioLabel, UsageReductionRatioText),
     ];
 
     public string UsageSummaryTitle => UsageStrings.Title;
@@ -739,6 +796,50 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// <summary>The session's spend at the selected model's prices; "—" while the model has no price.</summary>
     public string UsageCostText =>
         SessionUsageMath.Cost(usage, Metadata.Pricing) is { } cost ? Price(cost) : UsageStrings.UnknownText;
+
+    /// <summary>
+    /// "12.4k（read 9.6k · bash 1.2k · 图片 1.6k）· 7 条": everything the receipts reclaimed this session, split by the
+    /// tool that produced it — only the non-zero kinds appear; "—" before the first reduction.
+    /// </summary>
+    public string UsageReductionText
+    {
+        get
+        {
+            if (reductionReleased <= 0)
+            {
+                return UsageStrings.UnknownText;
+            }
+
+            var parts = new List<string>(4);
+            if (reductionRead > 0)
+            {
+                parts.Add(string.Concat("read ", Scale(reductionRead)));
+            }
+
+            if (reductionBash > 0)
+            {
+                parts.Add(string.Concat("bash ", Scale(reductionBash)));
+            }
+
+            if (reductionImage > 0)
+            {
+                parts.Add(UsageStrings.ReductionImageText(Scale(reductionImage)));
+            }
+
+            if (reductionOther > 0)
+            {
+                parts.Add(UsageStrings.ReductionOtherText(Scale(reductionOther)));
+            }
+
+            return UsageStrings.ReductionCountText(Scale(reductionReleased), string.Join(" · ", parts), reductionDropped);
+        }
+    }
+
+    /// <summary>"8 / 2": the reduction passes that ended under the trigger line on their own, and the ones that still needed
+    /// the summarizer; "—" before the first reduction.</summary>
+    public string UsageReductionRatioText => reductionsStopped + reductionsFellShort == 0
+        ? UsageStrings.UnknownText
+        : string.Concat(reductionsStopped.ToString(CultureInfo.InvariantCulture), " / ", reductionsFellShort.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>
     /// "5 已记录 · 2 本次": the turns of the stored history (checkpoints) and the turns this window watched complete, or the
