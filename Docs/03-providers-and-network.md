@@ -45,7 +45,7 @@
 
 - **`/models`**：地址由协议决定（Anthropic 为 `{base}/v1/models` 并显式 `limit=1000`，其余 `{base}/models`）；20 秒链接超时；按服务端顺序去重；上下文窗口认 `context_length` / `max_context_length` / `top_provider.context_length`，价格认 `pricing.prompt|completion|input_cache_read|input_cache_write`（每 token 值换算成每百万 token）。刷新是显式动作（点击或每日定时），启动时不逐个访问提供商。
 - 拉取结果经 `ProviderModelCache` 持久化到 `<数据根>/provider-models.json`，重启后仍在。
-- **元数据三源合并**：目录快照 → provider 上报 → 用户 `providers[].modelMeta`，逐字段合并，未知保持未知，绝不补 0。解析结果按（提供商, 模型）记进内存 memo，在配置保存、`/models` 刷新、快照更新三处整体作废。
+- **元数据三源合并**：目录快照 → provider 上报 → 用户 `providers[].modelMeta`，逐字段合并，未知保持未知，绝不补 0。解析结果按（提供商, 模型）记进内存 memo，在配置保存、`/models` 刷新、快照更新三处整体作废。字段含上下文窗口、最大输出（`maxOutputTokens`，目录取 `limit.output`）与四个价格；提供商级 `providers[].maxOutputTokens` 是它的兜底，两者都未知时压缩按窗口 20% 预留输出。
 - **目录快照（models.dev）**：`settings.json` 的 `modelCatalog.sourceUrl`（默认 `https://models.dev/api.json`，可换同形状镜像）每天抓一次，写 `<数据根>/model-catalog.json`；只留窗口、回复上限、四个价格、输入模态、推理标记与 `effort` 档位（约 235 个提供商 / 8993 个模型 / 1.4 MB）。抓取带 `ETag`（只在使用同一地址时发）；304 不重写模型数据但记一次 `checkedAt`；失败只记一条失败运行，磁盘旧快照继续生效。请求侧没有过滤能力，过滤只发生在解析之后：预设 → 目录提供商映射优先，映射不到的按模型 id 全局兜底。
 - **全局默认上下文窗口**：`modelCatalog.defaultContextWindow` 两种写法——正整数是固定 tokens，`"50%"`（接受 `50 %`，1–1000%）是该模型自身窗口的比例。优先级：目录快照 → 提供商上报 → 全局默认 → 每模型覆盖；百分比以链上已解析的窗口取 `floor(窗口 × 比例 / 100)` 且至少为 1，窗口未知时不产生数值。
 - **价格**四个字段（输入/输出/缓存读/缓存写）；表单默认只显示三列，缓存写只在提供商协议是 Anthropic 或该模型已有非零缓存写价时出现；空值是未知，不写 0。
