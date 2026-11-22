@@ -821,7 +821,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     }
 
     /// <summary>
-    /// Replays the stored history and the agent roster at most once, and never throws.
+    /// Replays the stored history and the agent roster at most once, and never throws. Both entry points - this one on first
+    /// activation and <see cref="LoadHistoryAsync"/> for a tab the shell is about to show - share that one pass.
     /// <para>Only a read-only tab can be restored without it: the window used to replay every remembered session's whole
     /// transcript on the UI thread before it was usable, while only the tab on screen was ever looked at. Those tabs are
     /// loaded by the first activation (the shell calls this from <c>ActiveSession</c>), which shows the waiting state of
@@ -908,14 +909,29 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>
     /// Rebuilds the transcript and the finished sub-agent list from the session store, reading off the dispatcher. A tab that
     /// was restored at start-up runs this on first activation instead of during restore: see <see cref="EnsureHistoryAsync"/>.
+    /// <para>One pass per tab, whichever entry point asks first: the shell loads the tab it is about to show here and a
+    /// restored tab is loaded through <see cref="EnsureHistoryAsync"/> on its first activation, and the activation that
+    /// follows either one asks again. A second replay would append the same rounds to the transcript and the same stored
+    /// children to the finished list on top of the first copy, which is what drew a session's sub-agent rows twice in the
+    /// project tree.</para>
     /// </summary>
     public async Task LoadHistoryAsync(CancellationToken ct)
     {
-        if (store is null)
+        if (store is null || disposed || historyLoaded)
         {
             return;
         }
 
+        // A replay already on its way is this tab's one pass: awaiting it keeps the caller's "history is in" promise
+        // without stacking a second copy on top of it.
+        if (historyLoad is { } pending)
+        {
+            await pending.ConfigureAwait(true);
+            return;
+        }
+
+        // Set before the reads: one attempt per tab, whether it succeeds or fails.
+        historyLoaded = true;
         try
         {
             var page = await TranscriptReplay
@@ -1032,6 +1048,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             .ConfigureAwait(true);
         foreach (var child in children)
         {
+            // A session the user opened under this one (an "Agent session") is a session row of its own beside the root, with
+            // its own tab: listing it here would draw the same session twice and hang the sub-agents it spawned under the
+            // root instead of under its own row. The tree plans those rows from the child links itself (PlanAgentSessions).
+            if (string.Equals(child.ChildDriver, AgentSessionKinds.ChildDriverUser, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             var status = await BackgroundRead.RunAsync(token => DeriveStoredStatusAsync(child.Id, token), ct)
                 .ConfigureAwait(true);
             finished.Add(SubAgentViewModel.FromStored(SessionId, child, parentAgentId, status, Title, openSession, instrumentSources));
@@ -2722,7 +2746,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         // A resumed child (the parent handing the same agent its next task) comes back as the tab it already was: its
         // transcript, round counter, cumulative usage reading and turn-metric rows all continue - a fresh tab would
         // restart the rounds and collide (child session, turn 1) with the rows its earlier runs already wrote.
-        if (TakeFinishedSubAgent(started.ChildId) is { } resumed)
+        if (TakeFinishedSubAgent(started.ChildId, started.ChildSessionId) is { } resumed)
         {
             resumed.IsReadOnly = false;
             resumed.MarkResumed();
@@ -2788,17 +2812,20 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     /// <summary>
     /// Pulls a finished child's tab back out of the finished menu, keeping its transcript and every counter: a resumed run
-    /// continues them. The finished list is in run-end order and small; a linear scan by child id is the whole cost.
+    /// continues them. A row replayed from the store is keyed by the child session it ran in, a live one by the run id the
+    /// host gave it - a child spawned before this tab was loaded is in the menu as the former and resumes as the latter, so
+    /// both ids identify it. The finished list is in run-end order and small; a linear scan is the whole cost.
     /// </summary>
-    private SubAgentViewModel? TakeFinishedSubAgent(string childId)
+    private SubAgentViewModel? TakeFinishedSubAgent(string childId, string childSessionId)
     {
         for (var index = 0; index < finished.Count; index++)
         {
-            if (string.Equals(finished[index].AgentId, childId, StringComparison.Ordinal))
+            var stored = finished[index];
+            if (string.Equals(stored.AgentId, childId, StringComparison.Ordinal)
+                || (childSessionId.Length > 0 && string.Equals(stored.ChildSessionId, childSessionId, StringComparison.Ordinal)))
             {
-                var resumed = finished[index];
                 finished.RemoveAt(index);
-                return resumed;
+                return stored;
             }
         }
 

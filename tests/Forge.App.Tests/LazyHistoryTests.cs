@@ -58,6 +58,76 @@ public sealed class LazyHistoryTests : IDisposable
         Assert.Equal(loaded, session.Transcript.Rounds.Count);
     }
 
+    /// <summary>
+    /// Opening a session that is not restored asks for its history twice - the shell loads a tab it is about to show, and
+    /// the activation right after asks the tab to ensure it. Both entry points are the same one pass: a second replay would
+    /// append the same rounds to the transcript and the same stored children to the sub-agent list on top of the first copy.
+    /// </summary>
+    [Fact]
+    public async Task A_tab_whose_history_was_loaded_directly_is_not_replayed_again_when_it_is_activated()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+        var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+        await store.AppendAsync(root.Id, ChatMessage.User("first question"), null, CancellationToken.None);
+        await store.AppendAsync(root.Id, ChatMessage.Assistant("first answer"), null, CancellationToken.None);
+        var spawned = await store.CreateAsync(
+            new SessionCreate(directory, "Scout: say hi") { ParentSessionId = root.Id, AgentKind = "Scout", Task = "say hi" },
+            CancellationToken.None);
+        await store.AppendAsync(spawned.Id, ChatMessage.User("say hi"), null, CancellationToken.None);
+        await store.AppendAsync(spawned.Id, ChatMessage.Assistant("hi"), null, CancellationToken.None);
+
+        var session = ReadOnlySession(root, store);
+        await session.LoadHistoryAsync(CancellationToken.None);
+
+        // The host's own "provider not configured" notice, then the stored turn.
+        Assert.Equal(2, session.Transcript.Rounds.Count);
+        Assert.Equal(spawned.Id, Assert.Single(session.Finished).ChildSessionId);
+
+        // The activation that follows the load asks again: one copy of every round, one row per stored child.
+        await session.EnsureHistoryAsync(CancellationToken.None);
+        Assert.Equal(2, session.Transcript.Rounds.Count);
+        Assert.Equal(spawned.Id, Assert.Single(session.Finished).ChildSessionId);
+    }
+
+    /// <summary>
+    /// A session the user opened under a root (an "agent session") has its own tab and its own row beside the root, so it is
+    /// not one of the root's sub-agent rows - and neither are the sub-agents it spawned itself, which hang under its own row.
+    /// The list is what the project tree draws under the session, so listing them here drew the same session twice.
+    /// </summary>
+    [Fact]
+    public async Task The_restored_sub_agent_rows_hold_the_model_spawned_children_only()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+        var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+        var worker = await store.CreateAsync(
+            new SessionCreate(directory, "Worker 1")
+            {
+                ParentSessionId = root.Id,
+                ChildDriver = AgentSessionKinds.ChildDriverUser,
+                AgentKind = AgentSessionKinds.Default,
+                Task = "list the tools you have",
+            },
+            CancellationToken.None);
+        await store.CreateAsync(
+            new SessionCreate(directory, "Scout: say hi")
+            {
+                ParentSessionId = worker.Id,
+                AgentKind = "Scout",
+                Task = "say hi",
+            },
+            CancellationToken.None);
+        var spawned = await store.CreateAsync(
+            new SessionCreate(directory, "Plan: think") { ParentSessionId = root.Id, AgentKind = "Plan", Task = "think" },
+            CancellationToken.None);
+
+        var session = ReadOnlySession(root, store);
+        await session.LoadHistoryAsync(CancellationToken.None);
+
+        Assert.Equal(spawned.Id, Assert.Single(session.Finished).ChildSessionId);
+    }
+
     [Fact]
     public async Task A_long_history_is_read_one_page_at_a_time_with_the_session_s_own_round_numbers()
     {
@@ -100,14 +170,19 @@ public sealed class LazyHistoryTests : IDisposable
     }
 
     /// <summary>The tab as restore builds it: a read-only view of the stored session, with no runtime and no history yet.</summary>
-    private SessionWorkspaceViewModel ReadOnlySession(SessionInfo info)
+    private SessionWorkspaceViewModel ReadOnlySession(SessionInfo info, SqliteSessionStore? store = null)
     {
         var providers = new ProviderServices(Path.Combine(directory, "settings.json"), directory, http);
+        var sessions = store ?? new SqliteSessionStore(directory);
         return new SessionWorkspaceViewModel(
             info,
             runtime: null,
             checkpoints: null,
-            store: new SqliteSessionStore(directory),
-            providers);
+            store: sessions,
+            providers)
+        {
+            // What the shell hands a read-only tab: the store read behind the restored sub-agent rows.
+            ChildQuery = (parent, ct) => sessions.QueryAsync(new SessionQuery { ParentSessionId = parent }, ct),
+        };
     }
 }
