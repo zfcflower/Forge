@@ -200,18 +200,6 @@ public sealed class SummaryCompactor : IContextCompactor
 
     private const string ChunkSeparator = "\n\n";
 
-    /// <summary>Built-in file tools by name: whether a call reads or modifies the file, and the argument holding its path.</summary>
-    private static readonly FrozenDictionary<string, (bool Modifies, string PathArgument)> FileTools =
-        new Dictionary<string, (bool Modifies, string PathArgument)>(StringComparer.Ordinal)
-        {
-            ["read"] = (false, "path"),
-            ["edit"] = (true, "path"),
-            ["write"] = (true, "path"),
-            ["delete"] = (true, "path"),
-            ["copy"] = (true, "to"),
-            ["move"] = (true, "to"),
-        }.ToFrozenDictionary(StringComparer.Ordinal);
-
     private readonly ISessionStore store;
     private readonly Func<ModelSettings, IChatProvider> providers;
     private readonly ITokenCounter tokens;
@@ -268,9 +256,7 @@ public sealed class SummaryCompactor : IContextCompactor
         }
 
         var previous = Previous(view);
-        var read = new SortedSet<string>(previous.Read, StringComparer.Ordinal);
-        var modified = new SortedSet<string>(previous.Modified, StringComparer.Ordinal);
-        CollectFiles(raw, cut.KeepFrom, read, modified);
+        var files = CompactionFiles.Collect(raw, cut.KeepFrom, previous.Files);
 
         var focus = string.IsNullOrWhiteSpace(request.CustomInstructions)
             ? string.Empty
@@ -292,8 +278,7 @@ public sealed class SummaryCompactor : IContextCompactor
         var text = Compose(
             FoldStaleTurnContext(await history.ConfigureAwait(false)),
             await prefix.ConfigureAwait(false),
-            read,
-            modified);
+            files);
         var fromSeq = view.SessionSummary?.FromSeq
                       ?? (view.StageSummaries.Count > 0 ? Math.Min(view.StageSummaries[0].FromSeq, raw[0].Seq) : raw[0].Seq);
         await store.PutSummaryAsync(
@@ -373,34 +358,44 @@ public sealed class SummaryCompactor : IContextCompactor
 
     // ------------------------------------------------------------------ previous summary and file lists
 
-    private readonly record struct PreviousSummary(string Text, List<string> Read, List<string> Modified);
+    private readonly record struct PreviousSummary(string Text, CompactionFiles Files);
 
     /// <summary>
     /// The summary the new one updates, without its file lists: the session summary, followed by the stage summaries a
-    /// session compacted by an earlier version may still have.
+    /// session compacted by an earlier version may still have. The lists themselves are merged into one set, so a line
+    /// range a previous summary already recorded is not lost and does not have to be read again.
     /// </summary>
     private static PreviousSummary Previous(ContextView view)
     {
-        var read = new List<string>();
-        var modified = new List<string>();
+        var files = new CompactionFiles();
         var builder = new StringBuilder(2048);
         if (view.SessionSummary is { } session)
         {
-            AppendBody(builder, session.Text, read, modified);
+            AppendBody(builder, session.Text, files);
         }
 
         foreach (var stage in view.StageSummaries)
         {
-            AppendBody(builder, stage.Text, read, modified);
+            AppendBody(builder, stage.Text, files);
         }
 
-        return new PreviousSummary(builder.ToString(), read, modified);
+        return new PreviousSummary(builder.ToString(), files);
     }
 
-    private static void AppendBody(StringBuilder builder, string text, List<string> read, List<string> modified)
+    private static void AppendBody(StringBuilder builder, string text, CompactionFiles files)
     {
-        var body = ExtractFileList(text, ModifiedFilesTag, modified);
-        body = ExtractFileList(body, ReadFilesTag, read).Trim();
+        var body = StripFileList(text, ModifiedFilesTag, out var modified);
+        body = StripFileList(body, ReadFilesTag, out var read).Trim();
+        foreach (var line in read)
+        {
+            files.AddEntry(line);
+        }
+
+        foreach (var line in modified)
+        {
+            files.AddModified(line);
+        }
+
         if (body.Length == 0)
         {
             return;
@@ -414,11 +409,12 @@ public sealed class SummaryCompactor : IContextCompactor
         builder.Append(body);
     }
 
-    /// <summary>Removes the last <c>&lt;tag&gt;…&lt;/tag&gt;</c> block from <paramref name="text"/> and adds its lines to <paramref name="into"/>.</summary>
-    internal static string ExtractFileList(string text, string tag, List<string> into)
+    /// <summary>Removes the last <c>&lt;tag&gt;…&lt;/tag&gt;</c> block from <paramref name="text" /> and returns its non-blank lines.</summary>
+    internal static string StripFileList(string text, string tag, out List<string> lines)
     {
         var open = string.Concat("<", tag, ">");
         var close = string.Concat("</", tag, ">");
+        lines = [];
         var start = text.LastIndexOf(open, StringComparison.Ordinal);
         if (start < 0)
         {
@@ -433,76 +429,20 @@ public sealed class SummaryCompactor : IContextCompactor
 
         foreach (var line in text.AsSpan(start + open.Length, end - start - open.Length).EnumerateLines())
         {
-            var path = line.Trim();
-            if (!path.IsEmpty)
+            var entry = line.Trim();
+            if (!entry.IsEmpty)
             {
-                into.Add(path.ToString());
+                lines.Add(entry.ToString());
             }
         }
 
         return string.Concat(text.AsSpan(0, start), text.AsSpan(end + close.Length));
     }
 
-    /// <summary>Paths the built-in file tools read or modified in <c>raw[0, end)</c>; unknown tools are ignored.</summary>
-    internal static void CollectFiles(IReadOnlyList<StoredMessage> raw, int end, ISet<string> read, ISet<string> modified)
-    {
-        for (var index = 0; index < end; index++)
-        {
-            var message = raw[index].Message;
-            if (message.Role != MessageRole.Assistant)
-            {
-                continue;
-            }
-
-            foreach (var block in message.Content)
-            {
-                if (block is ToolCallBlock call && FileTools.TryGetValue(call.Name, out var tool))
-                {
-                    foreach (var path in PathArguments(call.ArgumentsJson, tool.PathArgument))
-                    {
-                        (tool.Modifies ? modified : read).Add(path);
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>The path argument of a file tool call: one string, or the strings of an array (copy, move and delete take several).</summary>
-    private static List<string> PathArguments(string argumentsJson, string name)
-    {
-        var paths = new List<string>();
-        if (string.IsNullOrWhiteSpace(argumentsJson))
-        {
-            return paths;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(argumentsJson);
-            if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty(name, out var value))
-            {
-                return paths;
-            }
-
-            var items = value.ValueKind == JsonValueKind.Array ? value.EnumerateArray().ToArray() : [value];
-            foreach (var item in items)
-            {
-                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } path && path.Trim() is { Length: > 0 } trimmed)
-                {
-                    paths.Add(trimmed);
-                }
-            }
-        }
-        catch (JsonException)
-        {
-        }
-
-        return paths;
-    }
-
     /// <summary>History summary, the split turn's prefix summary when there is one, then the file lists.</summary>
-    internal static string Compose(string history, string turnPrefix, SortedSet<string> read, SortedSet<string> modified)
+    internal static string Compose(string history, string turnPrefix, CompactionFiles files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         var builder = new StringBuilder(history.Length + turnPrefix.Length + 256);
         builder.Append(history.Trim());
         if (turnPrefix.Length > 0)
@@ -515,26 +455,8 @@ public sealed class SummaryCompactor : IContextCompactor
             builder.Append(SplitTurnHeading).Append("\n\n").Append(turnPrefix.Trim());
         }
 
-        read.ExceptWith(modified);
-        AppendFileList(builder, ReadFilesTag, read);
-        AppendFileList(builder, ModifiedFilesTag, modified);
+        builder.Append(files.Render());
         return builder.ToString();
-    }
-
-    private static void AppendFileList(StringBuilder builder, string tag, SortedSet<string> paths)
-    {
-        if (paths.Count == 0)
-        {
-            return;
-        }
-
-        builder.Append("\n\n<").Append(tag).Append(">\n");
-        foreach (var path in paths)
-        {
-            builder.Append(path).Append('\n');
-        }
-
-        builder.Append("</").Append(tag).Append('>');
     }
 
     // ------------------------------------------------------------------ summarizer request
@@ -982,5 +904,398 @@ public sealed class SummaryCompactor : IContextCompactor
 
         var summary = builder.ToString().Trim();
         return summary.Length > 0 ? summary : throw new CompactionFailedException("The summarizer returned an empty summary.");
+    }
+}
+
+/// <summary>
+/// One line range a stored read covered: 1-based, inclusive, and open-ended when <see cref="End"/> is
+/// <see cref="int.MaxValue"/> (a read with an offset and no limit). A whole-file read is <see cref="Whole"/>.
+/// </summary>
+public readonly record struct LineRange(int Start, int End)
+{
+    /// <summary>Lines 1 to the end: the range a read without an offset or a limit covers.</summary>
+    public static LineRange Whole { get; } = new(1, int.MaxValue);
+
+    public bool IsWhole => Start <= 1 && End == int.MaxValue;
+
+    /// <summary>Overlapping or directly adjacent: reads of 1–420 and 421–840 describe one unbroken run.</summary>
+    public bool Touches(in LineRange other) => Start <= (long)other.End + 1 && other.Start <= (long)End + 1;
+
+    public LineRange Merge(in LineRange other) =>
+        new((int)Math.Min(Start, other.Start), (int)Math.Max(End, other.End));
+
+    /// <summary><c>12-40</c>, <c>12-</c> for an open end, or the empty string for the whole file.</summary>
+    public string Render() => IsWhole
+        ? string.Empty
+        : End == int.MaxValue
+            ? string.Concat(Start.ToString(CultureInfo.InvariantCulture), "-")
+            : string.Concat(Start.ToString(CultureInfo.InvariantCulture), "-", End.ToString(CultureInfo.InvariantCulture));
+}
+
+/// <summary>
+/// The file lists a compaction stores: what the summarized tool calls read — with the line ranges, merged — and what they
+/// changed. It is the only part of a summary that survives losing the tool output, so it keeps enough to stop a later read
+/// of the same lines: <c>src/App.cs:1-840</c> instead of a bare path.
+/// </summary>
+public sealed class CompactionFiles
+{
+    /// <summary>Built-in modifying tools and the argument holding their path; <c>read</c> is collected with its line window.</summary>
+    private static readonly FrozenDictionary<string, string> ModifyingTools =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["edit"] = "path",
+            ["write"] = "path",
+            ["delete"] = "path",
+            ["copy"] = "to",
+            ["move"] = "to",
+        }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    /// <summary>Path → its merged, ascending ranges. <see cref="LineRange.Whole"/> means the whole file.</summary>
+    public Dictionary<string, List<LineRange>> Read { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Paths a tool changed; these are listed apart from the read ones and never under both.</summary>
+    public SortedSet<string> Modified { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Adds one read of <paramref name="path"/>, merged into what is already known about that file.</summary>
+    public void AddRead(string path, in LineRange range)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (!Read.TryGetValue(path, out var ranges))
+        {
+            Read[path] = [range];
+            return;
+        }
+
+        // The whole file swallows every range; otherwise merge everything that touches the new one.
+        if (range.IsWhole || ranges.Contains(LineRange.Whole))
+        {
+            Read[path] = [LineRange.Whole];
+            return;
+        }
+
+        var merged = range;
+        var kept = new List<LineRange>(ranges.Count + 1);
+        foreach (var existing in ranges)
+        {
+            if (existing.Touches(merged))
+            {
+                merged = merged.Merge(existing);
+            }
+            else
+            {
+                kept.Add(existing);
+            }
+        }
+
+        kept.Add(merged);
+        kept.Sort(static (left, right) => left.Start.CompareTo(right.Start));
+        Read[path] = kept;
+    }
+
+    public void AddModified(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Modified.Add(path.Trim());
+    }
+
+    /// <summary>
+    /// One stored list line: a bare path (the whole file) or <c>path:1-420,600-</c>. The range half is only read when the
+    /// text after the last colon is a comma-separated list of ranges, so a Windows drive letter stays part of the path.
+    /// </summary>
+    public void AddEntry(string entry)
+    {
+        var line = entry.Trim();
+        if (line.Length == 0)
+        {
+            return;
+        }
+
+        var colon = line.LastIndexOf(':');
+        if (colon <= 1 || !TryParseRanges(line[(colon + 1)..], out var ranges))
+        {
+            AddRead(line, LineRange.Whole);
+            return;
+        }
+
+        foreach (var range in ranges)
+        {
+            AddRead(line[..colon], range);
+        }
+    }
+
+    /// <summary>
+    /// Collects the file work of <c>raw[0, end)</c>, seeded with what an earlier summary already recorded so a range is
+    /// never forgotten and never written twice.
+    /// </summary>
+    public static CompactionFiles Collect(IReadOnlyList<StoredMessage> raw, int end, CompactionFiles? seed = null)
+    {
+        ArgumentNullException.ThrowIfNull(raw);
+        var files = seed ?? new CompactionFiles();
+        var limit = Math.Min(end, raw.Count);
+        var answers = ReadAnswers(raw, limit);
+        for (var index = 0; index < limit; index++)
+        {
+            var message = raw[index].Message;
+            if (message.Role != MessageRole.Assistant)
+            {
+                continue;
+            }
+
+            foreach (var block in message.Content)
+            {
+                if (block is not ToolCallBlock call)
+                {
+                    continue;
+                }
+
+                if (string.Equals(call.Name, "read", StringComparison.Ordinal))
+                {
+                    ReadCalls(call.ArgumentsJson, answers.GetValueOrDefault(call.Id), files);
+                }
+                else if (ModifyingTools.TryGetValue(call.Name, out var argument))
+                {
+                    foreach (var path in PathArguments(call.ArgumentsJson, argument))
+                    {
+                        files.AddModified(path);
+                    }
+                }
+            }
+        }
+
+        return files;
+    }
+
+    /// <summary>
+    /// The text each tool call was answered with, by call id. It is the only trustworthy source for how far a read got: the
+    /// call's own <c>limit</c> is what was asked for, and the tool also cuts at its byte cap.
+    /// </summary>
+    private static Dictionary<string, string> ReadAnswers(IReadOnlyList<StoredMessage> raw, int end)
+    {
+        var answers = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var index = 0; index < end; index++)
+        {
+            var message = raw[index].Message;
+            if (message.Role != MessageRole.Tool)
+            {
+                continue;
+            }
+
+            foreach (var block in message.Content)
+            {
+                if (block is ToolResultBlock result && result.Blocks.OfType<TextBlock>().FirstOrDefault() is { } text)
+                {
+                    answers[result.CallId] = text.Text;
+                }
+            }
+        }
+
+        return answers;
+    }
+
+    /// <summary>The two <c>&lt;tag&gt;…&lt;/tag&gt;</c> blocks, or the empty string when there is nothing to store.</summary>
+    public string Render()
+    {
+        var read = Read
+            .Where(pair => !Modified.Contains(pair.Key))
+            .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+            .Select(RenderRead)
+            .ToList();
+        var builder = new StringBuilder(256);
+        AppendBlock(builder, SummaryCompactor.ReadFilesTag, read);
+        AppendBlock(builder, SummaryCompactor.ModifiedFilesTag, Modified);
+        return builder.ToString();
+    }
+
+    private static string RenderRead(KeyValuePair<string, List<LineRange>> entry)
+    {
+        if (entry.Value.Count == 0 || entry.Value.Exists(static range => range.IsWhole))
+        {
+            return entry.Key;
+        }
+
+        return string.Concat(entry.Key, ":", string.Join(',', entry.Value.Select(static range => range.Render())));
+    }
+
+    private static void AppendBlock(StringBuilder builder, string tag, IEnumerable<string> lines)
+    {
+        var opened = false;
+        foreach (var line in lines)
+        {
+            if (!opened)
+            {
+                builder.Append("\n\n<").Append(tag).Append(">\n");
+                opened = true;
+            }
+
+            builder.Append(line).Append('\n');
+        }
+
+        if (opened)
+        {
+            builder.Append("</").Append(tag).Append('>');
+        }
+    }
+
+    /// <summary>
+    /// One <c>read</c> call: the lines it actually showed, taken from its answer (<c>path: N lines</c>, or the
+    /// <c>Shown lines X–Y</c> tail when it was cut) and only falling back to the requested window when no answer came back.
+    /// A failed read records nothing: an error result has no lines in it.
+    /// </summary>
+    private static void ReadCalls(string argumentsJson, string? answer, CompactionFiles files)
+    {
+        if (string.IsNullOrWhiteSpace(argumentsJson))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(argumentsJson);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("path", out var pathElement) ||
+                pathElement.ValueKind != JsonValueKind.String ||
+                pathElement.GetString()?.Trim() is not { Length: > 0 } path)
+            {
+                return;
+            }
+
+            var offset = Integer(root, "offset");
+            var start = offset is { } first && first > 1 ? first : 1;
+            if (answer is not null)
+            {
+                if (ShownRange(answer, start) is { } shown)
+                {
+                    files.AddRead(path, shown);
+                }
+
+                // No range in the text: either a failed read or an answer this version cannot read. Neither is a claim about
+                // lines, so nothing is recorded rather than a guessed window.
+                return;
+            }
+
+            var limit = Integer(root, "limit");
+            var end = limit is { } count && count > 0 ? (int)Math.Min(int.MaxValue, (long)start + count - 1) : int.MaxValue;
+            files.AddRead(path, new LineRange(start, Math.Max(start, end)));
+        }
+        catch (JsonException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// The lines a read answer says it showed: the <c>Shown lines X–Y</c> tail of a cut result, otherwise the
+    /// <c>… : N lines</c> header counted from <paramref name="start"/>. Null when the text carries neither (an error result).
+    /// </summary>
+    private static LineRange? ShownRange(string answer, int start)
+    {
+        var cut = answer.LastIndexOf("Shown lines ", StringComparison.Ordinal);
+        if (cut >= 0)
+        {
+            var tail = answer.AsSpan(cut + "Shown lines ".Length);
+            var dash = tail.IndexOf('–');
+            if (dash > 0 &&
+                TryNumber(tail[..dash], out var from) &&
+                TryNumber(tail[(dash + 1)..], out var to) &&
+                from >= 1 && to >= from)
+            {
+                return new LineRange(from, to);
+            }
+        }
+
+        var newline = answer.IndexOf('\n');
+        var header = newline < 0 ? answer : answer[..newline];
+        const string suffix = " lines";
+        if (!header.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var number = header.AsSpan(0, header.Length - suffix.Length);
+        var space = number.LastIndexOf(' ');
+        var count = space < 0 ? number : number[(space + 1)..];
+        return TryNumber(count, out var shown) && shown >= 0
+            ? new LineRange(start, start + Math.Max(0, shown - 1))
+            : null;
+    }
+
+    /// <summary>Digits only, stopping at the first character that is not one (the tail continues with a period).</summary>
+    private static bool TryNumber(ReadOnlySpan<char> text, out int value)
+    {
+        var digits = 0;
+        while (digits < text.Length && char.IsAsciiDigit(text[digits]))
+        {
+            digits++;
+        }
+
+        return int.TryParse(text[..digits], NumberStyles.None, CultureInfo.InvariantCulture, out value);
+    }
+
+    private static int? Integer(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)
+            ? number
+            : null;
+
+    /// <summary>The path argument of a modifying tool: one string, or several (copy, move and delete take arrays).</summary>
+    private static List<string> PathArguments(string argumentsJson, string name)
+    {
+        var paths = new List<string>();
+        if (string.IsNullOrWhiteSpace(argumentsJson))
+        {
+            return paths;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(argumentsJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty(name, out var value))
+            {
+                return paths;
+            }
+
+            var items = value.ValueKind == JsonValueKind.Array ? value.EnumerateArray().ToArray() : [value];
+            foreach (var item in items)
+            {
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } path && path.Trim() is { Length: > 0 } trimmed)
+                {
+                    paths.Add(trimmed);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return paths;
+    }
+
+    /// <summary><c>1-420,600-</c> → the two ranges; anything else (a bare number, a drive letter, prose) is not a range list.</summary>
+    private static bool TryParseRanges(string text, out List<LineRange> ranges)
+    {
+        ranges = [];
+        foreach (var part in text.Split(','))
+        {
+            var dash = part.IndexOf('-');
+            if (dash <= 0)
+            {
+                return false;
+            }
+
+            if (!int.TryParse(part.AsSpan(0, dash), NumberStyles.None, CultureInfo.InvariantCulture, out var start) || start < 1)
+            {
+                return false;
+            }
+
+            var end = int.MaxValue;
+            if (part.Length > dash + 1 &&
+                (!int.TryParse(part.AsSpan(dash + 1), NumberStyles.None, CultureInfo.InvariantCulture, out end) || end < start))
+            {
+                return false;
+            }
+
+            ranges.Add(new LineRange(start, end));
+        }
+
+        return ranges.Count > 0;
     }
 }
