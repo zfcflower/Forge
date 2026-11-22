@@ -99,6 +99,31 @@ public sealed class LazyHistoryTests : IDisposable
         Assert.Equal(4, pages);
     }
 
+    /// <summary>
+    /// A draft tab carries an id no row has yet, and it is still an ordinary session view: showing it replays its history
+    /// through that id. The id has to be a legal storage identifier or the replay comes back as a 「读取会话失败」 notice under
+    /// the empty transcript - what 「新增 Agent 会话」 showed as soon as its draft tab was activated.
+    /// </summary>
+    [Fact]
+    public async Task A_draft_tab_replays_no_history_and_reports_no_read_failure()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+        var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+        var session = DraftSession(root);
+
+        var roundsBefore = session.Transcript.Rounds.Count;
+        await session.EnsureHistoryAsync(CancellationToken.None);
+
+        // Nothing was replayed (a draft has no row) and, above all, the replay did not fail: the id the tab carries is one the
+        // store accepts and simply finds nothing under. When it was rejected ("not allowed in a storage identifier") the
+        // failure landed in the transcript as a 「读取会话失败」 notice quoting that very id.
+        Assert.Equal(roundsBefore, session.Transcript.Rounds.Count);
+        Assert.DoesNotContain(
+            session.Transcript.Rounds.SelectMany(round => round.Rows).OfType<NoticeViewModel>(),
+            notice => notice.Text.Contains(session.SessionId, StringComparison.Ordinal));
+    }
+
     /// <summary>The tab as restore builds it: a read-only view of the stored session, with no runtime and no history yet.</summary>
     private SessionWorkspaceViewModel ReadOnlySession(SessionInfo info)
     {
@@ -109,5 +134,24 @@ public sealed class LazyHistoryTests : IDisposable
             checkpoints: null,
             store: new SqliteSessionStore(directory),
             providers);
+    }
+
+    /// <summary>The tab 「新增 Agent 会话」 opens: a draft whose session row the first message has not created yet.</summary>
+    private SessionWorkspaceViewModel DraftSession(SessionInfo root)
+    {
+        var providers = new ProviderServices(Path.Combine(directory, "settings.json"), directory, http);
+        var draft = root with
+        {
+            Id = MainWindowViewModel.NewAgentDraftId(root.Id, 1),
+            ParentSessionId = root.Id,
+            ChildDriver = AgentSessionKinds.ChildDriverUser,
+        };
+        return new SessionWorkspaceViewModel(
+            draft,
+            runtime: null,
+            checkpoints: null,
+            store: new SqliteSessionStore(directory),
+            providers,
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: true));
     }
 }
