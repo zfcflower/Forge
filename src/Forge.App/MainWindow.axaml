@@ -43,11 +43,17 @@
           <!-- The title row carries the logo lockup only: the project tree on the left already shows the open session
           and its branch, so repeating them here was redundant. The wordmark is the product's own name, so it is
           not translated. -->
+          <!-- The mark is one flat colour plus alpha, so each theme gets the same art tinted in its own brand tier and
+          the logo can never drift from the wordmark beside it. It stays a plain Image on purpose: an alpha mask over
+          BrandActionBrush would be one asset and no code, but Avalonia offsets the mask layer from the element by a
+          device pixel at fractional desktop scaling (visibly clipped the mark's right edge at 175%), while an Image
+          draws the bitmap in the element's own transform. HighQuality keeps the 256 px art from aliasing at 18 DIP. -->
           <Image x:Name="AppLogo"
                  Source="avares://Forge.App/Assets/forge.png"
                  Width="18"
                  Height="18"
                  VerticalAlignment="Center"
+                 RenderOptions.BitmapInterpolationMode="HighQuality"
                  AutomationProperties.Name="Forge" />
           <TextBlock x:Name="AppWordmark"
                      FontSize="{DynamicResource FontSizeWordmark}"

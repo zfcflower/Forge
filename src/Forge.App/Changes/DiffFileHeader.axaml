@@ -58,7 +58,7 @@
                   AutomationProperties.AutomationId="diff-file-open"
                   AutomationProperties.Name="{Binding [changes.diff.openInEditor], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [changes.diff.openInEditor], Source={x:Static loc:Loc.Instance}}">
-            <wc:FluentIcon Data="{DynamicResource IconOpen}" Width="14" Height="14" />
+            <wc:FluentIcon Data="{DynamicResource IconCodeBlock}" Width="14" Height="14" />
           </Button>
           <Button x:Name="MoreButton" Classes="ghost icon" Click="OnMoreClick"
                   AutomationProperties.AutomationId="diff-file-more"

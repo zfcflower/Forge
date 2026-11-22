@@ -1,7 +1,10 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Forge.App.Localization;
 using Forge.App.Input;
@@ -24,11 +27,36 @@ public partial class MainWindow : Window
     private MainWindowViewModel? viewModel;
     private int uiThread;
 
+    /// <summary>
+    /// The title-row mark in each theme's brand tier - the same art tinted twice. A bitmap cannot follow a theme the way
+    /// a brush can, and the brush alternative (alpha mask over <c>BrandActionBrush</c>) is shifted a device pixel off the
+    /// element at fractional desktop scaling, which clips the mark's right edge; an <see cref="Image"/> draws the bitmap
+    /// in the element's own transform, so the pair is what stays pixel-correct. Loaded once per process.
+    /// </summary>
+    private static readonly Bitmap LogoLight = LoadLogo("Assets/forge.png");
+    private static readonly Bitmap LogoDark = LoadLogo("Assets/forge-dark.png");
+
     public MainWindow()
     {
         InitializeComponent();
+        ApplyLogo();
+        ActualThemeVariantChanged += OnActualThemeVariantChanged;
         ClampToScreen();
         ApplyWindowStateChrome();
+    }
+
+    private static Bitmap LoadLogo(string path) =>
+        new(AssetLoader.Open(new Uri($"avares://Forge.App/{path}")));
+
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e) => ApplyLogo();
+
+    /// <summary>Paints the logo in the same brand tier the wordmark beside it reads from.</summary>
+    private void ApplyLogo()
+    {
+        if (AppLogo is not null)
+        {
+            AppLogo.Source = ActualThemeVariant == ThemeVariant.Dark ? LogoDark : LogoLight;
+        }
     }
 
     /// <summary>The maximize button shows what it will do: maximize while normal, restore while maximized.</summary>

@@ -19,9 +19,9 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   `arrow_collapse_all`, `arrow_download`, `arrow_maximize_vertical`, `arrow_minimize_vertical`, `arrow_undo`, `bot`, `branch`, `branch_compare`, `arrow_up`, `arrow_upload`, `book`,
   `chat_sparkle` (regular + filled), `checkmark`, `checkmark_circle`, `chevron_down`, `chevron_left`, `chevron_right`, `chevron_up`,
   `circle`,
-  `circle_half_fill`, `cloud_arrow_down`, `color`, `comment_add`, `copy`, `delete`, `dismiss`, `document_bullet_list_clock`,
+  `circle_half_fill`, `cloud_arrow_down`, `code_block`, `color`, `comment_add`, `copy`, `delete`, `desktop_toolbox`, `dismiss`, `document_bullet_list_clock`,
   `edit`, `edit_arrow_back`, `eye`, `flash` (regular + filled), `folder`,
-  `folder_add`, `home_garage`, `layer`, `more_horizontal` (regular + filled), `open`, `pause_circle`, `person`, `pin` (regular +
+  `folder_add`, `home_garage`, `layer`, `more_horizontal` (regular + filled), `pause_circle`, `person`, `pin` (regular +
   filled), `plug_connected`, `local_language`, `save`, `search`, `send`, `server`, `settings`, `shield_checkmark`, `sparkle`, `square`,
   `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`,
   `code`, `document_text`, `globe`, `info`, `lightbulb`, `task_list_ltr`, `warning`;
