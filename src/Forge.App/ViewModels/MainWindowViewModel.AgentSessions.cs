@@ -20,8 +20,17 @@ namespace Forge.App.ViewModels;
 /// </summary>
 internal sealed partial class MainWindowViewModel
 {
-    /// <summary>How a draft tab's session id is spelled before its row exists; nothing in the store carries this id.</summary>
-    private const string AgentDraftIdPrefix = "agent-draft:";
+    /// <summary>
+    /// How a draft tab's session id is spelled before its row exists; nothing in the store carries this id. It still has to be
+    /// a legal storage identifier: a draft tab is an ordinary session view, so the panels and the history replay ask the store
+    /// about this id, and a rejected identifier would surface as a read failure in the transcript and in the checklist panel
+    /// instead of the empty answer a row-less session deserves.
+    /// </summary>
+    private const string AgentDraftIdPrefix = "agent-draft-";
+
+    /// <summary>The id a draft tab carries until the first message creates its row.</summary>
+    internal static string NewAgentDraftId(string rootSessionId, int sequence) =>
+        AgentDraftIdPrefix + rootSessionId + "-" + sequence.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>Open agent-session tabs by the id their session has right now (the draft's id until its row exists).</summary>
     private readonly Dictionary<string, TabModel> agentTabs = new(StringComparer.Ordinal);
@@ -94,7 +103,7 @@ internal sealed partial class MainWindowViewModel
 
         var open = OpenAgentSessionCount(current.Id);
         var ordinal = 1 + stored + open;
-        var draftId = AgentDraftIdPrefix + current.Id + ":" + (++agentSessionSequence).ToString(CultureInfo.InvariantCulture);
+        var draftId = NewAgentDraftId(current.Id, ++agentSessionSequence);
         agentDrafts[current.Id] = open + 1;
         OpenAgentSessionTab(CreateAgentSessionView(current, current, ordinal, isDraft: true, draftId), activate: true);
     }

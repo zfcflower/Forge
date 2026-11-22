@@ -143,4 +143,149 @@ public class CompactionFileListTests
             "\n\n<read-files>\nD:\\forge\\src\\App.cs:1-40\nD:\\forge\\src\\Other.cs\n</read-files>",
             files.Render());
     }
+
+    // ---------------------------------------------------------------------------------------------- the hard budget
+
+    /// <summary>
+    /// The lists are written by code and grow with every compaction that meets a file, so each block has a character cap of
+    /// its own: the summary body is bounded by the summarizer's output limit, these are not.
+    /// </summary>
+    private static string Path(int index, int padding) => $"src/{new string('d', padding)}/{index:D3}.cs";
+
+    [Fact]
+    public void A_block_that_fills_its_budget_exactly_drops_nothing()
+    {
+        // One line of 3 971 characters plus its newline fills the 3 972 characters the block has below its tags.
+        var path = new string('p', 3_971);
+        var files = new CompactionFiles();
+        files.AddRead(path, LineRange.Whole);
+
+        var rendered = files.Render();
+        Assert.Equal(CompactionFiles.ReadListChars, rendered.Length);
+        Assert.Equal(string.Concat("\n\n<read-files>\n", path, "\n</read-files>"), rendered);
+    }
+
+    [Fact]
+    public void A_list_over_its_budget_keeps_the_ordinal_head_and_counts_what_it_dropped()
+    {
+        // Every line is 101 characters plus its newline, so 38 of them fit in the 3 972 the block has below its tags; the
+        // notice needs 32 of those characters, which changes nothing at this line length. Two paths are dropped.
+        var files = new CompactionFiles();
+        for (var index = 1; index <= 40; index++)
+        {
+            files.AddRead(Path(index, 90), LineRange.Whole);
+        }
+
+        var rendered = files.Render();
+        Assert.Equal(3_913, rendered.Length);
+        Assert.True(rendered.Length <= CompactionFiles.ReadListChars);
+        Assert.Contains($"{Path(38, 90)}\n", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(Path(39, 90), rendered, StringComparison.Ordinal);
+        Assert.EndsWith("\n… 2 more</read-files>", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void One_path_longer_than_the_whole_budget_is_shortened_in_the_middle()
+    {
+        var files = new CompactionFiles();
+        files.AddRead(string.Concat(new string('x', 5_000), "/End.cs"), LineRange.Whole);
+
+        var rendered = files.Render();
+        Assert.True(rendered.Length <= CompactionFiles.ReadListChars, $"{rendered.Length} characters");
+        Assert.Contains("…", rendered, StringComparison.Ordinal);
+        // The file name — the part that says which file this was — is what the tail keeps.
+        Assert.EndsWith("End.cs\n</read-files>", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_two_lists_have_their_own_budgets_and_the_modified_one_is_wider()
+    {
+        // The same 300 paths fit the modified list and overflow the read one: the wider budget is what makes a change
+        // record survive a list that would otherwise drop it.
+        var reads = new CompactionFiles();
+        var modified = new CompactionFiles();
+        for (var index = 1; index <= 300; index++)
+        {
+            reads.AddRead(Path(index, 6), LineRange.Whole);
+            modified.AddModified(Path(index, 6));
+        }
+
+        var readBlock = reads.Render();
+        var modifiedBlock = modified.Render();
+        Assert.InRange(readBlock.Length, 1, CompactionFiles.ReadListChars);
+        Assert.Contains("more", readBlock, StringComparison.Ordinal);
+        Assert.InRange(modifiedBlock.Length, 1, CompactionFiles.ModifiedListChars);
+        Assert.DoesNotContain("more", modifiedBlock, StringComparison.Ordinal);
+        Assert.Contains($"{Path(300, 6)}\n", modifiedBlock, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void This_passes_paths_are_rendered_before_the_ones_existing_summary_already_had()
+    {
+        var files = new CompactionFiles();
+        files.AddRead("src/old/a.cs", LineRange.Whole);
+
+        var second = CompactionFiles.Collect(
+            [Call(1, "read", """{"path":"src/new/a.cs"}""")],
+            1,
+            files);
+
+        Assert.Equal("\n\n<read-files>\nsrc/new/a.cs\nsrc/old/a.cs\n</read-files>", second.Render());
+    }
+
+    [Fact]
+    public void A_stored_notice_or_a_shortened_path_is_not_a_file()
+    {
+        // Both forms appear in a stored summary once a list outgrows its budget, in either block. Re-seeding from that text
+        // must not turn them into entries, or every later compaction would render one more line than the one before it.
+        var files = new CompactionFiles();
+        files.AddEntry("… 3 more");
+        files.AddEntry("src/dddddddddddddd/…/Abc.cs");
+        files.AddEntry("src/App.cs");
+        files.AddModified("… 7 more");
+        files.AddModified("src/changed/…/Abc.cs");
+        files.AddModified("src/Changed.cs");
+
+        Assert.Equal(
+            "\n\n<read-files>\nsrc/App.cs\n</read-files>\n\n<modified-files>\nsrc/Changed.cs\n</modified-files>",
+            files.Render());
+    }
+
+    [Fact]
+    public void A_path_as_long_as_the_block_itself_is_shortened_and_never_counted_as_zero_more()
+    {
+        // The block has 3 972 characters below its tags, so a path of exactly that length does not fit (its newline would
+        // be the 3 973rd). Reserving room for the dropped-count notice must not turn that into "… 0 more": it is shortened
+        // instead, which keeps the file name and the cap.
+        var files = new CompactionFiles();
+        files.AddRead(new string('p', 3_972), LineRange.Whole);
+
+        var rendered = files.Render();
+        Assert.Equal(CompactionFiles.ReadListChars, rendered.Length);
+        Assert.Contains("…", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("more", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Reseeding_a_list_that_filled_its_budget_keeps_it_inside_the_budget()
+    {
+        // 200 paths are far more than the 3 972 characters the block has; what a stored summary carries back is that
+        // shortened list, and the next pass adds one new path to it.
+        var files = new CompactionFiles();
+        for (var index = 1; index <= 200; index++)
+        {
+            files.AddRead(Path(index, 60), LineRange.Whole);
+        }
+
+        Assert.True(files.Render().Length <= CompactionFiles.ReadListChars);
+
+        var reseeded = CompactionFiles.Collect(
+            [Call(1, "read", """{"path":"src/latest.cs"}""")],
+            1,
+            files);
+
+        var rendered = reseeded.Render();
+        Assert.True(rendered.Length <= CompactionFiles.ReadListChars, $"{rendered.Length} characters");
+        Assert.StartsWith("\n\n<read-files>\nsrc/latest.cs\n", rendered, StringComparison.Ordinal);
+    }
 }

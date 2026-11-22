@@ -46,7 +46,10 @@ internal sealed record CompactionSettings(bool Enabled = true, int TriggerPercen
         && IsValidEmergency(EmergencyPercent, TriggerPercent);
 
     /// <summary>The Core policy for these settings; the resolvers come from the provider catalog.</summary>
-    public CompactionPolicy ToPolicy(Func<Forge.Abstractions.ModelSettings, int?>? contextWindow, Func<Forge.Abstractions.ModelSettings, int?>? maxOutput)
+    public CompactionPolicy ToPolicy(
+        Func<Forge.Abstractions.ModelSettings, int?>? contextWindow,
+        Func<Forge.Abstractions.ModelSettings, int?>? maxOutput,
+        Func<Forge.Abstractions.ModelSettings, int?>? wireMaxOutput = null)
     {
         var valid = IsValid ? this : Default with { Enabled = Enabled };
         return new CompactionPolicy
@@ -58,6 +61,7 @@ internal sealed record CompactionSettings(bool Enabled = true, int TriggerPercen
             EmergencyRatio = valid.EmergencyPercent / 100d,
             ContextWindow = contextWindow,
             MaxOutputTokens = maxOutput,
+            WireMaxOutputTokens = wireMaxOutput,
         };
     }
 }

@@ -177,14 +177,9 @@
     <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
-  <!-- The taller tier: a panel footer that owns the decision of its card (the question panel's dismiss / step / submit
-       row) sizes its buttons one step up from the inline ones, so the row reads as the card's action bar. -->
-  <Style Selector="Button.primary.large, Button.tinted.large, Button.outline.large">
-    <Setter Property="MinHeight" Value="32" />
-    <Setter Property="Padding" Value="14,6" />
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
-  </Style>
-
+  <!-- The same neutral palette as `Button.ghost` in the small geometry: white fill, the divider's 1 px border, primary
+       label. `ghost` is the medium size of this one look (panels, dialogs, settings pages); this is the size a row or a
+       card uses, so a button can sit level with 26 px chrome without a second set of colours. -->
   <Style Selector="Button.outline">
     <Setter Property="MinHeight" Value="26" />
     <Setter Property="Padding" Value="8,3" />
@@ -201,10 +196,12 @@
 
   <Style Selector="Button.outline:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
   </Style>
 
   <Style Selector="Button.outline:pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
   </Style>
 
   <Style Selector="Button.outline:disabled, Button.tinted:disabled">
@@ -225,8 +222,10 @@
     <Setter Property="Height" Value="1" />
   </Style>
 
+  <!-- A panel body on the two side regions takes the navigation rail's own surface: the outer columns read as one sheet
+       beside the white canvas, exactly like the settings page's section column. -->
   <Style Selector="Border.panel">
-    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+    <Setter Property="Background" Value="{DynamicResource SidebarBackgroundBrush}" />
   </Style>
 
   <!-- Transparent so a toolbar takes the colour of its region: white in Main, the sidebar grey at the sides. -->

@@ -22,7 +22,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public const double AutoCollapseWidth = 880;
 
     /// <summary>Width of the full section column, in DIPs.</summary>
-    public const double ExpandedNavWidth = 240;
+    public const double ExpandedNavWidth = 280;
 
     /// <summary>Width of the collapsed icon rail, in DIPs.</summary>
     public const double CollapsedNavWidth = 48;

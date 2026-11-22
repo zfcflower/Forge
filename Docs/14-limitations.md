@@ -35,10 +35,11 @@
 | `mcp.json` 注释保留 | 写回丢注释、统一两空格缩进（`JsonNode` 无 trivia） |
 | 工作流 `onError: retry/continue`、步骤级超时、`when`/`foreach`、`$expr` | 未实现；格式按可向前兼容设计 |
 | 额度读数覆盖面 | 只有 Anthropic 订阅窗口 + 通用 `x-ratelimit-*` 分钟级；非 Anthropic 的订阅额度端点、设置页额度摘要、历史曲线、跨会话持久化未做 |
-| 上下文继承的根因 | 继承前缀本身已超触发线时，迟滞只能把重复压缩限制为两次无效尝试；根因需要新的存储契约（T0） |
+| 上下文继承的根因 | 继承前缀本身已超触发线时，现在会在发请求前就判 `Irreducible`（不再白花摘要请求），并由裁剪级尝试救回；根因仍需新的存储契约（T0） |
+| 上下文裁剪的仪器读数 | **已计算未接缑**：`SessionInstrumentsViewModel.UsageReductionText` / `UsageReductionRatioText`（释放总量与按工具拆分、裁剪即够/仍需摘要比例）没有视图绑定，用量弹层与工具/提示词组都还不显示 |
 | 历史检索沿继承链 | `search_history`/`read_history` 不沿继承链回溯 |
 | 交接对话框的模型/推理档位、缓存剩余时间、接近压缩阈值、前缀指纹不符提示 | 未做；摘要只用旧会话自有消息，不沿继承链取父会话 |
-| 文件追踪的广度 | 只认 `read`/`edit`/`write` 的 `path` 参数 |
+| 文件追踪的广度 | `read` 记**实际显示的行范围**（取回答的 `Shown lines X–Y` 或 `path: N lines`，不取请求的 limit），`edit`/`write`/`delete`/`copy`/`move` 只记路径；`grep`/`ls`/`find` 与插件工具不产生条目 |
 | 只读并行会话 | 刻意推迟（`bash` 无法区分读写，要么禁要么每次审批） |
 | 一个会话切换多个工作区目录 | 推迟（`turn_checkpoints` 主键、步骤提交、PR 闸门、索引都要按当前目录取） |
 | 恢复到某一轮 | 推迟（届时被接手会话的检查点只读） |

@@ -12,12 +12,29 @@
         MinWidth="720"
         MinHeight="480"
         WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
         WindowDecorations="BorderOnly"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="-1"
         Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+    <!-- The column's scroll bar is drawn over its content, so the list keeps a 12 px gutter between itself and the edge.
+         Folded, the gutter is dropped: the rail's entries need that width to stay square. -->
+    <Style Selector="ScrollViewer.settings-nav-scroll">
+      <Setter Property="Padding" Value="0,0,12,0" />
+    </Style>
+    <!-- The toggle wears the column's own state: the section column is open, so the button keeps the active fill; folded it
+         is an ordinary title-bar icon again. -->
+    <Style Selector="Button.icon.active /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+    </Style>
+    <Style Selector="Button.icon.active">
+      <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
+    </Style>
+    <Style Selector="ScrollViewer.settings-nav-scroll.rail">
+      <Setter Property="Padding" Value="0" />
+    </Style>
     <!-- The section column: one flat button per section, green-tinted while selected. -->
     <Style Selector="Button.settings-nav">
       <Setter Property="Background" Value="Transparent" />
@@ -28,10 +45,19 @@
       <Setter Property="HorizontalContentAlignment" Value="Left" />
       <Setter Property="FontWeight" Value="Normal" />
     </Style>
+    <!-- The folded column is an icon rail: each entry is the same square the title bar's icon buttons are (26x26, the
+         small radius, no border), not a stretched row. -->
     <Style Selector="Button.settings-nav.rail">
-      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Width" Value="26" />
+      <Setter Property="Height" Value="26" />
       <Setter Property="Padding" Value="0" />
-      <Setter Property="Height" Value="34" />
+      <Setter Property="Margin" Value="0,1,0,1" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+    </Style>
+    <Style Selector="Button.settings-nav.rail /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
     </Style>
     <Style Selector="Button.settings-nav /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="Transparent" />
@@ -63,28 +89,32 @@
                    AutomationProperties.AutomationId="settings-title" />
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
           <Button Classes="icon"
+                  Width="30"
+                  Height="26"
+                  Classes.active="{Binding IsNavExpanded}"
                   Click="OnToggleNavClick"
                   ToolTip.Tip="{Binding NavToggleTip}"
                   AutomationProperties.AutomationId="settings-nav-toggle"
                   AutomationProperties.Name="{Binding NavToggleTip}">
-            <Panel Width="14" Height="14">
-              <wc:FluentIcon Data="{StaticResource IconChevronLeft}" Width="14" Height="14" IsVisible="{Binding IsNavExpanded}" />
-              <wc:FluentIcon Data="{StaticResource IconChevronRight}" Width="14" Height="14" IsVisible="{Binding IsNavCollapsed}" />
-            </Panel>
+            <wc:FluentIcon Data="{StaticResource IconNavigation}" Width="15" Height="15" />
           </Button>
           <Button Classes="icon"
+                  Width="30"
+                  Height="26"
                   Click="OnReloadClick"
                   ToolTip.Tip="{Binding ReloadText}"
                   AutomationProperties.AutomationId="settings-reload"
                   AutomationProperties.Name="{Binding ReloadText}">
-            <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
+            <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="15" Height="15" />
           </Button>
           <Button Classes="icon"
+                  Width="30"
+                  Height="26"
                   Click="OnCloseClick"
                   ToolTip.Tip="{Binding CloseText}"
                   AutomationProperties.AutomationId="settings-close"
                   AutomationProperties.Name="{Binding CloseText}">
-            <wc:FluentIcon Data="{StaticResource IconClose}" Width="14" Height="14" />
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
           </Button>
         </StackPanel>
       </Grid>
@@ -105,7 +135,10 @@
               Background="{DynamicResource SidebarBackgroundBrush}"
               BorderBrush="{DynamicResource BorderBrush}"
               BorderThickness="0,0,1,0">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer Classes="settings-nav-scroll"
+                      Classes.rail="{Binding IsNavCollapsed}"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
           <ItemsControl ItemsSource="{Binding NavGroups}"
                         Margin="8,10"
                         AutomationProperties.AutomationId="settings-nav">
@@ -144,8 +177,11 @@
         </ScrollViewer>
       </Border>
 
+      <!-- The page body is the card surface: white in light, one step below the window in dark, so the section reads as
+           the sheet beside the navigation rail instead of the window's own grey. -->
       <ScrollViewer Grid.Column="1"
                     Padding="12,6,12,6"
+                    Background="{DynamicResource CardBackgroundBrush}"
                     VerticalScrollBarVisibility="Auto"
                     AutomationProperties.AutomationId="settings-body">
         <ContentControl Content="{Binding SelectedSection.ViewModel}" />

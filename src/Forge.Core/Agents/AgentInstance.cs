@@ -295,8 +295,17 @@ internal sealed class CompactionState
 
     public int FruitlessAttempts { get; set; }
 
-    /// <summary>True once automatic compaction gave up, until a manual compaction or another model.</summary>
+    /// <summary>True once automatic compaction gave up, until a manual compaction, another model, or a context reduction that brings the instance back under the line.</summary>
     public bool Stalled { get; set; }
+
+    /// <summary>Why <see cref="Stalled"/> is set. Only <see cref="CompactionStallReason.Irreducible"/> can lift by itself (a higher line or a smaller tool set).</summary>
+    public CompactionStallReason StallReason { get; set; }
+
+    /// <summary>The line <see cref="CompactionStallReason.Irreducible"/> was declared against.</summary>
+    public int IrreducibleLine { get; set; }
+
+    /// <summary>The tool-definition tokens at that moment; a smaller set is a reason to look again.</summary>
+    public int IrreducibleToolTokens { get; set; }
 
     /// <summary>Published tool-set version <see cref="ToolTokens"/> was counted for; -1 before the first count.</summary>
     public int ToolTokensVersion { get; set; } = -1;
@@ -309,6 +318,9 @@ internal sealed class CompactionState
         FruitlessBaseline = null;
         FruitlessAttempts = 0;
         Stalled = false;
+        StallReason = CompactionStallReason.Ineffective;
+        IrreducibleLine = 0;
+        IrreducibleToolTokens = 0;
     }
 
     public void ForgetUsage()

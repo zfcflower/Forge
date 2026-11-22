@@ -219,7 +219,8 @@
                 <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding ShowsNoWorkspaceHint}" Text="{Binding NoWorkspaceHint}" />
 
                 <TextBlock Classes="label" Text="{Binding TextLabel}" />
-                <TextBox AcceptsReturn="True"
+                <TextBox Classes="multiline"
+                         AcceptsReturn="True"
                          TextWrapping="Wrap"
                          Height="360"
                          IsReadOnly="{Binding IsReadOnly}"

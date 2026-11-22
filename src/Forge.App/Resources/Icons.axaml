@@ -15,6 +15,9 @@
   <!-- 关闭 · Fluent dismiss 24 regular -->
   <StreamGeometry x:Key="IconClose">m4.4 4.55.07-.08a.75.75 0 0 1 .98-.07l.08.07L12 10.94l6.47-6.47a.75.75 0 1 1 1.06 1.06L13.06 12l6.47 6.47c.27.27.3.68.07.98l-.07.08a.75.75 0 0 1-.98.07l-.08-.07L12 13.06l-6.47 6.47a.75.75 0 0 1-1.06-1.06L10.94 12 4.47 5.53a.75.75 0 0 1-.07-.98l.07-.08z</StreamGeometry>
   <!-- 展开 · Fluent chevron_down 24 regular -->
+  <!-- Fluent `navigation` (24 regular): the three-line menu the settings window uses to fold and unfold its section
+       column. One glyph for both directions - the button's active fill says whether the column is open. -->
+  <StreamGeometry x:Key="IconNavigation">M2.75293 18.5H21.2529C21.6671 18.5 22.0029 18.8358 22.0029 19.25C22.0029 19.6642 21.6671 20 21.2529 20H2.75293C2.33872 20 2.00293 19.6642 2.00293 19.25C2.00293 18.8358 2.33872 18.5 2.75293 18.5ZM2.75293 11.5H21.2529C21.6671 11.5 22.0029 11.8358 22.0029 12.25C22.0029 12.6642 21.6671 13 21.2529 13H2.75293C2.33872 13 2.00293 12.6642 2.00293 12.25C2.00293 11.8358 2.33872 11.5 2.75293 11.5ZM2.75293 4.5H21.2529C21.6671 4.5 22.0029 4.83579 22.0029 5.25C22.0029 5.66421 21.6671 6 21.2529 6H2.75293C2.33872 6 2.00293 5.66421 2.00293 5.25C2.00293 4.83579 2.33872 4.5 2.75293 4.5Z</StreamGeometry>
   <StreamGeometry x:Key="IconChevronDown">M4.22 8.47c.3-.3.77-.3 1.06 0L12 15.19l6.72-6.72a.75.75 0 1 1 1.06 1.06l-7.25 7.25c-.3.3-.77.3-1.06 0L4.22 9.53a.75.75 0 0 1 0-1.06</StreamGeometry>
   <!-- 收起 · Fluent chevron_up 24 regular -->
   <StreamGeometry x:Key="IconChevronUp">M4.22 15.53c.3.3.77.3 1.06 0L12 8.81l6.72 6.72a.75.75 0 1 0 1.06-1.06l-7.25-7.25a.75.75 0 0 0-1.06 0l-7.25 7.25c-.3.3-.3.77 0 1.06</StreamGeometry>

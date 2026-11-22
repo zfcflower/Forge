@@ -222,6 +222,10 @@
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
     </Style>
+    <!-- The row is the frame: no field border and no field's bottom edge. -->
+    <Style Selector="TextBox.todo-input /template/ Border#PART_EdgeLine">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
 
     <!-- Rows and group rows share their surface geometry; only a row is interactive (hover, focus, drag, delete). -->
     <Style Selector="Border.todo-row, Border.todo-group-row">

@@ -9,13 +9,7 @@
        code-behind, reusing the app's renderer. -->
   <UserControl.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-      <Style Selector="TextBox.invalid">
-        <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
-      </Style>
-      <Style Selector="TextBox.invalid /template/ Border#PART_BorderElement">
-        <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
-      </Style>
-    </UserControl.Styles>
+  </UserControl.Styles>
   <StackPanel Spacing="6">
     <TextBlock Classes="caption"
                TextWrapping="Wrap"

@@ -92,7 +92,7 @@
 
 - 触发以**本次会话自身的模型窗口 W** 为基准：预留输出 R = min(maxOut, ⌊0.2W⌋)，再抬到至少 `min(4096, W/2)`；可用预算 U = W − R；触发线 = ⌊U × triggerPercent⌋（默认 85%，范围 50–95），目标 = max(1, ⌊U × targetPercent⌋)（默认 50%），再生长量 ⌊0.1U⌋。**触发线只用于回合的第一个请求**：同一回合内工具结果还在累积，改用紧急线 ⌊U × emergencyPercent⌋（默认 95%，范围 90–99 且高于触发），否则一个回合会把自己刚收集的证据压成摘要。
 - 当前上下文 C：模型与历史版本未变时用上次真实输入 token + 新增消息估算；否则全量估算（历史 + 稳定前缀 + 可见工具定义，每个定义另加 8 token）。
-- 迟滞：压缩后仍不低于触发线即“无效尝试”，要等实例自有内容再长 0.1U；连续两次无效标记 Stalled 并发一次 `AgentCompactionStalled`，直到手动压缩或换模型。
+- 迟滞：压缩后仍不低于触发线即“无效尝试”，要等实例自有内容再长 0.1U；连续两次无效标记 Stalled 并发一次 `AgentCompactionStalled`，直到手动压缩、换模型或一次把上下文带回线下的裁剪。
 - 切点只落在下标 ≥1 的 user/assistant 消息上，不拆开工具调用与结果；保留近期原文 keepRecent = 设置的 `keepRecentTokens`，缺省 max(1, min(20000, ⌊0.2U⌋))（设置值夹在 [min(1000,U), U/2]）。
 - 摘要格式固定六节：Goal / Constraints & Preferences / Progress(Done / In Progress / Blocked) / Key Decisions / Next Steps / Critical Context。消息序列化时 thinking 不写、工具结果截到 2000 字符、图片/文件只写占位；超预算分批，工具调用与其结果绝不分开；长回合被切开时另发一次 TURN-PREFIX 摘要并合并成 `Turn Context (split turn)`。
 - 文件追踪：`CompactionFiles` 把 `read` 的路径与**实际显示的行范围**（`Shown lines X–Y` 或 `path: N lines` 从 offset 起算）合进 `<read-files>`，同一文件的重叠/相邻区间合并（`1-420` + `421-840` → `1-840`），无 limit 记 `500-`，整文件读记裸路径；修改类只记路径，读后又改的只出现在 `<modified-files>`；与上一份摘要里的清单合并后排序追加。

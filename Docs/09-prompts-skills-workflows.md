@@ -7,7 +7,7 @@
 稳定前缀由四层依次叠加：**系统提示词 → 全局 Agent → 项目 Agent → 角色**。前三层按文件作用域合成，角色层是内置或用户 Agent 的正文；动态信息（时间、工作区状态）只作为请求末尾的一条临时 user 消息，不进历史与存储。
 
 - 系统层是可覆盖的槽位 `system`；`PromptComposer` 把 `PromptLayers.System` 当作完整系统层，空时回落 `BuiltInPrompts.System`。
-- 前缀字节稳定才命中提供商缓存：工具定义按名称排序、同类 Agent 一致；厂商身份（Claude 的身份块与 billing 块）只在 `AnthropicProvider` 里加，不进 `ComposedPrompt.StablePrefix`，也不进 `PromptFingerprint`。
+- 前缀字节稳定才命中提供商缓存：工具定义分三段、顺序固定且同类 Agent 一致——内置固定段按声明顺序（`FileTools.All`：读、写、改、列、找、grep、拷贝、移动、删除，最后才是 `bash`），条件段与外部段按名称排序；厂商身份（Claude 的身份块与 billing 块）只在 `AnthropicProvider` 里加，不进 `ComposedPrompt.StablePrefix`，也不进 `PromptFingerprint`。
 
 ## 9.2 三类模板（命令 / Agent / 槽位）
 
