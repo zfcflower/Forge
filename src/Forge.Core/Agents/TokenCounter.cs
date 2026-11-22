@@ -2,7 +2,7 @@ using Forge.Abstractions;
 
 namespace Forge.Core.Agents;
 
-/// <summary>Budget check for compaction; counts text as roughly four characters per token.</summary>
+/// <summary>Budget check for compaction; counts text by character class, roughly four Latin characters per token.</summary>
 public interface ITokenCounter
 {
     int Count(IReadOnlyList<ChatMessage> messages);
@@ -13,7 +13,19 @@ public interface ITokenCounter
 public sealed class ApproximateTokenCounter : ITokenCounter
 {
     private const int MessageOverhead = 4;
-    private const int CharsPerToken = 4;
+
+    /// <summary>Estimate units per token: a Latin character costs two units, so four of them make one token.</summary>
+    private const int UnitsPerToken = 8;
+
+    /// <summary>One byte-ish character of Latin script, code, whitespace or punctuation.</summary>
+    private const int LatinCharUnits = 2;
+
+    /// <summary>
+    /// One CJK character (Han, kana, Hangul, fullwidth forms). Measured tokenizers spend about 1.6 characters per token
+    /// here — two to three times what Latin text costs — so counting a Chinese spec at four characters per token
+    /// underestimates it by more than half and lets compaction start too late.
+    /// </summary>
+    private const int WideCharUnits = 5;
 
     /// <summary>
     /// A flat estimate per attached image: providers bill an image by its pixel size, not by its base64 length, and a
@@ -47,41 +59,41 @@ public sealed class ApproximateTokenCounter : ITokenCounter
             {
                 chars += block switch
                 {
-                    TextBlock text => text.Text.Length,
-                    ThinkingBlock thinking => thinking.Text.Length,
-                    ToolCallBlock call => call.Name.Length + call.ArgumentsJson.Length,
-                    ToolResultBlock result => ToolResultChars(result),
-                    ArtifactRefBlock artifact => artifact.Description.Length + 32,
-                    ImageBlock => (long)ImageTokens * CharsPerToken,
-                    FileBlock file => FileTokens(file) * CharsPerToken,
+                    TextBlock text => Units(text.Text),
+                    ThinkingBlock thinking => Units(thinking.Text),
+                    ToolCallBlock call => Units(call.Name) + Units(call.ArgumentsJson),
+                    ToolResultBlock result => ToolResultUnits(result),
+                    ArtifactRefBlock artifact => Units(artifact.Description) + 32L * LatinCharUnits,
+                    ImageBlock => (long)ImageTokens * UnitsPerToken,
+                    FileBlock file => FileTokens(file) * UnitsPerToken,
                     _ => 0,
                 };
             }
         }
 
-        return Saturate(chars / CharsPerToken + (long)messages.Count * MessageOverhead);
+        return Saturate(chars / UnitsPerToken + (long)messages.Count * MessageOverhead);
     }
 
     /// <summary>A tool result's text plus, for each image in it, the same flat cost an attached image has.</summary>
-    private static long ToolResultChars(ToolResultBlock result)
+    private static long ToolResultUnits(ToolResultBlock result)
     {
         if (result.Blocks is [TextBlock only])
         {
-            return only.Text.Length;
+            return Units(only.Text);
         }
 
-        long chars = 0;
+        long units = 0;
         foreach (var block in result.Blocks)
         {
-            chars += block switch
+            units += block switch
             {
-                TextBlock text => text.Text.Length,
-                ImageBlock => (long)ImageTokens * CharsPerToken,
+                TextBlock text => Units(text.Text),
+                ImageBlock => (long)ImageTokens * UnitsPerToken,
                 _ => 0,
             };
         }
 
-        return chars;
+        return units;
     }
 
     public int Count(string text)
@@ -91,8 +103,41 @@ public sealed class ApproximateTokenCounter : ITokenCounter
             return 0;
         }
 
-        return Saturate((text.Length + CharsPerToken - 1) / CharsPerToken);
+        return Saturate((Units(text) + UnitsPerToken - 1) / UnitsPerToken);
     }
+
+    /// <summary>Estimate units of one string: every character costs by its script, wide characters five and the rest two.</summary>
+    private static long Units(string text)
+    {
+        long units = 0;
+        foreach (var character in text)
+        {
+            units += IsWide(character) ? WideCharUnits : LatinCharUnits;
+        }
+
+        return units;
+    }
+
+    /// <summary>
+    /// Whether one character costs a CJK tokenizer step: Han (any block, including the compatibility ones), kana, Hangul,
+    /// CJK radicals and punctuation, and the fullwidth forms. Surrogate pairs (CJK extension B and beyond) are counted as
+    /// two ordinary characters — rare enough in a prompt to leave the estimate conservative.
+    /// </summary>
+    private static bool IsWide(char character) => character switch
+    {
+        >= '\u1100' and <= '\u115F' => true,
+        >= '\u2E80' and <= '\u303E' => true,
+        >= '\u3041' and <= '\u33FF' => true,
+        >= '\u3400' and <= '\u4DBF' => true,
+        >= '\u4E00' and <= '\u9FFF' => true,
+        >= '\uA000' and <= '\uA4CF' => true,
+        >= '\uAC00' and <= '\uD7A3' => true,
+        >= '\uF900' and <= '\uFAFF' => true,
+        >= '\uFE30' and <= '\uFE4F' => true,
+        >= '\uFF00' and <= '\uFF60' => true,
+        >= '\uFFE0' and <= '\uFFE6' => true,
+        _ => false,
+    };
 
     private static int Saturate(long value) => (int)Math.Min(int.MaxValue, value);
 }
