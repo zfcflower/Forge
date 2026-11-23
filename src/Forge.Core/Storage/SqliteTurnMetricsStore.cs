@@ -26,7 +26,7 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
 
     private const string Columns =
         "session_id, turn, started_at, ended_at, provider, model, status, error, " +
-        "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, tool_calls, stream_ms";
+        "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, tool_calls, stream_ms, effort";
 
     private const string StatusCompleted = "completed";
     private const string StatusStopped = "stopped";
@@ -104,7 +104,7 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
                 command.CommandText = $"""
                     INSERT INTO turn_metrics ({Columns})
                     VALUES ($session, $turn, $started, $ended, $provider, $model, $status, $error,
-                            $input, $output, $cache_read, $cache_write, $cache_write_1h, $tool_calls, $stream_ms)
+                            $input, $output, $cache_read, $cache_write, $cache_write_1h, $tool_calls, $stream_ms, $effort)
                     ON CONFLICT (session_id, turn) DO UPDATE SET
                         started_at = excluded.started_at,
                         ended_at = excluded.ended_at,
@@ -118,7 +118,8 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
                         cache_write_tokens = excluded.cache_write_tokens,
                         cache_write_1h_tokens = excluded.cache_write_1h_tokens,
                         tool_calls = excluded.tool_calls,
-                        stream_ms = excluded.stream_ms
+                        stream_ms = excluded.stream_ms,
+                        effort = excluded.effort
                     """;
                 command.Parameters.AddWithValue("$session", metric.SessionId);
                 command.Parameters.AddWithValue("$turn", metric.Turn);
@@ -135,6 +136,7 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
                 command.Parameters.AddWithValue("$cache_write_1h", ToDb(metric.CacheWrite1hTokens));
                 command.Parameters.AddWithValue("$tool_calls", ToDb(metric.ToolCalls));
                 command.Parameters.AddWithValue("$stream_ms", ToStreamMs(metric.StreamElapsed));
+                command.Parameters.AddWithValue("$effort", metric.Effort is { } effort ? EffortName(effort) : DBNull.Value);
                 return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             },
             ct);
@@ -233,14 +235,53 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
             null),
     };
 
+    /// <summary>
+    /// The lowercase text the <c>effort</c> column holds — the same names <c>settings.json</c> and <c>composer.json</c> use, so a
+    /// recorded level reads back as the step it was.
+    /// </summary>
+    internal static string EffortName(ThinkingEffort effort) => effort switch
+    {
+        ThinkingEffort.Minimal => "minimal",
+        ThinkingEffort.Low => "low",
+        ThinkingEffort.Medium => "medium",
+        ThinkingEffort.High => "high",
+        ThinkingEffort.XHigh => "xhigh",
+        ThinkingEffort.Max => "max",
+        _ => "off",
+    };
+
+    /// <summary>A NULL column is a turn nobody recorded a level for (a sub-agent's, or one from before the column existed).</summary>
+    private ThinkingEffort? ParseEffort(SqliteDataReader reader, int ordinal, string row)
+    {
+        var text = StorageDb.ReadOptionalText(reader, ordinal, "effort", _databasePath, row);
+        return text switch
+        {
+            null => null,
+            "off" => ThinkingEffort.Off,
+            "minimal" => ThinkingEffort.Minimal,
+            "low" => ThinkingEffort.Low,
+            "medium" => ThinkingEffort.Medium,
+            "high" => ThinkingEffort.High,
+            "xhigh" => ThinkingEffort.XHigh,
+            "max" => ThinkingEffort.Max,
+            _ => throw StorageDb.Malformed(
+                _databasePath,
+                "effort",
+                row,
+                $"'{text}' is not one of off, minimal, low, medium, high, xhigh, max",
+                null),
+        };
+    }
+
     private static async Task<bool> TableExistsAsync(SqliteConnection connection, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
-        // The newest column stands for the whole shape: a table a previous build of this feature created lacks stream_ms, is
-        // not migrated, and must read as "no table" instead of failing every insert and list.
-        command.CommandText = "SELECT 1 FROM pragma_table_info($name) WHERE name = 'stream_ms'";
+        // Both columns, not just the newest one: a table that already carried effort but not stream_ms (one an older build of
+        // this feature created after the step above added the column) must read as "no table" too, or every insert and list
+        // would fail on the column it still lacks instead of the feature quietly standing aside.
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info($name) WHERE name IN ('stream_ms', 'effort')";
         command.Parameters.AddWithValue("$name", TableName);
-        return await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is not null;
+        return await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is 2L;
     }
 
     /// <summary>A null token column binds as NULL — a column a turn never measured is never written as zero.</summary>
@@ -294,6 +335,7 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
             ToolCalls = ReadOptionalInt32(reader, 13, "tool_calls", row),
             StreamElapsed = TimeSpan.FromMilliseconds(
                 StorageDb.ReadInt64(reader, 14, "stream_ms", _databasePath, row)),
+            Effort = ParseEffort(reader, 15, row),
         };
     }
 

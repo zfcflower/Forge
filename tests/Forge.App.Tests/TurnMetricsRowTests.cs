@@ -23,7 +23,8 @@ public sealed class TurnMetricsRowTests
         TokenUsage? instanceUsage = null,
         int toolCalls = 2,
         TimeSpan? rootStream = null,
-        TimeSpan? turnStartStream = null) =>
+        TimeSpan? turnStartStream = null,
+        ThinkingEffort? effort = null) =>
         TurnMetricsRowFactory.Build(
             "s1",
             7,
@@ -37,7 +38,24 @@ public sealed class TurnMetricsRowTests
             turnStartStream ?? TimeSpan.Zero,
             toolCalls,
             "anthropic",
-            "claude");
+            "claude",
+            effort);
+
+    /// <summary>
+    /// The reasoning step a turn ran with is part of its row, not a display-only detail: the reopened divider reads it back
+    /// from here, and a factory that dropped it would still pass every rule about tokens and outcomes.
+    /// </summary>
+    [Fact]
+    public void The_row_carries_the_reasoning_step_the_turn_ran_with()
+    {
+        var row = Build(effort: ThinkingEffort.High);
+
+        Assert.Equal(ThinkingEffort.High, row.Effort);
+        Assert.Equal(ThinkingEffort.High, row.ToMetric().Effort);
+
+        // A turn nobody recorded a step for keeps it unknown instead of reading as "off".
+        Assert.Null(Build().ToMetric().Effort);
+    }
 
     [Fact]
     public void A_turn_that_ran_through_is_completed_and_keeps_the_snapshot_difference_in_utc()

@@ -28,7 +28,8 @@ internal readonly struct TurnMetricsRow
         int? cacheReadTokens = null,
         int? cacheWriteTokens = null,
         int? cacheWrite1hTokens = null,
-        int? toolCalls = null)
+        int? toolCalls = null,
+        ThinkingEffort? effort = null)
     {
         ArgumentNullException.ThrowIfNull(sessionId);
         SessionId = sessionId;
@@ -45,6 +46,7 @@ internal readonly struct TurnMetricsRow
         CacheWriteTokens = cacheWriteTokens;
         CacheWrite1hTokens = cacheWrite1hTokens;
         ToolCalls = toolCalls;
+        Effort = effort;
     }
 
     public string SessionId { get; }
@@ -75,6 +77,9 @@ internal readonly struct TurnMetricsRow
 
     public int? ToolCalls { get; }
 
+    /// <summary>The reasoning step the turn ran with; null when nobody recorded one (a sub-agent's turn, an undelivered turn).</summary>
+    public ThinkingEffort? Effort { get; }
+
     /// <summary>
     /// How long the model spent streaming this turn's answers, in milliseconds — the difference of the root instance's
     /// stream counter between the turn start and the turn end. Always written, whatever the outcome: unlike the token
@@ -99,7 +104,8 @@ internal readonly struct TurnMetricsRow
         CacheWriteTokens,
         CacheWrite1hTokens,
         ToolCalls,
-        TimeSpan.FromMilliseconds(StreamMs));
+        TimeSpan.FromMilliseconds(StreamMs),
+        Effort);
 }
 
 /// <summary>
@@ -140,7 +146,8 @@ internal static class TurnMetricsRowFactory
         TimeSpan turnStartElapsed,
         int? toolCalls,
         string? provider,
-        string? model) =>
+        string? model,
+        ThinkingEffort? effort) =>
         BuildRow(
             sessionId,
             turn,
@@ -154,7 +161,8 @@ internal static class TurnMetricsRowFactory
             turnStartElapsed,
             toolCalls,
             provider,
-            model);
+            model,
+            effort);
 
     /// <summary>
     /// Builds one row from the outcome Core reported through the delivery seam: a turn Core drove itself has no
@@ -177,7 +185,8 @@ internal static class TurnMetricsRowFactory
         TimeSpan turnStartElapsed,
         int? toolCalls,
         string? provider,
-        string? model) =>
+        string? model,
+        ThinkingEffort? effort) =>
         BuildRow(
             sessionId,
             turn,
@@ -191,7 +200,8 @@ internal static class TurnMetricsRowFactory
             turnStartElapsed,
             toolCalls,
             provider,
-            model);
+            model,
+            effort);
 
     /// <summary>
     /// The row status of an outcome Core reported through the delivery seam. <see cref="SessionReplyStatus"/> has exactly the
@@ -221,7 +231,8 @@ internal static class TurnMetricsRowFactory
         TimeSpan turnStartElapsed,
         int? toolCalls,
         string? provider,
-        string? model)
+        string? model,
+        ThinkingEffort? effort)
     {
         int? input = null, output = null, cacheRead = null, cacheWrite = null, cacheWrite1h = null;
         if (status is TurnMetricStatus.Completed)
@@ -255,7 +266,8 @@ internal static class TurnMetricsRowFactory
             cacheRead,
             cacheWrite,
             cacheWrite1h,
-            toolCalls)
+            toolCalls,
+            effort)
         {
             // Written for every outcome, outside the token block above: the two snapshots are always taken, they are
             // clamped because a counter that went backwards never means negative streaming, and nothing here reads a

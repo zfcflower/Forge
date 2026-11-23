@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 12;
+    public const int Version = 13;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -153,6 +153,7 @@ internal static class StorageSchema
             cache_write_1h_tokens INTEGER NULL,
             tool_calls            INTEGER NULL,
             stream_ms             INTEGER NOT NULL,
+            effort                TEXT NULL,
             PRIMARY KEY (session_id, turn)
         ) WITHOUT ROWID;
         """;
@@ -367,6 +368,9 @@ internal static class StorageSchema
                 break;
             case 11:
                 await ExecuteAsync(connection, transaction, V12SchemaSql, ct).ConfigureAwait(false);
+                break;
+            case 12:
+                await MigrateToV13Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
@@ -649,6 +653,26 @@ internal static class StorageSchema
     /// keeps reading as unnamed until something writes a title through <c>TryTitleAsync</c>.
     /// </summary>
     private const string V12SchemaSql = "ALTER TABLE sessions ADD COLUMN title_source TEXT;";
+
+    /// <summary>
+    /// The v13 step: the reasoning step each turn ran with. <c>turn_metrics</c> is created by the V1 script, so a database that
+    /// never used the feature has no table and the step alters nothing — a table an older build created for it after this
+    /// step already ran fails the recorder's shape probe and stays bypassed (see <c>SqliteTurnMetricsStore</c>), which is why
+    /// the step does not assume the table is there. Every existing row keeps NULL: a turn recorded before the column names no
+    /// step, and the readers show no suffix instead of guessing one.
+    /// </summary>
+    private static async Task MigrateToV13Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        var tables = await ExistingColumnsAsync(connection, transaction, ct).ConfigureAwait(false);
+        if (tables.ContainsKey("turn_metrics"))
+        {
+            await AddColumnIfMissingAsync(connection, transaction, "turn_metrics", "effort", "TEXT NULL", ct)
+                .ConfigureAwait(false);
+        }
+    }
 
     private const string V10SchemaSql = """
         CREATE TABLE IF NOT EXISTS automation_runs (

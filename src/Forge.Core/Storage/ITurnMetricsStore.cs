@@ -1,3 +1,5 @@
+using Forge.Abstractions;
+
 namespace Forge.Core.Storage;
 
 /// <summary>
@@ -43,7 +45,8 @@ public sealed record TurnMetric(
     int? CacheWriteTokens = null,
     int? CacheWrite1hTokens = null,
     int? ToolCalls = null,
-    TimeSpan StreamElapsed = default);
+    TimeSpan StreamElapsed = default,
+    ThinkingEffort? Effort = null);
 
 /// <summary>
 /// Per-turn metrics of main sessions, keyed by <c>(session_id, turn)</c> — the table records the number the transcript

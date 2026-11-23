@@ -5,6 +5,7 @@ using System.Text;
 using Forge.Abstractions;
 using Forge.App.Changes.Markdown;
 using Forge.App.Localization;
+using Forge.App.Providers;
 using Forge.Core.Providers;
 using Forge.Core.Storage;
 
@@ -602,6 +603,9 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     private string? providerName;
     private string? modelName;
 
+    /// <summary>The reasoning step the turn ran with: stamped at the turn's start, or seeded from its metrics row.</summary>
+    private ThinkingEffort? effort;
+
     /// <summary>The failure text the metrics table recorded; the tooltip shows it when the turn left no footnote.</summary>
     private string? seededError;
 
@@ -720,8 +724,19 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     /// turn's stored metrics row.</summary>
     internal string? ProviderName => providerName;
 
+    /// <summary>The reasoning step the turn ran with; null for a turn nobody recorded one for.</summary>
+    internal ThinkingEffort? Effort => effort;
+
+    /// <summary>
+    /// The turn's model in the standard form every divider uses — <c>provider/model:effort</c>, the provider and the step
+    /// omitted when they are unknown — and null when nothing named the model at all.
+    /// </summary>
+    internal string? ModelLabel => modelName is { Length: > 0 }
+        ? TurnDividerText.ModelLabel(providerName, modelName, effort)
+        : null;
+
     /// <summary>Stamps the live turn's model on the card, at the turn's start, so the divider line and tooltip can show it.</summary>
-    internal void NoteModel(string? provider, string? model)
+    internal void NoteModel(string? provider, string? model, ThinkingEffort? level = null)
     {
         if (string.IsNullOrEmpty(provider) && string.IsNullOrEmpty(model))
         {
@@ -730,6 +745,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 
         providerName = provider;
         modelName = model;
+        effort = level;
         dividerRow?.RefreshText();
     }
 
@@ -747,11 +763,8 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         dividerRow?.RefreshText();
     }
 
-    /// <summary>The model reference the tooltip's last line shows: the provider and the model, or whichever half was known.</summary>
-    internal string DividerModelText =>
-        modelName is { Length: > 0 } model
-            ? providerName is { Length: > 0 } provider ? $"{provider}/{model}" : model
-            : TextFormat.None;
+    /// <summary>The model reference the tooltip's last line shows: the standard label, or "—" when nothing knew the model.</summary>
+    internal string DividerModelText => ModelLabel ?? TextFormat.None;
 
     /// <summary>The user-visible text of the footnote, for the divider's status line; null when the turn went through.</summary>
     internal string? ErrorSummary => footnote.IsEmpty ? seededError : footnote.Resolve();
@@ -811,6 +824,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         };
         providerName ??= metric.Provider;
         modelName ??= metric.Model;
+        effort ??= metric.Effort;
         seededError ??= metric.Error;
         dividerRow?.RefreshText();
     }
@@ -1080,7 +1094,7 @@ internal sealed class TurnDividerViewModel(TurnCardViewModel card) : TranscriptI
         Card.ReportedUsage?.InputTokens,
         Card.ReportedUsage?.OutputTokens,
         Card.ToolCount,
-        Card.ModelName);
+        Card.ModelLabel);
 
     /// <summary>True for a turn that did not complete: the gutter node wears the failing state.</summary>
     public bool HasFailed => Card.EndStatus != TurnEndStatus.Completed;
@@ -1152,6 +1166,23 @@ internal static class TurnDividerText
         >= 0.01 => "$" + value.ToString("0.000", CultureInfo.InvariantCulture),
         _ => "$" + value.ToString("0.0000", CultureInfo.InvariantCulture),
     };
+
+    /// <summary>
+    /// The turn's model in the standard form the divider line and its tooltip both print:
+    /// <c>provider/model:effort</c>. The provider and the step are each omitted when that half is unknown, so a row from before
+    /// the step was recorded reads as the plain reference it always did; an unknown model reads <c>—</c>, never a made-up
+    /// combination.
+    /// </summary>
+    public static string ModelLabel(string? provider, string? model, ThinkingEffort? effort)
+    {
+        if (model is not { Length: > 0 } name)
+        {
+            return TextFormat.None;
+        }
+
+        var reference = provider is { Length: > 0 } source ? source + "/" + name : name;
+        return effort is { } step ? reference + ":" + ThinkingEfforts.Name(step) : reference;
+    }
 
     /// <summary>
     /// The line in the middle of the rule. A completed turn shows all four segments (unknown sides read "—"); any other

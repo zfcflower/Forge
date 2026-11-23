@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Data.Common;
 using System.Diagnostics;
@@ -153,6 +154,18 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private readonly ISessionInstrumentSources instrumentSources;
 
     /// <summary>
+    /// Where the chip's selection is persisted between runs (<c>ui_state</c>, one row per session); null in a standalone view,
+    /// which then only knows what the last recorded turn says.
+    /// </summary>
+    private readonly SessionComposerStore? sessionComposer;
+
+    /// <summary>The selection waiting to be written, and whether a writer is already draining it (UI thread only).</summary>
+    private readonly Lock selectionGate = new();
+    private SessionComposerSelection? pendingSelection;
+    private bool savingSelection;
+    private Task? selectionSave;
+
+    /// <summary>
     /// The root instance's counters as the turn began (tokens, streaming time, and which instance they belong to). The turn-end
     /// difference is the metrics row's snapshot. They are read from the instance itself, not from events: a turn that failed
     /// or was stopped never sends <c>AgentTurnCompleted</c>, yet its calls already moved the counters, and an event-fed copy
@@ -187,6 +200,18 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     // Automation turns (see RunAutomationTurnAsync): set only on the UI thread.
     private volatile bool automationTurn;
+
+    /// <summary>
+    /// The model an automation's own turn runs on when its agent overrides the composer's pick, and null otherwise: the turn
+    /// card and its metrics row both name the model and the reasoning step that actually ran, not the chip the user left behind.
+    /// </summary>
+    private ModelSettings? automationModel;
+
+    /// <summary>
+    /// The model the turn now running (or just ended) was started with. Stamped on the card and written into its metrics row, so
+    /// a chip change in the middle of a turn cannot relabel the turn it did not run.
+    /// </summary>
+    private ModelSettings turnModel = new(string.Empty);
 
     // Root failure of the running turn as the worker thread saw it: the coalesced UI copy can land after the turn's await.
     private volatile string? turnRootFailure;
@@ -239,7 +264,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         AgentSessionLaunch? agentSession = null,
         Func<IReadOnlyList<SessionMentionTarget>>? sessionMentions = null,
         Action<string, string>? sessionReceipt = null,
-        Func<string?>? rootTitle = null)
+        Func<string?>? rootTitle = null,
+        SessionComposerStore? sessionComposer = null)
     {
         Info = session;
         this.agentSession = agentSession;
@@ -260,6 +286,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         var instrumentSourcesResolved = instrumentSources ?? EmptySessionInstrumentSources.Instance;
         metricsRecorder = instrumentSourcesResolved.TurnMetricsRecorder;
         this.instrumentSources = instrumentSourcesResolved;
+        this.sessionComposer = sessionComposer;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
 
         // A failed turn that ran no tool is replayed through this session's own turn entry. The button itself lives on the
@@ -303,6 +330,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             // A kind switch renames the tab while the name is still the derivation's (see OnComposerPropertyChanged).
             Composer.PropertyChanged += OnComposerPropertyChanged;
         }
+        if (sessionComposer is not null && agentSession is null)
+        {
+            // A model or step the user picks is the session's selection whether or not a turn follows it: it is written as it
+            // changes, which is the only way a switch made just before closing survives (a metrics row never sees it).
+            Composer.PropertyChanged += OnComposerSelectionChanged;
+        }
+
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
         Instruments = new SessionInstrumentsViewModel(
             session,
@@ -929,6 +963,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             }
 
             var (older, _) = TranscriptReplay.ReplayPage(page);
+            // The older page's rounds seed from the same table as the first one, before they join the transcript: seeding
+            // through the merged transcript could also stamp a run in progress. The read is one query per page.
+            await SeedTurnMetricsAsync(older, SessionId, ct).ConfigureAwait(true);
             Transcript.PrependRounds(older);
             historyBeforeSeq = page.Messages[0].Seq;
             HasOlderHistory = page.HasMore;
@@ -991,6 +1028,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 .ConfigureAwait(true);
             Transcript.SeedRoundCounter(page.TurnsBefore);
             Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, page.Messages));
+            // The clock, the stream time, the tool count, the outcome and the model are not in the stored messages: a
+            // replayed round takes them from its own metrics row, so it reads the same line the live turn showed.
+            await RestoreComposerSelectionAsync(
+                    await SeedTurnMetricsAsync(Transcript, SessionId, ct).ConfigureAwait(true),
+                    ct)
+                .ConfigureAwait(true);
             historyBeforeSeq = page.Messages.Count > 0 ? page.Messages[0].Seq : 1;
             HasOlderHistory = page.HasMore;
 
@@ -1052,8 +1095,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>
     /// The one replay sequence both a main session's open and a history sub-agent's open run: read the stored messages,
     /// draw them, and seed the dividers from the turn metrics the session recorded. Returns the usage the replay summed,
-    /// for the caller's own instruments to seed. Reading and seeding failures are guarded here once: metrics only fill
-    /// blanks the replay cannot, so a lost read leaves "—", never a notice.
+    /// for the caller's own instruments to seed.
     /// </summary>
     private async Task<TokenUsage> ReplayIntoAsync(TranscriptViewModel transcript, string sessionId, CancellationToken ct)
     {
@@ -1069,20 +1111,170 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
 
         var total = TranscriptReplay.Apply(transcript, messages);
-        if (instrumentSources.TurnMetrics is { } turnMetrics)
+        await SeedTurnMetricsAsync(transcript, sessionId, ct).ConfigureAwait(true);
+        return total;
+    }
+
+    /// <summary>
+    /// Fills what a stored conversation cannot reconstruct — wall clock, stream time, tool count, outcome, model — from the
+    /// session's own <c>turn_metrics</c> rows, matching each replayed round by its number. Returns the rows it read, so a
+    /// caller that also needs the session's last model reuses the same read; a view without a metrics table, or a read that
+    /// failed, answers empty and leaves every round reading "—" — metrics only fill blanks, so they never turn into a notice.
+    /// </summary>
+    private async Task<IReadOnlyList<TurnMetric>> SeedTurnMetricsAsync(
+        TranscriptViewModel transcript,
+        string sessionId,
+        CancellationToken ct)
+    {
+        if (instrumentSources.TurnMetrics is not { } turnMetrics)
+        {
+            return [];
+        }
+
+        try
+        {
+            var metrics = await turnMetrics.ListAsync(sessionId, ct).ConfigureAwait(true);
+            transcript.SeedTurnMetrics(metrics);
+            return metrics;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException
+            or ObjectDisposedException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            AppLogs.Session.ZLogWarning($"turn metrics seed skipped: {exception.GetType().Name}: {exception.Message}");
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Puts a reopened session's chip back where it was left. The selection the user last picked is the authority — it is
+    /// written as it changes, so a model or step switched and then closed without a turn still comes back. A session from
+    /// before that write (or one whose stored model no configured provider serves any more) falls back to its last recorded
+    /// turn, which is the only model a metrics row can name. An agent-session tab keeps out: its chip follows the kind it was
+    /// opened with.
+    /// </summary>
+    private async Task RestoreComposerSelectionAsync(IReadOnlyList<TurnMetric> metrics, CancellationToken ct)
+    {
+        if (agentSession is not null)
+        {
+            return;
+        }
+
+        if (sessionComposer is not null)
         {
             try
             {
-                transcript.SeedTurnMetrics(await turnMetrics.ListAsync(sessionId, ct).ConfigureAwait(true));
+                if (await sessionComposer.ReadAsync(SessionId, ct).ConfigureAwait(true) is { Model: { Length: > 0 } stored } saved
+                    && Composer.RestoreSessionModel(stored, saved.Provider, ParseEffort(saved.Effort)))
+                {
+                    return;
+                }
             }
             catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException
-                or ObjectDisposedException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
+                or ObjectDisposedException or Microsoft.Data.Sqlite.SqliteException)
             {
-                AppLogs.Session.ZLogWarning($"turn metrics seed skipped: {exception.GetType().Name}: {exception.Message}");
+                AppLogs.Session.ZLogWarning($"composer selection read skipped: {exception.GetType().Name}: {exception.Message}");
             }
         }
 
-        return total;
+        for (var index = metrics.Count - 1; index >= 0; index--)
+        {
+            if (metrics[index].Model is { Length: > 0 } model)
+            {
+                Composer.RestoreSessionModel(model, metrics[index].Provider, metrics[index].Effort);
+                return;
+            }
+        }
+    }
+
+    /// <summary>The stored step name back to a step; a name this build does not know is no step, so the model alone restores.</summary>
+    private static ThinkingEffort? ParseEffort(string? stored) =>
+        ThinkingEfforts.TryParse(stored, out var effort) ? effort : null;
+
+    /// <summary>
+    /// Remembers the chip's selection as it changes, coalescing the writes a slider drag produces: the latest selection wins
+    /// and the previous one is dropped, never written out of order. A read-only view writes too - the only change it ever sees
+    /// is the restore itself, which keeps the row in step with what the view shows. Best effort like every other <c>ui_state</c>
+    /// write: a failed save leaves the next reopen on the last recorded turn instead of interrupting the user.
+    /// </summary>
+    private void OnComposerSelectionChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (nameof(ComposerViewModel.Model) or nameof(ComposerViewModel.ProviderId)
+            or nameof(ComposerViewModel.Effort)))
+        {
+            return;
+        }
+
+        if (sessionComposer is null || disposed)
+        {
+            return;
+        }
+
+        var selection = new SessionComposerSelection
+        {
+            Model = Composer.Model is { Length: > 0 } model ? model : null,
+            Provider = Composer.ProviderId is { Length: > 0 } provider ? provider : null,
+            Effort = ThinkingEfforts.Name(Composer.Effort),
+        };
+
+        // The pending value and the writer's own flag move together: the writer may be finishing on a pool thread, and a
+        // selection that landed between its last poll and its retirement would otherwise wait for the next change.
+        bool start;
+        lock (selectionGate)
+        {
+            pendingSelection = selection;
+            start = !savingSelection;
+            if (start)
+            {
+                savingSelection = true;
+            }
+        }
+
+        if (start)
+        {
+            selectionSave = SaveComposerSelectionAsync();
+        }
+    }
+
+    /// <summary>
+    /// The write of the chip selection last taken, for a caller that has to wait for it instead of racing it (the reopen test).
+    /// Completed when nothing was ever written.
+    /// </summary>
+    internal Task ComposerSelectionSaved => selectionSave ?? Task.CompletedTask;
+
+    private async Task SaveComposerSelectionAsync()
+    {
+        while (true)
+        {
+            SessionComposerSelection? selection;
+            lock (selectionGate)
+            {
+                selection = pendingSelection;
+                pendingSelection = null;
+                if (selection is null)
+                {
+                    // Retired under the same lock that schedules the writer, so a selection taken from here on starts its own.
+                    savingSelection = false;
+                    return;
+                }
+            }
+
+            if (sessionComposer is not { } store)
+            {
+                continue;
+            }
+
+            try
+            {
+                var sessionId = SessionId;
+                await Task.Run(() => store.WriteAsync(sessionId, selection, CancellationToken.None), CancellationToken.None)
+                    .ConfigureAwait(true);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                AppLogs.Session.ZLogWarning(
+                    $"composer selection not saved: {exception.GetType().Name}: {exception.Message}");
+            }
+        }
     }
 
     private async Task RestoreSubAgentsAsync(string parentSessionId, string parentAgentId, CancellationToken ct)
@@ -1642,6 +1834,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (agent is not null)
         {
             ApplyRootDefinition(agent);
+            automationModel = agent.Model;
         }
 
         try
@@ -1651,6 +1844,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         finally
         {
             automationTurn = false;
+            automationModel = null;
             if (agent is not null && !disposed)
             {
                 // The override was for this turn only: the session goes back to the agent its composer has selected.
@@ -2012,9 +2206,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         // Kept on the card, not in a field: a retry re-sends exactly this turn's text and attachments, and a card that never
         // had a prompt (a replayed one) must not offer one.
         card.Prompt = prompt;
+        // The turn's own model, stamped once and carried into its metrics row: the provider, the model id and the reasoning
+        // step are the ones this turn runs with, so a chip change during the turn cannot relabel it.
+        turnModel = TurnModel();
         card.NoteModel(
-            Composer.ProviderId is { Length: > 0 } provider ? provider : null,
-            Composer.Model is { Length: > 0 } model ? model : null);
+            turnModel.ProviderId is { Length: > 0 } provider ? provider : null,
+            turnModel.Model is { Length: > 0 } model ? model : null,
+            turnModel.Thinking);
         turnNumber = card.Round;
         IsRunning = true;
 
@@ -2742,7 +2940,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     turnStartStream,
                     tools,
                     agent.ProviderId,
-                    agent.Model.Length == 0 ? null : agent.Model));
+                    agent.Model.Length == 0 ? null : agent.Model,
+                    effort: null));
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
@@ -2750,6 +2949,23 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 AppLogs.Usage.ZLogWarning($"sub-agent turn metrics row not queued: {exception.GetType().Name}: {exception.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// The model the turn about to start runs on: the automation agent's own model when it overrides the chip for this one
+    /// turn, else the composer's pick. A definition that pins no provider keeps the composer's, which is where the host routes
+    /// an unpinned model.
+    /// </summary>
+    private ModelSettings TurnModel()
+    {
+        if (automationModel is not { } actual)
+        {
+            return Composer.SelectedModel;
+        }
+
+        return actual.ProviderId is { Length: > 0 }
+            ? actual
+            : actual with { ProviderId = Composer.ProviderId is { Length: > 0 } chosen ? chosen : null };
     }
 
     /// <summary>
@@ -2783,8 +2999,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 end.Stream,
                 start.Stream,
                 turnToolCalls,
-                Composer.ProviderId is { Length: > 0 } provider ? provider : null,
-                Composer.Model is { Length: > 0 } model ? model : null));
+                turnModel.ProviderId is { Length: > 0 } provider ? provider : null,
+                turnModel.Model is { Length: > 0 } model ? model : null,
+                turnModel.Thinking));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -3061,6 +3278,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         foreach (var agent in finished)
         {
             agent.DisposeInstruments();
+        }
+
+        if (sessionComposer is not null && agentSession is null)
+        {
+            Composer.PropertyChanged -= OnComposerSelectionChanged;
         }
 
         Composer.Dispose();

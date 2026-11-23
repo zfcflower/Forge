@@ -442,7 +442,10 @@ internal sealed partial class SessionWorkspaceViewModel
         // (RunTurnAsync branches to the agent path), so a card without a prompt is the one thing that would leave a failed
         // first turn - quota, 401, network, a retired model - with no way back.
         card.Prompt = prompt;
-        card.NoteModel(Composer.ProviderId is { Length: > 0 } provider ? provider : null, definition.Model.Model);
+        card.NoteModel(
+            Composer.ProviderId is { Length: > 0 } provider ? provider : null,
+            definition.Model.Model,
+            definition.Model.Thinking);
         turnNumber = card.Round;
         IsRunning = true;
 
@@ -664,7 +667,8 @@ internal sealed partial class SessionWorkspaceViewModel
                     : Composer.ProviderId is { Length: > 0 } chosen
                         ? chosen
                         : null,
-                definition.Model.Model));
+                definition.Model.Model,
+                definition.Model.Thinking));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

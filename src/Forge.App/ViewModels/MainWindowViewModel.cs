@@ -153,6 +153,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly AppComposition composition;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private readonly LayoutStateLoader layoutState;
+
+    /// <summary>Where each session's chip selection is kept between runs; one store for the whole window.</summary>
+    private readonly SessionComposerStore composerSelections;
     private readonly Dictionary<string, SessionWorkspaceViewModel> sessions = new(StringComparer.Ordinal);
     private readonly HashSet<string> handingOver = new(StringComparer.Ordinal);
     private readonly HashSet<string> openTabs = new(StringComparer.Ordinal);
@@ -195,6 +198,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         // the very first host already has the seam.
         InitializeSessionMessages();
         layoutState = new LayoutStateLoader(composition.UiState);
+        composerSelections = new SessionComposerStore(composition.UiState);
         reviews = composition.Workspace?.Reviews ?? new ReviewStore(composition.Paths.ReviewsDirectory);
 
         Status = new StatusBarViewModel(composition);
@@ -1051,7 +1055,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             openInspector: OpenInspector,
             openSession: () => ActivateSessionTab(info.Id),
             sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created),
-            sessionReceipt: DeliverReceipt)
+            sessionReceipt: DeliverReceipt,
+            sessionComposer: composerSelections)
         {
             ChildQuery = readOnly
                 ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)

@@ -279,7 +279,8 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
                 same ? started.Start.Stream : TimeSpan.Zero,
                 toolCalls: null,
                 started.Provider,
-                started.Model));
+                started.Model,
+                effort: null));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
