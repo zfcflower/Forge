@@ -330,7 +330,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             // A kind switch renames the tab while the name is still the derivation's (see OnComposerPropertyChanged).
             Composer.PropertyChanged += OnComposerPropertyChanged;
         }
-        if (sessionComposer is not null && agentSession is null)
+        if (sessionComposer is not null)
         {
             // A model or step the user picks is the session's selection whether or not a turn follows it: it is written as it
             // changes, which is the only way a switch made just before closing survives (a metrics row never sees it).
@@ -1146,24 +1146,26 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     }
 
     /// <summary>
+    /// The session this tab's stored selection belongs to. An agent-session <em>draft</em> has no stored row and its temporary
+    /// id is reused by the next draft under the same root, so until the first turn turns it into a session nothing is read or
+    /// written here — otherwise a selection the user never made would wait for the next draft that lands on that id.
+    /// </summary>
+    private string? ComposerSelectionSessionId =>
+        agentSession is { IsDraft: true } ? agentChildSessionId : SessionId;
+
+    /// <summary>
     /// Puts a reopened session's chip back where it was left. The selection the user last picked is the authority — it is
     /// written as it changes, so a model or step switched and then closed without a turn still comes back. A session from
     /// before that write (or one whose stored model no configured provider serves any more) falls back to its last recorded
-    /// turn, which is the only model a metrics row can name. An agent-session tab keeps out: its chip follows the kind it was
-    /// opened with.
+    /// turn, which is the only model a metrics row can name.
     /// </summary>
     private async Task RestoreComposerSelectionAsync(IReadOnlyList<TurnMetric> metrics, CancellationToken ct)
     {
-        if (agentSession is not null)
-        {
-            return;
-        }
-
-        if (sessionComposer is not null)
+        if (sessionComposer is { } store && ComposerSelectionSessionId is { } composerId)
         {
             try
             {
-                if (await sessionComposer.ReadAsync(SessionId, ct).ConfigureAwait(true) is { Model: { Length: > 0 } stored } saved
+                if (await store.ReadAsync(composerId, ct).ConfigureAwait(true) is { Model: { Length: > 0 } stored } saved
                     && Composer.RestoreSessionModel(stored, saved.Provider, ParseEffort(saved.Effort)))
                 {
                     return;
@@ -1204,7 +1206,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return;
         }
 
-        if (sessionComposer is null || disposed)
+        if (sessionComposer is null || disposed || ComposerSelectionSessionId is null)
         {
             return;
         }
@@ -1258,14 +1260,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 }
             }
 
-            if (sessionComposer is not { } store)
+            if (sessionComposer is not { } store || ComposerSelectionSessionId is not { } sessionId)
             {
                 continue;
             }
 
             try
             {
-                var sessionId = SessionId;
                 await Task.Run(() => store.WriteAsync(sessionId, selection, CancellationToken.None), CancellationToken.None)
                     .ConfigureAwait(true);
             }
@@ -3280,7 +3281,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             agent.DisposeInstruments();
         }
 
-        if (sessionComposer is not null && agentSession is null)
+        if (sessionComposer is not null)
         {
             Composer.PropertyChanged -= OnComposerSelectionChanged;
         }

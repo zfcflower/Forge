@@ -210,6 +210,94 @@ public sealed class ReopenRoundStatsTests : IDisposable
         Assert.Equal("probe/model-b", first.Card.DividerModelText);
     }
 
+    /// <summary>
+    /// An agent session is a tab of its own and its chip is restored the same way: the user may run it on another model than
+    /// the root's, and closing and reopening that tab must not silently move it back to the default. Its history load is the
+    /// same entry point, so it reads the same <c>ui_state</c> row and falls back to its own last turn.
+    /// </summary>
+    [Fact]
+    public async Task An_agent_session_tab_recovers_its_chip_from_its_own_last_turn()
+    {
+        await using var store = await OpenStoreAsync();
+        var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+        var child = await store.CreateAsync(
+            new SessionCreate(directory, "child") { ParentSessionId = root.Id },
+            CancellationToken.None);
+
+        await using var metrics = new SqliteTurnMetricsStore(directory);
+        await metrics.WriteAsync(
+            new TurnMetric(
+                child.Id,
+                1,
+                At0,
+                At0.AddSeconds(10),
+                TurnMetricStatus.Completed,
+                "probe",
+                "glm-5.3",
+                Effort: ThinkingEffort.High),
+            CancellationToken.None);
+
+        var session = Reopen(child, store, metrics, agentSession: new AgentSessionLaunch(root, 1, IsDraft: false));
+        await session.LoadHistoryAsync(CancellationToken.None);
+
+        Assert.Equal("glm-5.3", session.Composer.Model);
+        Assert.Equal("probe", session.Composer.ProviderId);
+        Assert.Equal(ThinkingEffort.High, session.Composer.Effort);
+    }
+
+    /// <summary>A selection written by the tab before it closed wins over the last recorded turn, agent session included.</summary>
+    [Fact]
+    public async Task An_agent_session_keeps_the_pick_it_stored_even_with_no_turn_behind_it()
+    {
+        await using var store = await OpenStoreAsync();
+        var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+        var child = await store.CreateAsync(
+            new SessionCreate(directory, "child") { ParentSessionId = root.Id },
+            CancellationToken.None);
+
+        await using var metrics = new SqliteTurnMetricsStore(directory);
+        await metrics.WriteAsync(
+            new TurnMetric(child.Id, 1, At0, At0.AddSeconds(10), TurnMetricStatus.Completed, "probe", "model-a"),
+            CancellationToken.None);
+
+        await using var uiState = new SqliteUiStateStore(directory);
+        var selections = new SessionComposerStore(uiState);
+        await selections.WriteAsync(
+            child.Id,
+            new SessionComposerSelection { Model = "glm-5.3", Provider = "probe", Effort = "high" },
+            CancellationToken.None);
+
+        var session = Reopen(child, store, metrics, selections, new AgentSessionLaunch(root, 1, IsDraft: false));
+        await session.LoadHistoryAsync(CancellationToken.None);
+
+        Assert.Equal("glm-5.3", session.Composer.Model);
+        Assert.Equal(ThinkingEffort.High, session.Composer.Effort);
+    }
+
+    /// <summary>
+    /// A draft agent session has no stored row, and the tab id a draft uses is reused by the next draft under the same root. A
+    /// selection written under it would therefore be read back by a draft the user never picked it in, so nothing is written
+    /// until the first turn turns the draft into a real session.
+    /// </summary>
+    [Fact]
+    public async Task An_agent_session_draft_writes_no_selection_under_its_temporary_id()
+    {
+        await using var store = await OpenStoreAsync();
+        var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+        var draftId = "agent-draft-" + root.Id + "-1";
+        var draft = new SessionInfo(draftId, directory, "worker", At0);
+
+        await using var metrics = new SqliteTurnMetricsStore(directory);
+        await using var uiState = new SqliteUiStateStore(directory);
+        var selections = new SessionComposerStore(uiState);
+
+        var session = Reopen(draft, store, metrics, selections, new AgentSessionLaunch(root, 1, IsDraft: true));
+        Assert.True(session.Composer.RestoreSessionModel("glm-5.3", "probe"));
+        await session.ComposerSelectionSaved;
+
+        Assert.Null(await selections.ReadAsync(draftId, CancellationToken.None));
+    }
+
     /// <summary>The session store and the metrics table share one <c>forge.db</c>, as they do in the app.</summary>
     private Task<SqliteSessionStore> OpenStoreAsync()
     {
@@ -254,7 +342,8 @@ public sealed class ReopenRoundStatsTests : IDisposable
         SessionInfo info,
         SqliteSessionStore store,
         ITurnMetricsStore metrics,
-        SessionComposerStore? composerSelections = null) =>
+        SessionComposerStore? composerSelections = null,
+        AgentSessionLaunch? agentSession = null) =>
         new(
             info,
             runtime: null,
@@ -263,6 +352,7 @@ public sealed class ReopenRoundStatsTests : IDisposable
             Providers(),
             composerPreferences: new ComposerPreferences(),
             instrumentSources: new MetricsSources(metrics),
+            agentSession: agentSession,
             sessionComposer: composerSelections);
 
     /// <summary>The app's sources with the turn-metrics table wired in; every other reading is the null object.</summary>

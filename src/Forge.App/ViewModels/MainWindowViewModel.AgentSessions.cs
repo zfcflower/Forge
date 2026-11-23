@@ -219,6 +219,9 @@ internal sealed partial class MainWindowViewModel
             agentSession: new AgentSessionLaunch(root, ordinal, isDraft),
             sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created),
             sessionReceipt: DeliverReceipt,
+            // An agent session is a session like any other: its chip comes back where the user left it, and a pick made there
+            // is remembered even when no turn follows it.
+            sessionComposer: composerSelections,
             // The tab's label carries the root's name as a prefix, and the launch only carries a snapshot of it: a root renamed
             // after this tab was opened has its own tab (when it has one) answer with the title it holds now.
             rootTitle: () => CurrentRootTitle(root.Id))
