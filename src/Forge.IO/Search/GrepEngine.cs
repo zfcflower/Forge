@@ -23,6 +23,13 @@ public sealed record GrepRequest
     /// <summary>An optional glob a file's workspace-relative path has to match; <see cref="GlobMatcher.IsPathMatch(string)"/> semantics.</summary>
     public string? Glob { get; init; }
 
+    /// <summary>
+    /// Whether the workspace's <c>.gitignore</c> rules prune the walk. True for a search of the root; false when the caller
+    /// named the path itself, which is the rule <c>ls</c> already follows — the same directory must not answer differently
+    /// depending on which tool is asked. Both backends honour it, so their result sets stay equal.
+    /// </summary>
+    public bool ApplyIgnoreRules { get; init; } = true;
+
     /// <summary>Treat <see cref="Pattern"/> as a .NET regular expression instead of a literal string.</summary>
     public bool Regex { get; init; }
 
@@ -197,7 +204,7 @@ public static class GrepEngine
                 yield break;
             }
 
-            var ignore = new GitIgnore(request.Root);
+            GitIgnore? ignore = request.ApplyIgnoreRules ? new GitIgnore(request.Root) : null;
             foreach (var entry in FileWalker.Walk(request.Root, request.StartPath, int.MaxValue, ignore, external))
             {
                 if (entry.IsDirectory)

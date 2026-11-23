@@ -89,7 +89,7 @@ public static class RipgrepBackend
                     : $"ripgrep failed: {Shorten(detail)}");
         }
 
-        var result = Parse(request, processResult, new GitIgnore(request.Root), out var failure);
+        var result = Parse(request, processResult, request.ApplyIgnoreRules ? new GitIgnore(request.Root) : null, out var failure);
         return result is null ? RipgrepOutcome.Skipped(failure!) : RipgrepOutcome.Completed(result);
     }
 
@@ -135,7 +135,7 @@ public static class RipgrepBackend
         return arguments;
     }
 
-    private static GrepResult? Parse(GrepRequest request, ProcessResult process, GitIgnore filter, out string? failure)
+    private static GrepResult? Parse(GrepRequest request, ProcessResult process, GitIgnore? filter, out string? failure)
     {
         failure = null;
         var output = new List<GrepLine>();
@@ -340,7 +340,7 @@ public static class RipgrepBackend
                 return ignored;
             }
 
-            ignored = filter.IsIgnoredWithAncestors(path, isDirectory: false);
+            ignored = filter?.IsIgnoredWithAncestors(path, isDirectory: false) ?? false;
             verdicts[path] = ignored;
             return ignored;
         }

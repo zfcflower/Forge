@@ -123,7 +123,7 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
 
         var cutByChars = shown < lines.Length || firstCut;
         var text = new StringBuilder(Math.Min(chars, MaxResultChars) + display.Length + 160);
-        text.Append(display).Append(": ").Append(shown).Append(" lines\n");
+        AppendHeader(text, display, window.FirstLine, shown, window.Truncated || cutByChars);
 
         Span<char> number = stackalloc char[12];
         for (var index = 0; index < shown; index++)
@@ -154,6 +154,31 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
         }
 
         return text.ToString().TrimEnd('\n');
+    }
+
+    /// <summary>
+    /// The first line: the file's own line count only when the whole file came back, otherwise the range this answer covers.
+    /// "path: 72 lines" over a 1 461-line file reads as a fact about the file, which is how a partial read turns into a wrong
+    /// belief about its size — the same failure shape as an empty search that does not say what it searched.
+    /// </summary>
+    private static void AppendHeader(StringBuilder text, string display, int firstLine, int shown, bool truncated)
+    {
+        text.Append(display).Append(": ");
+        if (shown == 0 && firstLine > 1)
+        {
+            text.Append("the file ends before line ").Append(firstLine.ToString(CultureInfo.InvariantCulture)).Append('\n');
+            return;
+        }
+
+        if (firstLine == 1 && !truncated)
+        {
+            text.Append(shown.ToString(CultureInfo.InvariantCulture)).Append(" lines\n");
+            return;
+        }
+
+        var last = firstLine + Math.Max(shown, 1) - 1;
+        text.Append("lines ").Append(firstLine.ToString(CultureInfo.InvariantCulture)).Append('–')
+            .Append(last.ToString(CultureInfo.InvariantCulture)).Append('\n');
     }
 
     private static string Display(string root, string path) =>

@@ -60,6 +60,9 @@ public sealed class BashTool : ToolBase
             "Run a command line in the workspace and return its exit code, duration and output. For what the built-in tools do not cover: " +
             "building, testing, running programs, package managers; git subcommands no git_* tool covers, and 'gh pr/run/workflow/api' " +
             "(each only if you hold git_* / pr_* tools); network only to localhost. " +
+            "Commands a built-in tool already does are refused and say which tool owns them: listing (ls, dir, Get-ChildItem, gci), " +
+            "reading (cat, head, tail, Get-Content, gc, type), searching (grep, rg, findstr, Select-String, find, fd), writing files " +
+            "(tee, Set-Content, Out-File), and 'sed -i' (use edit). " +
             "Piping a command's output through grep, head or tail is fine. Commands that are not trivially cheap run one at a time per workspace; " +
             "that wait does not count against timeout_seconds.",
             Schema,

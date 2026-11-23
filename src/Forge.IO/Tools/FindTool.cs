@@ -5,8 +5,9 @@ namespace Forge.IO.Tools;
 
 /// <summary>
 /// <c>find</c>: every entry below a directory whose workspace-relative path matches a glob, in walk order (the search
-/// is not sorted, so it never buffers a whole tree). Ignore rules apply through <see cref="GitIgnore"/>, which also
-/// means an ignored directory is never entered. Directories are printed with a trailing <c>/</c>. The listing stops at
+/// is not sorted, so it never buffers a whole tree). Ignore rules apply through <see cref="GitIgnore"/> to a search of the
+/// workspace root only — a path the caller named is searched as it is, the rule <c>ls</c> follows, and that also means an
+/// ignored directory is never entered below the root. Directories are printed with a trailing <c>/</c>. The listing stops at
 /// the requested limit and says so.
 /// </summary>
 public sealed class FindTool : ToolBase, IBoundedOutputTool
@@ -32,7 +33,8 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
         : base(
             "find",
             "Find files and directories by path glob below a directory, one workspace-relative path per line, in walk "
-            + "order. Applies .gitignore; directories end with `/`. Past the limit it reports the total count.",
+            + "order. Applies .gitignore to a search of the workspace root; a path named in full is searched as-is, like "
+            + "`ls`. Directories end with `/`. Past the limit it reports the total count.",
             Schema,
             ToolSideEffect.ReadOnly)
     {
@@ -73,11 +75,15 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
                 IsError: true));
         }
 
-        var ignore = new GitIgnore(root);
+        // The same rule `ls` and `grep` follow: a path the caller named is searched as it is, and only a search of the root
+        // is a search of the repository.
+        var ignore = string.Equals(start, root, WorkspacePath.Comparison) ? new GitIgnore(root) : null;
         var lines = new List<string>(Math.Min(limit, 256));
+        var walked = 0;
         var omitted = 0;
         foreach (var entry in FileWalker.Walk(root, start, depth, ignore, ct))
         {
+            walked++;
             // A link is reported as a file by the enumeration but never searched: ripgrep does not follow links either,
             // so skipping it keeps the two backends' result sets equal.
             if (entry.IsLink)
@@ -102,12 +108,17 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
 
         if (omitted > 0)
         {
-            lines.Add($"… (truncated: showing {limit} of {limit + omitted} entries)");
+            // Past the limit entries are only counted, so the answer can say how many there are and what to do next.
+            lines.Add($"… (truncated: showing {limit} of {limit + omitted} entries; raise limit or narrow pattern)");
         }
 
         if (lines.Count == 0)
         {
-            lines.Add("(empty)");
+            // "(empty)" alone could not tell "your glob matched nothing" from "nothing was walked at all"; the count and the
+            // one likely reason separate them. Same rule the grep answer follows.
+            lines.Add(walked == 0
+                ? "no entries: the directory is empty or excluded by .gitignore — verify with ls"
+                : $"no entry matched '{pattern}' (walked {walked} entries)");
         }
 
         return new ValueTask<ToolResult>(new ToolResult(BoundedOutput.Join(lines, "Narrow with `pattern` or `path`.")));

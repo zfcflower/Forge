@@ -156,7 +156,7 @@ public static class ToolJson
 
         if (number < minimum || number > maximum)
         {
-            throw new ToolArgumentException($"'{name}' must be between {minimum} and {maximum}.");
+            throw new ToolArgumentException($"'{name}' is {number}; it must be between {minimum} and {maximum}.");
         }
 
         return number;
@@ -176,7 +176,7 @@ public static class ToolJson
 
         if (number < minimum || number > maximum)
         {
-            throw new ToolArgumentException($"'{name}' must be between {minimum} and {maximum}.");
+            throw new ToolArgumentException($"'{name}' is {number}; it must be between {minimum} and {maximum}.");
         }
 
         return number;
