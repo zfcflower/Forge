@@ -42,6 +42,12 @@
     <Style Selector="Border.meta-line.editable">
       <Setter Property="Background" Value="{DynamicResource TiffanyTintBrush}" />
     </Style>
+    <!-- A number the user set themselves wears the mint surface instead of the pale editable tint, so "mine" and
+         "inherited/empty" read apart at a glance - the strong step, because the pale BrandTint is nearly the same
+         lightness as the editable tint. The keyboard-highlight style below is declared later and still wins. -->
+    <Style Selector="Border.meta-line.user">
+      <Setter Property="Background" Value="{DynamicResource BrandTintStrongBrush}" />
+    </Style>
     <Style Selector="Border.meta-line.current">
       <Setter Property="Background" Value="{DynamicResource TiffanySelectionBrush}" />
     </Style>
@@ -49,6 +55,11 @@
     <Style Selector="Border.meta-line.invalid">
       <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
       <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <!-- An inherited number wears the muted ink: it is the effective value the chain below the user's override produced
+         (the catalog snapshot, the provider's report or the global default window), and the hover names where it came from. -->
+    <Style Selector="Border.meta-line.inherited TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
     <Style Selector="TextBlock.meta-status">
       <Setter Property="Foreground" Value="{DynamicResource StatusSuccessBrush}" />
@@ -182,8 +193,10 @@
     <DataTemplate x:Key="MetaContextCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line editable"
               Classes.invalid="{Binding HasContextWindowError}"
+              Classes.inherited="{Binding ContextWindowInherited}"
+              Classes.user="{Binding ContextWindowOwn}"
               Padding="6,3"
-              ToolTip.Tip="{Binding ContextWindowError}">
+              ToolTip.Tip="{Binding ContextWindowTooltip}">
         <Panel x:Name="CellBody">
           <TextBlock x:Name="ValueText"
                      Text="{Binding ContextWindowText}"
@@ -196,8 +209,10 @@
     <DataTemplate x:Key="MetaMaxOutputCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line editable"
               Classes.invalid="{Binding HasMaxOutputError}"
+              Classes.inherited="{Binding MaxOutputInherited}"
+              Classes.user="{Binding MaxOutputOwn}"
               Padding="6,3"
-              ToolTip.Tip="{Binding MaxOutputError}">
+              ToolTip.Tip="{Binding MaxOutputTooltip}">
         <Panel x:Name="CellBody">
           <TextBlock x:Name="ValueText"
                      Text="{Binding MaxOutputText}"
@@ -210,6 +225,8 @@
     <DataTemplate x:Key="MetaInputCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line editable"
               Classes.invalid="{Binding InputPriceInvalid}"
+              Classes.inherited="{Binding InputInherited}"
+              Classes.user="{Binding InputOwn}"
               Padding="6,3"
               ToolTip.Tip="{Binding InputPriceTooltip}">
         <Panel x:Name="CellBody">
@@ -224,6 +241,8 @@
     <DataTemplate x:Key="MetaOutputCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line editable"
               Classes.invalid="{Binding OutputPriceInvalid}"
+              Classes.inherited="{Binding OutputInherited}"
+              Classes.user="{Binding OutputOwn}"
               Padding="6,3"
               ToolTip.Tip="{Binding OutputPriceTooltip}">
         <Panel x:Name="CellBody">
@@ -238,6 +257,8 @@
     <DataTemplate x:Key="MetaCacheReadCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line editable"
               Classes.invalid="{Binding CacheReadPriceInvalid}"
+              Classes.inherited="{Binding CacheReadInherited}"
+              Classes.user="{Binding CacheReadOwn}"
               Padding="6,3"
               ToolTip.Tip="{Binding CacheReadPriceTooltip}">
         <Panel x:Name="CellBody">
@@ -252,6 +273,8 @@
     <DataTemplate x:Key="MetaCacheWriteCell" x:DataType="settings:ModelMetadataRowViewModel">
       <Border Classes="meta-line editable"
               Classes.invalid="{Binding CacheWritePriceInvalid}"
+              Classes.inherited="{Binding CacheWriteInherited}"
+              Classes.user="{Binding CacheWriteOwn}"
               Padding="6,3"
               ToolTip.Tip="{Binding CacheWritePriceTooltip}">
         <Panel x:Name="CellBody">
@@ -272,7 +295,7 @@
     <DataTemplate x:Key="MetaContextEditor" x:DataType="settings:ModelMetadataRowViewModel">
       <NumericUpDown Classes="meta-cell"
                      Classes.invalid="{Binding HasContextWindowError}"
-                     ToolTip.Tip="{Binding ContextWindowError}"
+                     ToolTip.Tip="{Binding ContextWindowTooltip}"
                      Value="{Binding ContextWindow, Mode=TwoWay}"
                      FormatString="0">
         <NumericUpDown.Styles>
@@ -283,7 +306,7 @@
     <DataTemplate x:Key="MetaMaxOutputEditor" x:DataType="settings:ModelMetadataRowViewModel">
       <NumericUpDown Classes="meta-cell"
                      Classes.invalid="{Binding HasMaxOutputError}"
-                     ToolTip.Tip="{Binding MaxOutputError}"
+                     ToolTip.Tip="{Binding MaxOutputTooltip}"
                      Value="{Binding MaxOutput, Mode=TwoWay}"
                      FormatString="0">
         <NumericUpDown.Styles>

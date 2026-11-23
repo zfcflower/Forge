@@ -312,6 +312,12 @@ internal static class ProviderStrings
 
     public const string MetadataEmptyKey = "providers.meta.empty";
 
+    public const string MetadataSourceServerKey = "providers.meta.source.server";
+
+    public const string MetadataSourceCatalogKey = "providers.meta.source.catalog";
+
+    public const string MetadataSourceGlobalKey = "providers.meta.source.global";
+
     /// <summary>Heading of the first column: whether the model is offered by the pickers.</summary>
     public const string MetadataVisibilityKey = "providers.meta.visibility";
 
@@ -540,8 +546,8 @@ internal static class ProviderStrings
         Loc.Register(MetadataTitleKey, "模型 · {0}", "Models · {0}");
         Loc.Register(
             MetadataIntroKey,
-            "上下文窗口按 token 计，单价按每百万 token 的美元计：留空表示未知，浅蓝底的单元格点击可直接编辑，回车或点别处收起。",
-            "Context window is in tokens and prices are US dollars per million tokens: empty means unknown. Click a cell with a pale blue background to edit it; Enter or a click elsewhere puts it back.");
+            "上下文窗口按 token 计，单价按每百万 token 的美元计。薄荷底 = 你设置的值，浅蓝底 = 自动生效的继承值，悬停可看来源；点击格子即可编辑，输入即成覆盖、清空即回到继承，回车或点别处收起。",
+            "Context window is in tokens and prices are US dollars per million tokens. A mint cell is a number you set; a pale blue cell is inherited from the catalog snapshot or the provider's report (hover for the source). Click any cell to edit - type to override, clear to inherit; Enter or a click elsewhere puts it back.");
         Loc.Register(MetadataModelKey, "模型", "Model");
         Loc.Register(MetadataContextKey, "上下文窗口", "Context window");
         Loc.Register(MetadataMaxOutputKey, "最大输出", "Max output");
@@ -555,6 +561,9 @@ internal static class ProviderStrings
         Loc.Register(MetadataRefreshKey, "从服务端刷新模型", "Refresh models from the server");
         Loc.Register(MetadataResetKey, "恢复默认", "Restore defaults");
         Loc.Register(MetadataCloseKey, "关闭", "Close");
+        Loc.Register(MetadataSourceServerKey, "来自服务端上报的模型列表", "From the provider's own model list");
+        Loc.Register(MetadataSourceCatalogKey, "来自目录快照（每日自动刷新）", "From the catalog snapshot (refreshed daily)");
+        Loc.Register(MetadataSourceGlobalKey, "来自设置里的全局默认窗口", "From the global default window setting");
         Loc.Register(MetadataEmptyKey, "这个提供商还没有模型；先在编辑界面刷新一次。",
             "This provider has no models yet; refresh once in the editor.");
         Loc.Register(MetadataVisibilityKey, "显示", "Shown");
@@ -655,6 +664,13 @@ internal static class ProviderStrings
     public static string MetadataVisibilityHeader => Localization.Loc.Instance[MetadataVisibilityKey];
 
     public static string MetadataVisibilityTooltip => Localization.Loc.Instance[MetadataVisibilityTooltipKey];
+
+    /// <summary>The hover of an inherited (shown-not-set) number: which layer it came from.</summary>
+    public static Localization.LocText MetadataSourceServerText() => new(MetadataSourceServerKey);
+
+    public static Localization.LocText MetadataSourceCatalogText() => new(MetadataSourceCatalogKey);
+
+    public static Localization.LocText MetadataSourceGlobalText() => new(MetadataSourceGlobalKey);
 
     /// <summary>The "all models" count next to the connected heading; distinct model names, like the hidden set.</summary>
     public static string ModelStats(int visible, int total) =>

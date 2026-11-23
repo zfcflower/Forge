@@ -155,6 +155,10 @@
            foreground that is identical in both variants, and it is 9.65:1 on the soft mint. -->
       <SolidColorBrush x:Key="OnBrandSoftBrush" Color="#072625" />
       <SolidColorBrush x:Key="BrandTintBrush" Color="#E8F8F7" />
+      <!-- The mint's second surface step: deep enough to read apart from the pale Tiffany editable tint beside it
+           (BrandTint is nearly the same lightness as that tint, so "mine" vanished), still light enough that the table's
+           normal ink on it keeps its contrast. Worn by values the user set themselves. -->
+      <SolidColorBrush x:Key="BrandTintStrongBrush" Color="#C8ECE7" />
 
       <!-- The requested Tiffany accent (the round marker's #1B9EAA in `App.axaml`), as surfaces: the pale tint marks the
            editable cells of a table, the two deeper stops are its row states. A second family rather than another step of
@@ -329,6 +333,9 @@
       <SolidColorBrush x:Key="BrandSoftBrush" Color="#81D8D0" />
       <SolidColorBrush x:Key="OnBrandSoftBrush" Color="#072625" />
       <SolidColorBrush x:Key="BrandTintBrush" Color="#0D3F3E" />
+      <!-- The same second mint step on dark: above the panel body and greener than the Tiffany blue steps, so a user-set
+           cell reads apart from the inherited/empty ones the same way it does in light. -->
+      <SolidColorBrush x:Key="BrandTintStrongBrush" Color="#14514D" />
 
       <!-- The Tiffany surfaces on dark: the same three steps, kept in the bluish range above the panel body so the editable
            cells still read as a band without glowing against the window. -->

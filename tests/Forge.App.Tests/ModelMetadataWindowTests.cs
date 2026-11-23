@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Providers;
 using Forge.App.Settings;
@@ -260,13 +261,15 @@ public sealed class ModelMetadataWindowTests : IDisposable
         var (win, table, model) = Open();
         try
         {
-            // The five number columns are the editable ones, and the pale Tiffany tint is how the row says so.
+            // The number cells of a user-set row wear the mint surface - "mine" reads apart from inherited/empty at a glance.
             foreach (var name in new[] { "context", "input" })
             {
-                Assert.Same(Resource(win, "TiffanyTintBrush"), Line(Cell(table, model.Rows[0], name)).Background);
+                Assert.Same(Resource(win, "BrandTintStrongBrush"), Line(Cell(table, model.Rows[0], name)).Background);
             }
 
-            // The read-only columns keep the row's own background (no cell fill at all).
+            // A row whose numbers nobody set keeps the pale editable tint, and the read-only columns keep the row's own
+            // background (no cell fill at all).
+            Assert.Same(Resource(win, "TiffanyTintBrush"), Line(Cell(table, model.Rows[1], "context")).Background);
             Assert.Null(Line(Cell(table, model.Rows[0], "model")).Background);
 
             return Task.CompletedTask;
@@ -444,31 +447,161 @@ public sealed class ModelMetadataWindowTests : IDisposable
         }
     });
 
+    [Fact]
+    public Task A_model_without_an_override_shows_what_the_session_resolves() => SharedUi.RunAsync(() =>
+    {
+        var (win, table, model) = Open(report: new Dictionary<string, ModelMetadata>(StringComparer.Ordinal)
+        {
+            ["model-b"] = new(200000, new ModelPricing(3, 15, 0.3, 3.75)),
+        });
+        try
+        {
+            var row = model.Rows.Single(candidate => candidate.Model == "model-b");
+            var cell = Cell(table, row, "context");
+            var line = Line(cell);
+
+            // The resting cell shows the value a session resolves, in the muted inherited ink with the source on hover.
+            Assert.True(row.ContextWindowInherited);
+            Assert.Equal("200000", Display(cell).Text);
+            Assert.Contains("inherited", line.Classes);
+            Assert.Same(Resource(win, "TextSecondaryBrush"), Display(cell).Foreground);
+            Assert.Same(Resource(win, "TiffanyTintBrush"), line.Background);
+            Assert.Equal(ProviderStrings.MetadataSourceServerText().Resolve(), row.ContextWindowTooltip);
+
+            // A number of the user's own takes over the cell: full ink, the mint surface, and the section the save writes.
+            row.ContextWindow = 150000;
+            SharedUi.Settle(win);
+            Assert.Equal("150000", Display(cell).Text);
+            Assert.DoesNotContain("inherited", line.Classes);
+            Assert.Contains("user", line.Classes);
+            Assert.Same(Resource(win, "BrandTintStrongBrush"), line.Background);
+            Assert.Null(row.ContextWindowTooltip);
+            Assert.Equal(150000, row.ToSection()!.ContextWindow);
+
+            // Clearing it is "inherit" again: the chain's value comes back, and the save writes nothing for the model.
+            row.ContextWindow = null;
+            SharedUi.Settle(win);
+            Assert.Equal("200000", Display(cell).Text);
+            Assert.Contains("inherited", line.Classes);
+            Assert.Null(row.ToSection());
+            Assert.DoesNotContain(row.Model, ModelMetadataViewModel.ToOverrides(model.Rows).Keys);
+
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            win.Close();
+        }
+    });
+
+    [Fact]
+    public Task Reset_restores_the_default_by_clearing_the_staged_overrides() => SharedUi.RunAsync(() =>
+    {
+        var (win, table, model) = Open();
+        try
+        {
+            var row = model.Rows[0];
+            var cell = Cell(table, row, "context");
+            Assert.False(row.ContextWindowInherited);
+            Assert.Equal("1000000", Display(cell).Text);
+
+            // "Restore defaults" clears the staged cells; with nothing else known the display is honestly empty, and the
+            // section the save would write drops the model's override instead of pinning the resolved values into it.
+            model.ResetCommand.Execute(null);
+            SharedUi.Settle(win);
+            var cleared = model.Rows.Single(candidate => candidate.Model == row.Model);
+            Assert.Null(cleared.ContextWindow);
+            Assert.Null(cleared.Input);
+            Assert.False(cleared.ContextWindowInherited);
+            Assert.Equal(string.Empty, Display(Cell(table, cleared, "context")).Text);
+            Assert.Null(cleared.ToSection());
+
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            win.Close();
+        }
+    });
+
+    [Fact]
+    public Task The_global_default_window_is_what_the_cell_shows_and_yields_to_a_named_one() => SharedUi.RunAsync(() =>
+    {
+        Directory.CreateDirectory(directory);
+        var services = new ProviderServices(Path.Combine(directory, "settings.json"), directory, http);
+        var definition = ProbeDefinition();
+        services.Store.Save([definition], "probe", ContextWindowDefault.FromTokens(150000), services.Catalog.ModelCatalogSourceUrl);
+        services.Cache.Set(
+            "probe",
+            new ProviderModelList(
+                definition.Models,
+                new Dictionary<string, ModelMetadata>(StringComparer.Ordinal)
+                {
+                    ["model-b"] = new(200000, null),
+                }));
+        services.Reload();
+        var provider = services.Catalog.Find("probe")!;
+        var model = new ModelMetadataViewModel(services, provider, new AppPreferences());
+        var win = new ModelMetadataWindow(model);
+        win.Show();
+        SharedUi.Settle(win);
+        try
+        {
+            var table = win.GetVisualDescendants().OfType<TableView>().Single();
+
+            // A model the chain knows a window for shows the global default instead, and the hover says so.
+            var inherited = model.Rows.Single(row => row.Model == "model-b");
+            var inheritedCell = Cell(table, inherited, "context");
+            Assert.True(inherited.ContextWindowInherited);
+            Assert.Equal("150000", Display(inheritedCell).Text);
+            Assert.Equal(ProviderStrings.MetadataSourceGlobalText().Resolve(), inherited.ContextWindowTooltip);
+            Assert.Same(Resource(win, "TiffanyTintBrush"), Line(inheritedCell).Background);
+
+            // A window the user named for one model is not touched by the global one - and it wears the mint surface.
+            var own = model.Rows.Single(row => row.Model == "model-a");
+            Assert.False(own.ContextWindowInherited);
+            Assert.Equal("1000000", Display(Cell(table, own, "context")).Text);
+            Assert.Same(Resource(win, "BrandTintStrongBrush"), Line(Cell(table, own, "context")).Background);
+
+            // And "restore defaults" previews exactly what a save would produce: the stored override no longer shields
+            // the global window, so the staged cell reads the global value, not the chain value it would have shown if the
+            // shield had consulted the saved definition.
+            model.ResetCommand.Execute(null);
+            SharedUi.Settle(win);
+            var restored = model.Rows.Single(row => row.Model == "model-a");
+            var restoredCell = Cell(table, restored, "context");
+            Assert.Null(restored.ContextWindow);
+            Assert.True(restored.ContextWindowInherited);
+            Assert.Equal("150000", Display(restoredCell).Text);
+            Assert.Equal(ProviderStrings.MetadataSourceGlobalText().Resolve(), restored.ContextWindowTooltip);
+
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            win.Close();
+        }
+    });
+
     /// <summary>
     /// The window over a provider whose first model has a window and four prices. The visibility column only exists when the
     /// window was given the preferences, so one of each is passed.
     /// </summary>
-    private (Window Window, TableView Table, ModelMetadataViewModel Model) Open()
+    private (Window Window, TableView Table, ModelMetadataViewModel Model) Open(
+        IReadOnlyDictionary<string, ModelMetadata>? report = null)
     {
         Directory.CreateDirectory(directory);
         var services = new ProviderServices(Path.Combine(directory, "settings.json"), directory, http);
-        var overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal)
+        var definition = ProbeDefinition();
+        // The provider is registered the way the app registers one (a settings write and a reload), so the catalog the
+        // window resolves through is the real one, not a stand-in that could disagree with it.
+        services.Store.Save([definition], "probe", ContextWindowDefault.Empty, services.Catalog.ModelCatalogSourceUrl);
+        if (report is { Count: > 0 })
         {
-            ["model-a"] = new(1000000, new ModelPricing(0.3, 15, 0.03, 0.375)),
-        };
-        var definition = new ProviderDefinition
-        {
-            Id = "probe",
-            PresetId = "custom",
-            DisplayName = "Probe",
-            Protocol = ProviderProtocol.OpenAiCompatible,
-            BaseUrl = "https://example.invalid",
-            CredentialKind = ProviderCredentialKind.ApiKey,
-            Models = ["model-a", "model-b"],
-            DefaultModel = "model-a",
-            Overrides = overrides,
-        };
-        var provider = new ConnectedProvider(definition, services.Secrets, services.Cache, services.Credentials);
+            services.Cache.Set("probe", new ProviderModelList(definition.Models, report));
+        }
+        services.Reload();
+        var provider = services.Catalog.Find("probe")!;
         var model = new ModelMetadataViewModel(services, provider, new AppPreferences());
         var window = new ModelMetadataWindow(model);
         window.Show();
@@ -478,6 +611,24 @@ public sealed class ModelMetadataWindowTests : IDisposable
         Assert.Equal(2, model.Rows.Count);
         return (window, table, model);
     }
+
+    /// <summary>The provider every window here opens over: one model fully overridden, one the chain alone knows.</summary>
+    private ProviderDefinition ProbeDefinition() =>
+        new()
+        {
+            Id = "probe",
+            PresetId = "custom",
+            DisplayName = "Probe",
+            Protocol = ProviderProtocol.OpenAiCompatible,
+            BaseUrl = "https://example.invalid",
+            CredentialKind = ProviderCredentialKind.ApiKey,
+            Models = ["model-a", "model-b"],
+            DefaultModel = "model-a",
+            Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal)
+            {
+                ["model-a"] = new(1000000, new ModelPricing(0.3, 15, 0.03, 0.375)),
+            },
+        };
 
     /// <summary>Clicks the middle of a cell, which is how a cell is opened for editing.</summary>
     private static void Click(Window window, TableViewCell cell)

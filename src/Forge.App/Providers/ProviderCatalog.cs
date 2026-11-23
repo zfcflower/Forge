@@ -756,31 +756,34 @@ internal sealed class ProviderCatalog
         return ThinkingLevels.For(modelId);
     }
 
+    private ModelMetadata WithDefaultWindow(ConnectedProvider provider, ModelMetadata resolved, string modelId) =>
+        WithGlobalWindow(
+            DefaultContextWindow,
+            provider.Definition.Overrides.TryGetValue(modelId, out var overridden) ? overridden.ContextWindow : null,
+            resolved);
+
     /// <summary>
     /// Applies the global context window over the resolved metadata. An absolute count wins over a per-model override that
-    /// only carries prices (setting prices must not silently drop the global limit) and loses to one that names a window,
-    /// exactly as before. A share scales the window the chain already found — catalog snapshot, provider report or a
-    /// per-model override — and leaves the model unknown when none of them knows one.
+    /// only carries prices (setting prices must not silently drop the global limit) and loses to one that names a window
+    /// (<paramref name="namedWindow"/>, whether it is the saved one or the staged one a preview is showing), exactly as
+    /// before. A share scales the window the chain already found — catalog snapshot, provider report or a per-model
+    /// override — and leaves the model unknown when none of them knows one.
     /// </summary>
-    private ModelMetadata WithDefaultWindow(ConnectedProvider provider, ModelMetadata resolved, string modelId)
+    internal static ModelMetadata WithGlobalWindow(ContextWindowDefault global, int? namedWindow, ModelMetadata resolved)
     {
-        if (DefaultContextWindow.IsEmpty)
+        if (global.IsEmpty)
         {
             return resolved;
         }
 
-        // An absolute count replaces the window outright, except where the user already named one for this model.
-        if (DefaultContextWindow.Tokens is { } tokens)
+        if (global.Tokens is { } tokens)
         {
-            var overriddenWindow = provider.Definition.Overrides.TryGetValue(modelId, out var overridden)
-                ? overridden.ContextWindow
-                : null;
-            return overriddenWindow is > 0 || resolved.ContextWindow == tokens
+            return namedWindow is > 0 || resolved.ContextWindow == tokens
                 ? resolved
                 : resolved with { ContextWindow = tokens };
         }
 
-        var scaled = DefaultContextWindow.Resolve(resolved.ContextWindow);
+        var scaled = global.Resolve(resolved.ContextWindow);
         return scaled == resolved.ContextWindow ? resolved : resolved with { ContextWindow = scaled };
     }
 
