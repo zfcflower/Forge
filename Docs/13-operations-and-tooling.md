@@ -1,6 +1,6 @@
 # 13 运维、日志、更新与工程工具链
 
-本文件说明进程级行为（单实例、启动、日志、崩溃）以及自动更新、CI 与基准工具。
+本文件说明进程级行为（单实例、启动、日志、崩溃）、自动更新、CI 与基准工具，以及开发期如何抓取模型请求原文。
 
 ## 13.1 启动与组合根
 
@@ -70,5 +70,55 @@
 - **AOT 发布产物不含这三个 JIT 组件**（实测 `dotnet publish src/Forge.App -c Release` 的输出只有 `Forge.App.exe`、原生库、`.pdb` 与 `Assets/`；`Forge.App.csproj` 不引用它们的项目）。`JitHostLayout` 只按 `FORGE_JIT_DIR` 与仓内构建布局（`src/<asm>/bin/<cfg>/net11.0`、`artifacts/publish/<asm>/<cfg>`、`publish/<asm>/<cfg>`）定位它们，仓库里也没有发布它们的脚本或 CI 步骤——把 publish 目录原样发给用户时宿主起不来（`diag.jitHostMissing`），终端、插件、`run_code` 全部不可用。
 - 实测对照（本机 win-x64、同一提交、剔除 `.pdb`）：Native AOT 主程序目录 **94 MiB**、启动到窗口 **171 ms**；同一提交 `-p:PublishAot=false --self-contained` 的 JIT 版 **141 MiB**、**874 ms**（3 次中位）；框架依赖 JIT **58 MiB**。私有运行时单份（`Microsoft.NETCore.App` 共享框架）约 **75 MiB**，上面 105 MiB 的 JIT 目录 gzip 后 **44 MiB**。因此“反正要带运行时”时 AOT 不再省体积（94 + 75 > 141，本体反而大 ~28 MiB），它的收益是启动、内存、不可变边界与主程序不随用户机器 .NET 版本漂移。
 - 原生库不能静态链接，“单文件”不成立。
+
+## 13.8 开发期抓取模型请求原文（代理）
+
+§13.2 的诊断日志与 `Docs/03` §3.8 的用量日志按既定边界**不写提示词、消息正文与请求头值**，所以排查“我们究竟发了什么”时不要指望调高日志级别——原文得另外抓：常规情况把出站流量引到本地代理（零代码），Debug 构建另有逐请求的原样落盘到工作目录的 `.log/`（见“Debug 构建的逐请求原文”）。代理的两种形态分工不同，不是替代关系：
+
+| | 透明 MITM（正向代理） | 本地反向代理（改基址） |
+|---|---|---|
+| 路径 | Forge → `127.0.0.1:8080` → 真主机，代理终结 TLS | Forge → `127.0.0.1:9000`（明文）→ 真主机，代理自己发起 TLS |
+| 覆盖 | 全部提供商与三家协议，含订阅登录与官方身份头 | 只有基址可改的提供商（自定义 = OpenAI 兼容） |
+| 代价 | CA 要进用户信任库；代理设置作用于该进程全部出站流量 | 无 CA、无全局影响，可以长期挂着 |
+| 失真 | TLS 之上没有（主机、路径不变） | 依赖主机的头失真（`cc_version` 这类官方身份、订阅登录无法复用） |
+
+### 透明 MITM
+
+1. `pip install mitmproxy`（或 `uv tool install mitmproxy`）。首次运行 `mitmdump --listen-port 8080 -w artifacts/run/wire/flows.mitm` 会在 `~/.mitmproxy/` 生成 CA。
+2. 把 CA 装进**当前用户**的受信任根：`certutil -addstore -user Root "%USERPROFILE%\.mitmproxy\mitmproxy-ca-cert.cer"`。收尾时 `certutil -store -user Root` 查到 `mitmproxy` 那条的序列号，`certutil -delstore -user Root <序列号>` 删掉。
+3. 设置 → **网络与代理** → 代理选 `manual`，填 `http://127.0.0.1:8080`。只影响 Forge，系统的其它流量不动；用完改回 `system`。
+4. 只抓模型流量：给 `mitmdump` 加位置过滤（URL 正则），如 `mitmdump --listen-port 8080 -w artifacts/run/wire/flows.mitm '~u api.anthropic.com'`；不匹配的请求不落盘。
+5. 关联会话：提供商设置的请求头加一行 `x-forge-session: {session}`——`{session}` 每请求替换为会话 id（无会话的请求不发这条），flow 文件里就能按会话归档。
+
+### 本地反向代理
+
+1. `mitmdump --mode reverse:https://api.anthropic.com@9000 -w artifacts/run/wire/flows.mitm`。
+2. 新建一个**自定义提供商**指向 `http://127.0.0.1:9000`；自定义只有 OpenAI 兼容协议（`ProviderPresets.Custom`），Anthropic 线路需手改 `settings.json` 里该条目的 `protocol: "anthropic"` 与 `baseUrl`——`FromDocument` 按存下来的值读，而编辑框对非自定义提供商不允许改基址（`Docs/03` §3.10）。
+3. 不需要装 CA：这一跳是明文，代理自己与真主机建 TLS。
+
+### 读回与边界
+
+- 交互看：`mitmproxy -nr artifacts/run/wire/flows.mitm`。命令行快看：`mitmdump -nr <flows> --flow-detail 4`——**正文是美化后的，不是原始字节**，不能拿它比对字节。逐字节比对要读 flow 文件本身（`mitmproxy.io.FlowReader` 的 `request.raw_content`／`response.raw_content`）。
+- flow 在响应结束后才落盘：卡住未结束的流要等它断开才出现在文件里，实时看只能看控制台。
+- **走代理时目标由代理解析**：`network.dns` 对目标主机不再生效，`ConnectCallback` 的私网过滤也不作用于目标（`IsDirect` 为假就不解析不过滤），所以排查 DNS 与地址过滤问题时不要经过代理。
+- 代理不做脱敏：`x-api-key`／`authorization` 在 flow 文件里是**明文**。flows 一律放 `artifacts/`（已忽略）并随手删，不要提交或外发。
+- 提供商客户端不开自动解压（`NetworkHandlerOptions` 默认 `AutomaticDecompression = None`），抓到的正文就是服务端发的那一份，没有解压后再压缩的歧义。
+
+### 实测（2026-11-23，本机 win-x64，mitmproxy 12.3.1 + Python 3.12，自建 SSE 端点）
+
+- 请求体逐字节保真：390 B 的 Anthropic 形状请求体，上游收到的 SHA-256 与本地文件相同；flow 文件里的 `raw_content` 也相同（正向、反向各测一次）。
+- SSE 不被整包缓冲：5 帧 × 0.5 s 的流，客户端 **2.52 s** 内逐帧收完（整包缓冲则首字节要到 ~2.5 s 才出现）；正向 **2.53 s**。
+- 代理不注入请求头：客户端不发 `Accept-Encoding` 时上游也收不到（默认 `normalize_outbound_headers` 对它没有可见改动）；反向模式上游多看到 `Connection: close`，正向模式 `Proxy-Connection` 会漏到上游，两者对三家协议无影响。
+- `stream_large_bodies` 默认空即不触发流式丢弃，所以正文默认全部留存；一旦设了这个阈值又不设 `store_streamed_bodies`，超过阈值的正文**不会被存**。
+- 未验证：HTTPS 拦截全程（CA 未装进本机信任库）、真实三家提供商、.NET 客户端的 CONNECT 路径。
+
+### Debug 构建的逐请求原文
+
+Debug 构建把每个模型请求（每次 attempt，降级重发各算一次）写进**仓库根**的 `.log/`（从工作目录与可执行文件位置向上找最近的 `Forge.slnx`，所以从 `bin/` 启动也落在树根）：`<UTC 时间>-<序号>-<provider>-a<attempt>.http`，内容是请求行、最终请求头、原始 body，`---- response ----`、状态行、响应头与**边读边写**的原始响应字节；被拒的那次没有可读响应，改为写状态码与服务端返回的那句话。文件是适配器真正发出去的那份（`cache_control`、`beta` 头、`max_tokens` 夹取都在），所以回答“到底发了什么”不需要装证书，也不需要代理。
+
+- 没有开关：Debug 跑起来就写，路径写死在 `<仓库根>/.log/`，`.gitignore` 已忽略；不设目录、不建配置项。只认入口程序集是 `Forge.App`——测试宿主与 `Forge.Bench` 同样发请求，但它们的流量不是打开 `.log/` 要看的东西。
+- 只在 Debug 构建里存在：`WireDump` 整个类与五个调用点（`Start`、`Response`、三处 `Failed`）都在 `#if DEBUG` 内，Release 编译后 `WireDump` 这个类型、调用、局部变量与字符串全部消失（实测 Release 程序集里搜不到该类型，Debug 里有）——发布产物里没有任何能写提示词到磁盘的代码路径，也没有需要跳过的空调用。
+- 一次模型请求一个文件；一个带工具调用的回合会有多份，按文件名排序即时间顺序。
+- 写盘 best-effort：目录不可写、磁盘满、写到一半失败一律吞掉并停掉这一次抓取，绝不让调试记录影响回合；请求头与正文都是**原样**，连凭据也一样——它的用途就是看真实形状；`.log/` 不进版本库、随手删，别外发。
 
 相关文档：[03-providers-and-network.md](03-providers-and-network.md)（网络与用量日志）、[12-storage-and-data.md](12-storage-and-data.md)（数据目录）、[14-limitations.md](14-limitations.md)（未接线项）。

@@ -108,10 +108,18 @@ public abstract class HttpChatProvider : IChatProvider
         while (true)
         {
             using var message = CreateRequest(body, request);
+#if DEBUG
+            // Debug builds keep this attempt's bytes in .log/. Nothing of it survives into Release: the type and every call
+            // below are compiled out, so a shipped binary has no capture call to skip.
+            using var wire = WireDump.Start(message, body, Config.Id, downgraded ? 2 : 1, downgraded);
+#endif
             attempt = new UsageAttempt(Config.Id, request, Config.Wire?.Entrypoint, downgraded, Options.UsageRecorder);
             try
             {
                 response = await SendAsync(message, ct).ConfigureAwait(false);
+#if DEBUG
+                wire?.Response(response);
+#endif
                 attempt.Observe(response);
                 break;
             }
@@ -120,6 +128,9 @@ public abstract class HttpChatProvider : IChatProvider
                 // The server refused part of the shape rather than the request: drop it and send once more, then remember for the
                 // rest of the process that this provider does not accept it. The refused attempt is recorded like any other.
                 attempt.Failed(failure);
+#if DEBUG
+                wire?.Failed(failure);
+#endif
                 downgraded = true;
                 Degrade();
                 body = BuildBody(request);
@@ -127,11 +138,17 @@ public abstract class HttpChatProvider : IChatProvider
             catch (ProviderException failure)
             {
                 attempt.Failed(failure);
+#if DEBUG
+                wire?.Failed(failure);
+#endif
                 throw;
             }
             catch (Exception exception)
             {
                 attempt.Failed(exception);
+#if DEBUG
+                wire?.Failed(exception);
+#endif
                 throw;
             }
         }

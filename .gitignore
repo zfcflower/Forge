@@ -11,3 +11,4 @@ dist/
 TestResults/
 artifacts/
 .forge/context/
+.log/
