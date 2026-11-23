@@ -122,6 +122,13 @@ public sealed record AgentHostOptions
     public bool IncludeRetrievalTools { get; init; } = true;
 
     /// <summary>
+    /// Writes a name the model asked for through <c>set_title</c> and returns whether it is now the session's title (false
+    /// when a person, or an earlier call, already named it). Null - the default - does not offer the tool at all, which is
+    /// what a host without a session store wants: the call would have nowhere to land.
+    /// </summary>
+    public Func<string, CancellationToken, ValueTask<bool>>? RenameSession { get; init; }
+
+    /// <summary>
     /// Tool names switched off from the start (built-in or external); <see cref="AgentHost.SetDisabledTools"/> changes the
     /// set later. A disabled tool is neither offered to the model nor callable through the host.
     /// </summary>
@@ -213,6 +220,11 @@ public sealed class AgentHost
         if (options.QuestionHandler is { } questionHandler)
         {
             builtIns.Add(new AskUserTool(questionHandler));
+        }
+
+        if (options.RenameSession is { } renameSession)
+        {
+            builtIns.Add(new SetTitleTool(renameSession));
         }
 
         scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);

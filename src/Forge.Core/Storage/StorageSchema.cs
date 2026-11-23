@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 11;
+    public const int Version = 12;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -365,6 +365,9 @@ internal static class StorageSchema
             case 10:
                 await MigrateToV11Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
+            case 11:
+                await ExecuteAsync(connection, transaction, V12SchemaSql, ct).ConfigureAwait(false);
+                break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
         }
@@ -640,6 +643,12 @@ internal static class StorageSchema
         await ExecuteAsync(connection, transaction, V11SchemaSql, ct).ConfigureAwait(false);
         await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The v12 step: who named a session's title. NULL is the creation default - still nameable - so every existing row
+    /// keeps reading as unnamed until something writes a title through <c>TryTitleAsync</c>.
+    /// </summary>
+    private const string V12SchemaSql = "ALTER TABLE sessions ADD COLUMN title_source TEXT;";
 
     private const string V10SchemaSql = """
         CREATE TABLE IF NOT EXISTS automation_runs (

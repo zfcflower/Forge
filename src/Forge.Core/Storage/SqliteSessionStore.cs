@@ -26,7 +26,8 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
     private const string SessionColumns =
         "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
         "last_active_at, deleted_at, fork_of_branch, fork_base_sha, inherits_from_session_id, inherits_up_to_seq, " +
-        "COALESCE(lineage_root_id, id), origin_kind, prefix_fingerprint, automation_id, automation_run_id, child_driver";
+        "COALESCE(lineage_root_id, id), origin_kind, prefix_fingerprint, automation_id, automation_run_id, child_driver, " +
+        "title_source";
 
     /// <summary>Columns a new session row is written with; <c>occupancy_key</c> is always computed by the store.</summary>
     private const string InsertColumns =
@@ -212,10 +213,27 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         StoragePaths.SafeSegment(sessionId, nameof(sessionId));
         ArgumentNullException.ThrowIfNull(title);
         return EnqueueAsync(new UpdateSessionOp(
-            "UPDATE sessions SET title = $value WHERE id = $id",
+            "UPDATE sessions SET title = $value, title_source = 'user' WHERE id = $id",
             title,
             sessionId,
             ct), ct);
+    }
+
+    public Task<bool> TryTitleAsync(string sessionId, string title, string source, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        ArgumentNullException.ThrowIfNull(title);
+        // The reader refuses a source it does not know, so a wrong value written here would make the session unreadable for
+        // good. Only the two replaceable sources are accepted; a person's name goes through RenameAsync, which stamps "user".
+        if (source is not (SessionTitleSource.Derived or SessionTitleSource.Agent))
+        {
+            throw new ArgumentException(
+                $"'{source}' is not a title source this write may set: pass '{SessionTitleSource.Derived}' or '{SessionTitleSource.Agent}', "
+                + "or use RenameAsync for a name a person typed.",
+                nameof(source));
+        }
+
+        return EnqueueAsync(new TryTitleOp(title, source, sessionId, ct), ct);
     }
 
     public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct)
@@ -464,6 +482,12 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         _ => throw StorageDb.Malformed(databasePath, "child_driver", row, $"'{value}' is neither NULL nor '{StorageSchema.ChildDriverUser}'", null),
     };
 
+    private static string? ParseTitleSource(string? value, string databasePath, string row) => value switch
+    {
+        null or SessionTitleSource.Derived or SessionTitleSource.Agent or SessionTitleSource.User => value,
+        _ => throw StorageDb.Malformed(databasePath, "title_source", row, $"'{value}' is not a title source this build writes", null),
+    };
+
     private static string ResolveDatabasePath(string dataSource) =>
         dataSource.StartsWith("file:", StringComparison.OrdinalIgnoreCase) ||
         dataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase)
@@ -528,6 +552,10 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
             AutomationRunId = StorageDb.ReadOptionalText(reader, 21, "automation_run_id", _databasePath, row),
             ChildDriver = ParseChildDriver(
                 StorageDb.ReadOptionalText(reader, 22, "child_driver", _databasePath, row),
+                _databasePath,
+                row),
+            TitleSource = ParseTitleSource(
+                StorageDb.ReadOptionalText(reader, 23, "title_source", _databasePath, row),
                 _databasePath,
                 row),
         };

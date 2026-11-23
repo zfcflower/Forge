@@ -66,6 +66,13 @@ public sealed record SessionInfo(string Id, string WorkspacePath, string Title, 
 
     /// <summary>Run that created this session; set together with <see cref="AutomationId"/>.</summary>
     public string? AutomationRunId { get; init; }
+
+    /// <summary>
+    /// Who named <see cref="Title"/>: null while it is still the creation default, <c>derived</c> for a placeholder the
+    /// host derived from the first message, <c>agent</c> for a name the model wrote, <c>user</c> for a name a person typed.
+    /// Only the first two may still be replaced (see <see cref="ISessionCatalog.TryTitleAsync"/>).
+    /// </summary>
+    public string? TitleSource { get; init; }
 }
 
 public sealed record SessionCreate(string WorkspacePath, string Title)
@@ -131,6 +138,14 @@ public interface ISessionCatalog
     Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct);
 
     Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct);
+
+    /// <summary>
+    /// Writes <paramref name="title"/> only while the session's title is still replaceable, and records
+    /// <paramref name="source"/> as who wrote it. Precedence: <c>derived</c> replaces the creation default, <c>agent</c>
+    /// replaces the default or a derived placeholder, and a title a person renamed (<see cref="RenameAsync"/>) is never
+    /// replaced. One conditional statement, so two writers cannot both think they were first. False = nothing was written.
+    /// </summary>
+    Task<bool> TryTitleAsync(string sessionId, string title, string source, CancellationToken ct);
 
     Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct);
 

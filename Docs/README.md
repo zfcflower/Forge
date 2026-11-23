@@ -85,7 +85,7 @@ Forge.App（Native AOT，Avalonia UI，唯一知道全部主程序项目）
 | [09-prompts-skills-workflows.md](09-prompts-skills-workflows.md) | 三层提示词、模板三态、技能四层、编排注入、声明式工作流 | 内置 4 命令 + 4 Agent + 4 编排技能 |
 | [10-mcp.md](10-mcp.md) | MCP 传输、配置、OAuth、资源订阅、工具选面 | `mcp_tool_search`；工具 schema 64K 上限 |
 | [11-extensions-and-codemode.md](11-extensions-and-codemode.md) | 插件 SDK/Host/Worker/审批/安装、codemode 一次性执行器 | 哈希审批；失败预算 4 次 |
-| [12-storage-and-data.md](12-storage-and-data.md) | 数据目录、`forge.db` v11、`reviews.db`、设置文件、密钥库 | 时间戳写守卫；FTS5 回退 |
+| [12-storage-and-data.md](12-storage-and-data.md) | 数据目录、`forge.db` v12、`reviews.db`、设置文件、密钥库 | 时间戳写守卫；FTS5 回退 |
 | [13-operations-and-tooling.md](13-operations-and-tooling.md) | 单实例、诊断日志、自动更新、CI、基准 | 三 OS 构建与全量测试 + Windows AOT 冒烟 |
 | [14-limitations.md](14-limitations.md) | 未实现、未接线、未验证、明确的取舍 | macOS 分支未验证；面板渲染未做 |
 | [15-appendix.md](15-appendix.md) | 工具总表、设置分区表、数据文件表、常量表、术语表 | 速查 |

@@ -33,7 +33,7 @@
 
 ## 12.2 `forge.db`
 
-- `PRAGMA user_version` 是 schema 阶梯，当前 **11**。每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写版本号，事务内重读版本防止多进程重复迁移；读到更高版本立即 `InvalidDataException`，不降级不写库。
+- `PRAGMA user_version` 是 schema 阶梯，当前 **12**。每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写版本号，事务内重读版本防止多进程重复迁移；读到更高版本立即 `InvalidDataException`，不降级不写库。
 - 阶梯要点：
   - 1：工作台表。
   - 2：`todos` 加 `commit_subject`/`summary`/`verification`/`commit_id`/`commit_error` 五列 + `plan_summaries(session_id PK, text, updated_at)`。
@@ -43,7 +43,8 @@
   - 6：`deleted_at`。7：`projects.closed_at`（软关闭，同路径再添加复活原 id）。8：`fork_of_branch`/`fork_base_sha`。9：`inherits_from_session_id`/`inherits_up_to_seq`/`lineage_root_id`（回填自身）/`origin_kind`（回填 `cold`）/`prefix_fingerprint`。
   - 10：`automation_runs`、`automation_state`、`sessions.automation_id`/`automation_run_id`。
   - 11：`plan_summary_revisions(id 自增 PK, session_id, text, replaced_at)` + `ix_plan_summary_revisions_session(session_id, id DESC)`。
-  - 阶梯没有第 12 步：`todos.baseline_tree`（步骤首次转 `in_progress` 时的工作树内容指纹，旧行 NULL，不回填）、`turn_metrics`（每轮指标，见下）与 `sessions.child_driver`（NULL = 模型派生的子 Agent，`'user'` = 用户驱动的 Agent 会话）都**直带 V1 建表脚本**、不升 `user_version`——不向后兼容立场（commit 2802766，产品未投产）：旧库不迁移；`baseline_tree` 旧库缺列读 TODO 需删库重建，`turn_metrics` 旧库整条特性旁路为 no-op（缺表读作 false/空/0，不是错误）；**`child_driver` 旧库缺列则读会话直接失败，已定删库重建（不做 `AddColumnIfMissing` 补列）**。
+  - 12：`sessions.title_source TEXT`（NULL = 仍是创建默认标题，`derived`/`agent`/`user` 见 [01-sessions-and-workspaces.md](01-sessions-and-workspaces.md)），无回填——旧行读作“未命名”。它**走阶梯**而不是像 `child_driver` 那样直带建表脚本：NULL 对历史行有确切含义（还没人给它起名），补一列即可，不需要删库。
+  - 不走阶梯的列：`todos.baseline_tree`（步骤首次转 `in_progress` 时的工作树内容指纹，旧行 NULL，不回填）、`turn_metrics`（每轮指标，见下）与 `sessions.child_driver`（NULL = 模型派生的子 Agent，`'user'` = 用户驱动的 Agent 会话）都**直带 V1 建表脚本**、不升 `user_version`——不向后兼容立场（commit 2802766，产品未投产）：旧库不迁移；`baseline_tree` 旧库缺列读 TODO 需删库重建，`turn_metrics` 旧库整条特性旁路为 no-op（缺表读作 false/空/0，不是错误）；**`child_driver` 旧库缺列则读会话直接失败，已定删库重建（不做 `AddColumnIfMissing` 补列）**。
 - 关键表：`sessions`、`messages`、`summaries`、`messages_fts`（或回退 `messages_text`）、`artifacts`、`projects`、`todo_groups`、`todos`、`plan_summaries`、`plan_summary_revisions`、`ui_state`、`turn_checkpoints`、`turn_metrics`、`storage_notices`、`automation_runs`、`automation_state`。
 - 路径唯一性：`projects.root_key`（Windows 大写）唯一索引；General 项目由部分唯一索引保证单例，再次注册即改指向。
 - 时间戳只存 `ToString("O")` 形状（带 offset、固定 7 位小数）的文本，读取严格；3 号步骤先就地规范化（有 Z 或 ±hh:mm 且能解析出唯一时刻的改写为规范形状，时刻与 offset 不变；无 offset/不可解析原样保留，由严格读取指名报错）。规范化后给 14 张表 22 个时间戳列建 `BEFORE INSERT`/`BEFORE UPDATE` 触发器（`turn_metrics.started_at`/`ended_at` 随 V1 建表 + `TimestampColumns` 登记，新库在 3 号步骤装上守卫），任何写者都写不进非规范文本（可空列仍允许 NULL）。新增时间戳列必须登记进 `StorageSchema.TimestampColumns`，否则既不会被规范化也没有守卫。`artifacts` 由 owner 在阶梯外自建，其 `at` 列经 `EnsureOwnedTimestampsAsync` 装同一份守卫。

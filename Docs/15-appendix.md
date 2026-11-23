@@ -2,7 +2,7 @@
 
 ## 15.1 内置工具总表
 
-副作用列：`R` = 只读，`W` = 写，`X` = 执行；`*` = 可被 `tools` 分区关闭，`—` = 必需项不可关闭，`†` = 只有根 Agent 可用。
+副作用列：`R` = 只读，`W` = 写，`X` = 执行；`*` = 可被 `tools` 分区关闭，`—` = 必需项不可关闭，`†` = 只有根 Agent 可用（工具自身按调用深度拒绝，不是靠开关）。
 
 | 工具 | 组 | 副作用 | 开关 | 一句话 |
 |---|---|---|---|---|
@@ -14,6 +14,7 @@
 | `grep` | 文件 | R | * | 托管/ripgrep，1000 命中，单文件 8 MiB |
 | `bash` | 文件 | X | * | Direct 优先进程，每流 512 KiB，默认 120 s |
 | `todo` | 会话 | R/W | * | 7 种操作：清单、分组、计划摘要 |
+| `set_title` | 会话 | W | * | 命名本会话（只写 `sessions.title_source`，用户改名永久优先，不动分支与目录） |
 | `ask_user` | 会话 | R | * | 问题卡（选项/自由文本/多选） |
 | `skill` | 会话 | R | — | 按名取技能全文（≤64000 字符） |
 | `spawn_agent` | Agent | R | * | 派生 Scout/Worker/Plan/Reviewer 或用户 Agent；可带这一次的模型与档位 |
@@ -106,7 +107,7 @@
 见 [12-storage-and-data.md](12-storage-and-data.md) 12.1 的目录树。最常见的四个：
 
 - `settings.json`：唯一的偏好/提供商/Agent 配置源，三个写者互斥。
-- `forge.db`：会话与工作台状态，`user_version` 当前 11。
+- `forge.db`：会话与工作台状态，`user_version` 当前 12。
 - `reviews.db`：评论、标记、结论，无 schema 版本、幂等建表。
 - `approvals.db`：插件审批，Host 所有，App 只读。
 

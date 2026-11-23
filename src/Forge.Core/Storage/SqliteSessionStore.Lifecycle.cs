@@ -551,6 +551,28 @@ public sealed partial class SqliteSessionStore
         }
     }
 
+    /// <summary>
+    /// The precedence write: <c>derived</c> only ever replaces the creation default, <c>agent</c> the default or a derived
+    /// placeholder, and the condition is part of the statement, so a rename that lands between a read and this write cannot
+    /// be overwritten by a stale "still unnamed" decision.
+    /// </summary>
+    private sealed class TryTitleOp(string title, string source, string sessionId, CancellationToken ct) : WriteOp<bool>(ct)
+    {
+        protected override async ValueTask<bool> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences)
+        {
+            var replaceable = source == SessionTitleSource.Agent
+                ? "(title_source IS NULL OR title_source = $replaced)"
+                : "title_source IS NULL";
+            var sql = $"UPDATE sessions SET title = $value, title_source = $source WHERE id = $id AND {replaceable}";
+            await using var command = Command(connection, transaction, sql);
+            command.Parameters.AddWithValue("$value", title);
+            command.Parameters.AddWithValue("$source", source);
+            command.Parameters.AddWithValue("$replaced", SessionTitleSource.Derived);
+            command.Parameters.AddWithValue("$id", sessionId);
+            return await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false) > 0;
+        }
+    }
+
     /// <summary>The raw status write; its only occupancy protection is the unique index (translated, contained).</summary>
     private sealed class SetStatusOp(string sessionId, SessionStatus status, CancellationToken ct) : WriteOp<bool>(ct)
     {

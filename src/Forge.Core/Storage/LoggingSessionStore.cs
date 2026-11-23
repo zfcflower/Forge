@@ -82,6 +82,9 @@ public sealed class LoggingSessionStore(ISessionStore inner, JsonlEventLog log) 
     Task<bool> ISessionCatalog.RenameAsync(string sessionId, string title, CancellationToken ct) =>
         Catalog.RenameAsync(sessionId, title, ct);
 
+    Task<bool> ISessionCatalog.TryTitleAsync(string sessionId, string title, string source, CancellationToken ct) =>
+        Catalog.TryTitleAsync(sessionId, title, source, ct);
+
     Task ISessionCatalog.TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) =>
         Catalog.TouchAsync(sessionId, at, ct);
 
