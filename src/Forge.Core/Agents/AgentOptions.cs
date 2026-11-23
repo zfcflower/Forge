@@ -11,6 +11,15 @@ public sealed record AgentOptions
     public int MaxTurns { get; init; } = 100;
 
     /// <summary>
+    /// How many consecutive turns without new evidence end a run, zero to disable it. A turn has no new evidence when every
+    /// call of it was a read-only search (<c>grep</c>, <c>find</c>, <c>ls</c>) and every result matched nothing, or when the
+    /// batch repeats the previous turn's call for call - the shape a degenerate loop takes. Ending on it returns what the run
+    /// produced instead of spending the rest of <see cref="MaxTurns"/> and then throwing it away. Three is the shape two
+    /// production runaway loops showed, not a measured optimum.
+    /// </summary>
+    public int NoEvidenceTurnLimit { get; init; } = 3;
+
+    /// <summary>
     /// How many agents may be actively running at once, counted over the whole spawn tree rather than per
     /// depth: an agent is active while it streams a model turn or executes tools. An agent that is only
     /// waiting for the results of its own spawn_agent calls gives its slot back and takes it again before

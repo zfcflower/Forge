@@ -181,6 +181,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 - 事件通道保持无界(决定):`AgentHost.RunAsync` 的 `Channel.CreateUnbounded<AgentEvent>` 不加背压、不丢事件;UI 合并在 App 侧由 `FrameCoalescer` 实现,见 forge-app。
 - `MaxTurns` 计入后续指令续跑;不响应取消的工具要等其返回才真正停止。
+- **无进展收尾先于轮次上限。** 连续 `NoEvidenceTurnLimit`(默认 3,0 关闭)轮“没有新证据”即正常结束并返回已产出文本(尾部一行停止原因,同时作为一条 assistant 消息落盘并流式发给 UI),不再撞 `MaxTurns` 抛 `AgentTurnLimitException`。“没有新证据”只两种形状:本轮每个调用都是 `grep`/`find`/`ls` 且每个结果都是“没有命中”(`no matches…` 或 `(empty)`),或本轮调用批次与上一轮逐字相同(`name` + `arguments`)。所以 shell/编辑/构建的失败重试不计入,任何一次命中或成功调用都会清零;steering 落地归零。`AgentTurnLimitException` 保留为兜底路径。
 - 内置 Agent 的工具白名单未含 `todo`(加入会改动其可缓存工具集),目前只有根 Agent 可用。
 - 评审方式可配置(`goal-and-requirements.md` 的“Reviewer 子 Agent 一次评审,或人工逐行评审”)未接线:要一个设置项加一条“步骤提交后自动评审”的触发路径,单独决定。评审结论现在被步骤完成门禁读到(见「步骤完成门禁」),已持久化(`step_review_verdicts`),但:计划面板不显示,`pr_create` 不看它。
 - 步骤完成门禁的两个缺口:(已由内容指纹与步骤基线解决,保留作历史)评审之后的工作树改动无法察觉;Agent 自行 `git commit` 后工作树干净且步骤无提交,会被判成「没改代码」而放行。两者都需要新的证据源(步骤基线 HEAD / 树指纹),未实现。

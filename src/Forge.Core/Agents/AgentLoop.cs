@@ -150,6 +150,10 @@ public sealed class AgentLoop(AgentLoopServices services)
         await ResolveCacheStateAsync(instance, ct).ConfigureAwait(false);
         await PersistAsync(instance, input, null, ct).ConfigureAwait(false);
 
+        var noEvidenceLimit = services.Options.NoEvidenceTurnLimit;
+        var noEvidenceTurns = 0;
+        ToolCallBlock[]? previousCalls = null;
+
         for (var turn = 0; turn < services.Options.MaxTurns; turn++)
         {
             ct.ThrowIfCancellationRequested();
@@ -273,6 +277,37 @@ public sealed class AgentLoop(AgentLoopServices services)
             }
 
             await DeliverInterjectionsAsync(instance, sink).ConfigureAwait(false);
+
+            // A run that keeps asking the same question makes no progress: every search of the turn matched nothing, or the
+            // batch repeats the previous one call for call. Ending here returns what was produced; letting the turn budget
+            // run out would throw it away (see forge-core "无进展收尾"). A steer is the user speaking, so it clears the count.
+            if (execution.Steering is not null)
+            {
+                noEvidenceTurns = 0;
+            }
+            else if (IsNoEvidence(calls, previousCalls, execution.Results))
+            {
+                noEvidenceTurns++;
+                if (noEvidenceLimit > 0 && noEvidenceTurns >= noEvidenceLimit)
+                {
+                    // A queued instruction is the user asking for something else: deliver it and keep going rather than
+                    // stopping on top of it. Stopping is what is left when nobody has anything to add.
+                    if (await ContinueWithControlAsync(instance, control, sink, ct).ConfigureAwait(false))
+                    {
+                        noEvidenceTurns = 0;
+                    }
+                    else
+                    {
+                        return await StopWithoutEvidenceAsync(instance, noEvidenceTurns, stop, turnStartedAt, sink, ct).ConfigureAwait(false);
+                    }
+                }
+            }
+            else
+            {
+                noEvidenceTurns = 0;
+            }
+
+            previousCalls = calls;
         }
 
         throw new AgentTurnLimitException(
@@ -955,6 +990,100 @@ public sealed class AgentLoop(AgentLoopServices services)
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Ends a run that stopped making progress: the note becomes a real message — persisted, streamed as a delta and returned —
+    /// so the transcript, the screen and the parent agent all say the same thing about why the run ended early. Only streamed
+    /// text would leave the store behind; only a return value would leave the screen behind.
+    /// </summary>
+    private async ValueTask<AgentRunResult> StopWithoutEvidenceAsync(
+        AgentInstance instance,
+        int turns,
+        StopReason stop,
+        DateTimeOffset turnStartedAt,
+        IAgentEventSink sink,
+        CancellationToken ct)
+    {
+        var text = NoEvidenceText(instance, turns);
+        instance.AppendText(text);
+        instance.CommitText(text);
+        await PersistAsync(instance, new ChatMessage(MessageRole.Assistant, [new TextBlock(text)]), null, ct).ConfigureAwait(false);
+        sink.Emit(new AgentTextDelta(instance.Id, text));
+        sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop, instance.StreamElapsed, turnStartedAt, DateTimeOffset.UtcNow));
+        return new AgentRunResult(text, instance.Usage, stop);
+    }
+
+    /// <summary>
+    /// Whether one turn produced no new evidence. Two shapes qualify: every call was a read-only search and every result says
+    /// it matched nothing, or the whole batch repeats the previous turn's byte for byte. Deliberately narrow: a shell, edit or
+    /// build failure says nothing about the question being asked, so those never count, and a single matching or successful
+    /// call clears the streak.
+    /// </summary>
+    private static bool IsNoEvidence(ToolCallBlock[] calls, ToolCallBlock[]? previous, ContentBlock[] results)
+    {
+        if (previous is not null && SameBatch(calls, previous))
+        {
+            return true;
+        }
+
+        if (calls.Length != results.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < calls.Length; index++)
+        {
+            if (!IsSearchTool(calls[index].Name)
+                || results[index] is not ToolResultBlock { IsError: false } result
+                || !IsEmptySearchResult(result))
+            {
+                return false;
+            }
+        }
+
+        return calls.Length > 0;
+    }
+
+    private static bool SameBatch(ToolCallBlock[] calls, ToolCallBlock[] previous)
+    {
+        if (calls.Length != previous.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < calls.Length; index++)
+        {
+            if (!string.Equals(calls[index].Name, previous[index].Name, StringComparison.Ordinal)
+                || !string.Equals(calls[index].ArgumentsJson, previous[index].ArgumentsJson, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The read-only tools whose empty answer means "the question is unchanged". The names are Forge.IO's, and the loop only
+    /// compares them: depending on Forge.IO from Forge.Core would point the module arrow the wrong way, so they are spelled
+    /// here where the decision is made.
+    /// </summary>
+    private static bool IsSearchTool(string name) =>
+        string.Equals(name, "grep", StringComparison.Ordinal)
+        || string.Equals(name, "find", StringComparison.Ordinal)
+        || string.Equals(name, "ls", StringComparison.Ordinal);
+
+    private static bool IsEmptySearchResult(ToolResultBlock result) =>
+        result.Blocks is [TextBlock text]
+        && (text.Text.StartsWith("no matches", StringComparison.Ordinal) || string.Equals(text.Text, "(empty)", StringComparison.Ordinal));
+
+    /// <summary>What a no-progress stop returns: everything the run produced, and one line saying why it ended early.</summary>
+    private static string NoEvidenceText(AgentInstance instance, int turns)
+    {
+        var partial = instance.PartialText;
+        var reason = $"stopped: {turns} consecutive turns returned no new evidence (every search matched nothing).";
+        return partial.Length == 0 ? $"[{reason} No result was produced.]" : $"{partial}\n\n[{reason} Partial result above.]";
+    }
+
     private static string ModelKey(ModelSettings model) => string.Concat(model.ProviderId, "\u001f", model.Model);
 
     private async ValueTask<(ContentBlock[] Results, string? Steering)> ExecuteToolsAsync(
@@ -1063,9 +1192,10 @@ public sealed class AgentLoop(AgentLoopServices services)
         CancellationToken ct)
     {
         var call = new ToolCall(block.Id, block.Name, block.ArgumentsJson);
-        if (!tools.Current().TryGet(call.Name, out var tool))
+        var registry = tools.Current();
+        if (!registry.TryGet(call.Name, out var tool))
         {
-            return new ToolResultBlock(call.Id, $"Unknown tool '{call.Name}'.", IsError: true);
+            return new ToolResultBlock(call.Id, UnknownToolMessage(registry, call.Name), IsError: true);
         }
 
         var request = new ApprovalRequest(call.Name, call.ArgumentsJson, ToolRegistry.SideEffectOf(tool, call), instance.WorkingDirectory);
@@ -1107,6 +1237,31 @@ public sealed class AgentLoop(AgentLoopServices services)
         result = await SpillAsync(instance, tool, result, ct).ConfigureAwait(false);
         sink.Emit(new AgentToolFinished(instance.Id, call, result));
         return new ToolResultBlock(call.Id, result.Blocks, result.IsError);
+    }
+
+    /// <summary>
+    /// The answer to a call for a tool this agent does not hold. It names the tools it does hold: an agent told only that
+    /// "bash" is unknown has nothing to switch to, and no way to tell a typo from a kind that is simply not offered to it.
+    /// </summary>
+    private static string UnknownToolMessage(ToolRegistry registry, string name)
+    {
+        if (registry.Definitions.Count == 0)
+        {
+            return $"Unknown tool '{name}'.";
+        }
+
+        var builder = new StringBuilder($"Unknown tool '{name}'. Available: ");
+        for (var index = 0; index < registry.Definitions.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(", ");
+            }
+
+            builder.Append(registry.Definitions[index].Name);
+        }
+
+        return builder.Append('.').ToString();
     }
 
     private async ValueTask<bool> IsApprovedAsync(ApprovalRequest request, CancellationToken ct)
