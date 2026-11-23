@@ -2281,6 +2281,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             tab.Title = session.TabTitle;
         }
+
+        // A derived placeholder or the model's own set_title lands here as the store accepted it: the tree row, the open
+        // agent sessions of this root and the @ picker's names follow, exactly as they do for a name a person typed.
+        Retitle(session.SessionId, session.Info.Title);
     }
 
     private void OnTurnCompleted(SessionWorkspaceViewModel session)

@@ -4,6 +4,7 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Logging;
 using Forge.App.Workbench;
+using Forge.Core.Storage;
 using Forge.Workspace;
 using ZLogger;
 
@@ -657,9 +658,22 @@ internal sealed partial class MainWindowViewModel
     {
         if (sessions.TryGetValue(sessionId, out var session))
         {
-            session.Rename(title);
+            // The dialog wrote it, so the tab records the source too: a later set_title then reads as kept instead of
+            // silently overwriting a name a person chose.
+            session.Rename(title, SessionTitleSource.User);
         }
 
+        Retitle(sessionId, title);
+    }
+
+    /// <summary>
+    /// Everything that shows a session's name, after the store holds a new one: the open agent sessions of a renamed root
+    /// (their launch carries a snapshot of it, and "root › child" has to follow), the trees' rows, and the @ picker's names.
+    /// A name no person typed - a derived placeholder, the model's <c>set_title</c> - arrives here the same way, so all three
+    /// read one story per session.
+    /// </summary>
+    private void Retitle(string sessionId, string title)
+    {
         foreach (var agent in agentViews.Keys)
         {
             if (string.Equals(agent.AgentSessionRoot?.Id, sessionId, StringComparison.Ordinal))
@@ -667,6 +681,9 @@ internal sealed partial class MainWindowViewModel
                 agent.RenameRoot(title);
             }
         }
+
+        GeneralChats.RenameSession(sessionId, title);
+        Projects.RenameSession(sessionId, title);
 
         // The @ picker keeps the names it read from the store: an agent session renamed while its tab is closed would still
         // be offered under its old name there, and an open popup would keep showing it.

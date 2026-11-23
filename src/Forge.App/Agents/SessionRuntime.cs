@@ -6,6 +6,7 @@ using Forge.Core.Agents;
 using Forge.Core.Prompts;
 using Forge.Core.Prompts.Templates;
 using Forge.Core.Providers;
+using Forge.Core.Storage;
 using Forge.Core.Tools;
 using Forge.HostClient;
 using Forge.Mcp;
@@ -387,10 +388,24 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     /// </summary>
     public Func<string, string?>? ContextBudget { get; set; }
 
+    /// <summary>
+    /// Who named this session's title, as the store last accepted it: null until the first write, then the derived
+    /// placeholder or the model's own name. Kept here because a write lands mid-turn and the <see cref="Session"/> snapshot
+    /// the runtime was built from does not change with it.
+    /// </summary>
+    private string? titleSource;
+
+    /// <summary>
+    /// The name this session is now called, and who wrote it (<c>derived</c> placeholder or <c>agent</c>), raised after the
+    /// store accepted it. The shell relabels its tab and tree row from this; a write the store refused raises nothing.
+    /// </summary>
+    public event Action<string, string>? TitleNamed;
+
     public SessionRuntime(AgentRuntimeServices services, SessionInfo session)
     {
         this.services = services;
         Session = session;
+        titleSource = session.TitleSource;
         rootModel = services.Model;
         if (services.CompactionChanges is { } changes)
         {
@@ -451,11 +466,54 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         RunTurnAsync(userText, [], sink, ct);
 
     /// <summary>
+    /// Writes the placeholder title a turn's first user message describes, unless someone named the session first - the store
+    /// decides that, so a rename landing mid-turn wins. Nothing usable in the text (an attachment-only send, a pasted stack
+    /// trace) writes nothing and the creation default stays.
+    /// </summary>
+    public async Task DeriveTitleAsync(string firstUserText, CancellationToken ct)
+    {
+        if (Volatile.Read(ref titleSource) is not null || SessionTitles.Derive(firstUserText) is not { } title)
+        {
+            return;
+        }
+
+        await TryWriteTitleAsync(title, SessionTitleSource.Derived, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A title someone else wrote - a person through the rename dialog - so a later turn does not try the placeholder again.
+    /// The runtime keeps its own copy because the <see cref="Session"/> snapshot it was built from never changes with a write.
+    /// </summary>
+    public void NoteNamed(string source) => Volatile.Write(ref titleSource, source);
+
+    /// <summary>The <c>set_title</c> seam: the name the model asked for, kept only if it is still replaceable.</summary>
+    private async ValueTask<bool> NameSessionAsync(string title, CancellationToken ct) =>
+        await TryWriteTitleAsync(title, SessionTitleSource.Agent, ct).ConfigureAwait(false);
+
+    private async ValueTask<bool> TryWriteTitleAsync(string title, string source, CancellationToken ct)
+    {
+        var applied = await services.Catalog.TryTitleAsync(SessionId, title, source, ct).ConfigureAwait(false);
+        if (applied)
+        {
+            Volatile.Write(ref titleSource, source);
+            TitleNamed?.Invoke(title, source);
+        }
+
+        return applied;
+    }
+
+    /// <summary>
     /// Runs one user turn whose message is <paramref name="userText"/> followed by <paramref name="attachments"/> (images,
     /// files, inlined text files). The text may be empty only when at least one attachment is present.
     /// </summary>
+    /// <param name="deriveTitle">Whether this turn's text may write the placeholder title. A user's message may; an automation
+    /// turn may not - its session carries the automation's own name and was not created by a person typing a request.</param>
     public async Task RunTurnAsync(
-        string userText, IReadOnlyList<ContentBlock> attachments, Action<AgentEvent> sink, CancellationToken ct)
+        string userText,
+        IReadOnlyList<ContentBlock> attachments,
+        Action<AgentEvent> sink,
+        CancellationToken ct,
+        bool deriveTitle = true)
     {
         ArgumentNullException.ThrowIfNull(userText);
         ArgumentNullException.ThrowIfNull(attachments);
@@ -466,6 +524,16 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
         ArgumentNullException.ThrowIfNull(sink);
         var message = UserMessage(userText, attachments);
+
+        // The first user message of an unnamed session is what its placeholder title describes: written here, before the host
+        // is resolved, so the tab and the tree row already read as the task while the model streams its first token. A session
+        // someone already named is left alone, and a message with nothing usable in it keeps the creation default.
+        if (deriveTitle)
+        {
+            // The orchestration directive travels at the head of the message; the label describes what the person asked for,
+            // not the instruction the composer wrapped around it.
+            await DeriveTitleAsync(OrchestrationDirective.Strip(userText), ct).ConfigureAwait(false);
+        }
 
         // What this request is about decides which MCP tools are offered (see RefreshMcpTools); it is read when the tool
         // surface is refreshed at the start of the turn and never stored.
@@ -1777,6 +1845,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 SpawnModels = services.SpawnModels,
                 // The model's own budget line: a dynamic suffix, never part of the cached prefix or the history.
                 DynamicContext = ContextBudget,
+                // set_title: the tool exists in every host this runtime builds, so the tool segment stays byte-stable.
+                RenameSession = NameSessionAsync,
                 Options = new AgentOptions
                 {
                     DefaultModel = mainModel,
@@ -2442,6 +2512,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         {
             [TodoTool.Name] = ApprovalMode.Allow,
             [AskUserTool.Name] = ApprovalMode.Allow,
+
+            // Naming the session is the app's own tab label, not workspace state: it writes no file, moves no branch, and
+            // the model is asked to do it once, so a card here would be an interruption with nothing to decide.
+            [SetTitleTool.Name] = ApprovalMode.Allow,
 
             // Delivering a session message is what the user's own @ mention authorized: the approval card belongs to the
             // target's tools, which go through this session's policy like every other call of that turn (forge-core

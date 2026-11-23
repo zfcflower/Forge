@@ -19,6 +19,8 @@
 | 常规（scratch）会话 | `scratch/<日期-标题>/` | 常规对话 panel 的“+” | 没有仓库，git 工具与 diff 面板按无仓库处理 |
 | 自动化会话 | 暂存目录、指定仓库的 `forge/` 复用 worktree、或某会话下的 Scout 子 Agent | 自动化任务运行 | 带 `AutomationId` / `AutomationRunId`，树上有闪电标记 |
 
+
+- **会话标题**：建会话时是创建默认标题（时间戳），发出第一条消息时本机按这条消息派生一个占位标题（取第一行、去掉代码/URL/路径/文件名，截到 48 字符），模型之后可经 `set_title` 换成任务名（3–6 词、用户语言），用户手动重命名则永久优先——三者的优先级由 `sessions.title_source` 的一条条件写入保证。标题只影响显示：worktree 分支 `forge/<slug>`、目录名与提交说明沿用创建时的名字，改名不会动它们；派生只在本机发生，不额外发模型请求。
 - 新建 worktree 会话的对话框：起点来自共享分支选择器（可含远程跟踪分支，先解析成提交再 `worktree add -b`，所以选 `origin/main` 不会把新分支的上游设成它）；名称实时校验（`git check-ref-format --branch`、本地重名），250 ms 防抖、后台校验、过期结果丢弃。
 - 稀疏检出只在项目行“+”的新建工作区对话框中提供：`git worktree add --no-checkout` → `sparse-checkout set --cone` → `checkout`，任一步失败收回本次创建。
 - 分叉/合并/移除等生命周期动作的 git 原语在 `Forge.Workspace`；会话记录与事务在 `forge.db`。

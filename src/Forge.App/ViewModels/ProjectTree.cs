@@ -1168,6 +1168,21 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         }
     }
 
+    /// <summary>
+    /// A session's name changed in the store: its row is relabelled in place. Only a plain session row carries the session's own
+    /// title - an agent session's row shows the name of that agent session, which the root's rename never rewrites.
+    /// </summary>
+    public void RenameSession(string sessionId, string title)
+    {
+        foreach (var node in Enumerate(Sections))
+        {
+            if (node.Kind == TreeNodeKind.Session && string.Equals(node.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                node.Title = title;
+            }
+        }
+    }
+
     public void SetActiveSession(string? sessionId)
     {
         activeSessionId = sessionId ?? string.Empty;

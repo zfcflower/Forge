@@ -165,6 +165,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// call.</summary>
     private int turnToolCalls;
 
+    /// <summary>Requests this session has carried the naming line on: incremented from the agent loop's thread, so the cap
+    /// holds without a lock (a session naming itself drops the line before the cap anyway).</summary>
+    private int namingRequests;
+
     /// <summary>The card of the turn now running (or just ended). The root's usage lands on the card the turn used, not on
     /// whatever <c>Transcript.Current</c> happens to be when the coalescer's Background flush arrives — a quick next
     /// message would otherwise hand the previous turn's tokens to the new card.</summary>
@@ -306,10 +310,16 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             () => Composer.Model,
             () => Composer.ProviderId,
             openInspector);
-        if (runtime is not null)
+        if (runtime is not null && agentSession is null)
         {
-            // The budget line is the model's view of the very gauge this panel shows; the preference can turn it off.
-            runtime.ContextBudget = BudgetLine;
+            // The budget line is the model's view of the very gauge this panel shows; the preference can turn it off. The
+            // naming line rides the same per-request suffix, so neither ever enters the cached prefix. Both describe the
+            // session the runtime belongs to, so an agent-session tab - which shares this runtime - never installs them:
+            // otherwise whichever view was built last would decide what the root's own requests say.
+            runtime.ContextBudget = DynamicContext;
+            // The write finishes on a store thread and the model's own call runs on the agent's: the tab, the tree and the @
+            // popup this lands in are all UI-owned collections.
+            runtime.TitleNamed += OnTitleNamed;
         }
         if (!providers.IsConfigured)
         {
@@ -444,6 +454,27 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// </summary>
     private string? BudgetLine(string agentId) =>
         appPreferences?.ChatContextBudget == false ? null : InstrumentsOf(agentId)?.ContextBudgetLine;
+
+    /// <summary>
+    /// The trailing suffix one request carries: the instance's own budget line plus, while this session still has no real
+    /// name, one line saying so. Both are per-request text after the cached prefix; the naming line stops by itself once the
+    /// store holds a name (the model's own <c>set_title</c> or a person's rename) and never outlives the first two requests,
+    /// so a model that ignores it costs a fixed amount instead of one line per request forever.
+    /// </summary>
+    private string? DynamicContext(string agentId)
+    {
+        var budget = BudgetLine(agentId);
+        if (automationTurn
+            || !string.Equals(agentId, "root", StringComparison.Ordinal)
+            || Info.TitleSource is not (null or SessionTitleSource.Derived)
+            || Interlocked.Increment(ref namingRequests) > 2)
+        {
+            return budget;
+        }
+
+        var naming = SessionTitles.Nudge(Info.TitleSource is null ? null : Info.Title);
+        return string.IsNullOrEmpty(budget) ? naming : budget + "\n" + naming;
+    }
 
     /// <summary>Names of the tools this session can call; empty until its first turn built the agent host.</summary>
     internal IReadOnlyList<string> ToolNames() => runtime?.ToolNames() ?? [];
@@ -586,6 +617,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         {
             runtime.PromptsStaleChanged -= OnRuntimePromptsStaleChanged;
             runtime.SessionGrantsChanged -= OnSessionGrantsChanged;
+            runtime.TitleNamed -= OnTitleNamed;
         }
 
         runtime = null;
@@ -809,7 +841,18 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         RaiseRunningResources();
     }
 
-    public void Rename(string title)
+    /// <summary>A title the runtime wrote (a derived placeholder or the model's own name), applied on the UI thread.</summary>
+    private void OnTitleNamed(string title, string source) =>
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (!disposed)
+                {
+                    Rename(title, source);
+                }
+            });
+
+    public void Rename(string title, string? titleSource = null)
     {
         if (agentSession is not null && agentSelfRenames.Remove(title))
         {
@@ -818,11 +861,18 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return;
         }
 
-        Info = Info with { Title = title };
+        Info = Info with { Title = title, TitleSource = titleSource ?? Info.TitleSource };
         if (agentSession is not null)
         {
             agentName = title;
             OnPropertyChanged(nameof(AgentSessionName));
+        }
+
+        if (titleSource is not null && agentSession is null)
+        {
+            // A name from outside this runtime (the rename dialog): it carries the source, so the runtime stops offering the
+            // placeholder on every later turn. An agent session's own name is not this runtime's title.
+            runtime?.NoteNamed(titleSource);
         }
 
         OnPropertyChanged(nameof(Title));
@@ -1994,7 +2044,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 }
             }
 
-            await live.RunTurnAsync(OrchestrationDirective.Apply(prompt.Orchestration, text), prompt.Attachments, OnAgentEvent, token).ConfigureAwait(true);
+            await live.RunTurnAsync(
+                    OrchestrationDirective.Apply(prompt.Orchestration, text),
+                    prompt.Attachments,
+                    OnAgentEvent,
+                    token,
+                    deriveTitle: !automationTurn)
+                .ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -2991,6 +3047,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         {
             runtime.PromptsStaleChanged -= OnRuntimePromptsStaleChanged;
             runtime.SessionGrantsChanged -= OnSessionGrantsChanged;
+            runtime.TitleNamed -= OnTitleNamed;
         }
 
         ClearLiveTools();
