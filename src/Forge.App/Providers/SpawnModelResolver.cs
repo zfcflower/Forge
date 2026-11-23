@@ -108,10 +108,11 @@ internal sealed class SpawnModelResolver(Func<ProviderCatalog> catalog)
         }
 
         var owner = live.Find(providerId);
+        // Only a cap the user pinned may reach the wire; the catalogue's capability feeds the compaction budget alone.
         var settings = new ModelSettings(
             model,
             thinking,
-            owner?.MetadataFor(model).MaxOutputTokens ?? owner?.Definition.MaxOutputTokens,
+            owner?.UserMaxOutput(model),
             providerId);
         return SpawnModelChoice.Resolved(settings, note);
     }

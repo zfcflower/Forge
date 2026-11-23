@@ -370,12 +370,25 @@ internal sealed class ConnectedProvider
 
         var metadata = ModelMetadataResolver.Resolve(
             modelId,
-            modelCatalog?.View.Lookup(Definition.PresetId, modelId),
+            modelCatalog?.View.Lookup(Definition.PresetId, Definition.Id, Definition.DisplayName, modelId),
             cache.Get(Id, modelId),
             Definition.Overrides.TryGetValue(modelId, out var overridden) ? overridden : null);
         memo?.Set(Id, modelId, metadata);
         return metadata;
     }
+
+    /// <summary>
+    /// The output cap the user pinned for one model on this provider: the per-model <c>modelMeta</c> override, else the
+    /// provider-level figure. The only cap a request may carry: the catalogue's limit is the model's <em>capability</em> -
+    /// a display and compaction figure an aggregator re-derives rather than reports - so <see cref="MetadataFor" /> serves
+    /// that and this serves the wire. Null when nothing is pinned, which sends no cap at all.
+    /// </summary>
+    public int? UserMaxOutput(string? modelId) =>
+        !string.IsNullOrWhiteSpace(modelId)
+        && Definition.Overrides.TryGetValue(modelId, out var overridden)
+        && overridden.MaxOutputTokens is { } pinned
+            ? pinned
+            : Definition.MaxOutputTokens;
 
     /// <summary>
     /// The reasoning steps this model accepts: the compiled table first, because it was checked against the providers, then
@@ -387,7 +400,7 @@ internal sealed class ConnectedProvider
         var known = ThinkingLevels.For(modelId);
         return known.Count > 1
             ? known
-            : modelCatalog?.View.ReasoningStepsFor(Definition.PresetId, modelId) ?? known;
+            : modelCatalog?.View.ReasoningStepsFor(Definition.PresetId, Definition.Id, Definition.DisplayName, modelId) ?? known;
     }
 
     /// <summary>
@@ -718,7 +731,7 @@ internal sealed class ProviderCatalog
             }
         }
 
-        var table = ModelMetadataResolver.Resolve(modelId, modelCatalog?.View.Lookup(null, modelId), providerMetadata: null, userOverride: null);
+        var table = ModelMetadataResolver.Resolve(modelId, modelCatalog?.View.Lookup(null, null, null, modelId), providerMetadata: null, userOverride: null);
         var effective = DefaultContextWindow.Resolve(table.ContextWindow);
         return effective == table.ContextWindow ? table : table with { ContextWindow = effective };
     }

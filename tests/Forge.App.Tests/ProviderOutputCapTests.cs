@@ -110,6 +110,12 @@ public sealed class ProviderOutputCapTests : IDisposable
         var unset = new CapturingHandler(ResponsesStream());
         await DrainAsync(Responses(unset), Request(null));
         Assert.DoesNotContain("max_output_tokens", unset.Body, StringComparison.Ordinal);
+
+        // The compatible family mirrors it: unpinned is an absent field, so a custom gateway keeps its own default - the
+        // shape an aggregator's derived capability must never occupy again.
+        var compatUnset = new CapturingHandler(CompatibleStream());
+        await DrainAsync(Compatible(compatUnset), Request(null));
+        Assert.DoesNotContain("max_completion_tokens", compatUnset.Body, StringComparison.Ordinal);
     }
 
     [Fact]

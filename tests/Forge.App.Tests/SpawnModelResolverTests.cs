@@ -103,6 +103,51 @@ public sealed class SpawnModelResolverTests : IDisposable
     }
 
     [Fact]
+    public void A_provider_level_pin_reaches_the_spawned_settings()
+    {
+        var catalog = fixture.Create("probe", new FixtureProvider("probe", "Probe", ["kimi-k2"], MaxOutputTokens: 5_000));
+        var current = new ModelSettings("kimi-k2", ThinkingEffort.Off, null, "probe");
+
+        var choice = Resolver(catalog).Resolve(Request(null, null, null, current));
+
+        Assert.Equal(new ModelSettings("kimi-k2", ThinkingEffort.Off, 5_000, "probe"), choice.Settings);
+    }
+
+    [Fact]
+    public void A_per_model_pin_wins_over_the_provider_level_figure()
+    {
+        var catalog = fixture.Create(
+            "probe",
+            new FixtureProvider(
+                "probe",
+                "Probe",
+                ["kimi-k2"],
+                MaxOutputTokens: 5_000,
+                Overrides: new Dictionary<string, ModelMetadata> { ["kimi-k2"] = new(null, null, 4_096) }));
+        var current = new ModelSettings("kimi-k2", ThinkingEffort.Off, null, "probe");
+
+        var choice = Resolver(catalog).Resolve(Request(null, null, null, current));
+
+        Assert.Equal(new ModelSettings("kimi-k2", ThinkingEffort.Off, 4_096, "probe"), choice.Settings);
+    }
+
+    [Fact]
+    public void An_unpinned_model_carries_no_cap_even_when_the_catalog_knows_one()
+    {
+        // The catalog's limit is the model's capability, a display and compaction figure; loading it into the settings is
+        // what put an aggregator's derived 943718 on the wire and had every request for the 131072-cap model refused.
+        var catalog = fixture.Create(
+            "opencode",
+            ProviderCatalogFixture.Snapshot(("opencode", "glm-5.3", 131_072), ("openrouter", "z-ai/glm-5.3", 943_718)),
+            new FixtureProvider("opencode", "OPENCODE", ["glm-5.3"]));
+        var current = new ModelSettings("glm-5.3", ThinkingEffort.Off, null, "opencode");
+
+        var choice = Resolver(catalog).Resolve(Request(null, null, null, current));
+
+        Assert.Equal(new ModelSettings("glm-5.3", ThinkingEffort.Off, null, "opencode"), choice.Settings);
+    }
+
+    [Fact]
     public void A_model_two_providers_serve_is_refused_with_every_candidate()
     {
         var catalog = fixture.Create(

@@ -243,10 +243,11 @@ internal sealed class AgentDefaultsStore
 
         var accepted = (levels ?? ((modelId, providerId) => catalog.ThinkingStepsFor(modelId, providerId)))(model, target.Id);
         var thinking = ThinkingEfforts.Clamp(entry?.Thinking ?? ThinkingEffort.Off, accepted);
+        // Only a cap the user pinned may reach the wire; the catalogue's capability feeds the compaction budget alone.
         return new ModelSettings(
             model,
             thinking,
-            target.MetadataFor(model).MaxOutputTokens ?? target.Definition.MaxOutputTokens,
+            target.UserMaxOutput(model),
             target.Id);
     }
 

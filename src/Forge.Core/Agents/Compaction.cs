@@ -539,8 +539,16 @@ public sealed class SummaryCompactor : IContextCompactor
         return HasTurnContext(running) ? string.Concat(UpdateInstruction, "\n", FoldTurnContextInstruction) : UpdateInstruction;
     }
 
-    private static int OutputLimit(ModelSettings model, int maxOutputTokens) =>
-        model.MaxOutputTokens is { } own && own > 0 ? Math.Min(own, maxOutputTokens) : maxOutputTokens;
+    /// <summary>
+    /// The cap a summarizer request carries: the model's real output ceiling - the pin the user set, else the capability the
+    /// policy resolves - never above the summarizer's own bound. The pin alone would leave an unpinned model asking for the
+    /// full bound on a model whose ceiling is lower, and the provider refuses a request that exceeds it.
+    /// </summary>
+    private int OutputLimit(ModelSettings model, int maxOutputTokens)
+    {
+        var own = model.MaxOutputTokens ?? policy?.MaxOutputTokens?.Invoke(model);
+        return own is > 0 ? Math.Min(own.Value, maxOutputTokens) : maxOutputTokens;
+    }
 
     /// <summary>
     /// Characters of conversation one request may carry: <see cref="RequestWindowShare"/> of what the model's window leaves

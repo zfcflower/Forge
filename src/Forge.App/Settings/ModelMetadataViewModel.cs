@@ -202,7 +202,13 @@ internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
     {
         var staged = overrideMetadata ?? EditableMetadata(provider, model);
         var report = services.Cache.Get(providerId, model);
-        var snapshot = services.ModelCatalog.View.Lookup(provider.Definition.PresetId, model);
+        // The same identity a session would resolve with (preset, then the provider's own name), so the preview shows
+        // the drawer the user's provider opens rather than some global entry for the model id.
+        var snapshot = services.ModelCatalog.View.Lookup(
+            provider.Definition.PresetId,
+            provider.Definition.Id,
+            provider.Definition.DisplayName,
+            model);
         var merged = ModelMetadataResolver.Resolve(model, snapshot, report, userOverride: null);
         var effective = ProviderCatalog.WithGlobalWindow(services.Catalog.DefaultContextWindow, staged.ContextWindow, merged);
         return new RowSeed(

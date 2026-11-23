@@ -10,10 +10,11 @@ namespace Forge.Core.Providers;
 /// <remarks>
 /// <para>
 /// <b>Provider first, model id second.</b> The catalog prices the same model differently per provider (an aggregator adds
-/// margin over first-party list prices), so a provider the app knows how to map answers from its own catalog entry. A
-/// provider it cannot map — a custom OpenAI-compatible gateway, or a preset added upstream tomorrow — falls back to the
-/// entry for that model id wherever the catalog has it, because showing a plausible list price beats showing none: this
-/// data only ever feeds a display estimate, and the provider's own <c>/models</c> answer still wins over it.
+/// margin over first-party list prices), so a provider the app knows how to map answers from its own catalog entry. A preset it
+/// cannot map is still mapped by name: when the provider's own id or display name equals a catalog provider's id, that entry is
+/// the drawer to look in, because the name is the user's declaration of which gateway this is. Only a provider nobody can name
+/// falls back to the entry for that model id wherever the catalog has it, because showing a plausible list price beats showing
+/// none: this data only ever feeds a display estimate, and the provider's own <c>/models</c> answer still wins over it.
 /// </para>
 /// <para>
 /// Model ids are matched after <see cref="ModelIdRules.Normalize"/>: exact id first, then the longest known id the model id
@@ -23,11 +24,15 @@ namespace Forge.Core.Providers;
 /// </remarks>
 public sealed class ModelCatalogView
 {
-    /// <summary>First-party providers, most authoritative first: they win a model id the catalog lists several times.</summary>
+    /// <summary>
+    /// First-party and gateway providers, most authoritative first: they win a model id the catalog lists several times. An
+    /// aggregator re-lists other providers' models with its own derived figures (a share of the window rather than a reported
+    /// cap), so it ranks after the gateways it summarizes — its entry is the fallback, never the winner over the gateway itself.
+    /// </summary>
     private static readonly string[] ProviderPriority =
     [
-        "anthropic", "openai", "google", "xai", "deepseek", "moonshotai", "meta", "github-copilot", "openrouter",
-        "opencode", "opencode-go",
+        "anthropic", "openai", "google", "xai", "deepseek", "moonshotai", "meta", "github-copilot",
+        "opencode", "opencode-go", "openrouter",
     ];
 
     /// <summary>The Forge presets the catalog knows about, as preset id → catalog provider id.</summary>
@@ -112,7 +117,11 @@ public sealed class ModelCatalogView
         string.IsNullOrWhiteSpace(presetId) ? null : PresetProviders.GetValueOrDefault(presetId);
 
     /// <summary>The catalog entry for one model on one provider, or <c>null</c> when the catalog says nothing about it.</summary>
-    public ModelCatalogModel? Find(string? presetId, string? modelId)
+    /// <param name="presetId">The preset the provider was created from; a preset this build can map names the catalog provider.</param>
+    /// <param name="providerId">The connected provider's own id; when it names a catalog provider, that entry is the drawer.</param>
+    /// <param name="providerName">The connected provider's display name, the second chance when the id names no catalog provider.</param>
+    /// <param name="modelId">The model to look up, normalized before every comparison.</param>
+    public ModelCatalogModel? Find(string? presetId, string? providerId, string? providerName, string? modelId)
     {
         var normalized = ModelIdRules.Normalize(modelId);
         if (normalized.Length == 0 || Snapshot is null)
@@ -120,22 +129,43 @@ public sealed class ModelCatalogView
             return null;
         }
 
-        if (ProviderIdForPreset(presetId) is { } providerId
-            && byProvider.TryGetValue(providerId, out var index)
+        if (ProviderIdForPreset(presetId) is { } presetProvider
+            && byProvider.TryGetValue(presetProvider, out var index)
             && index.Find(normalized) is { } mapped)
         {
             return mapped;
         }
 
+        // Second chance: the provider's own name. A name that equals a catalog provider's id is the user saying which
+        // gateway this is, so its entry wins by identity and the no-identity fallback below never gets consulted - an
+        // aggregator re-listing the same model id cannot claim it first. Exact after trim and case; a name no catalog
+        // provider carries falls through.
+        var own = Drawer(providerId) ?? Drawer(providerName);
+        if (own?.Find(normalized) is { } entry)
+        {
+            return entry;
+        }
+
         return FindGlobal(normalized);
     }
 
+    /// <summary>
+    /// The catalog provider a connected provider's own key names, matched exactly after trim and case. Catalog keys are
+    /// lowercase; the name is the user's declaration, so anything beyond trimming and case is a guess this refuses to make.
+    /// </summary>
+    private ProviderIndex? Drawer(string? key)
+    {
+        var trimmed = key?.Trim().ToLowerInvariant();
+        return trimmed is { Length: > 0 } && byProvider.TryGetValue(trimmed, out var index) ? index : null;
+    }
+
     /// <summary>The resolved metadata for one model: the entry as <see cref="ModelMetadata"/>, or unknown.</summary>
-    public ModelMetadata Lookup(string? presetId, string? modelId) => Find(presetId, modelId)?.ToMetadata() ?? ModelMetadata.Unknown;
+    public ModelMetadata Lookup(string? presetId, string? providerId, string? providerName, string? modelId) =>
+        Find(presetId, providerId, providerName, modelId)?.ToMetadata() ?? ModelMetadata.Unknown;
 
     /// <summary>The reasoning steps the catalog knows for one model, or <c>null</c>; the caller falls back to its own table.</summary>
-    public IReadOnlyList<ThinkingEffort>? ReasoningStepsFor(string? presetId, string? modelId) =>
-        Find(presetId, modelId)?.ReasoningSteps;
+    public IReadOnlyList<ThinkingEffort>? ReasoningStepsFor(string? presetId, string? providerId, string? providerName, string? modelId) =>
+        Find(presetId, providerId, providerName, modelId)?.ReasoningSteps;
 
     private ModelCatalogModel? FindGlobal(string normalized)
     {

@@ -1079,7 +1079,7 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     }
 
     /// <summary>
-    /// The model chip's whole selection - model, effort, provider and that provider's output cap - as a definition has to
+    /// The model chip's whole selection - model, effort, provider and the cap the user pinned for it - as a definition has to
     /// carry it. <see cref="CurrentDefinition"/> builds the root definition around it; an agent-session tab puts it on the kind
     /// its agent chip holds instead (the kind supplies prompt and tools, the model chip the model).
     /// </summary>
@@ -1088,12 +1088,13 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         get
         {
             var provider = catalog.Find(providerId);
-            // The per-model cap wins over the provider's default: a vendor's models differ (8k vs 64k replies), and compaction
-            // reserves exactly this much output out of the window.
+            // Only a cap the user pinned (per-model modelMeta, else the provider-level figure) may reach the wire: the
+            // catalogue's limit is the model's capability and feeds the compaction budget through its own chain, never the
+            // request. An unpinned model sends no cap at all and gets the provider's default.
             return new ModelSettings(
                 model,
                 effort,
-                provider?.MetadataFor(model).MaxOutputTokens ?? provider?.Definition.MaxOutputTokens,
+                provider?.UserMaxOutput(model),
                 providerId);
         }
     }
@@ -1549,6 +1550,13 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     {
         var providerChanged = !string.Equals(providerId, provider, StringComparison.Ordinal);
         providerId = provider;
+        if (providerChanged)
+        {
+            // Two providers can serve one model id: the name does not move, what runs the next request does, and the sessions
+            // that persist or price by provider have to hear about it.
+            OnPropertyChanged(nameof(ProviderId));
+        }
+
         if (!Set(ref model, name) && !providerChanged)
         {
             return false;
@@ -1588,6 +1596,50 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             ? pinned
             : ResolveProviderFor(configured.Model) ?? providerId;
         SwitchModel(configured.Model, provider);
+    }
+
+    /// <summary>
+    /// Puts a reopened session's chip back where it was left: the model, its provider and the reasoning step. The provider that
+    /// served the model wins when it still lists it; otherwise the first configured provider that does serves it. Nothing moves
+    /// when no configured provider offers the model any more (the provider was removed or renamed since) - a chip naming a model
+    /// nobody serves would fail the next turn - and the caller then falls back to the session's own last recorded turn. The
+    /// reasoning step is applied after the model, because the steps a model accepts are only known once it is selected.
+    /// </summary>
+    /// <param name="model">The model the session was left on.</param>
+    /// <param name="provider">The provider that served it.</param>
+    /// <param name="effort">The reasoning step, when one was recorded; the current one stays otherwise.</param>
+    /// <returns>False when no configured provider could serve the model, so the caller can try its fallback.</returns>
+    internal bool RestoreSessionModel(string model, string? provider, ThinkingEffort? effort = null)
+    {
+        if (!catalog.IsConfigured || model.Length == 0)
+        {
+            return false;
+        }
+
+        var resolved = provider is { Length: > 0 } recorded
+            && catalog.Find(recorded) is { } serving
+            && serving.Models.Contains(model, StringComparer.Ordinal)
+                ? recorded
+                : ResolveProviderFor(model);
+        if (resolved is null)
+        {
+            return false;
+        }
+
+        // The same path a pick takes, so the next turn runs on the restored model and the strip prices with it.
+        if (SwitchModel(model, resolved))
+        {
+            Apply();
+        }
+
+        // The step goes on after the model: the setter clamps it to the steps the restored model accepts, which are only
+        // known once the switch re-read them.
+        if (effort is { } step)
+        {
+            Effort = step;
+        }
+
+        return true;
     }
 
     /// <summary>
