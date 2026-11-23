@@ -209,7 +209,18 @@ internal static partial class TranscriptScenarios
         }
 
         /// <summary>Bench switch: the stock ListBox, whose rows build their template every time (the cases ending in "-unpooled").</summary>
-        private static bool Unpooled;
+        private static bool Unpooled
+        {
+            get => unpooled;
+            set
+            {
+                unpooled = value;
+                // Both halves of the A/B: the stock list as well as a cache that hands nothing out and keeps nothing.
+                RowControlPool.Enabled = !value;
+            }
+        }
+
+        private static bool unpooled;
 
         private ListBox NewList(TranscriptViewModel transcript, string stack)
         {

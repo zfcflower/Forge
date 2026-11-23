@@ -66,11 +66,11 @@
     </DataTemplate>
   </UserControl.DataTemplates>
 
-  <ItemsControl ItemsSource="{Binding Items}">
-    <ItemsControl.ItemsPanel>
+  <views:PooledItemsControl ItemsSource="{Binding Items}" Scope="Card">
+    <views:PooledItemsControl.ItemsPanel>
       <ItemsPanelTemplate>
         <views:ToolCardPanel Columns="4" />
       </ItemsPanelTemplate>
-    </ItemsControl.ItemsPanel>
-  </ItemsControl>
+    </views:PooledItemsControl.ItemsPanel>
+  </views:PooledItemsControl>
 </UserControl>

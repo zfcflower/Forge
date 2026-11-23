@@ -420,7 +420,7 @@
     <!-- One round: a container of its own. Every row of the round is a child of this host, so rows of two rounds are never
          siblings and the axis of a round starts and ends inside it. -->
     <DataTemplate DataType="vm:TranscriptRoundViewModel" x:DataType="vm:TranscriptRoundViewModel">
-      <ItemsControl ItemsSource="{Binding Rows}" />
+      <views:PooledItemsControl ItemsSource="{Binding Rows}" />
     </DataTemplate>
 
     <!-- User message: a timeline node with a bubble on the text column's left edge, in line with the reply cards below. -->

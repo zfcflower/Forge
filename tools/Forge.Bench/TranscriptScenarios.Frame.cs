@@ -18,7 +18,7 @@ namespace Forge.Bench;
 /// </summary>
 internal static partial class TranscriptScenarios
 {
-    private static readonly string[] FrameCases = ["wheel", "thumb", "thumb-stock", "toggle", "toggle-text", "extent", "extent-varied", "extent-varied-stock","thumb-gap", "thumb-gap-stock", "thumb-gap-varied", "thumb-gap-long", "thumb-gap-long-stock", "rowcost", "rowcost-composer", "popup-styles", "scoped-sheets", "gutter", "thumb-unpooled", "thumb-follow", "thumb-follow-stock", "thumb-follow-long", "thumb-follow-long-stock", "pool-pixels", "reuse", "reuse-unpooled", "rebind", "attach", "attach-plain"];
+    private static readonly string[] FrameCases = ["wheel", "thumb", "thumb-stock", "toggle", "toggle-text", "extent", "extent-varied", "extent-varied-stock","thumb-gap", "thumb-gap-stock", "thumb-gap-varied", "thumb-gap-long", "thumb-gap-long-stock", "rowcost", "rowcost-composer", "popup-styles", "scoped-sheets", "gutter", "thumb-unpooled", "thumb-pool", "thumb-nopool", "thumb-follow", "thumb-follow-stock", "thumb-follow-long", "thumb-follow-long-stock", "pool-pixels", "reuse", "reuse-unpooled", "rebind", "attach", "attach-plain"];
 
     private static IEnumerable<BenchScenario> FrameScenarios() => FrameCases.Select(FrameCase);
 
@@ -95,6 +95,11 @@ internal static partial class TranscriptScenarios
                 }
 
                 Unpooled = name.EndsWith("-unpooled");
+                // Same list, same panel, cache off: the A half of the pool's A/B (the pool state is kept, nothing rents from it).
+                if (name.EndsWith("-nopool"))
+                {
+                    Forge.App.Views.RowControlPool.Enabled = false;
+                }
                 var probe = await MountAsync(name.StartsWith("extent-varied", StringComparison.Ordinal) ? BuildVaried(40) : name == "thumb-gap-varied" ? BuildVaried(600) : BuildRich(name.Contains("long") ? 200 : 40, false), pinned: !name.EndsWith("-stock")).ConfigureAwait(true);
                 try
                 {
@@ -108,6 +113,8 @@ internal static partial class TranscriptScenarios
                         case "wheel":
                         case "thumb":
                         case "thumb-unpooled":
+                        case "thumb-pool":
+                        case "thumb-nopool":
                         case "thumb-stock":
                         {
                             var start = Tool(transcript, 20, 0);
@@ -258,6 +265,7 @@ internal static partial class TranscriptScenarios
             var shots = new Dictionary<bool, List<Func<int, int, Avalonia.Media.Color>>>();
             var size = new PixelSize(0, 0);
             var pooledCount = 0;
+            var rentedBefore = Forge.App.Views.RowControlPool.Rented;
             try
             {
                 foreach (var unpooled in new[] { true, false })
@@ -295,18 +303,20 @@ internal static partial class TranscriptScenarios
                     shots[unpooled] = list;
                     if (!unpooled)
                     {
-                        pooledCount = ((Forge.App.Views.TranscriptListBox)probe.List).PooledCount;
-                        if (pooledCount > 4 * 24)
+                        var rented = Forge.App.Views.RowControlPool.Rented - rentedBefore;
+                        pooledCount = Forge.App.Views.RowControlPool.Count;
+
+                        // A waiting control carries no data context: the cache never keeps a session (or a row) alive.
+                        var carrying = Forge.App.Views.RowControlPool.WaitingWithData;
+                        if (carrying != 0)
                         {
-                            failures.Add($"the pool holds {pooledCount} controls, above its bound of 96");
+                            failures.Add($"{carrying} pooled controls still carry a data context");
                         }
 
-                        probe.List.ItemsSource = new List<object>();
-                        window.UpdateLayout();
-                        var left = ((Forge.App.Views.TranscriptListBox)probe.List).PooledCount;
-                        if (left != 0)
+                        // And the run must have reused: after a drag through the transcript, the cache has handed controls out.
+                        if (rented == 0)
                         {
-                            failures.Add($"{left} controls stay pooled after the source was replaced");
+                            failures.Add("no row control was reused: the pool handed nothing out during the drag");
                         }
                     }
                 }
@@ -341,7 +351,7 @@ internal static partial class TranscriptScenarios
                     throw new InvalidOperationException("pooled rows: " + string.Join("; ", failures.Take(6)));
                 }
 
-                return $"{samples.Count} rows render pixel for pixel like the stock list after the pool was used ({pooledCount} controls pooled)";
+                return $"{samples.Count} rows render pixel for pixel like the stock list after the pool was used ({pooledCount} controls waiting, {Forge.App.Views.RowControlPool.Rented - rentedBefore} handed out during the drag)";
             }
             finally
             {
