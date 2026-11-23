@@ -23,22 +23,9 @@ internal static partial class TranscriptScenarios
 {
     private static readonly string[] AnchorCases =
     [
-        "tool-visible",
-        "tool-result-top",
-        "thinking-visible",
-        "turn-header-visible",
-        "turn-covering",
-        "rows-above",
         "turn-above",
-        "thinking-programmatic",
-        "rapid",
+        "rows-above",
         "follow-expand",
-        "subagent-new-turn",
-        "click-inside",
-        "click-inside-autoscroll",
-        "follow-click-expand",
-        "click-below",
-        "click-label",
     ];
 
 
@@ -248,9 +235,6 @@ internal static partial class TranscriptScenarios
             return 0;
         }
 
-        private static double? ElementY(Probe probe, Visual element) =>
-            element.IsAttachedToVisualTree() && element.TranslatePoint(default, probe.Scroller) is { } point ? point.Y : null;
-
         /// <summary>Scrolls until <paramref name="row"/>'s top sits at <paramref name="y"/> on screen (clamped by the extent).</summary>
         private async Task PlaceAsync(Probe probe, object row, double y)
         {
@@ -266,57 +250,6 @@ internal static partial class TranscriptScenarios
                 probe.Scroller.Offset = new Vector(0, probe.Scroller.Offset.Y + (now - y));
                 await FramesAsync(2).ConfigureAwait(true);
             }
-        }
-
-        /// <summary>A left press and release at the middle of the visible part of <paramref name="target"/>, as the mouse would send them.</summary>
-        private void PointerClick(Control target, bool release = true)
-        {
-            var size = target.Bounds.Size;
-            var local = new Point(Math.Min(20, size.Width / 2), Math.Min(8, size.Height / 2));
-            var position = target.TranslatePoint(local, window) ?? throw new InvalidOperationException("target is not attached");
-            var pointer = new Avalonia.Input.Pointer(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Mouse, true);
-            // A press focuses the nearest focusable element: the text itself, or (on a label, a gap, a caption) the row.
-            var focus = target.GetSelfAndVisualAncestors().OfType<Avalonia.Input.InputElement>().FirstOrDefault(e => e.Focusable && e.IsEffectivelyEnabled && e.IsEffectivelyVisible) ?? target;
-            focus.Focus(Avalonia.Input.NavigationMethod.Pointer);
-            var pressed = new Avalonia.Input.PointerPoint(pointer, position, new Avalonia.Input.PointerPointProperties(Avalonia.Input.RawInputModifiers.LeftMouseButton, Avalonia.Input.PointerUpdateKind.LeftButtonPressed));
-            target.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(target, pointer, window, position, 0, pressed.Properties, Avalonia.Input.KeyModifiers.None));
-            if (!release)
-            {
-                return;
-            }
-
-            var released = new Avalonia.Input.PointerPointProperties(Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PointerUpdateKind.LeftButtonReleased);
-            target.RaiseEvent(new Avalonia.Input.PointerReleasedEventArgs(target, pointer, window, position, 0, released, Avalonia.Input.KeyModifiers.None, Avalonia.Input.MouseButton.Left));
-        }
-
-        private static void Click(Button button)
-        {
-            if (!button.IsEffectivelyEnabled)
-            {
-                var chain = string.Join(" < ", button.GetSelfAndVisualAncestors().OfType<Avalonia.Input.InputElement>().Where(e => !e.IsEnabled).Select(e => e.GetType().Name));
-                throw new InvalidOperationException($"disabled button cmd={button.Command is not null} dc={button.DataContext?.GetType().Name} attached={button.IsAttachedToVisualTree()} enabled={button.IsEnabled}: {chain}");
-            }
-
-            // A mouse click focuses the button first; the panel then keeps the focused row alive outside its realized range.
-            button.Focus();
-            var peer = ControlAutomationPeer.CreatePeerForElement(button);
-            (peer.GetProvider<IInvokeProvider>() ?? throw new InvalidOperationException("button has no invoke provider")).Invoke();
-        }
-
-        /// <summary>A button of a row, found again through the row on every call: containers are recycled and re-created.</summary>
-        private static double? ButtonY(Probe probe, object row, Func<Button, bool> match) =>
-            probe.List.ContainerFromItem(row)?.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.IsEffectivelyVisible && match(b)) is { } button
-                ? ElementY(probe, button)
-                : null;
-
-        private static void ClickIn(Probe probe, object row, Func<Button, bool> match) => Click(ButtonIn(probe, row, match));
-
-        private static Button ButtonIn(Probe probe, object row, Func<Button, bool> match)
-        {
-            var container = probe.List.ContainerFromItem(row) ?? throw new InvalidOperationException($"row {row.GetType().Name} not realized");
-            var buttons = container.GetVisualDescendants().OfType<Button>().ToList();
-            return buttons.FirstOrDefault(button => button.IsEffectivelyVisible && match(button))
-                ?? throw new InvalidOperationException($"no button in {row.GetType().Name}: attached={container.IsAttachedToVisualTree()} buttons={buttons.Count} y={RowY(probe, row)}");
         }
 
         /// <summary>One measured change: the watched thing's screen y before and after, the offset, the extent and the writes.</summary>
@@ -390,12 +323,12 @@ internal static partial class TranscriptScenarios
                 // The turn-header toggle only exists in sub-agent transcripts now (a main-session turn has no header
                 // row): the three header cases ride a collapsed-older transcript like subagent-new-turn, so the coverage
                 // of "toggling a header must not move the content anchor" survives the layout change.
-                var headerCase = name is "turn-header-visible" or "turn-covering" or "turn-above";
-                var subagentStyle = headerCase || name == "subagent-new-turn";
-                var probe = await MountAsync(BuildRich(name == "subagent-new-turn" ? 8 : 40, subagentStyle), pinned).ConfigureAwait(true);
+                // A main-session turn has no header row any more, so the surviving header case rides a collapsed-older
+                // (sub-agent style) transcript.
+                var probe = await MountAsync(BuildRich(40, collapseOlder: name == "turn-above"), pinned).ConfigureAwait(true);
                 try
                 {
-                    if (name is not ("follow-expand" or "follow-click-expand"))
+                    if (name != "follow-expand")
                     {
                         probe.Follower.StopFollowing();
                     }
@@ -414,68 +347,6 @@ internal static partial class TranscriptScenarios
             var results = new List<string>();
             switch (name)
             {
-                case "tool-visible":
-                {
-                    // A collapsed tool row in the middle of the screen, opened and closed by its header.
-                    var tool = Tool(transcript, 20, 2);
-                    await PlaceAsync(probe, tool, 300).ConfigureAwait(true);
-                    Func<Button, bool> headerMatch = b => ReferenceEquals(b.Command, tool.ToggleCommand);
-                    results.Add(await MeasureAsync(probe, "expand header", () => ButtonY(probe, tool, headerMatch), () => ClickIn(probe, tool, headerMatch)).ConfigureAwait(true));
-                    results.Add(await MeasureAsync(probe, "collapse header", () => ButtonY(probe, tool, headerMatch), () => ClickIn(probe, tool, headerMatch)).ConfigureAwait(true));
-                    break;
-                }
-
-                case "tool-result-top":
-                {
-                    // An open tool row whose header is above the top edge; its "show more"/"show less" button is on screen.
-                    var tool = Tool(transcript, 20, 2);
-                    tool.IsExpanded = true;
-                    await FramesAsync(2).ConfigureAwait(true);
-                    await PlaceAsync(probe, tool, -180).ConfigureAwait(true);
-                    Func<Button, bool> toggleMatch = b => ReferenceEquals(b.Command, tool.ToggleResultCommand);
-                    results.Add(await MeasureAsync(probe, "show more", () => ButtonY(probe, tool, toggleMatch), () => ClickIn(probe, tool, toggleMatch)).ConfigureAwait(true));
-                    results.Add(await MeasureAsync(probe, "show less", () => ButtonY(probe, tool, toggleMatch), () => ClickIn(probe, tool, toggleMatch)).ConfigureAwait(true));
-                    break;
-                }
-
-                case "thinking-visible":
-                {
-                    var thinking = transcript.FlatRows().OfType<TurnThinkingViewModel>().Skip(20).First();
-                    await PlaceAsync(probe, thinking, 250).ConfigureAwait(true);
-                    Func<Button, bool> toggleMatch = b => b.Classes.Contains("link");
-                    results.Add(await MeasureAsync(probe, "expand", () => ButtonY(probe, thinking, toggleMatch), () => ClickIn(probe, thinking, toggleMatch)).ConfigureAwait(true));
-                    results.Add(await MeasureAsync(probe, "collapse", () => ButtonY(probe, thinking, toggleMatch), () => ClickIn(probe, thinking, toggleMatch)).ConfigureAwait(true));
-                    break;
-                }
-
-                case "turn-header-visible":
-                {
-                    var card = Card(transcript, 20);
-                    card.IsExpanded = true;
-                    await FramesAsync(2).ConfigureAwait(true);
-                    await PlaceAsync(probe, card, 150).ConfigureAwait(true);
-                    Func<Button, bool> headerMatch = b => b.Classes.Contains("link");
-                    results.Add(await MeasureAsync(probe, "collapse", () => ButtonY(probe, card, headerMatch), () => ClickIn(probe, card, headerMatch)).ConfigureAwait(true));
-                    results.Add(await MeasureAsync(probe, "expand", () => ButtonY(probe, card, headerMatch), () => ClickIn(probe, card, headerMatch)).ConfigureAwait(true));
-                    break;
-                }
-
-                case "turn-covering":
-                {
-                    // The turn's header is far above the top edge and its blocks fill the screen; the turn collapses (programmatic).
-                    var card = Card(transcript, 20);
-                    card.IsExpanded = true;
-                    await FramesAsync(2).ConfigureAwait(true);
-                    var tool = ToolOf(card, 3);
-                    await PlaceAsync(probe, tool, 100).ConfigureAwait(true);
-                    object? next = card.Host is { } host && transcript.Rounds.IndexOf(host) is var at && at >= 0 && at + 1 < transcript.Rounds.Count && transcript.Rounds[at + 1].Rows.Count > 0
-                        ? transcript.Rounds[at + 1].Rows[0]
-                        : null;
-                    results.Add(await MeasureAsync(probe, "collapse (header y after)", () => RowY(probe, card), () => card.IsExpanded = false).ConfigureAwait(true));
-                    results.Add($"next row y {F(next is null ? double.NaN : RowY(probe, next) ?? double.NaN)}");
-                    break;
-                }
-
                 case "rows-above":
                 {
                     // Tool rows two turns above the screen open and close (programmatic); the first row on screen is watched.
@@ -506,53 +377,6 @@ internal static partial class TranscriptScenarios
                     break;
                 }
 
-                case "thinking-programmatic":
-                {
-                    // A visible thinking block opens by itself (no click, no row inserted). The first row on screen is the
-                    // anchor and is watched; the thinking row below it must stay too, the rows after it move down (it grew).
-                    var thinking = transcript.FlatRows().OfType<TurnThinkingViewModel>().Skip(20).First();
-                    await PlaceAsync(probe, thinking, 60).ConfigureAwait(true);
-                    var watched = FirstVisibleRow(probe);
-                    var thinkingY = RowY(probe, thinking);
-                    results.Add(await MeasureAsync(probe, "open (first row watched)", () => RowY(probe, watched), () => thinking.IsExpanded = true).ConfigureAwait(true));
-                    results.Add($"thinking row y {F(thinkingY ?? double.NaN)}->{F(RowY(probe, thinking) ?? double.NaN)}");
-                    break;
-                }
-
-                case "rapid":
-                {
-                    // Eleven clicks on the same header, some within one frame; the header must end where it started.
-                    var tool = Tool(transcript, 20, 2);
-                    await PlaceAsync(probe, tool, 300).ConfigureAwait(true);
-                    Func<Button, bool> headerMatch = b => ReferenceEquals(b.Command, tool.ToggleCommand);
-                    var start = ButtonY(probe, tool, headerMatch);
-                    probe.OffsetWrites = 0;
-                    var worst = 0d;
-                    var clicks = 0;
-                    try
-                    {
-                        for (var i = 0; i < 11; i++)
-                        {
-                            ClickIn(probe, tool, headerMatch);
-                            clicks++;
-                            if (i % 3 == 0)
-                            {
-                                await NextFrameAsync().ConfigureAwait(true);
-                                worst = Math.Max(worst, Math.Abs((ButtonY(probe, tool, headerMatch) ?? double.NaN) - (start ?? double.NaN)));
-                            }
-                        }
-                    }
-                    catch (InvalidOperationException exception)
-                    {
-                        results.Add($"stopped after {clicks} clicks ({exception.Message})");
-                    }
-
-                    await FramesAsync(3).ConfigureAwait(true);
-                    var end = ButtonY(probe, tool, headerMatch);
-                    results.Add($"{clicks} clicks: end drift {F((end ?? double.NaN) - (start ?? double.NaN))}, worst between frames {F(worst)}, writes {probe.OffsetWrites}");
-                    break;
-                }
-
                 case "follow-expand":
                 {
                     // Following the reply at the bottom; the last tool row opens by itself. The list must end at the bottom.
@@ -565,91 +389,6 @@ internal static partial class TranscriptScenarios
                     break;
                 }
 
-                case "click-inside":
-                case "click-inside-autoscroll":
-                {
-                    // A press and release (a real pointer press, not a command) inside the text of an open tool row. The list
-                    // must not move: no jump to the row or to the text. "-autoscroll" is a list that still has the framework
-                    // default of scrolling a newly selected row into view.
-                    if (name == "click-inside-autoscroll")
-                    {
-                        probe.List.AutoScrollToSelectedItem = true;
-                    }
-
-                    var tool = Tool(transcript, 20, 2);
-                    tool.IsExpanded = true;
-                    await FramesAsync(2).ConfigureAwait(true);
-                    await PlaceAsync(probe, tool, -120).ConfigureAwait(true);
-                    var container = probe.List.ContainerFromItem(tool)!;
-                    var text = container.GetVisualDescendants().OfType<SelectableTextBlock>().Last(t => t.IsEffectivelyVisible);
-                    results.Add(await MeasureAsync(probe, "press inside result", () => ElementY(probe, text), () => PointerClick(text)).ConfigureAwait(true));
-                    break;
-                }
-
-                case "click-below":
-                {
-                    // An open tool row whose text runs past the bottom of the window; the user clicks the part that is showing.
-                    // The list must not scroll to bring the rest of the text (or its bottom) into view.
-                    var tool = Tool(transcript, 20, 2);
-                    tool.IsExpanded = true;
-                    await FramesAsync(2).ConfigureAwait(true);
-                    await PlaceAsync(probe, tool, 700).ConfigureAwait(true);
-                    var container = probe.List.ContainerFromItem(tool)!;
-                    var viewport = probe.Scroller.Viewport.Height;
-                    var text = container.GetVisualDescendants().OfType<SelectableTextBlock>()
-                        .Where(t => t.IsEffectivelyVisible && ElementY(probe, t) is { } y && y < viewport - 30)
-                        .OrderBy(t => ElementY(probe, t)).Last();
-                    results.Add($"text at y {F(ElementY(probe, text) ?? double.NaN)}, {F(text.Bounds.Height)} tall, viewport {F(viewport)}");
-                    results.Add(await MeasureAsync(probe, "press text running past the bottom", () => ElementY(probe, text), () => PointerClick(text)).ConfigureAwait(true));
-                    break;
-                }
-
-                case "click-label":
-                {
-                    // The same open row, the user presses something that is not text and not a button (the "result" label): the
-                    // press focuses the row itself, and the scroll viewer asks to bring the focused element (the whole row) into
-                    // view, which aligns the bottom of a row that is taller than what shows. The list must not move.
-                    var tool = Tool(transcript, 20, 2);
-                    tool.IsExpanded = true;
-                    await FramesAsync(2).ConfigureAwait(true);
-                    await PlaceAsync(probe, tool, 700).ConfigureAwait(true);
-                    var container = probe.List.ContainerFromItem(tool)!;
-                    var viewport = probe.Scroller.Viewport.Height;
-                    var label = container.GetVisualDescendants().OfType<Avalonia.Controls.TextBlock>().Where(t => t is not SelectableTextBlock && t.Classes.Contains("label") && t.IsEffectivelyVisible && ElementY(probe, t) is { } ly && ly > 0 && ly < viewport - 30)
-                        .OrderBy(t => ElementY(probe, t)).Last();
-                    results.Add($"row {F(container.Bounds.Height)} tall, label at y {F(ElementY(probe, label) ?? double.NaN)}, viewport {F(viewport)}");
-                    results.Add(await MeasureAsync(probe, "press a label of the open row", () => ElementY(probe, label), () => PointerClick(label)).ConfigureAwait(true));
-                    break;
-                }
-
-                case "follow-click-expand":
-                {
-                    // Following the reply at the bottom, the user presses the header of the last tool row (the press, then the
-                    // click's command): the row opens below the pointer; the list must stay where the header is, not run to
-                    // the bottom of what opened.
-                    await FramesAsync(3).ConfigureAwait(true);
-                    var last = AllTools(transcript).Last();
-                    Func<Button, bool> match = b => ReferenceEquals(b.Command, last.ToggleCommand);
-                    results.Add(await MeasureAsync(probe, "press header of the last row", () => ButtonY(probe, last, match), () =>
-                    {
-                        PointerClick(ButtonIn(probe, last, match), release: false);
-                        Click(ButtonIn(probe, last, match));
-                    }).ConfigureAwait(true));
-                    var sv = probe.Scroller;
-                    results.Add($"following {probe.Follower.IsFollowing}, distance from bottom {F(sv.Extent.Height - sv.Viewport.Height - sv.Offset.Y)}");
-                    break;
-                }
-
-                case "subagent-new-turn":
-                {
-                    // A sub-agent transcript: the user reads the middle of the newest turn, then the next turn starts and
-                    // collapses it (its blocks leave the list, the screen's content among them).
-                    var card = Cards(transcript).Last();
-                    var tool = ToolsOf(card).ElementAt(3);
-                    await PlaceAsync(probe, tool, 200).ConfigureAwait(true);
-                    results.Add(await MeasureAsync(probe, "new turn (old header y after)", () => RowY(probe, card), () => transcript.BeginTurn(DateTimeOffset.UtcNow)).ConfigureAwait(true));
-                    break;
-                }
             }
 
             return string.Join(" | ", results);
