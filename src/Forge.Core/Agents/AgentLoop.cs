@@ -649,7 +649,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             sink.Emit(new AgentContextReduced(
                 instance.Id, current, reducedAfter, reduction.DroppedResults,
                 reduction.ReadTokens, reduction.BashTokens, reduction.ImageTokens, reduction.OtherTokens));
-            sink.Emit(new AgentContextMeasured(instance.Id, reducedAfter, budget.Usable, line));
+            sink.Emit(new AgentContextMeasured(instance.Id, reducedAfter, budget.Usable, line) { Usage = instance.Usage });
             if (reducedAfter < line)
             {
                 state.ResetHysteresis();
@@ -707,7 +707,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         {
             sink.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
             after = ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter));
-            sink.Emit(new AgentContextMeasured(instance.Id, after, budget.Usable, trigger));
+            sink.Emit(new AgentContextMeasured(instance.Id, after, budget.Usable, trigger) { Usage = instance.Usage });
             if (after < line)
             {
                 state.ResetHysteresis();
@@ -825,6 +825,9 @@ public sealed class AgentLoop(AgentLoopServices services)
             budget?.TriggerTokens(policy.TriggerRatio))
         {
             CacheTtl = instance.CacheTtlInUse,
+            // The instance's cumulative usage, so a shell reading these can follow a turn request by request instead of
+            // waiting for its end; a compaction changes the context, not the spend, and reports what already stands.
+            Usage = instance.Usage,
         });
     }
 

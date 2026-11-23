@@ -11,9 +11,8 @@ namespace Forge.App.Localization;
 /// </summary>
 internal static class UsageStrings
 {
-    /// <summary>The chip's label and its hover line.</summary>
+    /// <summary>The chip's label and the hover line of the row it opens.</summary>
     public const string SummaryTitle = "usage.summary.title";
-    public const string SummaryTooltip = "usage.summary.tooltip";
 
     public const string Input = "usage.summary.input";
     public const string Output = "usage.summary.output";
@@ -60,8 +59,6 @@ internal static class UsageStrings
     public const string TurnsValue = "usage.summary.turns.value";
 
     public static string Title => Loc.Instance[SummaryTitle];
-
-    public static string Tooltip => Loc.Instance[SummaryTooltip];
 
     public static string InputLabel => Loc.Instance[Input];
 
@@ -117,7 +114,6 @@ internal static class UsageStrings
     internal static void Register()
     {
         Loc.Register(SummaryTitle, "用量", "Usage");
-        Loc.Register(SummaryTooltip, "本会话累计的 token、成本与回合", "This session's tokens, cost and turns");
         Loc.Register(Input, "总输入", "Input");
         Loc.Register(Output, "总输出", "Output");
         Loc.Register(CacheRead, "缓存读", "Cache read");

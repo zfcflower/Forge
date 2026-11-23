@@ -76,6 +76,15 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private readonly Dictionary<string, TokenUsage> agentUsage = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// What each agent's readings (the strip, or a child's tab) have been told so far. Every observation of an instance's
+    /// cumulative counters moves them by the difference — <c>AgentContextMeasured.Usage</c> after each request, the turn's
+    /// completion, a run's remainder — so the numbers follow a turn as it spends instead of jumping at its end. Kept apart
+    /// from <see cref="agentUsage"/> because the cards take their amount at the turn's end and neither side may consume the
+    /// other's number.
+    /// </summary>
+    private readonly Dictionary<string, TokenUsage> liveUsage = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The same per-agent accumulation for the model's streaming time, kept beside <see cref="agentUsage"/> and updated at
     /// the same moment: an <c>AgentTurnCompleted</c> carries the instance's cumulative stream time, so the difference to the
     /// previous event of that agent is what its card adds (see <see cref="AddTurnUsage"/>). Written and read on the UI
@@ -130,11 +139,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private readonly ConcurrentDictionary<string, TurnCardViewModel> subAgentLastCards = new();
 
     /// <summary>
-    /// Each run's usage baseline: the instance counter as it stood when the run's <c>AgentSubAgentStarted</c> arrived. A
-    /// resumed child keeps one <c>agentUsage</c> entry across its runs, and each run's unreported remainder - what
-    /// <c>AgentSubAgentFinished.Usage</c> carries, itself a per-run difference Core took - is measured against this.
+    /// Each run's two usage baselines, as the instance counter stood when the run's <c>AgentSubAgentStarted</c> arrived: the
+    /// cards' (<c>Card</c>, written only at turn completions) and the reading's (<c>Live</c>, moved by every observation). Both
+    /// are needed because each run's remainder - what <c>AgentSubAgentFinished.Usage</c> carries, itself a per-run difference
+    /// Core took - is measured against the ledger that will receive it; a resumed child keeps its entries across runs.
     /// </summary>
-    private readonly ConcurrentDictionary<string, TokenUsage> subAgentRunStart = new();
+    private readonly ConcurrentDictionary<string, (TokenUsage Card, TokenUsage Live)> subAgentRunStart = new();
 
     /// <summary>
     /// The session's sources, kept for the replay seeding only: the metrics table the dividers seed from and the model
@@ -1934,6 +1944,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         {
             rootRebuilt = false;
             agentUsage.Remove("root");
+            liveUsage.Remove("root");
             agentStream.Remove("root");
         }
 
@@ -2400,6 +2411,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 var instruments = InstrumentsOf(context.AgentId);
                 instruments?.NoteContext(context.AgentId, context.ContextTokens, context.UsableTokens, context.TriggerTokens);
                 instruments?.NoteCacheTtl(context.CacheTtl);
+                // The same event carries the spend of the request it measured, so the readings move once per request rather
+                // than once per turn.
+                NoteLiveUsage(context.AgentId, context.Usage);
                 break;
             case AgentContextReduced reduced:
                 // The measurement that follows settles which side of the receipts/summary split this pass counts on.
@@ -2522,12 +2536,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         var previous = agentUsage.TryGetValue(completed.AgentId, out var stored) ? stored : TokenUsage.Empty;
         agentUsage[completed.AgentId] = completed.Usage;
         var root = string.Equals(completed.AgentId, "root", StringComparison.Ordinal);
-        var delta = new TokenUsage(
-            Math.Max(0, completed.Usage.InputTokens - previous.InputTokens),
-            Math.Max(0, completed.Usage.OutputTokens - previous.OutputTokens),
-            Math.Max(0, completed.Usage.CacheReadTokens - previous.CacheReadTokens),
-            Math.Max(0, completed.Usage.CacheWriteTokens - previous.CacheWriteTokens),
-            Math.Max(0, completed.Usage.CacheWrite1hTokens - previous.CacheWrite1hTokens));
+        var delta = Since(completed.Usage, previous);
 
         // The same difference for the streaming time. The counter is kept in step before the "nothing reported" return
         // below, so a later event's difference can never swallow this event's time, and the card is addressed without
@@ -2540,18 +2549,21 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             (root ? turnCard : Find(completed.AgentId)?.Transcript.Current)?.NoteStream(completed.StreamElapsed - previousStream);
         }
 
+        // The readings were fed request by request; this observation closes the gap the requests left (or hands them the
+        // whole turn when the provider reported only at its end). Told before the return below, because a turn whose card
+        // arithmetic has nothing left can still be the one the strip has not seen.
+        NoteLiveUsage(completed.AgentId, completed.Usage);
+
         // Nothing reported is not the same as zero spent: the strip and the card keep "—", and the metrics row keeps null, so
         // a turn whose only non-zero column is the hour-lived cache write still counts as reported.
-        if (delta.InputTokens == 0 && delta.OutputTokens == 0 && delta.CacheReadTokens == 0 && delta.CacheWriteTokens == 0
-            && delta.CacheWrite1hTokens == 0)
+        if (IsNothing(delta))
         {
             return;
         }
 
-        // The strip reports the root agent's spend (the context window and the price belong to that model); a sub-agent's
-        // usage stays on its own tab, and its turn card still gets its own delta here. The root's card is the turn's own
-        // card (see turnCard): a Background flush arriving after the next turn began must not misdeliver the tokens.
-        Instruments.AddTurn(completed.AgentId, delta);
+        // The card holds this turn's own share: the context window and the price belong to the model the composer shows, and
+        // a sub-agent's usage stays on its own tab. The root's card is the turn's own card (see turnCard): a Background flush
+        // arriving after the next turn began must not misdeliver the tokens.
         if (root)
         {
             // The session's tool set only exists once the first turn built the agent host, so the denominator is refreshed
@@ -2562,10 +2574,75 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         else
         {
             Card(completed.AgentId)?.AddUsage(delta, completed.Stop);
-            Find(completed.AgentId)?.Instruments.AddTurn(completed.AgentId, delta);
         }
+
         NoteFullCacheRewrite(completed.AgentId, delta);
     }
+
+    /// <summary>
+    /// Feeds a reading from one observation of an instance's cumulative counters: the difference to what that reading was
+    /// last told. Every model request reports one (<see cref="AgentContextMeasured"/>, then the turn's completion and a run's
+    /// remainder), so the numbers move while a turn spends. An observation whose counter is all zeroes — a request nobody
+    /// metered — moves nothing and leaves the baseline where it stands.
+    /// </summary>
+    internal void NoteLiveUsage(string agentId, TokenUsage current)
+    {
+        // Nothing to tell yet (a child whose tab is not built): the baseline stays where it is, so the whole of the counter is
+        // still owed to the reading once it exists instead of being swallowed here.
+        if (IsNothing(current) || InstrumentsOf(agentId) is not { } reading)
+        {
+            return;
+        }
+
+        var previous = liveUsage.TryGetValue(agentId, out var seen) ? seen : TokenUsage.Empty;
+        // Kept in step before the emptiness check: a rebuilt instance's counter restarts from zero, and the next observation
+        // must difference against the new scale rather than repeat the whole of it.
+        liveUsage[agentId] = current;
+        var delta = Since(current, previous);
+        if (IsNothing(delta))
+        {
+            return;
+        }
+
+        reading.AddTurn(agentId, delta);
+    }
+
+    /// <summary>
+    /// The readings' share of a run's terminal event: the run's own total (a per-run difference Core took) minus what the
+    /// readings were already told since the run began, measured against their own baseline. A run whose requests all
+    /// reported owes nothing; one that stopped between a request's spend and its measurement hands over the remainder.
+    /// </summary>
+    private void NoteLiveRunUsage(string agentId, TokenUsage runUsage, TokenUsage runStart)
+    {
+        if (InstrumentsOf(agentId) is not { } reading)
+        {
+            return;
+        }
+
+        var seen = liveUsage.TryGetValue(agentId, out var told) ? told : TokenUsage.Empty;
+        var delta = UnreportedRunUsage(runUsage, seen, runStart);
+        if (IsNothing(delta))
+        {
+            return;
+        }
+
+        liveUsage[agentId] = seen + delta;
+        reading.AddTurn(agentId, delta);
+    }
+
+    /// <summary>The part of <paramref name="current"/> that <paramref name="previous"/> did not already have, per column.
+    /// A counter that moved backwards (a rebuilt instance) contributes nothing.</summary>
+    private static TokenUsage Since(TokenUsage current, TokenUsage previous) => new(
+        Math.Max(0, current.InputTokens - previous.InputTokens),
+        Math.Max(0, current.OutputTokens - previous.OutputTokens),
+        Math.Max(0, current.CacheReadTokens - previous.CacheReadTokens),
+        Math.Max(0, current.CacheWriteTokens - previous.CacheWriteTokens),
+        Math.Max(0, current.CacheWrite1hTokens - previous.CacheWrite1hTokens));
+
+    /// <summary>True when a usage reading carries nothing reported at all; every column counts, the hour-lived write included.</summary>
+    private static bool IsNothing(TokenUsage usage) =>
+        usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0
+        && usage.CacheWrite1hTokens == 0;
 
     /// <summary>
     /// Closes a live sub-agent's turn where the root's turn closes: the card keeps its own divider, its elapsed is the turn's
@@ -2743,8 +2820,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private void StartSubAgent(AgentSubAgentStarted started)
     {
         // The baseline first: every run differences its own tokens against the counter as it stands here, so a resumed
-        // child never re-counts what its earlier runs already reported.
-        subAgentRunStart[started.ChildId] = agentUsage.TryGetValue(started.ChildId, out var known) ? known : TokenUsage.Empty;
+        // child never re-counts what its earlier runs already reported - on either ledger.
+        subAgentRunStart[started.ChildId] = (
+            agentUsage.TryGetValue(started.ChildId, out var known) ? known : TokenUsage.Empty,
+            liveUsage.TryGetValue(started.ChildId, out var told) ? told : TokenUsage.Empty);
 
         if (subAgentById.ContainsKey(started.ChildId))
         {
@@ -2850,15 +2929,19 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         // The terminal event carries THIS RUN's usage (a difference Core took before the run began), so the unreported
         // part is what this run's own turns did not already count: the counter's move since the run started. A completed
         // run leaves nothing; one that failed mid-turn still owes its partial spend to the open card and the reading.
-        var runStart = subAgentRunStart.TryGetValue(finishedEvent.AgentId, out var baseline) ? baseline : TokenUsage.Empty;
+        var runStart = subAgentRunStart.TryGetValue(finishedEvent.AgentId, out var baseline) ? baseline : default;
         var reported = agentUsage.TryGetValue(finishedEvent.AgentId, out var counter) ? counter : TokenUsage.Empty;
-        var delta = UnreportedRunUsage(finishedEvent.Usage, reported, runStart);
+        var delta = UnreportedRunUsage(finishedEvent.Usage, reported, runStart.Card);
         if (delta.InputTokens > 0 || delta.OutputTokens > 0)
         {
             (agent.Transcript.Current ?? (subAgentLastCards.TryGetValue(finishedEvent.AgentId, out var lastCard) ? lastCard : null))
                 ?.AddUsage(delta, StopReason.EndTurn);
-            agent.Instruments.AddTurn(finishedEvent.AgentId, delta);
         }
+
+        // The tab's reading was fed request by request while the run spent; only what no observation delivered is still owed,
+        // and that is measured against the reading's own baseline - which can stand ahead of the cards' after an interrupted
+        // run, so the two remainders are taken separately.
+        NoteLiveRunUsage(finishedEvent.AgentId, finishedEvent.Usage, runStart.Live);
         subAgentRunStart.TryRemove(finishedEvent.AgentId, out _);
 
         // A failed or stopped run had no completion event, so its turn never reached the count through the per-turn close;

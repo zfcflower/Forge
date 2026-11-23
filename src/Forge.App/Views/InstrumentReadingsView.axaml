@@ -30,9 +30,10 @@
                ToolTip.Tip="{Binding CacheTtlTooltip}"
                AutomationProperties.AutomationId="strip-cache-ttl" />
     <!-- The session usage summary: the expanded form of the hover line above, plus the two numbers the hover line
-         has no room for — the turns and the time they took. A flyout, not a dialog: it reads and closes. -->
+         has no room for — the turns and the time they took. A flyout, not a dialog: it reads and closes. Its own hover
+         line is the cumulative token line itself, so pointing at the chip answers what the flyout answers. -->
     <Button Classes="instrument-chip"
-            ToolTip.Tip="{Binding UsageSummaryTooltip}"
+            ToolTip.Tip="{Binding UsageTooltip}"
             AutomationProperties.AutomationId="strip-usage-summary"
             AutomationProperties.Name="{Binding UsageSummaryTitle}">
       <StackPanel Orientation="Horizontal" Spacing="5">
@@ -82,12 +83,12 @@
         </Flyout>
       </Button.Flyout>
     </Button>
-    <Button Classes="instrument-chip context-gauge"
+    <Button x:Name="Gauge"
+            Classes="instrument-chip context-gauge"
             Classes.warning="{Binding IsContextWarning}"
             Classes.over="{Binding IsContextOver}"
             Padding="4,0"
             Command="{Binding $parent[views:InstrumentReadingsView].CompactCommand}"
-            ToolTip.Tip="{Binding $parent[views:InstrumentReadingsView].GaugeTooltip}"
             AutomationProperties.AutomationId="strip-context-compact"
             AutomationProperties.Name="{Binding [session.strip.context.compact], Source={x:Static loc:Loc.Instance}}">
       <StackPanel Orientation="Horizontal" Spacing="8">

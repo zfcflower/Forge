@@ -207,4 +207,12 @@ public sealed record AgentContextMeasured(string AgentId, int ContextTokens, int
     /// in force instead of leaving the user to infer it from the bill.
     /// </summary>
     public string? CacheTtl { get; init; }
+
+    /// <summary>
+    /// The instance's cumulative usage at this measurement — the same counter <see cref="AgentTurnCompleted"/> carries, observed
+    /// after every request instead of once per turn, so the shell's readings move as the turn spends rather than at its end. A
+    /// measurement that spends nothing (a reduction, a compaction) reports the counter as it stands, so a reader that
+    /// differences sees nothing new.
+    /// </summary>
+    public TokenUsage Usage { get; init; } = TokenUsage.Empty;
 }

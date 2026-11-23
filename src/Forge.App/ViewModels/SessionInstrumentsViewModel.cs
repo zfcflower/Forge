@@ -761,8 +761,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     public string UsageSummaryTitle => UsageStrings.Title;
 
-    public string UsageSummaryTooltip => UsageStrings.Tooltip;
-
     /// <summary>Where the numbers come from, and which of them a session without checkpoints cannot report.</summary>
     public string UsageSummaryHint => UsageStrings.HintText;
 
@@ -938,7 +936,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(HasUsageSummary));
         OnPropertyChanged(nameof(IsUsageSummaryEmpty));
         OnPropertyChanged(nameof(UsageSummaryTitle));
-        OnPropertyChanged(nameof(UsageSummaryTooltip));
         OnPropertyChanged(nameof(UsageSummaryHint));
         OnPropertyChanged(nameof(UsageSummaryRows));
         OnPropertyChanged(nameof(UsageInputText));
@@ -1011,6 +1008,10 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         RaiseQuota();
         // So can the cache lifetime's configuration, until a request reports the ttl that actually went out.
         SeedCacheTtl();
+        // And so can the model: the hover line's cost and window are priced with the composer's current pick, so a switch
+        // re-prices them here instead of waiting for the next turn to report usage.
+        OnPropertyChanged(nameof(UsageTooltip));
+        RaiseUsageSummary();
     }
 
     /// <summary>An MCP server changed state, possibly on a pool thread; the dot is only read on the UI thread.</summary>

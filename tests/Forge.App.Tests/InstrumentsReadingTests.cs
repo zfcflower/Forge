@@ -1,17 +1,24 @@
+using Avalonia.Automation;
+using Avalonia.Controls;
+using Avalonia.VisualTree;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.App.ViewModels;
+using Forge.App.Views;
 using Forge.Core.Storage;
 using Xunit;
+using TextBlock = Avalonia.Controls.TextBlock;
 
 namespace Forge.App.Tests;
 
 /// <summary>
-/// The strip's two readings that used to mislead: the context gauge labelled an unmeasured session "0%" (unknown is not
-/// zero), and the cache-lifetime chip stayed hidden until the first request even though the provider's configuration is
-/// readable without one. Both are observable on <see cref="SessionInstrumentsViewModel"/> without a view.
+/// The strip's readings that used to mislead: the context gauge labelled an unmeasured session "0%" (unknown is not
+/// zero), the cache-lifetime chip stayed hidden until the first request even though the provider's configuration is
+/// readable without one, and the two hover lines (the gauge's and the usage chip's) were evaluated once and then described
+/// an older session forever. Everything but the last pair is observable on <see cref="SessionInstrumentsViewModel"/>
+/// without a view.
 /// </summary>
 [Collection("forge-app-ui")]
 public class InstrumentsReadingTests
@@ -148,4 +155,62 @@ public class InstrumentsReadingTests
         strip.NoteCompacted(60_000);
         Assert.Equal("Context 60k/136k (44%); auto-compaction at 115.6k.", strip.ContextBudgetLine);
     }
+
+    /// <summary>
+    /// Every hover line of the readings is the reading itself, rebuilt after the number under it moves: the gauge's line
+    /// is composed by the control (the numbers plus what a click does on this host), and the usage chip's line is the
+    /// session's cumulative token line - the one the group already carried. Both hosts render this control, so both read
+    /// the same two lines.
+    /// </summary>
+    [Fact]
+    public Task Every_hover_line_follows_the_reading_it_describes() => SharedUi.RunAsync(() =>
+    {
+        using var strip = Strip(ttl: null);
+        var compact = new RelayCommand(static () => { });
+        var view = new InstrumentReadingsView { DataContext = strip, CompactCommand = compact };
+        var window = new Window { Width = 900, Height = 200, Content = view };
+        window.Show();
+        SharedUi.Settle(window);
+        var gauge = ByAutomationId(view, "strip-context-compact");
+        var chip = ByAutomationId(view, "strip-usage-summary");
+
+        // Before the first request the gauge says the measurement is pending; the strip host's click is promised.
+        Assert.Equal(
+            InstrumentsStrings.ContextTooltipPending + "\n" + InstrumentsStrings.ContextCompactHint,
+            TipText(gauge));
+
+        // A measurement arrives: the line carries it, not the pending wording.
+        strip.NoteContext("root", 62_000, 136_000, 115_600);
+        SharedUi.Settle(window);
+        Assert.Equal(strip.ContextTooltip + "\n" + InstrumentsStrings.ContextCompactHint, TipText(gauge));
+        Assert.Contains("62k", TipText(gauge));
+
+        // The other host has no manual compaction, and the line says so instead of promising a click.
+        view.CompactCommand = null;
+        SharedUi.Settle(window);
+        Assert.Equal(strip.ContextTooltip + "\n" + InstrumentsStrings.ContextAutoHint, TipText(gauge));
+
+        // The usage chip's hover line is the cumulative token line, so a finished turn shows up in it.
+        Assert.Equal(strip.UsageTooltip, TipText(chip));
+        strip.AddTurn("root", new TokenUsage(1_200, 300, 1_000, 0, 0));
+        SharedUi.Settle(window);
+        Assert.Equal(strip.UsageTooltip, TipText(chip));
+        Assert.Contains("↑1.2k ↓300", TipText(chip));
+
+        window.Close();
+        return Task.CompletedTask;
+    });
+
+    /// <summary>The control the automation id names, as the tests' handle on the two hover lines.</summary>
+    private static Control ByAutomationId(Control root, string id) =>
+        root.GetVisualDescendants().OfType<Control>().First(c => AutomationProperties.GetAutomationId(c) == id);
+
+    /// <summary>The tip's text: a plain string tip, or the block this control owns and rewrites.</summary>
+    private static string TipText(Control control) => ToolTip.GetTip(control) switch
+    {
+        string text => text,
+        TextBlock block => block.Text ?? string.Empty,
+        { } other => other.ToString() ?? string.Empty,
+        _ => string.Empty,
+    };
 }

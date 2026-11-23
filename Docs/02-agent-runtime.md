@@ -100,7 +100,7 @@
 - 摘要被拒（MaxTokens 截断、发起工具调用、提供商报错、空正文）即整次压缩失败、什么也不写；自动与溢出路径把它当作“没腾出空间”，不让回合失败。
 - **溢出兜底**：流里还没收到任何内容时，强制压缩一次再重发一次；第二次仍溢出或没腾出空间就以原错误失败。
 - **手动压缩**：`/compact [关注点]` 或点击上下文量规，目标 1、无视触发线与开关，保留 keepRecent 近期原文，并重置迟滞；关注点作为 `Additional focus` 追加到摘要指令；回合进行中拒绝，压缩期间禁止发送。
-- 每次模型请求后与每次压缩后发 `AgentContextMeasured(AgentId, ContextTokens, UsableTokens, TriggerTokens, CacheTtl)`；composer 的量规与缓存小片读它（根 Agent 计数，子 Agent 忽略）。
+- 每次模型请求后与每次压缩后发 `AgentContextMeasured(AgentId, ContextTokens, UsableTokens, TriggerTokens, CacheTtl, Usage)`；composer 的量规、缓存小片与用量读数读它（根 Agent 计数，子 Agent 忽略）。`Usage` 是该实例的累计用量，取值在该请求的用量加到计数器之后，所以外壳只做差分就能每请求更新一次统计（裁剪与自动压缩这类不新增开销的测量报当时已有的数，差分即为零）。
 - **模型自己也能读到这条读数**：`preferences.chatContextBudget` 默认开，App 把量规的一行文本（`Context 62k/170k (36%); auto-compaction at 145k.`，窗口未知时只报 C）经 `AgentHostOptions.DynamicContext` 作为**尾部动态后缀**追加到每次请求——不进存储、不进历史、不改变稳定前缀（缓存断点落在倒数第二条消息，动态尾不入缓存）。关掉后模型只能从工具输出的截断推断剩余空间。
 - 计划摘要（`plan_summaries`）另存：每次替换把旧文本记一条修订，每会话保留最新 50 条，`ListPlanRevisionsAsync` 按 id 倒序；复制会话一并复制、清理会话一并删除。
 

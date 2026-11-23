@@ -387,6 +387,7 @@ internal sealed partial class SessionWorkspaceViewModel
         agentInstance = null;
         Volatile.Write(ref agentAgentId, null);
         agentUsage.Remove("root");
+        liveUsage.Remove("root");
         agentStream.Remove("root");
         return await live.ResumeUserChildAsync(agentChildSessionId!, WorkDir, definition, ct).ConfigureAwait(true);
     }
@@ -725,9 +726,10 @@ internal sealed partial class SessionWorkspaceViewModel
 
     /// <summary>
     /// Feeds the tab's own usage bar from the child instance, never from the root runtime's counters: this tab runs on the
-    /// root's runtime, but the spend it shows is the child's. What this view already counted - the turn-completed events it
-    /// saw - is the baseline, so a run that ended without one (a stop, a failure) still shows what it spent; a reading that is
-    /// gone adds nothing, and the bar keeps the last numbers it had instead of dropping to zero.
+    /// root's runtime, but the spend it shows is the child's. The reading goes through the same live ledger a turn-completed
+    /// event feeds — every request already moved it, so what a stop or a failure left unreported is all that is still owed, and
+    /// a reading that is gone adds nothing (the bar keeps the last numbers it had instead of dropping to zero). The card's own
+    /// arithmetic is left alone: it takes its amount from the completion event when that event lands.
     /// </summary>
     private void NoteAgentTurnUsage(AgentSessionCounters? counters)
     {
@@ -736,23 +738,7 @@ internal sealed partial class SessionWorkspaceViewModel
             return;
         }
 
-        var counted = agentUsage.TryGetValue("root", out var stored) ? stored : TokenUsage.Empty;
-        var delta = new TokenUsage(
-            Math.Max(0, reading.Usage.InputTokens - counted.InputTokens),
-            Math.Max(0, reading.Usage.OutputTokens - counted.OutputTokens),
-            Math.Max(0, reading.Usage.CacheReadTokens - counted.CacheReadTokens),
-            Math.Max(0, reading.Usage.CacheWriteTokens - counted.CacheWriteTokens),
-            Math.Max(0, reading.Usage.CacheWrite1hTokens - counted.CacheWrite1hTokens));
-        if (delta.InputTokens == 0 && delta.OutputTokens == 0 && delta.CacheReadTokens == 0 && delta.CacheWriteTokens == 0
-            && delta.CacheWrite1hTokens == 0)
-        {
-            return;
-        }
-
-        // The same per-agent bookkeeping a turn-completed event does, on the instance's cumulative scale: an event still queued
-        // for the UI thread then finds nothing left to add, and the next one differences from this reading.
-        agentUsage["root"] = reading.Usage;
-        Instruments.AddTurn("root", delta);
+        NoteLiveUsage("root", reading.Usage);
     }
 
     /// <summary>
