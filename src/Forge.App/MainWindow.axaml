@@ -60,6 +60,25 @@
                      FontWeight="Medium"
                      Foreground="{DynamicResource BrandActionBrush}"
                      Text="FORGE" />
+          <!-- The extension host's readout sits here, beside the automations entry, because it reports a background thing
+          that belongs to the machine rather than a window action: the dot is the live state (green running / yellow
+          starting / red failed / grey otherwise) and the tooltip carries the details the removed status bar left homeless
+          (process id, failure reason). The text never states the state - the dot does. -->
+          <StackPanel Margin="10,0,0,0"
+                      Orientation="Horizontal"
+                      Spacing="6"
+                      VerticalAlignment="Center"
+                      ToolTip.Tip="{Binding Status.HostTooltip}"
+                      AutomationProperties.AutomationId="host-state">
+            <StackPanel.Styles>
+              <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+            </StackPanel.Styles>
+            <Ellipse Classes="status-dot"
+                     Classes.running="{Binding Status.IsHostRunning}"
+                     Classes.starting="{Binding Status.IsHostStarting}"
+                     Classes.failed="{Binding Status.IsHostFailed}" />
+            <TextBlock Classes="caption" Text="{Binding [status.host.name], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
           <!-- Automations entry: opens Settings > Automations; the badge counts the running and waiting runs only and
           is hidden at zero. -->
           <Button Classes="flat"
@@ -88,11 +107,10 @@
           </Button>
         </StackPanel>
 
-        <!-- The right side is one cluster: search, prompt reload, plan, the host readout, then the terminal, settings and
-        the caption buttons. One box (30x26) and one gap (2 px) for all of them - a row of icons is spaced evenly or it
-        reads as two rows; the same rule covers the settings window's title row (SPEC, 控件形态「一行里的图标按钮是一个簇」).
-        The search button opens the palette (disabled until wave W3), and the extension host's state is the one live readout
-        the header carries. -->
+        <!-- The right side is one cluster: search, prompt reload, plan, the terminal, settings, then the caption buttons.
+        One box (30x26) and one gap (2 px) for all of them - a row of icons is spaced evenly or it reads as two rows; the
+        same rule covers the settings window's title row (SPEC, 控件形态「一行里的图标按钮是一个簇」). The search button opens
+        the palette (disabled until wave W3). -->
         <StackPanel Grid.Column="1"
                     Orientation="Horizontal"
                     Spacing="2"
@@ -149,20 +167,6 @@
                            Height="15"
                            Foreground="{DynamicResource TextMutedBrush}" />
           </Button>
-          <StackPanel Orientation="Horizontal"
-                      Spacing="6"
-                      VerticalAlignment="Center"
-                      ToolTip.Tip="{Binding Status.HostTooltip}"
-                      AutomationProperties.AutomationId="host-state">
-            <StackPanel.Styles>
-              <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-            </StackPanel.Styles>
-            <Ellipse Classes="status-dot"
-                     Classes.running="{Binding Status.IsHostRunning}"
-                     Classes.starting="{Binding Status.IsHostStarting}"
-                     Classes.failed="{Binding Status.IsHostFailed}" />
-            <TextBlock Classes="caption" Text="{Binding [status.host.name], Source={x:Static loc:Loc.Instance}}" />
-          </StackPanel>
           <!-- Terminal and settings are actions too, so they sit in the same cluster; only the caption buttons change glyph
           size (13 / 12), never their box. -->
           <Button Classes="ghost icon"
@@ -182,6 +186,14 @@
                   ToolTip.Tip="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}">
             <wc:FluentIcon Data="{StaticResource IconGear}" Width="15" Height="15" />
           </Button>
+          <!-- One hairline between the window controls and the app's own tools: 15 px, i.e. the caption glyph's 13 px with
+          a pixel above and below, so it reads as a group sign rather than a second row of chrome. It takes the region
+          dividers' colour and the cluster's own 2 px on each side, and it is not a button: no pointer, no box. -->
+          <Border Width="1"
+                  Height="15"
+                  VerticalAlignment="Center"
+                  Background="{DynamicResource BorderBrush}"
+                  AutomationProperties.AutomationId="window-controls-separator" />
           <Button x:Name="MinimizeButton"
                   Classes="ghost icon"
                   Width="30"
