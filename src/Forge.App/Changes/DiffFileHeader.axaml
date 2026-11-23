@@ -9,21 +9,15 @@
        +N / -N, kept summary, then the right cluster. FlexRowPanel gives the path whatever the others leave. -->
   <UserControl.Styles>
     <StyleInclude Source="avares://Forge.App/Resources/DiffStyles.axaml" />
-    <Style Selector="wc|FluentIcon.chevron">
-      <Setter Property="RenderTransform" Value="rotate(0deg)" />
-    </Style>
-    <Style Selector="Border.expanded wc|FluentIcon.chevron">
-      <Setter Property="RenderTransform" Value="rotate(90deg)" />
-    </Style>
   </UserControl.Styles>
   <Border Height="36" Background="{DynamicResource SurfaceSubtleBrush}" BorderBrush="{DynamicResource BorderBrush}"
-          BorderThickness="0,1" Classes.expanded="{Binding !IsCollapsed}">
+          BorderThickness="0,1">
     <ch:FlexRowPanel Margin="6,0" Spacing="8">
       <Button Classes="ghost icon" Command="{Binding ToggleCollapsedCommand}" VerticalAlignment="Center"
               AutomationProperties.AutomationId="diff-file-collapse"
               AutomationProperties.Name="{Binding [changes.diff.toggleCollapsed], Source={x:Static loc:Loc.Instance}}"
               ToolTip.Tip="{Binding [changes.diff.toggleCollapsed], Source={x:Static loc:Loc.Instance}}">
-        <wc:FluentIcon Classes="chevron" Data="{StaticResource TreeChevronGeometry}" Width="14" Height="14" />
+        <wc:FluentIcon Classes="chevron" Data="{StaticResource TreeChevronGeometry}" Rotated="{Binding !IsCollapsed}" Width="14" Height="14" />
       </Button>
       <TextBlock Text="{Binding Badge}" Classes="mono" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
       <ch:MiddleEllipsisText x:Name="PathText" Text="{Binding Path}" ch:FlexRowPanel.IsFlexible="True"

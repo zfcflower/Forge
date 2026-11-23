@@ -122,7 +122,7 @@
                       <Grid ColumnDefinitions="18,*,Auto">
                         <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
                                        Classes="tree-chevron"
-                                       Classes.expanded="{Binding IsExpanded}"
+                                       Rotated="{Binding IsExpanded}"
                                        IsVisible="{Binding !IsSection}"
                                        Width="12"
                                        Height="12" />

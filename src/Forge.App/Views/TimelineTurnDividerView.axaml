@@ -45,7 +45,7 @@
         <StackPanel Orientation="Horizontal" Spacing="6">
           <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
                          Classes="tree-chevron"
-                         Classes.expanded="{Binding IsExpanded}"
+                         Rotated="{Binding IsExpanded}"
                          Width="12"
                          Height="12"
                          VerticalAlignment="Center"

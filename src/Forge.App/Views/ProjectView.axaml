@@ -84,7 +84,7 @@
                            and disappears, so it is drawn at 12 px and overhangs its 10 px slot by a pixel on each side. -->
                       <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
                                      Classes="tree-chevron"
-                                     Classes.expanded="{Binding ChevronRotated}"
+                                     Rotated="{Binding ChevronRotated}"
                                      Width="12"
                                      Height="12"
                                      HorizontalAlignment="Center" />
@@ -203,7 +203,7 @@
                                Margin="0,0,8,0" />
                     <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
                                    Classes="tree-chevron"
-                                   Classes.expanded="{Binding ChevronRotated}"
+                                   Rotated="{Binding ChevronRotated}"
                                    IsVisible="{Binding HasToggle}"
                                    Width="12"
                                    Height="12"

@@ -570,7 +570,7 @@
                   AutomationProperties.AutomationId="thinking-toggle"
                   AutomationProperties.Name="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}">
             <StackPanel Orientation="Horizontal" Spacing="6">
-              <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}" Classes="tree-chevron" Classes.expanded="{Binding IsExpanded}" Width="12" Height="12" />
+              <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}" Classes="tree-chevron" Rotated="{Binding IsExpanded}" Width="12" Height="12" />
               <TextBlock Classes="thinking-line" Text="{Binding [timeline.name.thinking], Source={x:Static loc:Loc.Instance}}" />
               <TextBlock Classes="thinking-line"
                          MaxWidth="560"

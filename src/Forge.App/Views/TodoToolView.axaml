@@ -171,7 +171,7 @@
           <Grid ColumnDefinitions="Auto,30,*,Auto" VerticalAlignment="Center">
             <wc:FluentIcon Grid.Column="0"
                            Classes="todo-chevron"
-                           Classes.expanded="{Binding IsExpanded}"
+                           Rotated="{Binding IsExpanded}"
                            Data="{StaticResource TreeChevronGeometry}"
                            Width="8" Height="8"
                            Margin="8,0,6,0" />
@@ -309,14 +309,10 @@
       <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
     </Style>
 
-    <!-- › while folded, pointing down once the group is open. -->
+    <!-- › while folded, pointing down once the group is open (the turn itself is the icon's, see FluentIcon.Rotated). -->
     <Style Selector="wc|FluentIcon.todo-chevron">
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
       <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="RenderTransform" Value="rotate(0deg)" />
-    </Style>
-    <Style Selector="wc|FluentIcon.todo-chevron.expanded">
-      <Setter Property="RenderTransform" Value="rotate(90deg)" />
     </Style>
   </UserControl.Styles>
 

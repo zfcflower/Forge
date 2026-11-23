@@ -43,7 +43,7 @@
                         IsVisible="{Binding HasToggle}">
                   <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
                                  Classes="tree-chevron"
-                                 Classes.expanded="{Binding ChevronRotated}"
+                                 Rotated="{Binding ChevronRotated}"
                                  Width="12"
                                  Height="12"
                                  HorizontalAlignment="Center" />

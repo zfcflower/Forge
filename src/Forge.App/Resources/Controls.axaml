@@ -392,15 +392,11 @@
     <Setter Property="BorderBrush" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
-  <!-- 树行箭头:一枚 Fluent chevron_right,展开时整个图标转 90°。 -->
+  <!-- 树行箭头:一枚 Fluent chevron_right。展开时的那 90° 由控件自己画(`FluentIcon.Rotated`),样式只上色和居中:
+       样式写 `RenderTransform` 到不了 `PathIcon`,值会被图标自身的变换顶掉。 -->
   <Style Selector="wc|FluentIcon.tree-chevron">
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
-    <Setter Property="RenderTransform" Value="rotate(0deg)" />
-  </Style>
-
-  <Style Selector="wc|FluentIcon.tree-chevron.expanded">
-    <Setter Property="RenderTransform" Value="rotate(90deg)" />
   </Style>
 
   <Style Selector="wc|SyntaxTokenTextBlock.syntax-keyword">
