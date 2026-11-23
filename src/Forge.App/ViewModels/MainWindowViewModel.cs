@@ -657,16 +657,19 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// An agent row of the project tree was clicked: bring its session to the front of the main region (opening it when it is
     /// not loaded), reopen the bottom group if the user had collapsed it, and select that agent's tab there. Finished agents
     /// live only in the bottom group's dropdown, so the lookup falls back to the finished list.
+    /// <para>The session always comes first: with its tab already open it is brought forward without touching the store, and
+    /// with the tab closed (or the view not built yet) it is opened again - a click that only lit the agent's row while the
+    /// main region stayed on another session left the tree marking a row the user could not see.</para>
     /// </summary>
     private async Task OpenSubAgentTabAsync(string sessionId, string agentId, CancellationToken ct)
     {
-        if (!sessions.ContainsKey(sessionId))
+        if (sessions.ContainsKey(sessionId) && Workbench.FindTab(WorkbenchIds.SessionTab(sessionId)) is { } tab)
         {
-            await OpenSessionByIdAsync(sessionId, ct).ConfigureAwait(true);
+            Workbench.ActivateTab(tab);
         }
         else
         {
-            ActivateSessionTab(sessionId);
+            await OpenSessionByIdAsync(sessionId, ct).ConfigureAwait(true);
         }
 
         if (!sessions.TryGetValue(sessionId, out var session))
@@ -2436,6 +2439,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         if (session is null)
         {
             PruneSubAgentTabs(null, []);
+            SyncTreeActiveAgent();
             return;
         }
 
@@ -2467,7 +2471,17 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         // group folds to its title bar (its finished menu stays) and the chip rests - disabled - until a tab lands again.
         session.SubAgentRegionOpen = Workbench.IsBottomBodyOpen;
         session.CanToggleSubAgents = Workbench.HasBottomTab;
+        SyncTreeActiveAgent();
     }
+
+    /// <summary>
+    /// Re-reads the tree's current sub-agent row from the bottom group once the tab set has settled. Pruning closes tabs, and
+    /// closing the active one activates a neighbour - which re-announces that neighbour as "on screen" while it still belongs
+    /// to the session that just left; an emptied group reports nothing at all, because a null active tab raises no change.
+    /// Taking the group's real state last is what keeps the tree free of a row the user cannot see.
+    /// </summary>
+    private void SyncTreeActiveAgent() =>
+        SetTreesActiveAgent((Workbench.BottomTabs.ActiveTab?.Content as SubAgentViewModel)?.AgentId);
 
     private void PruneSubAgentTabs(SessionWorkspaceViewModel? session, HashSet<string> live)
     {
@@ -2705,8 +2719,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             Reviews.Attach(PanelContext.Empty);
             Specs.Attach(PanelContext.Empty);
             GitSync.Attach(PanelContext.Empty);
-            SyncFinishedMenu(null);
-            PruneSubAgentTabs(null, []);
+            // Same tail as the non-empty path: the finished menu, the sub-agent tabs and the tree's current row go together.
+            SyncSubAgentRegion();
             ReapplyReviewOwners();
             return;
         }

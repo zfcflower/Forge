@@ -1183,20 +1183,28 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         }
     }
 
+    /// <summary>
+    /// Marks the session row of the tab the main region shows; the row's icon turns filled, its background does not change.
+    /// <para>A sub-agent mark belongs to the session on screen, so it goes with a session switch: the bottom group keeps the
+    /// agent tab it had, but two rows of two different sessions must never both look current.</para>
+    /// </summary>
     public void SetActiveSession(string? sessionId)
     {
         activeSessionId = sessionId ?? string.Empty;
+        activeAgentId = string.Empty;
         foreach (var node in Enumerate(Sections))
         {
-            node.IsActiveSession = node.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession
-                && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
             if (node.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession)
             {
+                node.IsActiveSession = string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
+                node.RefreshGlyph();
+            }
+            else if (node.IsAgent)
+            {
+                node.IsActiveAgent = false;
                 node.RefreshGlyph();
             }
         }
-
-        ActiveRowChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Marks the agent row whose tab the bottom group shows; null clears the mark.</summary>
@@ -1212,15 +1220,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                 node.RefreshGlyph();
             }
         }
-
-        ActiveRowChanged?.Invoke(this, EventArgs.Empty);
     }
-
-    /// <summary>
-    /// Raised when the row the shell is showing changes (another session tab, another sub-agent tab). The view drops the
-    /// mouse selection then: the highlight follows what is on screen, and a row picked earlier must not keep it too.
-    /// </summary>
-    public event EventHandler? ActiveRowChanged;
 
     /// <summary>
     /// Archives a root session: it leaves the worktree list and shows up under "历史". The workspace is handed to the root's

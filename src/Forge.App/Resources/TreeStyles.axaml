@@ -29,7 +29,18 @@
     <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
   </Style>
 
+  <!-- The one background a project-tree row ever wears is the user's pick. The session or agent the shell happens to be
+       showing says so with its filled icon instead of a second background: two highlights in the same brush read as two
+       selections, and the row the user did not pick then looks stuck. (The changed-files tree paints its
+       `active-row` with the rule below instead — there the mark is "the file the editor has open", not a second pick.) -->
   <Style Selector="ListBoxItem:selected Border.tree-row-content">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+  </Style>
+
+  <!-- The changed-files tree's "this file is the one open in the editor": its rows hide the pointer press inside
+       `Button.tree-row-hit`, so a click never produces a ListBox selection there and this is the background the list
+       normally wears. The project tree does not bind this class. -->
+  <Style Selector="Border.tree-row-content.active-row">
     <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
 
@@ -38,11 +49,6 @@
        stays — the tree's keyboard navigation and its refresh restore both read it — only the background is withheld. -->
   <Style Selector="ListBoxItem:selected Border.tree-row-content.heading-row">
     <Setter Property="Background" Value="Transparent" />
-  </Style>
-
-  <!-- The row the shell is showing: the active session in the main region, or the sub-agent whose tab the bottom group has. -->
-  <Style Selector="Border.tree-row-content.active-row">
-    <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
   </Style>
 
   <!-- A tree row's icon is the same size as the text beside it: rows set no font size of their own, so the icon follows the

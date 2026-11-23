@@ -20,8 +20,6 @@ public partial class ProjectView : UserControl
     /// <summary>True while a restore posted from a row change is in flight, so its own selection events are ignored.</summary>
     private bool restoring;
 
-    private ProjectTreeViewModel? tree;
-
     /// <summary>
     /// The row whose double click started a rename, so the release that closes that gesture does not run the row's action
     /// (the first click already did) and a later single click is not mistaken for it: every press resets it.
@@ -46,24 +44,6 @@ public partial class ProjectView : UserControl
             items.CollectionChanged += OnRowsChanged;
         }
     }
-
-    /// <summary>Follows the panel's view model, whose active-row signal means "another tab is on screen now".</summary>
-    protected override void OnDataContextChanged(EventArgs e)
-    {
-        base.OnDataContextChanged(e);
-        if (tree is not null)
-        {
-            tree.ActiveRowChanged -= OnActiveRowChanged;
-        }
-
-        tree = DataContext as ProjectTreeViewModel;
-        if (tree is not null)
-        {
-            tree.ActiveRowChanged += OnActiveRowChanged;
-        }
-    }
-
-    private void OnActiveRowChanged(object? sender, EventArgs e) => ClearSelection();
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {

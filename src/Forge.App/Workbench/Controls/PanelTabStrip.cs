@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using Forge.App.Localization;
 using Forge.App.Logging;
 using ZLogger;
@@ -50,6 +51,16 @@ internal sealed class PanelTabStrip : TemplatedControl
     private Point dragStart;
     private TabDragMode dragMode;
     private int dragIndex;
+
+    /// <summary>The header waiting to be scrolled into the strip; cleared once it is, or once it is no longer the active tab.</summary>
+    private TabHeaderView? pendingReveal;
+
+    /// <summary>
+    /// The active tab the strip has already announced. Only a change of this scrolls the strip: a rebuild (a tab opening
+    /// in the background, a language switch) re-applies the same active tab all the time and must leave the strip where
+    /// the user scrolled it.
+    /// </summary>
+    private TabModel? announcedActive;
 
     static PanelTabStrip()
     {
@@ -150,6 +161,8 @@ internal sealed class PanelTabStrip : TemplatedControl
     {
         base.OnAttachedToVisualTree(e);
         attachedThread = Environment.CurrentManagedThreadId;
+        // A strip that is put back in the tree starts from the left edge: its active tab is revealed again.
+        announcedActive = null;
         Subscribe();
         Loc.Instance.LanguageChanged += OnLanguageChanged;
         // The answer to "do the tabs fit" only exists once a layout pass has placed them, and it changes with the
@@ -305,6 +318,7 @@ internal sealed class PanelTabStrip : TemplatedControl
 
     private void Rebuild()
     {
+        pendingReveal = null;
         headers.Clear();
         tabsHost?.Children.Clear();
         if (tabsHost is null || Group is not { } group)
@@ -386,9 +400,79 @@ internal sealed class PanelTabStrip : TemplatedControl
         {
             headers[i].IsActive = ReferenceEquals(headers[i].Model, active);
         }
+
+        if (ReferenceEquals(active, announcedActive))
+        {
+            return;
+        }
+
+        announcedActive = active;
+        Reveal(active);
     }
 
-    private void OnStripLayoutUpdated(object? sender, EventArgs e) => RefreshOverflow();
+    /// <summary>
+    /// Scrolls <paramref name="tab"/> into view. A tab opened at the end of a full strip lands entirely outside the
+    /// viewport, and nothing on screen would then say which tab is on show; a strip that already holds it does not move.
+    /// <para>Posted, because activation usually arrives before the header has bounds: <see cref="RevealPending"/> is retried
+    /// from the next layout pass until it can run, then dropped, so a strip the user scrolled away is never pulled back.</para>
+    /// </summary>
+    private void Reveal(TabModel? tab)
+    {
+        pendingReveal = null;
+        if (tab is null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < headers.Count; i++)
+        {
+            if (ReferenceEquals(headers[i].Model, tab))
+            {
+                pendingReveal = headers[i];
+                Dispatcher.UIThread.Post(RevealPending, DispatcherPriority.Loaded);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs the pending reveal once the strip has placed the header and that header is outside the viewport; a header still
+    /// without bounds waits one more pass, and one the strip already holds is left where it is.
+    /// </summary>
+    private void RevealPending()
+    {
+        if (pendingReveal is not { } header || !ReferenceEquals(header.Model, Group?.ActiveTab))
+        {
+            pendingReveal = null;
+            return;
+        }
+
+        if (header.Bounds.Width <= 0 || scroller is not { } viewer || viewer.Viewport.Width <= 0)
+        {
+            return;
+        }
+
+        pendingReveal = null;
+        if (!IsHeaderInside(header, viewer))
+        {
+            header.BringIntoView();
+        }
+    }
+
+    /// <summary>Whether a header sits entirely inside the strip's viewport, the same test the overflow button uses.</summary>
+    private bool IsHeaderInside(TabHeaderView header, ScrollViewer viewer) =>
+        tabsHost is { } host
+        && !IsClipped(
+            host.Bounds.X + header.Bounds.X,
+            header.Bounds.Width,
+            viewer.Offset.X,
+            viewer.Offset.X + viewer.Viewport.Width);
+
+    private void OnStripLayoutUpdated(object? sender, EventArgs e)
+    {
+        RefreshOverflow();
+        RevealPending();
+    }
 
     /// <summary>Rereads the overflow flag after a layout pass; writing it only on a flip keeps a steady title bar free.</summary>
     private void RefreshOverflow()
@@ -508,14 +592,7 @@ internal sealed class PanelTabStrip : TemplatedControl
     private void ActivateAndReveal(TabModel tab)
     {
         Layout?.ActivateTabByUser(tab);
-        for (var i = 0; i < headers.Count; i++)
-        {
-            if (ReferenceEquals(headers[i].Model, tab))
-            {
-                headers[i].BringIntoView();
-                return;
-            }
-        }
+        Reveal(tab);
     }
 
     private void OnGroupChanged()
