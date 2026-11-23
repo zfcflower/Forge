@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Automation.Peers;
 using Avalonia.Automation.Provider;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.Abstractions;
@@ -23,8 +24,9 @@ internal static partial class TranscriptScenarios
 {
     private static readonly string[] AnchorCases =
     [
-        "turn-above",
         "rows-above",
+        "rapid",
+        "turn-covering",
         "follow-expand",
     ];
 
@@ -221,18 +223,75 @@ internal static partial class TranscriptScenarios
             return visual?.TranslatePoint(default, probe.Scroller)?.Y;
         }
 
-        /// <summary>The index of the round that hosts <paramref name="row"/>, which is what the list scrolls by.</summary>
+        /// <summary>
+        /// The index of the round that hosts <paramref name="row"/>, which is what the list scrolls by. A tool row lives
+        /// inside its round's group, so the group has to be opened to find it.
+        /// </summary>
         private static int RoundIndexOf(TranscriptViewModel transcript, object row)
         {
             for (var i = 0; i < transcript.Rounds.Count; i++)
             {
-                if (transcript.Rounds[i].Rows.Contains(row))
+                foreach (var candidate in transcript.Rounds[i].Rows)
                 {
-                    return i;
+                    if (ReferenceEquals(candidate, row)
+                        || (candidate is TurnToolGroupViewModel group && group.Tools.Any(tool => ReferenceEquals(tool, row))))
+                    {
+                        return i;
+                    }
                 }
             }
 
             return 0;
+        }
+
+        /// <summary>The realized container crossing the top edge: the thing the content anchor holds in place.</summary>
+        private static object TopRow(Probe probe) =>
+            probe.List.GetRealizedContainers()
+                .Select(container => (Container: container, Top: ElementY(probe, container) ?? double.NaN))
+                .Where(pair => pair.Top <= 0 && pair.Top + pair.Container.Bounds.Height > 0)
+                .OrderByDescending(pair => pair.Top)
+                .Select(pair => probe.List.ItemFromContainer(pair.Container)!)
+                .FirstOrDefault()
+            ?? throw new InvalidOperationException("nothing crosses the top edge");
+
+        /// <summary>The band of the viewport no realized container covers, at the top (0 when the content starts at the edge).</summary>
+        private static double TopGap(Probe probe)
+        {
+            var tops = probe.List.GetRealizedContainers()
+                .Select(container => ElementY(probe, container) ?? double.NaN)
+                .Where(top => top is not double.NaN && top < probe.Scroller.Viewport.Height)
+                .ToList();
+            return tops.Count == 0 ? probe.Scroller.Viewport.Height : Math.Max(0, tops.Min());
+        }
+
+        /// <summary>A visible button of the row: a card's own face is the button, so the row's own control counts too.</summary>
+        private static Button ButtonOf(Probe probe, object row, Func<Button, bool> match) =>
+            probe.List.GetVisualDescendants().OfType<Control>()
+                .Where(control => ReferenceEquals(control.DataContext, row))
+                .SelectMany(control => control.GetSelfAndVisualDescendants().OfType<Button>())
+                .FirstOrDefault(button => button.IsEffectivelyVisible && match(button))
+            ?? throw new InvalidOperationException($"no button for {row.GetType().Name} at y {RowY(probe, row)?.ToString("F0", CultureInfo.InvariantCulture) ?? "not realized"}");
+
+        private static double? RoundY(Probe probe, TranscriptRoundViewModel round) =>
+            probe.List.ContainerFromItem(round) is { } container ? ElementY(probe, container) : null;
+
+        private static double? ButtonY(Probe probe, object row, Func<Button, bool> match) =>
+            ButtonOf(probe, row, match) is { } button ? ElementY(probe, button) : null;
+
+        private static double? ElementY(Probe probe, Visual element) =>
+            element.IsAttachedToVisualTree() && element.TranslatePoint(default, probe.Scroller) is { } point ? point.Y : null;
+
+        /// <summary>A click through the button's automation peer, the way a pointer click ends up invoking it.</summary>
+        private static void Click(Button button)
+        {
+            if (!button.IsEffectivelyEnabled)
+            {
+                throw new InvalidOperationException($"disabled button {button.DataContext?.GetType().Name}");
+            }
+
+            button.Focus();
+            var peer = ControlAutomationPeer.CreatePeerForElement(button);
+            (peer.GetProvider<IInvokeProvider>() ?? throw new InvalidOperationException("button has no invoke provider")).Invoke();
         }
 
         /// <summary>Scrolls until <paramref name="row"/>'s top sits at <paramref name="y"/> on screen (clamped by the extent).</summary>
@@ -325,7 +384,7 @@ internal static partial class TranscriptScenarios
                 // of "toggling a header must not move the content anchor" survives the layout change.
                 // A main-session turn has no header row any more, so the surviving header case rides a collapsed-older
                 // (sub-agent style) transcript.
-                var probe = await MountAsync(BuildRich(40, collapseOlder: name == "turn-above"), pinned).ConfigureAwait(true);
+                var probe = await MountAsync(BuildRich(name == "rows-above" ? 200 : 40, collapseOlder: name is "turn-covering" or "subagent-new-turn"), pinned).ConfigureAwait(true);
                 try
                 {
                     if (name != "follow-expand")
@@ -349,31 +408,96 @@ internal static partial class TranscriptScenarios
             {
                 case "rows-above":
                 {
-                    // Tool rows two turns above the screen open and close (programmatic); the first row on screen is watched.
-                    var tool = Tool(transcript, 20, 0);
+                    // A 200-turn transcript read in the middle: six tool rows two turns above the screen open at once. Those
+                    // rows sit inside the realized range (everything else is recycled), so this is the path where the panel and
+                    // the content anchor have to agree on where the row crossing the top edge is while rows above it grow.
+                    var tool = Tool(transcript, 100, 0);
                     await PlaceAsync(probe, tool, 40).ConfigureAwait(true);
-                    var watched = FirstVisibleRow(probe);
-                    results.Add(await MeasureAsync(probe, "open 6 above", () => RowY(probe, watched), () =>
+                    var top = probe.Transcript.Rounds.IndexOf((TranscriptRoundViewModel)TopRow(probe));
+                    if (top + 1 >= transcript.Rounds.Count)
+                    {
+                        top--;
+                    }
+
+                    // The round that crosses the top edge grows above the anchor row; the round after it is what a reader
+                    // below the growth must keep seeing where it was.
+                    var watched = transcript.Rounds[top + 1];
+                    var extentBefore = probe.Scroller.Extent.Height;
+                    var report = await MeasureAsync(probe, "open 6 above", () => RoundY(probe, watched), () =>
                     {
                         for (var i = 0; i < 6; i++)
                         {
-                            Tool(transcript, 18, i).IsExpanded = true;
+                            Tool(transcript, top, i).IsExpanded = true;
                         }
-                    }).ConfigureAwait(true));
+                    }, frames: 4).ConfigureAwait(true);
+                    if (probe.Scroller.Extent.Height < extentBefore + 20)
+                    {
+                        throw new InvalidOperationException(
+                            $"transcript.anchor.rows-above: opening six rows above the screen did not grow the extent ({F(extentBefore)} -> {F(probe.Scroller.Extent.Height)}): the rows are not realized, so nothing was measured. {report}");
+                    }
+
+                    results.Add(report);
                     break;
                 }
 
-                case "turn-above":
+                case "rapid":
                 {
-                    Card(transcript, 19).IsExpanded = true;
-                    var card = Card(transcript, 20);
+                    // Eleven presses on the same control inside a row, some within one frame. The row grows and shrinks under
+                    // the pointer, so the anchor has to be that control, not the row: it must end where it started.
+                    var thinking = transcript.Rounds[20].Rows.OfType<TurnThinkingViewModel>().Single();
+                    await PlaceAsync(probe, thinking, 300).ConfigureAwait(true);
+                    await FramesAsync(3).ConfigureAwait(true);
+                    Func<Button, bool> toggleMatch = button =>
+                        ReferenceEquals(button.DataContext, thinking) && button.Classes.Contains("link");
+                    var start = ButtonY(probe, thinking, toggleMatch)
+                                ?? throw new InvalidOperationException("transcript.anchor.rapid: the thinking row's toggle is not on screen");
+                    probe.OffsetWrites = 0;
+                    var worst = 0d;
+                    for (var i = 0; i < 11; i++)
+                    {
+                        Click(ButtonOf(probe, thinking, toggleMatch));
+                        if (i % 3 == 0)
+                        {
+                            await NextFrameAsync().ConfigureAwait(true);
+                            worst = Math.Max(worst, Math.Abs((ButtonY(probe, thinking, toggleMatch) ?? double.NaN) - start));
+                        }
+                    }
+
+                    await FramesAsync(3).ConfigureAwait(true);
+                    var end = ButtonY(probe, thinking, toggleMatch);
+                    results.Add($"drift {F((end ?? double.NaN) - start)} after 11 clicks, worst between frames {F(worst)}, offset writes {probe.OffsetWrites}");
+                    break;
+                }
+
+                case "turn-covering":
+                {
+                    // The turn's blocks fill the screen and its own header sits far above the top edge; the turn collapses by
+                    // itself, so the row the anchor was holding is gone. It hands over to the turn's header: what follows has to
+                    // start at the top edge, not leave a band where the blocks were.
+                    var card = Cards(transcript).Last();
                     card.IsExpanded = true;
                     await FramesAsync(2).ConfigureAwait(true);
-                    var tool = ToolOf(card, 0);
-                    await PlaceAsync(probe, tool, 40).ConfigureAwait(true);
-                    var watched = FirstVisibleRow(probe);
-                    results.Add(await MeasureAsync(probe, "collapse turn above", () => RowY(probe, watched), () => Card(transcript, 19).IsExpanded = false).ConfigureAwait(true));
-                    results.Add(await MeasureAsync(probe, "expand turn above", () => RowY(probe, watched), () => Card(transcript, 19).IsExpanded = true).ConfigureAwait(true));
+                    await PlaceAsync(probe, ToolOf(card, 3), 100).ConfigureAwait(true);
+                    var extentBefore = probe.Scroller.Extent.Height;
+
+                    card.IsExpanded = false;
+                    await FramesAsync(4).ConfigureAwait(true);
+
+                    var extent = probe.Scroller.Extent.Height;
+                    var gap = TopGap(probe);
+                    results.Add($"collapse: extent {F(extentBefore)}->{F(extent)}, band above the first realized container {F(gap)} DIP, offset {F(probe.Scroller.Offset.Y)}");
+                    if (extent > extentBefore - 20)
+                    {
+                        throw new InvalidOperationException(
+                            $"transcript.anchor.turn-covering: collapsing the turn did not shrink the extent ({F(extentBefore)} -> {F(extent)}), so nothing was measured");
+                    }
+
+                    if (gap > 20)
+                    {
+                        throw new InvalidOperationException(
+                            $"transcript.anchor.turn-covering: the collapse left a blank band of {F(gap)} DIP above the content (limit 20)");
+                    }
+
                     break;
                 }
 
