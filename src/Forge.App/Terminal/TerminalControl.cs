@@ -28,10 +28,8 @@ namespace Forge.App.Terminal;
 /// <para>The control never parses: it takes <see cref="TerminalViewModel.Gate"/> briefly to read the visible rows and to
 /// encode input, and the background pump keeps feeding the emulator on its own thread.</para>
 /// </summary>
-internal sealed class TerminalControl : Control
+internal sealed partial class TerminalControl : Control
 {
-    public static readonly StyledProperty<TerminalViewModel?> SourceProperty =
-        AvaloniaProperty.Register<TerminalControl, TerminalViewModel?>(nameof(Source));
 
     /// <summary>How long a size change waits before the emulator and the pseudo-terminal are resized.</summary>
     private static readonly TimeSpan ResizeDebounce = TimeSpan.FromMilliseconds(50);
@@ -135,11 +133,8 @@ internal sealed class TerminalControl : Control
     }
 
     /// <summary>The terminal this surface shows; the tab's data template binds it.</summary>
-    public TerminalViewModel? Source
-    {
-        get => GetValue(SourceProperty);
-        set => SetValue(SourceProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial TerminalViewModel? Source { get; set; }
 
     // ---------------------------------------------------------------- lifetime and subscriptions
 
@@ -1004,16 +999,38 @@ internal sealed class TerminalControl : Control
 
         // Ctrl/Alt plus a printable key becomes a control code or an ESC-prefixed character, which is how ^C, ^D, ^Z and
         // Alt+B work in a shell. Command (Meta) is the window's shortcut modifier and is never sent as text.
-        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt)) != 0 && TryMapRune(e.Key, out var rune))
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt)) == 0)
         {
-            Span<byte> encoded = stackalloc byte[8];
-            var characterModifiers = modifiers & (TerminalModifiers.Control | TerminalModifiers.Alt | TerminalModifiers.Shift);
-            if (KeyEncoder.TryEncodeChar(rune, characterModifiers, encoded, out var length))
-            {
-                viewModel.SendInput(encoded[..length]);
-                scrollOffset = 0;
-                e.Handled = true;
-            }
+            return;
+        }
+
+        // AltGr and macOS Option type a character: the layout consumed the chord, so the character arrives through text
+        // input and the key-down must not also send an ESC-prefixed letter for it.
+        if (KeyChord.LayoutTypesTheChord(e.KeyModifiers, e.ConsumedModifiers))
+        {
+            return;
+        }
+
+        var free = ToTerminalModifiers(KeyChord.Free(e.KeyModifiers, e.ConsumedModifiers)) &
+                   (TerminalModifiers.Control | TerminalModifiers.Alt | TerminalModifiers.Shift);
+        Span<byte> encoded = stackalloc byte[KeyEncoder.MaxSequenceLength];
+
+        // A platform text that is all control characters is exactly what xterm wants for the chord (Ctrl+[ on a German
+        // keyboard, Ctrl+Я on a Russian one). Only without Alt: an Alt chord keeps its ESC prefix.
+        if ((free & TerminalModifiers.Alt) == 0 && KeyChord.TryCopyControlText(e.KeyText, encoded, out var controlBytes))
+        {
+            viewModel.SendInput(encoded[..controlBytes]);
+            scrollOffset = 0;
+            e.Handled = true;
+            return;
+        }
+
+        if ((KeyChord.TryChordRune(e.AlternateKeyText, out var rune) || TryMapRune(e.Key, out rune)) &&
+            KeyEncoder.TryEncodeChar(rune, free, encoded, out var length))
+        {
+            viewModel.SendInput(encoded[..length]);
+            scrollOffset = 0;
+            e.Handled = true;
         }
     }
 

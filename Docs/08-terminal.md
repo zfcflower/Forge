@@ -25,6 +25,7 @@
 
 - 自绘，每行生成 `FormattedText` 并按行版本号缓存。
 - 键盘与 IME 输入；复制粘贴 Ctrl+Shift+C/V（macOS 用 Cmd）；粘贴前去掉转义字符，启用 2004 时加括号包裹。
+- **按键编码按键盘布局**（Avalonia 12.2 的 `KeyText`/`AlternateKeyText`/`ConsumedModifiers`）：Ctrl 和弦优先用平台给出的控制字符（德语布局的 Ctrl+`[` 发 `ESC`、俄语布局发 `^Я`），布局自己用掉的 Ctrl/Alt 视为文本（AltGr 的 `@`、macOS Option 打出的字符不再额外发 ESC 前缀），Alt 和弦保留 ESC 前缀；`KeyEncoder` 只把字符/命名键变成字节，布局判断在 `KeyChord`。
 - 拖选、双击选词、三击选行（开启鼠标上报时按住 Shift 仍是本地选择）；滚轮在开启上报时发给程序、在备用屏发方向键，否则滚动回滚区。
 - Ctrl+点击 OSC 8 链接只放行 http/https。
 - 尺寸变化防抖 50 ms 后同步给 Host；视口锚定在回滚内容上，新输出不会把正在查看的历史顶走。
