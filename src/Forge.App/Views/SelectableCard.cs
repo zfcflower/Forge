@@ -386,6 +386,8 @@ internal sealed class SelectableCard : Border
         if (TopLevel.GetTopLevel(this) is { } top)
         {
             top.AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+            // One selection in the window: a press that is not inside the holder drops it, whatever it lands on.
+            top.AddHandler(PointerPressedEvent, OnRootPointerPressed, RoutingStrategies.Tunnel);
         }
 
         // A recycled row rebuilds the blocks: paint the selection the card still holds onto the new ones.
@@ -401,6 +403,7 @@ internal sealed class SelectableCard : Border
         if (TopLevel.GetTopLevel(this) is { } top)
         {
             top.RemoveHandler(KeyDownEvent, OnKeyDown);
+            top.RemoveHandler(PointerPressedEvent, OnRootPointerPressed);
         }
 
         StopEdgeScroll();
@@ -442,6 +445,31 @@ internal sealed class SelectableCard : Border
             Clear();
             e.Handled = true;
         }
+    }
+
+    private static void OnRootPointerPressed(object? sender, PointerPressedEventArgs e) =>
+        owner?.ClearWhenPressOutside(e.Source as Visual);
+
+    /// <summary>
+    /// A press that lands outside this card drops its selection — the transcript background, another row's padding, a panel,
+    /// the composer. A press inside stays the card's own business: it starts a new drag or a word select.
+    /// </summary>
+    internal void ClearWhenPressOutside(Visual? source)
+    {
+        if (!hasSelection)
+        {
+            return;
+        }
+
+        for (var visual = source; visual is not null; visual = visual.GetVisualParent())
+        {
+            if (ReferenceEquals(visual, this))
+            {
+                return;
+            }
+        }
+
+        Clear();
     }
 
     /// <summary>Whether the keyboard focus sits inside this card, which is what makes it the target of Ctrl+A.</summary>

@@ -139,6 +139,36 @@ public sealed class TranscriptSelectionTests
         return Task.CompletedTask;
     });
 
+    /// <summary>A press outside the card that holds a selection drops it; a press inside it does not.</summary>
+    [Fact]
+    public Task A_click_outside_the_card_clears_its_selection() => SharedUi.RunAsync(() =>
+    {
+        var text = new MarkdownTextBlock { Text = "select me", TextWrapping = TextWrapping.Wrap };
+        var card = new SelectableCard { Child = new StackPanel { Children = { text } } };
+        var elsewhere = new TextBlock { Text = "somewhere else" };
+        var window = new Window
+        {
+            Content = new Panel { Background = Brushes.Transparent, Children = { card, elsewhere } },
+            Width = 420,
+            Height = 200,
+        };
+        window.Show();
+        SharedUi.Settle(window);
+
+        card.SelectAll();
+        Assert.True(card.HasSelection);
+
+        card.ClearWhenPressOutside(elsewhere);
+        Assert.False(card.HasSelection);
+        Assert.Equal(0, text.SelectionEnd);
+
+        // A press inside the card is that card's own business: it starts a word select or a new drag, not a clear.
+        card.SelectAll();
+        card.ClearWhenPressOutside(text);
+        Assert.True(card.HasSelection);
+        return Task.CompletedTask;
+    });
+
     /// <summary>The point-to-character map the card's drag relies on: a point in a block lands on the character under it.</summary>
     [Fact]
     public Task A_point_maps_to_the_character_under_it() => SharedUi.RunAsync(() =>
