@@ -1175,16 +1175,61 @@ public sealed class AgentLoop(AgentLoopServices services)
         IAgentEventSink sink,
         CancellationToken ct)
     {
-        var batch = new Task<ContentBlock>[to - from];
-        for (var index = from; index < to; index++)
+        var completed = await RunCallsAsync(
+                [.. calls[from..to]],
+                call => RunOneAsync(instance, tools, call, context, sink, ct))
+            .ConfigureAwait(false);
+        for (var index = 0; index < completed.Length; index++)
         {
-            batch[index - from] = RunOneAsync(instance, tools, calls[index], context, sink, ct);
+            results[from + index] = completed[index];
         }
 
-        var completed = await Task.WhenAll(batch).ConfigureAwait(false);
-        for (var index = from; index < to; index++)
+        // The whole set answers first, then a cancelled turn ends the run: every call's outcome is already on record, so the
+        // tool message the turn leaves behind names what each one actually did instead of marking them all cancelled.
+        ct.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>
+    /// Runs every call of a concurrent batch and returns one outcome per call, in order. The fan-out is total on purpose:
+    /// each call's cancellation becomes its own <see cref="CancelledByUserResult"/> and each failure its own error result, so
+    /// <see cref="Task.WhenAll{TResult}(Task{TResult}[])"/> completes instead of throwing for one and discarding the rest -
+    /// a single stopped call used to take the other three's finished results down with it, and the model was told all four
+    /// were cancelled while three children were still running. Ending a cancelled turn is the caller's business, after the
+    /// set has answered.
+    /// </summary>
+    internal static async Task<ContentBlock[]> RunCallsAsync(
+        IReadOnlyList<ToolCallBlock> calls,
+        Func<ToolCallBlock, Task<ContentBlock>> run)
+    {
+        var batch = new Task<ContentBlock>[calls.Count];
+        for (var index = 0; index < calls.Count; index++)
         {
-            results[index] = completed[index - from];
+            batch[index] = AsOutcomeAsync(calls[index], run);
+        }
+
+        await Task.WhenAll(batch).ConfigureAwait(false);
+        var completed = new ContentBlock[batch.Length];
+        for (var index = 0; index < batch.Length; index++)
+        {
+            completed[index] = batch[index].Result;
+        }
+
+        return completed;
+
+        static async Task<ContentBlock> AsOutcomeAsync(ToolCallBlock call, Func<ToolCallBlock, Task<ContentBlock>> run)
+        {
+            try
+            {
+                return await run(call).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return new ToolResultBlock(call.Id, CancelledByUserResult, IsError: true);
+            }
+            catch (Exception exception)
+            {
+                return new ToolResultBlock(call.Id, exception.Message, IsError: true);
+            }
         }
     }
 
