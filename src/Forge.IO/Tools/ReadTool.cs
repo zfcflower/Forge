@@ -5,7 +5,12 @@ using Forge.Abstractions;
 
 namespace Forge.IO.Tools;
 
-/// <summary>Reads a bounded window of a workspace text file and prints it with 1-based line numbers.</summary>
+/// <summary>
+/// Reads a bounded window of a text file and prints it with 1-based line numbers. A path inside the workspace is resolved
+/// exactly as every other tool resolves it; an absolute path outside it is read too, because a document the work needs
+/// (a vendor's <c>skills/*/SKILL.md</c> under the package cache, a user-level config) cannot otherwise be reached: the
+/// working-directory bound belongs to the tools that write.
+/// </summary>
 public sealed class ReadTool : ToolBase, IBoundedOutputTool
 {
     /// <summary>
@@ -18,9 +23,10 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
         """{"type":"object","properties":{"path":{"type":"string","description":"File to read, workspace-relative or absolute."},"offset":{"type":"integer","description":"First line to return, 1-based.","minimum":1},"limit":{"type":"integer","description":"How many lines to return.","minimum":1,"maximum":20000},"max_bytes":{"type":"integer","description":"Byte budget of the returned text.","minimum":1,"maximum":1048576}},"required":["path"],"additionalProperties":false}""";
 
     private const string Description =
-        "Read a text file from the workspace with line numbers. One call returns at most about 32,000 characters; a cut " +
-        "result names the lines shown and the offset to continue from. Read a large file by range (offset and limit), " +
-        "not whole. The byte budget cuts at a byte offset, so its last line can be partial.";
+        "Read a text file, inside the workspace by a relative path or anywhere by an absolute one, with line numbers. One " +
+        "call returns at most about 32,000 characters; a cut result names the lines shown and the offset to continue from. " +
+        "Read a large file by range (offset and limit), not whole. The byte budget cuts at a byte offset, so its last line " +
+        "can be partial.";
 
     private readonly Func<ToolOptions> options;
 
@@ -58,7 +64,7 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
             ToolOptions.MaxReadMaxBytes);
 
         var root = Root(context);
-        var path = WorkspacePath.Resolve(root, requested);
+        var path = Resolve(root, requested);
         var display = Display(root, path);
         if (Directory.Exists(path))
         {
@@ -181,6 +187,21 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
             .Append(last.ToString(CultureInfo.InvariantCulture)).Append('\n');
     }
 
+    /// <summary>
+    /// The absolute path to read. Inside the workspace it goes through <see cref="WorkspacePath.Resolve"/>, so the read
+    /// records the same key an <c>edit</c> later checks; outside it is taken as given (links resolved), which is the one
+    /// place the workspace bound does not apply — a read cannot change anything, and a write in that place still refuses.
+    /// </summary>
+    private static string Resolve(string root, string requested)
+    {
+        var full = Path.IsPathRooted(requested)
+            ? Path.GetFullPath(requested)
+            : Path.GetFullPath(Path.Combine(root, requested));
+        return WorkspacePath.IsUnder(full, root)
+            ? WorkspacePath.Resolve(root, requested)
+            : WorkspacePath.ResolveRealPath(full);
+    }
+
     private static string Display(string root, string path) =>
-        WorkspacePath.RelativeTo(root, path) is { Length: > 0 } relative ? relative : path;
+        WorkspacePath.IsUnder(path, root) && WorkspacePath.RelativeTo(root, path) is { Length: > 0 } relative ? relative : path;
 }
