@@ -113,6 +113,16 @@ public sealed class BashTool : ToolBase
                 OnOutput = context.Progress,
             };
             mode = "direct";
+
+            // MSBuild answers a held output file by retrying the copy ten times before failing (77 s in production).
+            // A sharing violation is detectable in a millisecond, so the build is not started at all.
+            if (BuildLockProbe.Find(argv, workingDirectory) is { } locked)
+            {
+                return new ToolResult(
+                    $"bash: not started: '{locked}' is held open by another process (a running build output is the usual "
+                    + "cause); close it or build a copy.",
+                    IsError: true);
+            }
         }
         else
         {
@@ -265,16 +275,18 @@ public sealed class BashTool : ToolBase
             text.Append("exit: ").Append(result.ExitCode).Append("  duration: ").Append(milliseconds).Append("ms\n");
         }
 
-        AppendStream(text, "stdout", result.Stdout, result.StdoutBytes, result.StdoutTruncated);
-        AppendStream(text, "stderr", result.Stderr, result.StderrBytes, result.StderrTruncated);
+        var (stdout, stdoutFolded) = OutputFold.Squeeze(result.Stdout);
+        var (stderr, stderrFolded) = OutputFold.Squeeze(result.Stderr);
+        AppendStream(text, "stdout", stdout, result.StdoutBytes, result.StdoutTruncated, stdoutFolded);
+        AppendStream(text, "stderr", stderr, result.StderrBytes, result.StderrTruncated, stderrFolded);
         return text.ToString();
     }
 
-    private static void AppendStream(StringBuilder text, string name, string content, long bytes, bool truncated)
+    private static void AppendStream(StringBuilder text, string name, string content, long bytes, bool truncated, bool folded)
     {
         text.Append("--- ").Append(name).Append(" (").Append(bytes.ToString(CultureInfo.InvariantCulture));
-        text.Append(truncated ? " bytes, truncated) ---\n" : " bytes) ---\n");
-        if (content.Length == 0)
+        text.Append(truncated ? " bytes, truncated" : " bytes");
+        text.Append(folded ? ", repeated lines folded) ---\n" : ") ---\n");        if (content.Length == 0)
         {
             return;
         }
