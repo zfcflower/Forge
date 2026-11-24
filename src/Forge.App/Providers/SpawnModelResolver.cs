@@ -62,8 +62,11 @@ internal sealed class SpawnModelResolver(Func<ProviderCatalog> catalog)
                 if (current.Kind != ModelResolutionKind.Unique)
                 {
                     return SpawnModelChoice.Refused(current.Kind == ModelResolutionKind.Ambiguous
-                        ? Candidates(request.Current.Model, current.Candidates)
-                        : $"provider '{providerText}' does not list the agent's current model '{request.Current.Model}'; call models with provider=<id> to see what it serves.");
+                        ? Candidates(request.Current.Model, current.Candidates, request.ListsModels)
+                        : $"provider '{providerText}' does not list the agent's current model '{request.Current.Model}'; "
+                          + (request.ListsModels
+                              ? "call models with provider=<id> to see what it serves."
+                              : "pass an explicit 'model' instead."));
                 }
 
                 model = current.Match!.Model;
@@ -86,13 +89,21 @@ internal sealed class SpawnModelResolver(Func<ProviderCatalog> catalog)
                     break;
 
                 case ModelResolutionKind.Ambiguous:
-                    return SpawnModelChoice.Refused(Candidates(modelText, match.Candidates));
+                    return SpawnModelChoice.Refused(Candidates(modelText, match.Candidates, request.ListsModels));
 
                 default:
+                {
+                    // A near miss is worth more than a pointer to a tool the caller may not hold: the id is one word away.
+                    var closest = ModelResolver.Suggest(modelText, providers);
+                    var suggestions = closest.Count == 0
+                        ? string.Empty
+                        : " Closest: " + string.Join(" | ", closest.Select(static c => c.ProviderId + " / " + c.Model)) + ".";
                     return SpawnModelChoice.Refused(
-                        $"unknown model '{modelText}'. Call models to list the connected models"
+                        $"unknown model '{modelText}'.{suggestions} "
+                        + (request.ListsModels ? "Call models to list the connected models" : "Use one of the ids above")
                         + (providerText is null ? string.Empty : $" of provider '{providerText}'")
-                        + ", or pass provider to narrow the lookup.");
+                        + (request.ListsModels ? ", or pass provider to narrow the lookup." : "."));
+                }
             }
         }
 
@@ -133,13 +144,15 @@ internal sealed class SpawnModelResolver(Func<ProviderCatalog> catalog)
     private static string StepList(IReadOnlyList<ThinkingEffort> steps) =>
         string.Join(", ", steps.Select(ThinkingEfforts.Name));
 
-    private static string Candidates(string text, IReadOnlyList<ResolvedModel> candidates)
+    private static string Candidates(string text, IReadOnlyList<ResolvedModel> candidates, bool listsModels)
     {
         var hidden = Math.Max(0, candidates.Count - MaxCandidates);
         var shown = string.Join(" | ", candidates.Take(MaxCandidates).Select(static c => c.ProviderId + " / " + c.Model));
         return $"model '{text}' matches {candidates.Count} models: {shown}"
                + (hidden == 0 ? string.Empty : $" | and {hidden} more")
-               + ". Pass provider to pick one, or call models for the full list.";
+               + (listsModels
+                   ? ". Pass provider to pick one, or call models for the full list."
+                   : ". Pass provider to pick one.");
     }
 
     private static string UnknownProvider(string text, IReadOnlyList<ProviderModels> providers) =>

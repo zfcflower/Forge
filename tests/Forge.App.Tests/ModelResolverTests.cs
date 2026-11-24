@@ -160,4 +160,22 @@ public sealed class ModelResolverTests
         Assert.Equal(ModelResolutionKind.Unique, result.Kind);
         Assert.Equal(new ResolvedModel("p", "kimi-k2"), result.Match);
     }
+
+    [Fact]
+    public void Suggest_ranks_the_real_id_of_a_reordered_name_and_ignores_the_unrelated_ones()
+    {
+        var providers = new ProviderModels[] { new("p", "P", ["gpt-6-luna", "luna-1-preview", "kimi-k2"]) };
+
+        var suggestions = ModelResolver.Suggest("luna-6.1", providers);
+
+        Assert.Equal(["gpt-6-luna", "luna-1-preview"], suggestions.Select(static suggestion => suggestion.Model));
+    }
+
+    [Fact]
+    public void Suggest_says_nothing_when_no_word_is_shared()
+    {
+        var providers = new ProviderModels[] { new("p", "P", ["kimi-k2"]) };
+
+        Assert.Empty(ModelResolver.Suggest("zulu", providers));
+    }
 }

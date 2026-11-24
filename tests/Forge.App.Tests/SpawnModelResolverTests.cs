@@ -103,6 +103,34 @@ public sealed class SpawnModelResolverTests : IDisposable
     }
 
     [Fact]
+    public void An_unknown_model_is_answered_with_the_closest_ids_it_can_use_instead()
+    {
+        var catalog = fixture.Create("probe", new FixtureProvider("probe", "Probe", ["gpt-6-luna", "kimi-k2"]));
+
+        var choice = Resolver(catalog).Resolve(Request("luna-6.1", null, null, new ModelSettings("kimi-k2")));
+
+        Assert.Null(choice.Settings);
+        Assert.Contains("Closest: probe / gpt-6-luna.", choice.Error);
+    }
+
+    [Fact]
+    public void A_caller_without_the_models_tool_is_not_pointed_at_it()
+    {
+        var catalog = fixture.Create("probe", new FixtureProvider("probe", "Probe", ["gpt-6-luna"]));
+
+        var choice = Resolver(catalog).Resolve(new SpawnModelRequest(
+            "luna-6.1",
+            null,
+            null,
+            new ModelSettings("gpt-6-luna"),
+            ListsModels: false));
+
+        Assert.Null(choice.Settings);
+        Assert.DoesNotContain("Call models", choice.Error);
+        Assert.Contains("Use one of the ids above", choice.Error);
+    }
+
+    [Fact]
     public void A_provider_level_pin_reaches_the_spawned_settings()
     {
         var catalog = fixture.Create("probe", new FixtureProvider("probe", "Probe", ["kimi-k2"], MaxOutputTokens: 5_000));

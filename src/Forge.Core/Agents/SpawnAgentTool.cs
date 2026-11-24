@@ -130,7 +130,12 @@ public sealed class SpawnAgentTool : ITool
             // override keeps its model). An unknown kind is left to the scheduler, whose message lists what exists.
             if (kinds.FirstOrDefault(agent => string.Equals(agent.Name, kind, StringComparison.OrdinalIgnoreCase)) is { } definition)
             {
-                var choice = spawnModels(new SpawnModelRequest(model, provider, thinking, definition.Model));
+                var choice = spawnModels(new SpawnModelRequest(
+                    model,
+                    provider,
+                    thinking,
+                    definition.Model,
+                    context.Tools is { } tools && tools.TryGet("models", out _)));
                 if (choice.Error is { } error)
                 {
                     return new ToolResult(error, IsError: true);

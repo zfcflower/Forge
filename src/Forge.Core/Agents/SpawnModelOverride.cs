@@ -14,7 +14,9 @@ namespace Forge.Core.Agents;
 /// <param name="Thinking">A thinking-step name (off/minimal/low/medium/high/xhigh/max). Null or blank keeps the step
 /// the kind would have used, clamped to the model's accepted steps.</param>
 /// <param name="Current">What the kind runs with today, already resolved from <c>settings.json</c> by the host build.</param>
-public sealed record SpawnModelRequest(string? Model, string? Provider, string? Thinking, ModelSettings Current);
+/// <param name="ListsModels">Whether the calling agent holds the <c>models</c> tool, so a refusal may point at it; a
+/// sub-agent's tool list usually omits it, and telling it to call a tool it does not have is a dead end.</param>
+public sealed record SpawnModelRequest(string? Model, string? Provider, string? Thinking, ModelSettings Current, bool ListsModels = true);
 
 /// <summary>
 /// What a per-spawn override resolved to: the complete settings to run the child with, or why it cannot.
