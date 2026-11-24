@@ -19,7 +19,7 @@ Decide once per piece of new work, by what the work changes rather than by how t
 | The work | Route |
 |---|---|
 | Product behavior: a feature, a behavior change, a bug, an output or UI difference, however small | `brainstorming` |
-| The tests themselves: hardening a critical module's tests, pinning behavior through an important refactor, or auditing test quality on a schedule | `hardening-tests` |
+| The tests themselves: hardening a critical module's tests, pinning behavior through an important refactor, or hardening test quality in an audit, one-off or on a schedule | `hardening-tests` |
 | Handing finished work to review as a pull request, or tending a pull request that already exists (CI, review comments, a base that moved) | `shipping-a-pr` |
 | Nothing user-visible changes: a question, an explanation, a read-only investigation, a typo, a prose-only doc edit, a rename that keeps every behavior | no route |
 
@@ -37,8 +37,8 @@ How to read that table:
 - One test someone suspects is hollow is a look, not a workflow. The sweep over a module's tests that follows is
   `hardening-tests`.
 - A pull request's review, its tests included, is `shipping-a-pr` while the work is about that pull request.
-- A refactor whose observable behavior stays the same is `hardening-tests` even though it edits source: pinning that
-  behavior is the point. Only a refactor that changes something a user or a caller can observe is a behavior change.
+- Pinning an important refactor's behavior is `hardening-tests`: the behavior-preserving edits those tests must survive
+  are in scope with it. A change a user or a caller can observe is a behavior change, so it belongs to `brainstorming`.
 - A defect someone already reports is a bug fix, so it goes to `brainstorming`; the failing reproduction test is that
   workflow's evidence, not a separate trip through this one.
 - A recurring audit ("every Monday", "monthly") takes the same route as the one-off audit: `hardening-tests`.
@@ -101,7 +101,7 @@ Each of these is a wrong route, not a shortcut:
 - `brainstorming`: an interview in rounds through `ask_user`, a task spec under `.forge/context/`, then the plan
   in the `todo` tool, then implementation step by step with `request_review` on every code step.
 - `hardening-tests`: the module's own tests, then the contract that governs it, then the repository's own test
-  command, then the measurement and the probes. It never changes product behavior: a confirmed defect leaves for
-  `brainstorming`, and finished tests leave for `shipping-a-pr`.
+  command, then the measurement and the probes. It never changes observable behavior: a confirmed defect leaves for
+  `brainstorming`, and finished tests leave for `shipping-a-pr` when the user asks for them to be delivered.
 - `shipping-a-pr`: `pr_workflow` for the phase, `pr_create` after its gates, then CI and review comments driven
   back into the implementation. It never merges.

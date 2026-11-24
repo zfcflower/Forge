@@ -16,12 +16,15 @@ and close it with a test that would fail if the code were wrong.
 
 ## What this workflow never does
 
-- It does not change product behavior. A confirmed defect ends this workflow: report it and hand it to `brainstorming`.
-  Writing the failing test is fine; fixing the code here is not.
+- It does not change observable behavior. A refactor that keeps every behavior is in scope, because the tests it must
+  survive are the subject; a change a user or a caller can observe ends this workflow and goes to `brainstorming`,
+  with the failing test as its evidence. Fixing code here is not allowed.
 - It does not add a test framework, runner, package, linter or coverage tool to the project. The command the repository
   already uses is the only one it runs.
 - It does not report a coverage percentage or a mutation score. It reports the gaps that matter and the test each needs.
-- It does not edit a source file inside the session's workspace. Every probe (step 3) is made in a separate worktree.
+- It does not edit a source file inside the session's workspace to make a probe. Every probe (step 3) is a mutation
+  made in a separate worktree; the behavior-preserving edits this workflow needs go through the plan and
+  `request_review` like any other work.
 - It does not run the whole suite in a loop. Every run is bounded; see Budgets.
 
 ## 1. Settle the scope
@@ -32,7 +35,7 @@ The route in says which of the three the work is; the scope is what the rest of 
 |---|---|
 | A critical module | the module named, plus the callers that shape its inputs |
 | An important refactor | the members the diff touches, plus the siblings that must agree with them |
-| A periodic audit | the three modules the repository changes most, weighted by how many modules call them |
+| An audit, one-off or on a schedule | the three modules the repository changes most, weighted by how many modules call them |
 
 Read the module's own tests first, then the specs, docs and doc comments that say what it must support. That set, not
 what callers pass today, is the domain: a value no caller produces yet still belongs to it when the contract promises it.
@@ -70,11 +73,14 @@ early return, move a boundary. Keep it compiling, run only the affected tests, r
 before the next edit. Remove the worktree when the run is over.
 
 A survivor alone does not confirm a gap: it can also mean the command never ran the tests that matter. So before
-reporting any gap, show one probe that the suite does catch. When not one probe can be caught, report that the test run
-is unverifiable and stop: the command, the filter or the project is wrong, and a list of survivors would be fiction.
+reporting any gap, show one control probe that the suite catches in the module and scope you are reporting, through
+the same command and the same filter the survivors went through. A probe caught somewhere else proves nothing about
+this module. When no control probe can be caught, report that the test run is unverifiable and stop: the command, the
+filter or the project is wrong, and a list of survivors would be fiction.
 
-A project that will not build, or a module whose tests cannot be run in isolation, is a reason to skip this step and say
-so; coverage plus reading is then the whole measurement.
+A project that will not build, or a module whose tests cannot be run in isolation, is a reason to skip the probes and
+say so. Every gap found by coverage and reading alone is then reported as an unconfirmed hypothesis, never as a
+confirmed gap.
 
 ## 4. Close it
 
@@ -96,9 +102,12 @@ Exactly one of these ends the workflow.
   promises reaches it, it only logs, or it needs a seam the project does not have. No tests are written, which is a
   legitimate outcome.
 - **Gaps closed.** Report each gap, its evidence and the test that now covers it, then hand the result to
-  `shipping-a-pr` when the user wants it delivered.
-- **A real defect.** Stop, report it with the probe that shows it, and hand it to `brainstorming`: the fix and its
-  release belong to that workflow, not this one.
+  `shipping-a-pr` when the user wants it delivered. Without that ask the tests stay where they are; the workflow is
+  done either way.
+- **A real defect.** Stop and hand it to `brainstorming`: the fix and its release belong to that workflow, not this one.
+  The evidence is the probe that shows it, or a test that contradicts the contract on unmodified code.
+- **Unverified or out of budget.** Report what was measured, which gaps stayed unconfirmed, and what is left, then
+  stop. A run that reaches either end this way is finished, not failed.
 
 ## Budgets
 
@@ -109,6 +118,10 @@ Exactly one of these ends the workflow.
 | A periodic audit | at most 3 per module, 3 modules | at most 10 | 60 minutes |
 
 When a budget runs out, report the gaps found so far and what is left. Never widen the scope on your own.
+
+The clock starts when the workflow starts, not when the first test runs. Give every command a timeout no longer than
+the budget left, and do not start a run that could overrun it; a command with no bound of its own is a command that
+cannot be given one.
 
 ## Red flags
 

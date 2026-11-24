@@ -56,4 +56,15 @@ public sealed class OrchestrationSkillsTests : IDisposable
         Assert.Contains("goes through brainstorming first", text, StringComparison.Ordinal);
         Assert.Contains("goes through shipping-a-pr", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void The_router_skill_offers_the_test_hardening_route()
+    {
+        var router = DiscoverBuiltIn().Single(skill => skill.Name == "choosing-a-workflow");
+
+        var text = File.ReadAllText(router.Path);
+
+        Assert.Contains("| `hardening-tests` |", text, StringComparison.Ordinal);
+        Assert.Contains("`skill {\"name\": \"hardening-tests\"}`", text, StringComparison.Ordinal);
+    }
 }
