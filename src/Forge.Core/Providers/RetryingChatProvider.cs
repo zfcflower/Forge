@@ -9,12 +9,43 @@ namespace Forge.Core.Providers;
 /// Retries only failures that happen before the first event reaches the caller, so a consumer never observes duplicated
 /// output. Every attempt also spends the provider's local budget first (<see cref="ProviderRateLimiter"/>), which is the one
 /// place in the request path where the budget can be charged exactly once per attempt — a retry is another request.
+/// <para>
+/// The ladder depends on why the attempt failed, because the two cases have nothing in common: a dropped connection comes
+/// back in milliseconds, while an endpoint that answers 429 "overloaded" is shedding load for tens of seconds and a
+/// half-second of backoff only burns the attempts. So a transport or server-side failure keeps a short ladder (three
+/// attempts), and a 429 walks <see cref="OverloadDelays"/> (five attempts, about half a minute), with one cap on the total
+/// wait a request may spend between attempts (<see cref="MaxRetryBudget"/>) so the retry path is never frozen longer than
+/// that. Every wait is announced as a <see cref="RetryWait"/> before it is slept; the caller gives up loudly instead of
+/// sleeping past the cap. (A wait on our own budget is a different delay with its own, longer ceiling —
+/// <c>_maxRetryAfter</c>: a refilling bucket is not the endpoint refusing us.)
+/// </para>
 /// </summary>
 public sealed class RetryingChatProvider : IChatProvider
 {
     private static readonly TimeSpan DefaultBaseDelay = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan DefaultMaxDelay = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DefaultMaxRetryAfter = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The wait before each further attempt after a 429, in order: 1s, 3s, 8s, 20s. Chosen against what the endpoint actually
+    /// does — a gateway shedding load recovers in seconds to tens of seconds, so the ladder has to outlast the first few
+    /// seconds instead of spending every attempt inside them, and its last step still has to fit under
+    /// <see cref="MaxRetryBudget"/> together with the ones before it.
+    /// </summary>
+    private static readonly TimeSpan[] OverloadDelays =
+    [
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(3),
+        TimeSpan.FromSeconds(8),
+        TimeSpan.FromSeconds(20),
+    ];
+
+    /// <summary>
+    /// How long one request may spend asleep between attempts. Past it the wait stops being jitter and becomes a spent
+    /// window: the turn is handed back with the failure (and the server's own delay) instead of being frozen, which is also
+    /// what keeps the automation flow's quota handling on the one path it already knows.
+    /// </summary>
+    private static readonly TimeSpan MaxRetryBudget = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// A wait shorter than this is not reported as a <see cref="BudgetWait"/> event: sub-second hiccups explain nothing
@@ -67,7 +98,7 @@ public sealed class RetryingChatProvider : IChatProvider
         _rateLimiter = rateLimiter;
         _tokens = tokenCounter ?? new ApproximateTokenCounter();
         _delay = delayAsync ?? DefaultDelayAsync;
-        _jitter = jitter ?? EqualJitter;
+        _jitter = jitter ?? FullJitter;
     }
 
     public string Id => _inner.Id;
@@ -85,6 +116,7 @@ public sealed class RetryingChatProvider : IChatProvider
         // reads the number, so the walk over the messages (an enumerator per message) is not paid at all.
         var reserved = _rateLimiter is { Policy.Enabled: true } ? EstimateTokens(request) : 0;
         var charged = 0;
+        var slept = TimeSpan.Zero;
 
         for (var attempt = 1; ; attempt++)
         {
@@ -189,12 +221,23 @@ public sealed class RetryingChatProvider : IChatProvider
                 _rateLimiter?.Observe(_inner.Id, reading, _time.GetUtcNow());
             }
 
-            if (failure is null || yielded || attempt >= _maxAttempts || !IsRetryable(failure, ct) || IsQuota(failure))
+            var attempts = Attempts(failure);
+            if (failure is null || yielded || attempt >= attempts || !IsRetryable(failure, ct) || IsQuota(failure))
             {
                 throw Rethrow(failure ?? new ProviderException($"{_inner.Id}: stream ended unexpectedly.", retryable: true));
             }
 
-            await _delay(ComputeDelay(attempt, failure), ct).ConfigureAwait(false);
+            if (!TryDelay(attempt, failure, slept, out var delay))
+            {
+                // The provider asks for longer than this request may sleep (or the ladder itself would run past the budget):
+                // the failure keeps its own Retry-After, so whoever reads it — the footnote, the quota classification, the
+                // automation that resumes the session — sees the server's number rather than a wait that never happened.
+                throw Rethrow(failure);
+            }
+
+            yield return new RetryWait(delay, attempt + 1, attempts, ReasonOf(failure));
+            await _delay(delay, ct).ConfigureAwait(false);
+            slept += delay;
         }
     }
 
@@ -209,6 +252,30 @@ public sealed class RetryingChatProvider : IChatProvider
         OperationCanceledException => false,
         HttpRequestException or IOException or TimeoutException => !ct.IsCancellationRequested,
         _ => false,
+    };
+
+    /// <summary>
+    /// How many attempts this failure is worth: a 429 walks the whole overload ladder, everything else keeps the short one
+    /// the caller configured.
+    /// </summary>
+    private int Attempts(Exception? failure) =>
+        failure is not null && IsOverload(ReasonOf(failure)) ? OverloadDelays.Length + 1 : _maxAttempts;
+
+    /// <summary>Server-side load shedding and per-minute limits share the long ladder; both are the same problem to us.</summary>
+    private static bool IsOverload(RetryReason reason) => reason is RetryReason.Overloaded or RetryReason.RateLimited;
+
+    /// <summary>
+    /// Reads a failure into the four words the caller shows. The 429 split is the provider's own wording (`ProviderQuota`
+    /// already owns that vocabulary): "rate limit / per minute" is the account's minute budget, anything else on a 429 is
+    /// the endpoint shedding load.
+    /// </summary>
+    private static RetryReason ReasonOf(Exception failure) => failure switch
+    {
+        ProviderException { StatusCode: 429 } provider =>
+            ProviderQuota.IsRateWording(ProviderErrors.MatchText(provider)) ? RetryReason.RateLimited : RetryReason.Overloaded,
+        ProviderException { StatusCode: null } => RetryReason.Transport,
+        ProviderException => RetryReason.Server,
+        _ => RetryReason.Transport,
     };
 
     /// <summary>
@@ -274,15 +341,35 @@ public sealed class RetryingChatProvider : IChatProvider
             ? $"{span.TotalMinutes:0.#} min"
             : $"{span.TotalSeconds:0.#} s";
 
-    private TimeSpan ComputeDelay(int attempt, Exception failure)
+    /// <summary>
+    /// How long to wait before the next attempt, or false when that wait is longer than this request may sleep.
+    /// <para>
+    /// The server's own <c>Retry-After</c> wins over any ladder — it is the only number that is not a guess — but it is also
+    /// subject to the budget: asking for two minutes is not jitter, so the request gives up instead of going quiet for that
+    /// long. Without one, a 429 walks <see cref="OverloadDelays"/> and everything else doubles from the base delay, both
+    /// jittered so two sessions refused in the same instant do not come back in the same instant.
+    /// </para>
+    /// </summary>
+    private bool TryDelay(int attempt, Exception failure, TimeSpan slept, out TimeSpan delay)
     {
         if (failure is ProviderException provider
             && ProviderErrors.TryGetRetryAfter(provider, out var retryAfter)
             && retryAfter > TimeSpan.Zero)
         {
-            return retryAfter > _maxRetryAfter ? _maxRetryAfter : retryAfter;
+            delay = retryAfter > _maxRetryAfter ? _maxRetryAfter : retryAfter;
+            return delay <= MaxRetryBudget - slept;
         }
 
+        var reason = ReasonOf(failure);
+        var ceiling = IsOverload(reason)
+            ? OverloadDelays[Math.Min(attempt - 1, OverloadDelays.Length - 1)]
+            : Exponential(attempt);
+        delay = _jitter(ceiling);
+        return delay <= MaxRetryBudget - slept;
+    }
+
+    private TimeSpan Exponential(int attempt)
+    {
         var baseMilliseconds = _baseDelay.TotalMilliseconds;
         var maxMilliseconds = _maxDelay.TotalMilliseconds;
         var milliseconds = baseMilliseconds * Math.Pow(2, attempt - 1);
@@ -291,24 +378,16 @@ public sealed class RetryingChatProvider : IChatProvider
             milliseconds = maxMilliseconds;
         }
 
-        if (milliseconds < 0)
-        {
-            milliseconds = 0;
-        }
-
-        return _jitter(TimeSpan.FromMilliseconds(milliseconds));
+        return milliseconds < 0 ? TimeSpan.Zero : TimeSpan.FromMilliseconds(milliseconds);
     }
 
-    private static TimeSpan EqualJitter(TimeSpan ceiling)
-    {
-        if (ceiling <= TimeSpan.Zero)
-        {
-            return TimeSpan.Zero;
-        }
-
-        var half = ceiling / 2;
-        return half + (half * Random.Shared.NextDouble());
-    }
+    /// <summary>
+    /// The default jitter: <c>[0, ceiling]</c> uniformly ("full jitter"). Bounded-by-half spread would keep every client of a
+    /// refused window arriving inside a window that is still half the ceiling long, which is exactly the pile-up a jittered
+    /// retry exists to avoid.
+    /// </summary>
+    private static TimeSpan FullJitter(TimeSpan ceiling) =>
+        ceiling <= TimeSpan.Zero ? TimeSpan.Zero : ceiling * Random.Shared.NextDouble();
 
     /// <summary>The default wait: on the injected clock, so a caller that moved the clock is not left sleeping in real time.</summary>
     private ValueTask DefaultDelayAsync(TimeSpan delay, CancellationToken ct) =>

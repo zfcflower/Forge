@@ -215,12 +215,49 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     // Root failure of the running turn as the worker thread saw it: the coalesced UI copy can land after the turn's await.
     private volatile string? turnRootFailure;
+
+    /// <summary>
+    /// How many attempts of this turn were sent again, and how long those waits added up to. Counted on the worker thread as
+    /// the retry events arrive (the coalesced UI copy can land after the turn's await), so the failure the turn ends with can
+    /// say how much of the ladder was spent instead of looking like a request that failed at once.
+    /// </summary>
+    private int turnRetries;
+    private long turnRetryWaitMs;
+
     private bool turnRan;
     private volatile ProviderQuotaExhausted? turnRootQuota;
     private string? automationBanner;
     private Action? cancelAutomation;
     private RelayCommand? cancelAutomationCommand;
     private long lastActivityTicks = DateTimeOffset.UtcNow.UtcTicks;
+
+    // ---------------------------------------------------------------- automatic continue after an overloaded endpoint
+
+    /// <summary>
+    /// How many rounds of an automatic continue this failure chain has already spent. Reset by a turn that ends without the
+    /// root failing, so the budget belongs to one episode of overload rather than to the session's lifetime.
+    /// </summary>
+    private int autoResumeRounds;
+    private CancellationTokenSource? autoResumePending;
+
+    /// <summary>
+    /// What the last retried attempt of the running turn failed with. An overloaded endpoint and a per-minute limit both come
+    /// back in about a minute, so those two earn the automatic continue; a 429 that was never retried (a spent window, a delay
+    /// longer than one request may sleep) leaves this null, and the footnote's buttons or the quota flow own it instead.
+    /// </summary>
+    private RetryReason? turnRetryReason;
+
+    /// <summary>
+    /// How many times one failure chain may be continued by itself. Three rounds span about three minutes, which is the scale
+    /// an overload that outlives the whole retry ladder works on; past it the footnote's buttons are the honest answer.
+    /// </summary>
+    private const int MaxAutoResumeRounds = 3;
+
+    /// <summary>
+    /// How long a failed turn waits before continuing on its own. A settable field rather than a constant because it is the one
+    /// part of this feature a test cannot spend: a deterministic case drives the round with zero delay instead of sleeping.
+    /// </summary>
+    internal TimeSpan AutoResumeDelay { get; set; } = TimeSpan.FromSeconds(60);
     private int runningTools;
     private bool automationRejected;
     private string? rootFailure;
@@ -292,6 +329,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         // button with no transcript change.
         Transcript.CanRetryTurn = _ => IsRetryableTurn();
         Transcript.RetryTurn = RetryTurnAsync;
+
+        // A failed turn that had already run a tool cannot be replayed (bash/write would run twice), so it is continued
+        // instead: one message into the same history. Same live gate — idle, writable, no resume already waiting.
+        Transcript.CanResumeTurn = _ => IsRetryableTurn();
+        Transcript.ResumeTurn = ResumeTurnAsync;
         coalescer = new FrameCoalescer<AgentEvent>(HandleOnUi, FlushAllPendingText);
         SubAgents = new ReadOnlyObservableCollection<SubAgentViewModel>(subAgents);
         Finished = new ReadOnlyObservableCollection<SubAgentViewModel>(finished);
@@ -1501,6 +1543,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     private async Task SendAsync(CancellationToken ignored)
     {
+        // The user typing is the answer to the failure: an automatic continue that is still waiting gives way, so the next
+        // turn is the one they asked for and not two turns racing for the same session.
+        CancelAutoResume();
         var typed = draft.Trim();
         if (TryParseCompactCommand(typed, out var focus) && !Composer.HasAttachments)
         {
@@ -2076,6 +2121,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     private async Task RunTurnAsync(ComposerPrompt prompt)
     {
+        // Any turn starting is the end of an automatic continue's reason to exist — a queued message, a redirect, a review
+        // request that queues one, the user's own send (which also cancels earlier, before the composer is read). Doing it
+        // here rather than at each caller is what makes "a user message always wins" true for paths that never go through
+        // SendAsync; the automatic round itself has already dropped its own pending token, so this is a no-op for it.
+        CancelAutoResume();
+
         if (agentSession is not null)
         {
             await RunAgentSessionTurnAsync(prompt).ConfigureAwait(true);
@@ -2108,6 +2159,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Interlocked.Exchange(ref runningTools, 0);
         turnStartCounters = live.ReadRootCounters();
         turnToolCalls = 0;
+        turnRetryReason = null;
+        Interlocked.Exchange(ref turnRetries, 0);
+        Interlocked.Exchange(ref turnRetryWaitMs, 0);
         Instruments.RefreshCounters();
         Transcript.AddUserMessage(text, turnStartedAt, prompt.Attachments);
         var card = Transcript.BeginTurn(turnStartedAt);
@@ -2181,7 +2235,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
                 lastTurnError = error;
                 var turnElapsed = DateTimeOffset.Now - turnStartedAt;
-                Transcript.EndTurn(turnElapsed, error);
+
+                // A root failure arrives as an event, not as an exception (the run wrapper turns every throw into
+                // AgentFailed), so without this the turn would close as *completed* and the one sentence the user needs
+                // would be a red line above a green checkmark. The metrics row keeps reading `error` itself, so what is
+                // stored stays the provider's own text.
+                Transcript.EndTurn(turnElapsed, error ?? TurnFailureFootnote());
 
                 // The turn's own numbers, handed over as one struct channel write: no await, no query, no formatting, and a
                 // recorder that is missing or has no table costs nothing. The denominator of the strip counts every turn,
@@ -2209,6 +2268,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 IsRunning = false;
                 TurnCompleted?.Invoke(this);
                 ScheduleNext();
+
+                // After the queue had its chance: a message the user already typed is the user's own answer to the failure,
+                // and an automatic continue on top of it would be a second turn nobody asked for.
+                ScheduleAutoResume();
             }
         }
     }
@@ -2327,6 +2390,28 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     }
 
     /// <summary>
+    /// The running turn's failure as the card's own sentence, for the shape that never takes the exception path: a root failure
+    /// reaches the shell as <c>AgentFailed</c> and is filed here by the event, so this is what makes the turn close as failed —
+    /// and what the retry/continue affordance hangs off, since that is a footnote of a failed turn. It adds how much of the
+    /// retry ladder was spent (the count is the only place either the transcript or the metrics row would ever show it).
+    /// </summary>
+    private LocText TurnFailureFootnote()
+    {
+        if (turnRootFailure is not { Length: > 0 } failure)
+        {
+            return default;
+        }
+
+        var retries = Volatile.Read(ref turnRetries);
+        return retries == 0
+            ? SessionStrings.TurnFailed(failure)
+            : SessionStrings.TurnFailedRetried(
+                failure,
+                retries,
+                TimeSpan.FromMilliseconds(Volatile.Read(ref turnRetryWaitMs)));
+    }
+
+    /// <summary>
     /// Whether the failed turn's retry may run now: the session has to be writable and quiet, and no automation run may be
     /// attached — a <c>builtin.quota-resume</c> waiting for the reset already is the retry, and two would fight over the turn.
     /// </summary>
@@ -2355,6 +2440,134 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
     }
 
+    /// <summary>
+    /// Continues the failed turn rather than replaying it: one message through the ordinary turn path, so the model reads the
+    /// history it already built (tool results included) and nothing that ran is run again — exactly what a user does by typing
+    /// "continue", which is what the turn gate, the queue and every failure path already handle. The sentence comes from the
+    /// prompt slot, so a user who edits that text gets their own wording; a session with no template service falls back to the
+    /// compiled default.
+    /// </summary>
+    private async Task ResumeTurnAsync(TurnCardViewModel card)
+    {
+        if (card.Prompt is null)
+        {
+            return;
+        }
+
+        await ContinueTurnAsync().ConfigureAwait(true);
+    }
+
+    private string ResumeText()
+    {
+        var text = runtime?.PromptText(Prompts.AppPromptSlotIds.OverloadContinue);
+        return string.IsNullOrWhiteSpace(text) ? Prompts.AppPromptTexts.OverloadContinue : text;
+    }
+
+    /// <summary>
+    /// Continues the failed turn by itself once the endpoint has had time to recover, instead of leaving the user to press
+    /// "继续" on a busy endpoint. Only a failure the retry layer actually retried and lost on — an overloaded endpoint or a
+    /// per-minute limit — earns this: both come back in about a minute, which is the same statement the ladder's last step
+    /// makes. Everything else (a spent window, a 401, a refused shape) is not a wait, and the quota flow or the footnote's
+    /// buttons already own it.
+    ///
+    /// <para>The wait is visible and cancellable: the banner names the countdown, its cancel button stops it, and typing
+    /// anything sends the user's own turn instead (see <see cref="SendAsync"/>). The budget belongs to one episode — a turn
+    /// that ends without this failure resets it — so a session that keeps working is not left with an exhausted count.</para>
+    /// </summary>
+    private void ScheduleAutoResume()
+    {
+        if (disposed || isReadOnlyView || isRunning || automationTurn || HasAutomationBanner || queued.Count > 0)
+        {
+            return;
+        }
+
+        // A turn that ended for any other reason ends the episode: the next overload starts from a full budget again.
+        if (turnRootFailure is null || turnRetryReason is not (RetryReason.Overloaded or RetryReason.RateLimited))
+        {
+            autoResumeRounds = 0;
+            return;
+        }
+
+        if (autoResumeRounds >= MaxAutoResumeRounds)
+        {
+            return;
+        }
+
+        autoResumeRounds++;
+        var pending = new CancellationTokenSource();
+        autoResumePending = pending;
+        SetAutomationBanner(
+            SessionStrings.AutoResume((int)Math.Ceiling(AutoResumeDelay.TotalSeconds), autoResumeRounds, MaxAutoResumeRounds),
+            CancelAutoResume);
+        _ = RunAutoResumeAsync(pending);
+    }
+
+    private async Task RunAutoResumeAsync(CancellationTokenSource pending)
+    {
+        try
+        {
+            await Task.Delay(AutoResumeDelay, pending.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        // The turn itself has to start on the UI thread like any other: through the ordinary turn path, so the gate, the queue
+        // and every failure path stay the ones a user's own "继续" would go through.
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (disposed || !ReferenceEquals(autoResumePending, pending))
+            {
+                return;
+            }
+
+            autoResumePending = null;
+            SetAutomationBanner(null, null);
+            if (isReadOnlyView || isRunning)
+            {
+                return;
+            }
+
+            _ = ContinueTurnAsync();
+        });
+
+        pending.Dispose();
+    }
+
+    /// <summary>Stops the automatic continue and clears its banner; a no-op when none is pending (an automation's banner stays).</summary>
+    private void CancelAutoResume()
+    {
+        var pending = autoResumePending;
+        if (pending is null)
+        {
+            return;
+        }
+
+        autoResumePending = null;
+        pending.Cancel();
+        pending.Dispose();
+        SetAutomationBanner(null, null);
+    }
+
+    /// <summary>One continue message through the ordinary turn path; called by the button and by the automatic round alike.</summary>
+    private async Task ContinueTurnAsync()
+    {
+        if (!IsRetryableTurn())
+        {
+            return;
+        }
+
+        try
+        {
+            await RunTurnAsync(ComposerPrompt.FromText(ResumeText())).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            OnSendFailed(exception);
+        }
+    }
+
     /// <summary>Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer.</summary>
     private void OnAgentEvent(AgentEvent value)
     {
@@ -2376,6 +2589,18 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         switch (value)
         {
+            case AgentRetryWait retry:
+                // Counted here, on the event thread: the turn's failure is built in the turn's own finally, and the
+                // coalesced UI copy of these events may still be queued behind the turn's await.
+                if (string.Equals(retry.AgentId, "root", StringComparison.Ordinal))
+                {
+                    Interlocked.Increment(ref turnRetries);
+                    Interlocked.Add(ref turnRetryWaitMs, (long)retry.Delay.TotalMilliseconds);
+                    turnRetryReason = retry.Reason;
+                }
+
+                coalescer.Enqueue(value);
+                break;
             case AgentFailed failed when string.Equals(failed.AgentId, "root", StringComparison.Ordinal):
                 turnRootFailure = failed.Error;
                 coalescer.Enqueue(value);
@@ -2562,6 +2787,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 Card(waiting.AgentId)?.AddNotice(
                     RateLimitStrings.Waiting(waiting.ProviderId, waiting.Wait), isError: false);
                 break;
+            case AgentRetryWait retry:
+                // Same shape, different owner: the endpoint refused the attempt and it is being sent again. One line per
+                // attempt, because "which attempt of how many" is the only thing that separates a slow turn from a stuck
+                // one; the line stays after the retry succeeds, so the transcript shows what the answer cost in waiting.
+                Card(retry.AgentId)?.AddNotice(
+                    RateLimitStrings.Retrying(retry.ProviderId, retry.Attempt, retry.Total, retry.Delay, retry.Reason),
+                    isError: false);
+                break;
             case AgentApprovalDenied denied:
                 Card(denied.AgentId)?.AddNotice(
                     SessionStrings.Denied(denied.Call.Name), isError: true, kind: TimelineNodeKind.Approval);
@@ -2601,13 +2834,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             case AgentInterjected interjected:
                 OnInterjected(interjected);
                 break;
+            case AgentFailed failed when string.Equals(failed.AgentId, "root", StringComparison.Ordinal):
+                // The root's failure is the turn's failure: the card's footnote says it (see TurnFailureFootnote), so a second
+                // red line above it would only repeat the same sentence. A child has no turn of its own here and keeps the line.
+                rootFailure = failed.Error;
+                break;
             case AgentFailed failed:
                 Card(failed.AgentId)?.AddNotice(LocText.Literal(failed.Error), isError: true);
-                if (string.Equals(failed.AgentId, "root", StringComparison.Ordinal))
-                {
-                    rootFailure = failed.Error;
-                }
-
                 break;
             case AgentQuotaExhausted quota when string.Equals(quota.AgentId, "root", StringComparison.Ordinal):
                 QuotaExhausted?.Invoke(this, quota.Quota);
@@ -3173,6 +3406,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
 
         disposed = true;
+        CancelAutoResume();
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         if (runtime is not null)
         {

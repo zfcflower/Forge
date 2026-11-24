@@ -707,7 +707,23 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     /// <summary>Replays this turn through the owning session's own turn entry point; see <see cref="TranscriptViewModel.RetryTurn"/>.</summary>
     internal Task RetryAsync() => Owner?.RetryAsync(this) ?? Task.CompletedTask;
 
-    /// <summary>Lets the live half of <see cref="CanRetry"/> change without a new footnote.</summary>
+    /// <summary>
+    /// Whether this turn may be <em>continued</em> instead of replayed: it failed after it had already run a tool, so replaying
+    /// the prompt would repeat side effects while leaving the work undone is the only alternative. It sends a continue
+    /// instruction into the same session — history, tool results and all — through the ordinary turn path, which is what a user
+    /// does by hand; <see cref="CanRetry"/> stays the cheaper replay for the shape where nothing happened yet, and the two are
+    /// never offered together. The live half is the session's, asked through <see cref="TranscriptViewModel.CanResume"/>.
+    /// </summary>
+    internal bool CanResume =>
+        Prompt is not null &&
+        EndStatus == TurnEndStatus.Failed &&
+        toolCallsTotal > 0 &&
+        Owner?.CanResume(this) == true;
+
+    /// <summary>Continues this turn through the owning session's own turn entry point; see <see cref="TranscriptViewModel.ResumeTurn"/>.</summary>
+    internal Task ResumeAsync() => Owner?.ResumeAsync(this) ?? Task.CompletedTask;
+
+    /// <summary>Lets the live half of <see cref="CanRetry"/> and <see cref="CanResume"/> change without a new footnote.</summary>
     internal void RefreshRetry() => footnoteRow?.RefreshRetry();
 
     /// <summary>
@@ -1074,6 +1090,7 @@ internal sealed class TurnWorkingViewModel(TurnCardViewModel card) : TranscriptI
 internal sealed class TurnFootnoteViewModel(TurnCardViewModel card) : TranscriptItemViewModel
 {
     private AsyncRelayCommand? retryCommand;
+    private AsyncRelayCommand? resumeCommand;
 
     public TurnCardViewModel Card { get; } = card;
 
@@ -1082,6 +1099,9 @@ internal sealed class TurnFootnoteViewModel(TurnCardViewModel card) : Transcript
     /// <summary>Whether the footnote shows the retry button beside its text.</summary>
     public bool CanRetry => Card.CanRetry;
 
+    /// <summary>Whether it shows the continue button instead: the turn failed after running a tool, so a replay is off the table.</summary>
+    public bool CanResume => Card.CanResume;
+
     /// <summary>
     /// Re-runs the failed turn. The command disables itself while it runs, and the session's runner reports its own
     /// failures (the turn is exactly the place a failure is already shown), so nothing escapes to the dispatcher.
@@ -1089,10 +1109,16 @@ internal sealed class TurnFootnoteViewModel(TurnCardViewModel card) : Transcript
     public AsyncRelayCommand RetryCommand =>
         retryCommand ??= new AsyncRelayCommand(_ => Card.RetryAsync(), () => Card.CanRetry);
 
+    /// <summary>Continues the failed turn from where it stopped; same failure handling as <see cref="RetryCommand"/>.</summary>
+    public AsyncRelayCommand ResumeCommand =>
+        resumeCommand ??= new AsyncRelayCommand(_ => Card.ResumeAsync(), () => Card.CanResume);
+
     internal void RefreshRetry()
     {
         OnPropertyChanged(nameof(CanRetry));
+        OnPropertyChanged(nameof(CanResume));
         retryCommand?.NotifyCanExecuteChanged();
+        resumeCommand?.NotifyCanExecuteChanged();
     }
 
     public override void RefreshText()
@@ -1331,12 +1357,25 @@ internal sealed class TranscriptViewModel : ObservableObject
     /// <summary>Runs the retry; owns its own failures, so the transcript never observes a fault of it.</summary>
     internal Func<TurnCardViewModel, Task>? RetryTurn { get; set; }
 
+    /// <summary>Whether the newest turn may be continued (a failed turn that already ran a tool); the session's live gate.</summary>
+    internal Func<TurnCardViewModel, bool>? CanResumeTurn { get; set; }
+
+    /// <summary>Runs the continue; owns its own failures like <see cref="RetryTurn"/>.</summary>
+    internal Func<TurnCardViewModel, Task>? ResumeTurn { get; set; }
+
     /// <summary>Only the newest turn is retryable: once a later turn exists the user has already moved on past it.</summary>
     internal bool CanRetry(TurnCardViewModel card) =>
         ReferenceEquals(card, current) && CanRetryTurn?.Invoke(card) == true;
 
     internal Task RetryAsync(TurnCardViewModel card) =>
         RetryTurn is { } run && CanRetry(card) ? run(card) : Task.CompletedTask;
+
+    /// <summary>The same newest-turn rule for continuing a turn that already had its side effects.</summary>
+    internal bool CanResume(TurnCardViewModel card) =>
+        ReferenceEquals(card, current) && CanResumeTurn?.Invoke(card) == true;
+
+    internal Task ResumeAsync(TurnCardViewModel card) =>
+        ResumeTurn is { } run && CanResume(card) ? run(card) : Task.CompletedTask;
 
     /// <summary>Re-reads the retry gate of the newest turn after the session's state moved (running, read-only, a resume run).</summary>
     internal void RefreshRetry() => current?.RefreshRetry();

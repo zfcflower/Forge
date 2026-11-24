@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Forge.Abstractions;
 
 namespace Forge.App.Localization;
 
@@ -35,6 +36,13 @@ internal static class RateLimitStrings
 
     // ---------------------------------------------------------------- a running turn's wait
     public const string WaitingKey = "rateLimit.waiting";
+
+    // ---------------------------------------------------------------- a running turn's retry
+    public const string RetryingKey = "rateLimit.retrying";
+    public const string OverloadedKey = "rateLimit.reason.overloaded";
+    public const string RateLimitedKey = "rateLimit.reason.rateLimited";
+    public const string ServerKey = "rateLimit.reason.server";
+    public const string TransportKey = "rateLimit.reason.transport";
 
     /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
     [ModuleInitializer]
@@ -80,6 +88,23 @@ internal static class RateLimitStrings
     /// </summary>
     public static LocText Waiting(string providerId, TimeSpan wait) =>
         new(WaitingKey, providerId, (int)Math.Ceiling(wait.TotalSeconds));
+
+    /// <summary>
+    /// The line a running turn shows while an attempt is being sent again: which attempt of how many, how long until the
+    /// next one, and why — without the count a retried turn and a hung one look the same, which is exactly what made an
+    /// overloaded endpoint look like a turn that simply stopped.
+    /// </summary>
+    public static LocText Retrying(string providerId, int attempt, int total, TimeSpan delay, RetryReason reason) =>
+        new(RetryingKey, providerId, attempt, total, (int)Math.Ceiling(delay.TotalSeconds), Reason(reason));
+
+    /// <summary>The reason as its own text, so a language switch re-renders it with the line it belongs to.</summary>
+    public static LocText Reason(RetryReason reason) => new(reason switch
+    {
+        RetryReason.Overloaded => OverloadedKey,
+        RetryReason.RateLimited => RateLimitedKey,
+        RetryReason.Server => ServerKey,
+        _ => TransportKey,
+    });
 
     internal static void Register()
     {
@@ -134,5 +159,15 @@ internal static class RateLimitStrings
             WaitingKey,
             "本地限流：等待 {0} 恢复额度，约 {1} 秒",
             "Rate limit: waiting for {0} to refill, about {1}s");
+
+        // A retried attempt is the same kind of status: quiet, not an error, and gone once the answer starts.
+        Loc.Register(
+            RetryingKey,
+            "重试中：{0} · 第 {1}/{2} 次 · 约 {3} 秒后重发（{4}）",
+            "Retrying {0}: attempt {1} of {2}, sending again in about {3}s ({4})");
+        Loc.Register(OverloadedKey, "服务过载", "endpoint busy");
+        Loc.Register(RateLimitedKey, "被限流", "rate limited");
+        Loc.Register(ServerKey, "服务器错误", "server error");
+        Loc.Register(TransportKey, "连接中断", "connection lost");
     }
 }

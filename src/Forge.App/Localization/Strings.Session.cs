@@ -119,8 +119,12 @@ internal static class SessionStrings
     public const string CopyMessageKey = "turn.copyMessage";
     public const string NoToolResultKey = "turn.noToolResult";
     public const string TurnFailedKey = "turn.failed";
+    public const string TurnFailedRetriedKey = "turn.failedRetried";
     public const string TurnRetryKey = "turn.retry";
     public const string TurnRetryNameKey = "turn.retryName";
+    public const string TurnResumeKey = "turn.resume";
+    public const string TurnResumeNameKey = "turn.resumeName";
+    public const string TurnAutoResumeKey = "turn.autoResume";
     public const string DeniedKey = "turn.denied";
     public const string CompactedKey = "turn.compacted";
     public const string ProviderNoticeTitleKey = "turn.providerNotice.title";
@@ -389,6 +393,20 @@ internal static class SessionStrings
 
     /// <summary>The notice shown when the turn itself could not run.</summary>
     public static LocText TurnFailed(string message) => new(TurnFailedKey, message);
+
+    /// <summary>
+    /// The same notice once the request was tried more than once: the attempts and the waiting are the part a user cannot see
+    /// anywhere else (a retried turn and an instant failure look identical on the card).
+    /// </summary>
+    public static LocText TurnFailedRetried(string message, int retries, TimeSpan wait) =>
+        new(TurnFailedRetriedKey, message, retries, (int)Math.Round(wait.TotalSeconds));
+
+    /// <summary>
+    /// The banner above the composer while the session waits out a busy endpoint on its own. A plain string, not a
+    /// <see cref="LocText"/>: the banner slot takes text, exactly as the automation banner does.
+    /// </summary>
+    public static string AutoResume(int seconds, int round, int rounds) =>
+        Loc.Instance.Format(TurnAutoResumeKey, seconds, round, rounds);
 
     /// <summary>The notice shown in place of an approved-but-unavailable tool call.</summary>
     public static LocText Denied(string tool) => new(DeniedKey, tool);
@@ -669,8 +687,21 @@ internal static class SessionStrings
         Loc.Register(CopyMessageKey, "复制消息", "Copy message");
         Loc.Register(NoToolResultKey, "没有结果：本轮已结束", "No result: the turn ended");
         Loc.Register(TurnFailedKey, "本轮无法运行：{0}", "This turn could not run: {0}");
+        Loc.Register(
+            TurnFailedRetriedKey,
+            "本轮无法运行：{0}（已重试 {1} 次，共等待 {2} 秒）",
+            "This turn could not run: {0} (retried {1} times, {2}s spent waiting)");
         Loc.Register(TurnRetryKey, "重试", "Retry");
         Loc.Register(TurnRetryNameKey, "重试这一轮（重新发送同一条消息）", "Retry this turn (sends the same message again)");
+        Loc.Register(TurnResumeKey, "继续", "Continue");
+        Loc.Register(
+            TurnResumeNameKey,
+            "继续这一轮（发一条“继续”指令；已经跑过的工具不会重跑）",
+            "Continue this turn (sends a continue instruction; tools that already ran are not repeated)");
+        Loc.Register(
+            TurnAutoResumeKey,
+            "服务过载，约 {0} 秒后自动继续（第 {1}/{2} 次）",
+            "Endpoint busy: continuing automatically in about {0}s (round {1} of {2})");
         Loc.Register(DeniedKey, "已拒绝：{0}（尚未配置审批对话框）", "Denied: {0} (no approval dialog yet)");
         Loc.Register(CompactedKey, "已压缩上下文：{0} → {1} tokens", "Context compacted: {0} → {1} tokens");
         Loc.Register(ProviderNoticeTitleKey, "本轮请求的形状被降级", "This turn ran with a reduced request");

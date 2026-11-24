@@ -538,18 +538,30 @@
                    Margin="0,4,8,6"
                    TextWrapping="Wrap"
                    Text="{Binding Text}" />
-        <!-- Only a failed turn that produced nothing gets this: it is the one shape a replay cannot repeat. The session
-             decides whether it may run now (idle, writable, no resume already waiting); see TranscriptViewModel.CanRetry. -->
-        <Button Grid.Column="2"
-                Classes="link"
-                Margin="0,0,8,0"
-                VerticalAlignment="Center"
-                Content="{Binding [turn.retry], Source={x:Static loc:Loc.Instance}}"
-                Command="{Binding RetryCommand}"
-                IsVisible="{Binding CanRetry}"
-                ToolTip.Tip="{Binding [turn.retryName], Source={x:Static loc:Loc.Instance}}"
-                AutomationProperties.AutomationId="turn-retry"
-                AutomationProperties.Name="{Binding [turn.retryName], Source={x:Static loc:Loc.Instance}}" />
+        <!-- Two shapes, never at once: a turn that produced nothing gets the retry (the same message again), a turn that had
+             already run a tool gets the continue (a continue instruction into the same history — replaying it would run bash,
+             write or a push twice). The session decides whether either may run now (idle, writable, no resume already
+             waiting); see TranscriptViewModel.CanRetry and CanResume. -->
+        <StackPanel Grid.Column="2"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    Margin="0,0,8,0"
+                    VerticalAlignment="Center">
+          <Button Classes="link"
+                  Content="{Binding [turn.retry], Source={x:Static loc:Loc.Instance}}"
+                  Command="{Binding RetryCommand}"
+                  IsVisible="{Binding CanRetry}"
+                  ToolTip.Tip="{Binding [turn.retryName], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="turn-retry"
+                  AutomationProperties.Name="{Binding [turn.retryName], Source={x:Static loc:Loc.Instance}}" />
+          <Button Classes="link"
+                  Content="{Binding [turn.resume], Source={x:Static loc:Loc.Instance}}"
+                  Command="{Binding ResumeCommand}"
+                  IsVisible="{Binding CanResume}"
+                  ToolTip.Tip="{Binding [turn.resumeName], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="turn-resume"
+                  AutomationProperties.Name="{Binding [turn.resumeName], Source={x:Static loc:Loc.Instance}}" />
+        </StackPanel>
       </Grid>
     </DataTemplate>
 

@@ -82,6 +82,13 @@ public static partial class ProviderQuota
         return new ProviderQuotaExhausted(model.ProviderId, model.Model, resetAt, Trim(message));
     }
 
+    /// <summary>
+    /// Whether a provider's text describes a <em>rate</em> (per minute, RPM/TPM, “请求过于频繁”) rather than a spent window.
+    /// The one place that vocabulary is written down: the quota classification reads it as a veto, and the retry layer labels a
+    /// 429 with it so the shell can say “rate limited” instead of “overloaded”.
+    /// </summary>
+    public static bool IsRateWording(string message) => RateWordingRegex().IsMatch(message);
+
     private static bool HasMarker(string message)
     {
         foreach (var marker in DefiniteMarkers)
@@ -99,7 +106,7 @@ public static partial class ProviderQuota
         }
 
         // A short rate limit ("Rate limit reached ... tokens per min", "..._per_minute", 请求过于频繁) is the retry layer's.
-        if (RateWordingRegex().IsMatch(message))
+        if (IsRateWording(message))
         {
             return false;
         }

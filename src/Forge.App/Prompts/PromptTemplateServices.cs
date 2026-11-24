@@ -10,6 +10,13 @@ internal static class AppPromptSlotIds
     /// <summary>Sent to a session the quota automation resumes. No placeholders.</summary>
     public const string QuotaContinue = "automations.quota.continue";
 
+    /// <summary>
+    /// Sent when the user continues a turn that failed after it had already run tools. Distinct from
+    /// <see cref="QuotaContinue"/> on purpose: the reason matters to the model (a spent window is not a busy endpoint), and a
+    /// user reading the slot text in the settings should see which one they are editing. No placeholders.
+    /// </summary>
+    public const string OverloadContinue = "chat.overload.continue";
+
     /// <summary>The Scout task of the CI chain. Placeholders <c>{pr}</c>, <c>{branch}</c>, <c>{failures}</c>.</summary>
     public const string CiScout = "automations.ci.scout";
 
@@ -27,6 +34,10 @@ internal static class AppPromptTexts
 {
     public const string QuotaContinue =
         "The model quota has been restored. Continue the previous task from where it stopped.";
+
+    /// <summary>The user's "continue" after a turn whose request the endpoint refused (overload, rate limit, a dropped stream).</summary>
+    public const string OverloadContinue =
+        "The last request was refused by the provider (the endpoint was busy or the connection dropped). Continue the previous task from where it stopped. Do not repeat tool calls whose results you already have.";
 
     public const string CiScout =
         """
@@ -65,6 +76,11 @@ internal static class AppPromptTexts
             "Quota resume",
             "Sent to a session when the model quota is restored and the automation resumes it.",
             QuotaContinue);
+        yield return PromptTemplateRegistry.Slot(
+            AppPromptSlotIds.OverloadContinue,
+            "Continue after a refused request",
+            "Sent when the user continues a turn whose request the provider refused. Already-run tools are not repeated.",
+            OverloadContinue);
         yield return PromptTemplateRegistry.Slot(
             AppPromptSlotIds.CiScout,
             "CI failure: Scout task",

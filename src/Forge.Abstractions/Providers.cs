@@ -62,9 +62,35 @@ public sealed record ToolCallArgumentsDelta(string Id, string Json) : ChatStream
 /// <summary>
 /// The provider is about to sleep out a local rate-limit wait before an attempt can be sent. Yielded before the sleep, so a
 /// consumer can tell the user why the turn is quiet; not an error, and never emitted for the server-driven backoff between
-/// failed attempts (a retry is another request, not a wait the user can act on).
+/// failed attempts (that one is <see cref="RetryWait"/>).
 /// </summary>
 public sealed record BudgetWait(TimeSpan Wait) : ChatStreamEvent;
+
+/// <summary>Why an attempt is being sent again, in the words the shell shows beside the count.</summary>
+public enum RetryReason
+{
+    /// <summary>The endpoint itself is busy (a 429 that names no per-minute limit, the shape a saturated gateway sends).</summary>
+    Overloaded,
+
+    /// <summary>The account hit a per-minute request or token limit.</summary>
+    RateLimited,
+
+    /// <summary>The endpoint answered with a server-side failure (5xx, or a request timeout).</summary>
+    Server,
+
+    /// <summary>Nothing came back: a connection, stream or idle-timeout failure.</summary>
+    Transport,
+}
+
+/// <summary>
+/// An attempt failed before it produced anything and is about to be sent again after <see cref="Delay"/>.
+/// <para>
+/// Yielded before the sleep it describes, and for every retry — a retry is the slowest thing that can happen to a turn
+/// without anything appearing on screen, so the caller gets <see cref="Attempt"/> of <see cref="Total"/> and the reason
+/// to say out loud. Not an error, and not content: a consumer must not count it as output the provider produced.
+/// </para>
+/// </summary>
+public sealed record RetryWait(TimeSpan Delay, int Attempt, int Total, RetryReason Reason) : ChatStreamEvent;
 
 /// <summary>
 /// The turn's last stream event. <see cref="RateLimit"/> is the provider's own account-usage reading, when the protocol

@@ -11,7 +11,7 @@
 | `openai-responses` | `POST {baseUrl}/responses` | Meta、OpenAI 的 ChatGPT 订阅（`chatgpt.com/backend-api/codex`） |
 
 - Responses 适配器：系统提示走 `instructions`，消息与工具调用走 `input`，推理档走 `reasoning.effort`，`store:false`；流按 `output_text.delta` / `function_call_arguments.delta` / `response.completed` 解析；七档里 `Max` 与 OpenAI 兼容一样夹到 `xhigh`。
-- 重试只发生在**首个事件之前**；`HttpClient` 是无限超时，停滞由每次读取的空闲超时（默认 120 秒）判定。
+- 重试只发生在**首个事件之前**（阶梯见 02 的 2.11：传输层/5xx 三次，429 五次、1s/3s/8s/20s，单请求累计等待 ≤60 秒）；`HttpClient` 是无限超时，停滞由每次读取的空闲超时（默认 120 秒）判定。
 - OpenAI 兼容适配器写出消息时合并相邻同角色 `user`/`assistant`（文本按序拼接、段落间空行，`tool_calls` 保序）；`tool` 与 `system` 不合并，同一历史序列化结果字节稳定。
 - 三家适配器都按各自协议编码图片（`image` source / `image_url` data URL / `input_image`）、文件附件与工具结果图片；没有线路形状的组合在构造请求体时抛不可重试错误，不静默丢弃。
 

@@ -536,10 +536,17 @@ internal sealed partial class SessionWorkspaceViewModel
             try
             {
                 // A stop the user asked for closes the run instead of raising here, so the card learns it from the run's own
-                // end - the same way its metrics row does - instead of reading as a turn that went through.
-                if (error is null && Volatile.Read(ref agentRunEnded) is { Status: SubAgentStatus.Stopped })
+                // end - the same way its metrics row does - instead of reading as a turn that went through. A failure is the
+                // same shape and used to be the reverse case: it never raises out of RunUserChildTurnAsync (it arrives as the
+                // run's own end with an error), so the card closed as completed while the metrics row said failed.
+                if (error is null && Volatile.Read(ref agentRunEnded) is { } ended)
                 {
-                    error = SessionStrings.Stopped;
+                    error = ended.Status switch
+                    {
+                        SubAgentStatus.Stopped => SessionStrings.Stopped,
+                        SubAgentStatus.Failed when ended.Error is { Length: > 0 } message => SessionStrings.TurnFailed(message),
+                        _ => error,
+                    };
                 }
 
                 lastTurnError = error;

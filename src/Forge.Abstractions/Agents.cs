@@ -73,6 +73,22 @@ public sealed record AgentRateLimitUpdated(string AgentId, ProviderRateLimit Rat
 /// describes the local budget, not the account's spending windows.
 /// </summary>
 public sealed record AgentBudgetWait(string AgentId, string ProviderId, TimeSpan Wait) : AgentEvent(AgentId);
+
+/// <summary>
+/// The turn's last request failed before producing anything and is being sent again after <paramref name="Delay"/>, which is
+/// the only explanation the user gets for a turn that looks stuck: without it a retried 429 and a hung request are the same
+/// picture. Informational like <see cref="AgentBudgetWait"/> — a quiet line on the running turn, never an error, never
+/// persisted — but it describes the endpoint refusing us, not our own budget, and <paramref name="Attempt"/> of
+/// <paramref name="Total"/> says how much of the ladder is left.
+/// </summary>
+public sealed record AgentRetryWait(
+    string AgentId,
+    string ProviderId,
+    TimeSpan Delay,
+    int Attempt,
+    int Total,
+    RetryReason Reason) : AgentEvent(AgentId);
+
 public sealed record AgentFailed(string AgentId, string Error) : AgentEvent(AgentId);
 
 /// <summary>Lifecycle of one sub-agent run as shown to the user; terminal values never change again for that run.</summary>

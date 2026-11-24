@@ -1924,6 +1924,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     }
 
     /// <summary>
+    /// The text of one prompt slot for this session's workspace, or null when the host has no template service. Read when the
+    /// session sends a message on the user's behalf (continuing a failed turn), so an edited slot is what goes out, exactly as
+    /// the quota automation reads its own slot.
+    /// </summary>
+    public string? PromptText(string slotId) => services.PromptTemplates?.Resolve(Session.WorkspacePath).Slot(slotId);
+
+    /// <summary>
     /// Re-reads every prompt source: from the next turn on the session runs on a fresh agent host (templates, system slot,
     /// layers, agent kinds, skill index) and the root agent is resumed from the store, so the conversation keeps its context.
     /// The prompt cache of the conversation is lost once (the prefix changed). A running turn is not touched; it ends on the

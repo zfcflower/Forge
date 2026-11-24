@@ -23,6 +23,7 @@ public sealed class TurnRetryTests
         if (retryable)
         {
             transcript.CanRetryTurn = static _ => true;
+            transcript.CanResumeTurn = static _ => true;
         }
 
         return transcript;
@@ -81,6 +82,63 @@ public sealed class TurnRetryTests
 
         Assert.False(card.CanRetry);
         Assert.False(card.FootnoteRow.RetryCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task A_failed_turn_that_already_ran_a_tool_offers_the_continue_instead()
+    {
+        // The shape the Worker-2 turn had: a 429 after twenty tool calls. The replay is off the table, but leaving the user
+        // with nothing is what made a retried turn look like it simply stopped, so the footnote offers the continue.
+        var transcript = Transcript();
+        var card = FailedTurn(
+            transcript,
+            beforeFinish: static c => c.AddTool(new ToolCall("t1", "bash", "{\"command\":\"dotnet build\"}")));
+        var resumed = new List<TurnCardViewModel>();
+        transcript.ResumeTurn = resumedCard =>
+        {
+            resumed.Add(resumedCard);
+            return Task.CompletedTask;
+        };
+
+        Assert.False(card.CanRetry);
+        Assert.True(card.CanResume);
+        Assert.True(card.FootnoteRow.ResumeCommand.CanExecute(null));
+
+        await card.ResumeAsync();
+
+        Assert.Same(card, Assert.Single(resumed));
+    }
+
+    [Fact]
+    public void A_failed_turn_that_ran_no_tool_offers_no_continue()
+    {
+        // Replaying is strictly better there (it re-sends the exact prompt), so the two affordances never share a footnote.
+        var card = FailedTurn();
+
+        Assert.True(card.CanRetry);
+        Assert.False(card.CanResume);
+        Assert.False(card.FootnoteRow.ResumeCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void Only_the_newest_failed_turn_offers_the_continue()
+    {
+        var transcript = Transcript();
+        var failed = FailedTurn(
+            transcript,
+            beforeFinish: static c => c.AddTool(new ToolCall("t1", "read", "{\"path\":\"a.txt\"}")));
+        Assert.True(failed.FootnoteRow.CanResume);
+
+        var raised = new List<string?>();
+        failed.FootnoteRow.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        transcript.AddUserMessage("never mind, describe it instead", At.AddMinutes(1));
+        var next = transcript.BeginTurn(At.AddMinutes(1));
+        next.Prompt = ComposerPrompt.FromText("never mind, describe it instead");
+
+        Assert.False(failed.CanResume);
+        Assert.False(failed.FootnoteRow.CanResume);
+        Assert.Contains(nameof(TurnFootnoteViewModel.CanResume), raised);
     }
 
     [Fact]
@@ -192,6 +250,46 @@ public sealed class TurnRetryViewTests
         transcript.RefreshRetry();
         SharedUi.Settle(window);
         Assert.False(button.IsVisible);
+        window.Close();
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task The_footnote_offers_the_continue_when_the_turn_had_already_run_a_tool() => SharedUi.RunAsync(() =>
+    {
+        var transcript = new TranscriptViewModel(collapseOlderTurns: false)
+        {
+            CanRetryTurn = static _ => true,
+            CanResumeTurn = static _ => true,
+        };
+        transcript.AddUserMessage("ship it", At);
+        var card = transcript.BeginTurn(At);
+        card.Prompt = ComposerPrompt.FromText("ship it");
+        card.AddTool(new ToolCall("t1", "bash", "{\"command\":\"dotnet build\"}"));
+        transcript.EndTurn(
+            TimeSpan.FromSeconds(1),
+            SessionStrings.TurnFailedRetried("the provider refused the request", 4, TimeSpan.FromSeconds(32)));
+
+        var window = new Window { Width = 640, Height = 240, Content = new ContentControl { Content = card.FootnoteRow } };
+        window.Show();
+        SharedUi.Settle(window);
+
+        var visible = window.GetVisualDescendants()
+            .OfType<Button>()
+            .Where(candidate => AutomationProperties.GetAutomationId(candidate) is "turn-retry" or "turn-resume")
+            .Where(candidate => candidate.IsVisible)
+            .ToList();
+
+        // Exactly one, and it is the continue: a registered-key typo would render "[turn.resume]" here, and a wrong gate
+        // would show the retry that replays the bash command.
+        var button = Assert.Single(visible);
+        Assert.Equal("turn-resume", AutomationProperties.GetAutomationId(button));
+        Assert.Equal(Loc.Instance[SessionStrings.TurnResumeKey], button.Content);
+
+        // The footnote carries the attempts: the user who only sees "429" would never learn it was tried five times.
+        Assert.Equal(
+            SessionStrings.TurnFailedRetried("the provider refused the request", 4, TimeSpan.FromSeconds(32)).Resolve(),
+            card.Footnote);
         window.Close();
         return Task.CompletedTask;
     });
