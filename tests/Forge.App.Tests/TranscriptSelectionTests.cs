@@ -76,6 +76,35 @@ public sealed class TranscriptSelectionTests
         Assert.Equal((0, 4), range.For(1, 10));
     }
 
+    /// <summary>Ctrl+A on a card selects everything it holds — a reply with several blocks, a tool's expanded output, a thinking block.</summary>
+    [Fact]
+    public Task Selecting_the_card_takes_every_block_it_holds() => SharedUi.RunAsync(() =>
+    {
+        var one = new MarkdownTextBlock { Text = "first paragraph", TextWrapping = TextWrapping.Wrap };
+        var two = new MarkdownCodeTextBlock { Text = "return Managed(path);", TextWrapping = TextWrapping.Wrap };
+        var card = new SelectableCard { Child = new StackPanel { Children = { one, two } } };
+        var window = new Window { Content = new Panel { Background = Brushes.Transparent, Children = { card } }, Width = 420, Height = 160 };
+        window.Show();
+        SharedUi.Settle(window);
+
+        card.SelectAll();
+
+        Assert.True(card.HasSelection);
+        Assert.Equal(0, one.SelectionStart);
+        Assert.Equal("first paragraph".Length, one.SelectionEnd);
+        Assert.Equal(0, two.SelectionStart);
+        Assert.Equal("return Managed(path);".Length, two.SelectionEnd);
+
+        // A copied code block keeps its fences, so a snippet pasted into an issue is still code.
+        var copied = card.SelectedText();
+        Assert.NotNull(copied);
+        Assert.Contains("first paragraph", copied, StringComparison.Ordinal);
+        Assert.Contains("```", copied, StringComparison.Ordinal);
+        Assert.Contains("return Managed(path);", copied, StringComparison.Ordinal);
+
+        return Task.CompletedTask;
+    });
+
     /// <summary>The point-to-character map the card's drag relies on: a point in a block lands on the character under it.</summary>
     [Fact]
     public Task A_point_maps_to_the_character_under_it() => SharedUi.RunAsync(() =>

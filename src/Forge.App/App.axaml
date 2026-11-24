@@ -581,20 +581,20 @@
                          IsVisible="{Binding !IsExpanded}" />
             </StackPanel>
           </Button>
-          <Border Classes="thinking-block" IsVisible="{Binding IsExpanded}" Margin="18,0,0,0">
+          <views:SelectableCard Classes="thinking-block" IsVisible="{Binding IsExpanded}" Margin="18,0,0,0">
             <ScrollViewer MaxHeight="240"
                           views:StreamFollow.Follow="True"
                           HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
-              <TextBlock Classes="thinking-line"
-                         Margin="0,0,4,0"
-                         LineHeight="19.2"
-                         TextWrapping="Wrap"
-                         Foreground="{DynamicResource TextSecondaryBrush}"
-                         Text="{Binding Text}"
-                         AutomationProperties.AutomationId="thinking-text" />
+              <SelectableTextBlock Classes="thinking-line"
+                                   Margin="0,0,4,0"
+                                   LineHeight="19.2"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="{Binding Text}"
+                                   AutomationProperties.AutomationId="thinking-text" />
             </ScrollViewer>
-          </Border>
+          </views:SelectableCard>
         </StackPanel>
       </Grid>
     </DataTemplate>

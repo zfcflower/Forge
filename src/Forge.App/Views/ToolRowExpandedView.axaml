@@ -9,6 +9,7 @@
   <!-- What one tool call looks like when it is open: arguments, result, the result's actions, its images and the live tail of a
        call that has not returned yet. One implementation, used by the inspector row, by the tool card group and by the tool
        row, so the three can never drift apart. -->
+  <views:SelectableCard>
   <StackPanel Spacing="4" Margin="0,2,0,2">
     <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
     <!-- Arguments can be a whole file (write, edit): they are capped like the result, so one call never opens into a screen
@@ -61,4 +62,5 @@
     <views:ToolRowImagesView />
     <views:ToolRowTailView />
   </StackPanel>
+  </views:SelectableCard>
 </UserControl>

@@ -170,6 +170,7 @@ internal sealed class SelectableCard : Border
         }
 
         pressedAt = e.GetPosition(this);
+        Collect();
         pressed = BlockAt(pressedAt);
         pointer = e.Pointer;
     }
@@ -293,6 +294,29 @@ internal sealed class SelectableCard : Border
         }
     }
 
+    /// <summary>
+    /// Selects everything the card holds. Driven by Ctrl+A when this card is the one with a selection or holds the focus, so a
+    /// reply, a tool's expanded output or a thinking block can be taken as a whole without dragging through it.
+    /// </summary>
+    internal void SelectAll()
+    {
+        Collect();
+        if (range.Count == 0)
+        {
+            return;
+        }
+
+        if (owner is { } other && !ReferenceEquals(other, this))
+        {
+            other.Clear();
+        }
+
+        owner = this;
+        hasSelection = true;
+        selection = new CardSelection(0, 0, range.Count - 1, range[^1].Text?.Length ?? 0);
+        Apply();
+    }
+
     /// <summary>Drops this card's selection and forgets it as the holder.</summary>
     internal void Clear()
     {
@@ -386,8 +410,17 @@ internal sealed class SelectableCard : Border
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
-        if (!ReferenceEquals(owner, this) || e.KeyModifiers != KeyModifiers.Control)
+        if (e.KeyModifiers != KeyModifiers.Control || !(ReferenceEquals(owner, this) || ContainsFocus()))
         {
+            return;
+        }
+
+        if (e.Key is Key.A)
+        {
+            // The card holding the focus (a reply, a tool output, a thinking block) or the one already selected. A text box
+            // keeps its own Ctrl+A: no ancestor of it is a card.
+            SelectAll();
+            e.Handled = true;
             return;
         }
 
@@ -410,6 +443,21 @@ internal sealed class SelectableCard : Border
             Clear();
             e.Handled = true;
         }
+    }
+
+    /// <summary>Whether the keyboard focus sits inside this card, which is what makes it the target of Ctrl+A.</summary>
+    private bool ContainsFocus()
+    {
+        var focused = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement();
+        for (var visual = focused as Visual; visual is not null; visual = visual.GetVisualParent())
+        {
+            if (ReferenceEquals(visual, this))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Keeps the gesture alive past the viewport edge: drag out of the list and the transcript scrolls under the pointer.</summary>
@@ -503,25 +551,37 @@ internal sealed class SelectableCard : Border
         }
     }
 
-    /// <summary>The selectable block under a point, or null for padding.</summary>
+    /// <summary>
+    /// The selectable block at a point, by geometry rather than by hit test: the card paints its own background, so the hit test
+    /// answers with the border and a drag started in a paragraph never found the paragraph. A point in the gap between two
+    /// blocks goes to the closer one, within a small tolerance, so dragging through padding does not drop the gesture.
+    /// </summary>
     private ISelectableBlock? BlockAt(Point point)
     {
-        if (this.GetVisualAt(point) is not { } hit)
+        ISelectableBlock? nearest = null;
+        var nearestDistance = double.MaxValue;
+        foreach (var block in range)
         {
-            return null;
-        }
+            if (block is not Visual visual || visual.TranslatePoint(default, this) is not { } origin)
+            {
+                continue;
+            }
 
-        while (hit is not null && !ReferenceEquals(hit, this))
-        {
-            if (hit is ISelectableBlock block)
+            var bounds = new Rect(origin, visual.Bounds.Size);
+            if (bounds.Contains(point))
             {
                 return block;
             }
 
-            hit = hit.GetVisualParent();
+            var distance = point.Y < bounds.Top ? bounds.Top - point.Y : point.Y - bounds.Bottom;
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearest = block;
+            }
         }
 
-        return null;
+        return nearestDistance <= 48 ? nearest : null;
     }
 
     private int IndexOf(ISelectableBlock block)
