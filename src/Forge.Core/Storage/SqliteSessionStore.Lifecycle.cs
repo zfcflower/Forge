@@ -695,6 +695,7 @@ public sealed partial class SqliteSessionStore
                 }
             }
 
+            SessionInfo taker;
             if (resumeSessionId is not null)
             {
                 // 2b. Resume: conditional Archived|Deleted → Active of the same row; nothing is copied.
@@ -704,44 +705,62 @@ public sealed partial class SqliteSessionStore
                     throw new InvalidOperationException($"Session {resumeSessionId} does not exist.");
                 }
 
-                return await store.ReadSessionAsync(connection, transaction, resumeSessionId).ConfigureAwait(false);
+                taker = await store.ReadSessionAsync(connection, transaction, resumeSessionId).ConfigureAwait(false);
+            }
+            else
+            {
+                // 2a. New session: fork / lineage bookkeeping comes from the old row.
+                string? forkOf;
+                string? forkSha;
+                string lineage;
+                await using (var read = Command(
+                    connection,
+                    transaction,
+                    "SELECT fork_of_branch, fork_base_sha, COALESCE(lineage_root_id, id) FROM sessions WHERE id = $old"))
+                {
+                    read.Parameters.AddWithValue("$old", oldSessionId);
+                    await using var reader = await read.ExecuteReaderAsync(CancellationToken.None).ConfigureAwait(false);
+                    await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false);
+                    forkOf = reader.IsDBNull(0) ? null : reader.GetString(0);
+                    forkSha = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    lineage = reader.GetString(2);
+                }
+
+                var created = session! with { ForkOfBranch = forkOf, ForkBaseSha = forkSha, LineageRootId = lineage };
+                await InsertSessionAsync(connection, transaction, created, key!).ConfigureAwait(false);
+
+                var messages = create!.InitialMessages;
+                var at = DateTimeOffset.UtcNow;
+                for (var index = 0; index < messages.Count; index++)
+                {
+                    await store.InsertMessageAsync(connection, transaction, created.Id, index + 1, messages[index], null, at).ConfigureAwait(false);
+                }
+
+                if (create.CopyTodosAndPlans)
+                {
+                    await CopyTodosAndPlansAsync(connection, transaction, oldSessionId, created.Id).ConfigureAwait(false);
+                }
+
+                // Only now, with every sub-step done, does the writer learn the new session's last sequence.
+                sequences.Record(created.Id, messages.Count);
+                taker = created;
             }
 
-            // 2a. New session: fork / lineage bookkeeping comes from the old row.
-            string? forkOf;
-            string? forkSha;
-            string lineage;
-            await using (var read = Command(
+            // 3. The old root's still-active agent sessions follow the workspace to the taker (the same rule an
+            //    archive-with-successor applies): left under the archived old root they would surface in the branch's
+            //    history group without ever having been archived. The archived ones stay - an archived root keeps its
+            //    archived family in history. A resume that already adopted them (the taker was one of them) finds none.
+            await using (var rehome = Command(
                 connection,
                 transaction,
-                "SELECT fork_of_branch, fork_base_sha, COALESCE(lineage_root_id, id) FROM sessions WHERE id = $old"))
+                $"UPDATE sessions SET parent_session_id = $taker WHERE parent_session_id = $old AND child_driver = '{StorageSchema.ChildDriverUser}' AND status = 'Active'"))
             {
-                read.Parameters.AddWithValue("$old", oldSessionId);
-                await using var reader = await read.ExecuteReaderAsync(CancellationToken.None).ConfigureAwait(false);
-                await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false);
-                forkOf = reader.IsDBNull(0) ? null : reader.GetString(0);
-                forkSha = reader.IsDBNull(1) ? null : reader.GetString(1);
-                lineage = reader.GetString(2);
+                rehome.Parameters.AddWithValue("$taker", taker.Id);
+                rehome.Parameters.AddWithValue("$old", oldSessionId);
+                await rehome.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
-            var created = session! with { ForkOfBranch = forkOf, ForkBaseSha = forkSha, LineageRootId = lineage };
-            await InsertSessionAsync(connection, transaction, created, key!).ConfigureAwait(false);
-
-            var messages = create!.InitialMessages;
-            var at = DateTimeOffset.UtcNow;
-            for (var index = 0; index < messages.Count; index++)
-            {
-                await store.InsertMessageAsync(connection, transaction, created.Id, index + 1, messages[index], null, at).ConfigureAwait(false);
-            }
-
-            if (create.CopyTodosAndPlans)
-            {
-                await CopyTodosAndPlansAsync(connection, transaction, oldSessionId, created.Id).ConfigureAwait(false);
-            }
-
-            // Only now, with every sub-step done, does the writer learn the new session's last sequence.
-            sequences.Record(created.Id, messages.Count);
-            return created;
+            return taker;
         }
 
         private static async Task CopyTodosAndPlansAsync(SqliteConnection connection, SqliteTransaction transaction, string from, string to)

@@ -6,11 +6,12 @@ using Avalonia.Threading;
 namespace Forge.App.Views;
 
 /// <summary>
-/// A glyph that turns while something loads: the icon comes from <see cref="Resources/Icons"/> like every other, and the
-/// rotation is a dispatcher timer rather than an animation. The chrome's animations are declarative, and a style-driven
-/// render transform makes <c>Window.Show</c> throw in the headless tests (see the notification overlay's note); the one
-/// indicator that has to run inside those windows therefore drives its own transform. The timer only runs while the control
-/// is attached and visible, so a transcript that stops waiting stops spending frames.
+/// A glyph that turns while something has not answered yet: the tool status of the transcript and the history loader's
+/// indicator. The icon comes from <see cref="Resources/Icons"/> like every other, and the rotation is a dispatcher timer
+/// rather than an animation. The chrome's animations are declarative, and a style-driven render transform makes
+/// <c>Window.Show</c> throw in the headless tests (see the notification overlay's note); the indicators that have to run
+/// inside those windows therefore drive their own transform. The timer only runs while the control is attached and visible,
+/// so a transcript that stops waiting stops spending frames.
 /// </summary>
 public sealed class WaitingGlyph : PathIcon
 {

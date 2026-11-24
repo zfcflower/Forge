@@ -18,7 +18,7 @@ depends-on: [forge-goal]
 | 项目 | 职责 |
 |---|---|
 | `Forge.Abstractions` | 主程序内部共享契约(工具、审批、存储、提示词、Agent 事件);零外部依赖 |
-| `Forge.IO` | 文件与进程原语 + Agent 的文件/搜索/shell 工具:`AtomicFile`、工作区路径守卫、有界文件读写、目录遍历、`.gitignore` 匹配、grep 引擎、`ProcessRunner`、7 个 `ITool`(`read`/`write`/`edit`/`ls`/`find`/`grep`/`bash`);只依赖 BCL 与 `Abstractions` |
+| `Forge.IO` | 文件与进程原语 + Agent 的文件/搜索/shell 工具:`AtomicFile`、工作区路径守卫、有界文件读写、目录遍历、`.gitignore` 匹配、grep 引擎、`ProcessRunner`、10 个 `ITool`(`read`/`write`/`edit`/`ls`/`find`/`grep`/`copy`/`move`/`delete`/`bash`);只依赖 BCL 与 `Abstractions` |
 | `Forge.Ipc` | 命名管道 + 4 字节长度前缀 MessagePack 帧的传输、帧编解码、请求关联、协议版本;主程序、宿主、Worker 共用;AOT 兼容 |
 | `Forge.Ipc.Protocol` | 宿主内部各操作的类型化负载(插件执行、Worker、`host.tool_call`、终端);依赖 `Ipc`、`Plugin.Sdk`,不属插件 SDK;AOT 兼容 |
 | `Forge.Plugin.Sdk` | 供插件源码引用的稳定 SDK 与契约,独立版本化,不依赖 Core |
@@ -47,15 +47,15 @@ depends-on: [forge-goal]
 
 **一个工作区同一时刻一个活动根会话。** 每个会话绑定一个 Git Worktree,会话的工具调用、文件读写和终端的工作目录均限定在其中;一个工作区同一时刻至多一个活动根会话(存储层唯一索引强制),旧会话可被接手、归档后进历史。独立的并行分支工作用分叉工作区。**Agent 会话(设计见 forge-core「Agent 会话」):** 用户可在活动根会话下手动增加用户驱动的子会话,共用根会话的目录;它们从属于根会话(根的忙判定含它们、根离开 `Active` 即随之只读、删除级联),不参与占用索引;**只有根会话能改 git 状态**(Agent 会话可选的 Agent 种类不得持有 git 写工具与 PR 工具,由 `BashPolicy` 按工具面机械保证)。同一目录内并发写的保护是 `edit` 的精确匹配与 `write` 的覆盖前版本比对(见 forge-io「`write` 覆盖检查」),不是文件锁。
 
-**文件与命令能力留在进程内,不走 shell。** Agent 读写文件、列目录、找文件、搜内容全部由 `Forge.IO` 的原生实现完成,不启动外部进程;只有真正需要外部程序时才创建子进程(搜索可由可选的 ripgrep 加速,但它只做加速,不是前提)。工具面固定为 `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 七个,名字与内置 Agent 的白名单一致;`bash` 先用 Direct(参数向量、不经 shell),只有出现 shell 语法时才走平台解释器。所有工具都有按字节的输出上限、超时、取消与工作区路径校验,超限只截断结果而不会停止读取子进程管道。(已确认)
+**文件与命令能力留在进程内,不走 shell。** Agent 读写文件、列目录、找文件、搜内容全部由 `Forge.IO` 的原生实现完成,不启动外部进程;只有真正需要外部程序时才创建子进程(搜索可由可选的 ripgrep 加速,但它只做加速,不是前提)。工具面固定为 `read`/`write`/`edit`/`ls`/`find`/`grep`/`copy`/`move`/`delete`/`bash` 十个,与内置 Agent 按角色选取的白名单同源;`bash` 先用 Direct(参数向量、不经 shell),只有出现 shell 语法时才走平台解释器。所有工具都有按字节的输出上限、超时、取消与路径校验:写工具限定在工作区内,只读 `read` 还允许工作区外的绝对路径;超限只截断结果而不会停止读取子进程管道。(已确认)
 
 **Native AOT 主程序(已确认要求;可行性已由 Stage 0 实测确认)。** 主程序不可变、Native AOT 发布;不在其中使用 Roslyn 动态编译或 `AssemblyLoadContext` 加载插件。主程序侧全部项目(`Abstractions`/`IO`/`Ipc`/`Ipc.Protocol`/`Plugin.Sdk`/`Approval`/`Core`/`Workspace`/`Mcp`/`Editor`/`HostClient`/`App`)已开启 `IsAotCompatible` 且 AOT 分析器 0 警告;Workspace 的 JSON 输出改走反射无关的 `JsonPayload`,持久化类型走 `WorkspaceJsonContext` 源生成。体积与延迟均按实测记录,不给估算:`25.3 MiB` 是 Stage 0 可行性探针(**只含一个最小 Avalonia 窗口**)的数,不是产品基线。2026-11 在 .NET 11 / Avalonia 12.1.6 上重测(win-x64,同一台机器):最小 Avalonia 窗口 16.5 MiB,加 AvaloniaEdit+TextMate 编辑器栈 28.7 MiB,完整 `Forge.App` 49.7 MiB——即约 +12 MiB 编辑器栈、+21 MiB 产品自身代码与其余模块,其中嵌入资源(TextMate 语法、Avalonia 资源、图标)8.6 MiB。构建开关实测:`OptimizationPreference=Size` 降到 42.8 MiB,再关托管堆栈追踪 40.8 MiB;两者都不建议默认开(前者牺牲速度,后者丢掉插件与 Agent 链路最需要的托管堆栈)。2026-11-16 在同一机器与同一配置下重测(`dotnet publish src/Forge.App -c Release`,`PublishAot` 隐含 `PublishTrimmed=true`,`OptimizationPreference` 默认 Speed):`Forge.App.exe` 72.92 MiB,`OptimizationPreference=Size` 62.27 MiB,`StackTraceSupport=false` 69.83 MiB;发布目录去掉 `.pdb` 后 93.31 MiB(含原生库 libSkiaSharp 11.09、av_libglesv2 5.14、e_sqlite3 1.88、libHarfBuzzSharp 1.73、libonigwrap 0.52 MiB),`.pdb` 另占 350.31 MiB、不随产品分发。与上面记录的 49.7 MiB 相差的部分仍未逐项核对(要检出当时的提交重测),不得据此宣称体积回归或优化;体积构成已按 mstat 归因:mstat 覆盖 63.70 MiB(方法 32.27、类型 11.33、嵌入资源 9.37 MiB),余下 12.29 MiB 由 exe 减 mstat 得出、属未独立测量的 AOT 运行时本体与 PE 开销;这组数对应 2026-11-23 工作树的 75.99 MiB(含未提交改动),不是上面 72.92 MiB 那一次,明细与复现命令见 `Docs/13` §13.7。同日升到 Avalonia 12.2.0 + Svg.Skia 5.2.3(SkiaSharp 4.148.0 / HarfBuzzSharp 14.2.0)后同机重测:`Forge.App.exe` 79.12 MiB(发布目录去 `.pdb` 100.26 MiB),AOT 分析器 0 警告,明细见同节。同时,不存在需要在三方库上做 ILLink substitution 的依赖链(理由见同节)。headless 对话 81-84ms、GUI 到窗口句柄 166ms 同样来自 Stage 0 探针,产品化后未重测。风险:Avalonia 与 Microsoft.Data.Sqlite/SQLitePCLRaw 未声明 AOT 兼容,靠实测背书,CI 的三 OS 测试矩阵(`.github/workflows/ci.yml`)负责冒烟(其中 AOT `publish` 冒烟目前只在 Windows 上接线);原生库不能静态链接,"单文件"不成立;Linux/macOS 发布未在本机验证(需 CI)。只有核心依赖确实无法解决时才重新评估放弃 AOT。
 
 **扩展点统一为契约,执行在进程外。** 工具、命令、提示词、Agent、工作流经 `Forge.Plugin.Sdk` 注册,由 `ExtensionHost` 通过 IPC 向主程序报告;主程序侧以代理 `ITool` 暴露。模型提供商内置,仅在设置中配置,不开放插件注册。
 
-**插件 UI 为声明式。** 插件不能返回进程内控件,改由 IPC 返回 UI Schema(第一阶段 Form、Table、Markdown、Text、Button、Status),由主程序渲染 Avalonia 控件。原 `PanelDefinition(Func<object>)` 契约需迁移。
+**插件 UI 为声明式。** 插件不能返回进程内控件,改由 IPC 返回 UI Schema(第一阶段 Form、Table、Markdown、Text、Button、Status)。当前仅定义并传递 `UiSchema`,App 尚未注册或渲染插件面板;原 `PanelDefinition(Func<object>)` 契约已移除。
 
-**三种扩展形态,不混为一套。** Markdown 技能描述 Agent 行为与知识;声明式 Workflow(JSON,第一阶段只含顺序、并行、JSON 路径映射,优先复用 `run_code`)组合已有工具;C# 插件实现新逻辑。保存下来的 run_code 脚本也可作为持久化扩展。
+**三种扩展形态,不混为一套。** Markdown 技能描述 Agent 行为与知识;声明式 Workflow(JSON,第一阶段只含顺序、并行、JSON 路径映射)组合已有工具,每一步直接调用底层工具,不嵌套 `run_code`;C# 插件实现新逻辑。保存下来的 run_code 脚本也可作为持久化扩展。
 
 **Extension Host 与 Worker。** `ExtensionHost` 是常驻的普通 .NET JIT 进程,要求用户已安装 **.NET 11** 运行时(`net11.0`;`PluginWorker` 每插件一个、`ScriptExecutor` 每次调用一个,都由 Host 用同一运行时拉起,主程序本身不需要运行时)。把 CoreCLR 托管进 AOT 进程这条路不成立:`nethost`/`hostfxr` 的托管 API 只支持 framework-dependent 部署,CLR 也不能与 NativeAOT 运行时同进程共存——进程外 JIT 是 AOT 不可变边界的前提。(现状偏差:没有运行时探测与版本检查,缺 `dotnet` 只落在 `diag.hostStartFailed` 的启动失败文本里;AOT 发布产物也还没带这三个 JIT 组件,见 `Docs/13` §13.7 与 `Docs/14`。)新创建和已批准的 C# 插件默认都在独立 `PluginWorker` 进程执行;共享 Host 仅为高信任低风险插件的可选性能优化。批准只代表允许执行,不代表可进入共享进程。`AssemblyLoadContext` 只负责加载卸载,不提供隔离。取消令牌无法停止不合作的代码,必要时终止整个 Worker(含进程树)。
 
@@ -77,9 +77,9 @@ depends-on: [forge-goal]
 
 **动态工作流。** 工作流以 Markdown 技能文件定义(frontmatter + 步骤文本,同 ThinkRail/PI 的 SKILL.md),由 Agent 阅读并执行;用户与插件均可提供,由路由工作流按任务类型选择(参考 choosing-a-workflow)。不引入新语法,也不提供 C# 状态机形态(已确认)。
 
-**默认编排随产品发布,承载是嵌入式技能文件。** 产品自带四份编排技能(`choosing-a-workflow`/`brainstorming`/`todos`/`shipping-a-pr`,范式取 ThinkRail),作为 `Forge.App` 的嵌入资源发布,启动时物化到 `<UserData>/builtin-skills/<内容哈希>/`,成为技能发现的**第四个、优先级最低**的来源——工作区与用户目录的同名技能覆盖它,所以「默认编排可改」不需要第二套机制。技能正文经 `skill` 工具按名送达模型,不走 `read`:物化目录在工作区之外,`read` 的工作区路径校验本来就拒绝它。路由是 **per-task** 的,索引与路由文本只注入**根 Agent 的 role 层**,不进 system 层——system 层整棵 Agent 树共享,注入它会让被派活的子 Agent 也去选工作流、访谈用户。开关 `preferences.orchestrationEnabled`(默认开)。
+**默认编排随产品发布,承载是嵌入式技能文件。** 产品自带五份编排技能(`choosing-a-workflow`/`brainstorming`/`todos`/`shipping-a-pr`/`hardening-tests`,范式取 ThinkRail),作为 `Forge.App` 的嵌入资源发布,启动时物化到 `<UserData>/builtin-skills/<内容哈希>/`,成为技能发现的**第四个、优先级最低**的来源——工作区与用户目录的同名技能覆盖它,所以「默认编排可改」不需要第二套机制。技能正文按设计经 `skill` 工具按名送达模型,不走 `read`:物化目录在工作区之外,但 `read` 当前允许工作区外的绝对路径,所以这不是路径守卫强制边界。路由是 **per-task** 的,索引与路由文本只注入**根 Agent 的 role 层**,不进 system 层——system 层整棵 Agent 树共享,注入它会让被派活的子 Agent 也去选工作流、访谈用户。开关 `preferences.orchestrationEnabled`(默认开)。
 
-**编排的约束力:关键 gate 机械,其余提示。** 路由、头脑风暴、计划都是提示引导(Agent 可以不遵守,这是技能范式的固有代价);两个节点由代码强制:改了代码的 TODO 步骤要标 done,必须先有 `request_review` 的 approve 结论与真实 `verification`(见 forge-core「步骤完成门禁」);`pr_create` 要求本会话计划的分组步骤全部 done(见 forge-workspace)。开关 `preferences.workflowGatesEnabled`(默认开)。产品**不认任何仓库特定的测试收据文件**:`forge-test.ps1`/`artifacts/testruns/` 是本仓的开发约定,不是产品能力,通用仓库没有它;证据来源是 Core 声明的窄接口,项目要接真收据源时实现它,不改契约。
+**编排的约束力:关键 gate 机械,其余提示。** 路由、头脑风暴、计划都是提示引导(Agent 可以不遵守,这是技能范式的固有代价);两个节点由代码强制:改了代码的 TODO 步骤要标 done,必须先有 `request_review` 的 approve 结论与真实 `verification`(见 forge-core「步骤完成门禁」);`pr_create` 要求本会话计划的分组步骤全部 done(见 forge-workspace)。步骤门禁与自动修复由 `preferences.reviewToolEnabled`、`preferences.stepReviewRequired`、`preferences.reviewAutoFix`/`reviewAutoFixMaxRounds` 分别控制;旧总开关 `workflowGatesEnabled` 已删除,仅读取旧文件并把 `false` 迁移为 `stepReviewRequired=false`。`pr_create` 的五道闸门固定不可关。产品**不认任何仓库特定的测试收据文件**:`forge-test.ps1`/`artifacts/testruns/` 是本仓的开发约定,不是产品能力,通用仓库没有它;证据来源是 Core 声明的窄接口,项目要接真收据源时实现它,不改契约。
 
 ## 开源代码内化
 
@@ -99,7 +99,7 @@ agent-framework、MCP、编辑器/Git 及其他成熟三方包,均只取有用�
 | MessagePack | 4.0.0-rc.1 | `Forge.Ipc`、`Forge.Ipc.Protocol`、`Forge.Plugin.Sdk`、`Forge.ScriptRuntime` | IPC 线格式,只用源生成格式化器,见 `forge-ipc` |
 | Mermaider | 0.18.0(2026-11-23 发布;用户当日选择直接取最新,不再等“发布满两周”) | `Forge.App` 渲染层 | 2026-11-14 有条件批准、W11 已落地:仅用于把聊天/diff 里的 ```mermaid 块本地解析、布局并输出 SVG(ASCII 退路未启用);不引 JS、不联网;图类型白名单可配 |
 | Svg.Skia | 5.2.3(2026-11-23 用户决定取最新,覆盖此前“5.x 不取”的记录) | `Forge.App` 渲染层 | 2026-11-14 有条件批准、W11 已落地;**AOT 验证口径(2026-11-15 用户接受)**:Windows 本地 `publish` AOT 0 警告 + CI 的 Windows AOT `publish` 冒烟为门(三平台 `publish` 矩阵**尚未接线**,见 `.github/workflows/ci.yml` 顶部注释),CI 测试矩阵(三 OS、JIT)里的真实渲染用例为运行时验证,AOT 产物里的实际渲染不单独起测试宿主。**它把 SkiaSharp 抬到 4.148.0、HarfBuzzSharp 抬到 14.2.0**:Avalonia.Skia 12.2.0 的程序集引用仍是 SkiaSharp 3.119.0.0,运行时按更高版本统一绑定。2026-11-23 实测:AOT `publish` 0 警告、570 例全绿、`transcript.guard.panel-fields` 起真实窗口渲染通过(win-x64);**Linux/WebAssembly 的原生资产仍解析到旧版**(`SkiaSharp.NativeAssets.Linux` 3.119.4、`SkiaSharp.NativeAssets.WebAssembly` 3.119.4、`HarfBuzzSharp.NativeAssets.WebAssembly` 8.3.1.3,与 4.148.0/14.2.0 的托管程序集不同版),Linux 桌面渲染**未验证**。`Forge.App.csproj` 不显式引用 SkiaSharp(由 Avalonia.Skia 传递)。**传递依赖(2026-11-15 用户追认批准范围:批准根包即批准其传递闭包,不单独引用、版本由还原锁定)**:Mermaider → Sugiyama 0.18.0、Microsoft.Extensions.ObjectPool 11.0.0(官方 .NET 库,白名单内);Svg.Skia → ExCSS 4.3.1、ShimSkiaSharp / Svg.Model / Svg.Custom / Svg.Animation / Svg.SceneGraph 5.2.3、SkiaSharp 4.148.0 与 HarfBuzzSharp 14.2.0(Win32/macOS/Linux 原生资产同版)。仅用于 Mermaider 输出的 SVG 解析成 `SKPicture`(矢量回放,不栅格化) |
-| Avalonia.Headless | 12.2.0 | `tests/Forge.App.Tests` | 仅测试;2026-11-18 用户批准恢复测试项目,现仅有 `tests/Forge.App.Tests`(2026-11-24 实测全量 600 例全绿),入仓门槛见 `AGENTS.md` §4 |
+| Avalonia.Headless | 12.2.0 | `tests/Forge.App.Tests` | 仅测试;2026-11-18 用户批准恢复测试项目,现仅有 `tests/Forge.App.Tests`;仓内 `artifacts/app-tests-run.log` 为一次失败运行,当前全量结果以新测试输出为准,入仓门槛见 `AGENTS.md` §4 |
 | xunit.v3 | 4.0.3 | `tests/Forge.App.Tests` | 仅测试;xunit 2.9.3 已被 NuGet 标为弃用(Legacy,替代包 xunit.v3),2026-11-24 迁到 xunit.v3 + Microsoft.Testing.Platform:测试项目 `OutputType=Exe`,不再引 `Microsoft.NET.Test.Sdk` 与 `xunit.runner.visualstudio`(SDK 11 上 MTP 拒绝 VSTest),`global.json` 钉 `test.runner` |
 
 **插件的 NuGet 依赖不受上述白名单限制,由使用者控制(已确认)。** 默认只用 BCL 与 Plugin SDK;新增依赖须经用户审批并计入 DependencyHash;支持离线 NuGet 缓存;编译缓存键包含 SDK、Contracts、依赖与编译配置版本。
@@ -110,4 +110,4 @@ agent-framework、MCP、编辑器/Git 及其他成熟三方包,均只取有用�
 
 ## 编辑器着色
 
-两层:本地 TextMate 语法立即给出关键字、字符串、注释等词法颜色;LSP 的 `semanticTokens` 返回后叠加覆盖标识符类别颜色。服务器未启动、崩溃或不支持语义 token 时只剩词法层,不影响编辑。不使用 tree-sitter(无需为三平台分发原生库)。TextMate 语法与兼容 Oniguruma 的正则引擎参考 Passenger 的做法,内化其源码(MIT,保留署名)。
+两层:本地 TextMate 语法立即给出关键字、字符串、注释等词法颜色;LSP 的 `semanticTokens` 返回后叠加覆盖标识符类别颜色。服务器未启动、崩溃或不支持语义 token 时只剩词法层,不影响编辑。主文件编辑器使用 `AvaloniaEdit.TextMate`;`Forge.Editor` 的自有 TextMate 分词器保留给语言服务/预览等无 UI 调用方,其 500 ms 搜索预算与重试策略不适用于主文件编辑器。不使用 tree-sitter(无需为三平台分发原生库)。TextMate 语法与兼容 Oniguruma 的正则引擎参考 Passenger 的做法,内化其源码(MIT,保留署名)。

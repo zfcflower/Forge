@@ -35,7 +35,7 @@
 | `meta-subscription` | `auth.meta.com` 设备码 → identity token → `POST api.meta.ai/muse-code/key` 铸 24 小时 `api_key` | 到期前 5 分钟用 identity token 重铸；铸不出且带 `action_url` 时显示给用户 |
 | `chatgpt-subscription` | `auth.openai.com` 设备码 → authorization code + verifier → `/oauth/token` | 账号 id 取自 access token JWT claim；每请求带 `chatgpt-account-id` 与 `OpenAI-Beta: responses=experimental` |
 
-- 五种设备码登录的 token bundle 只存**加密密钥库**（引用 `kimi:`/`xai:`/`meta:`/`chatgpt:` + provider id），绝不进 `settings.json`、绝不写日志；刷新按提供商串行，401 只在被拒的 refresh token 仍是当前值时才清库。
+- 五种设备码登录的 token bundle 只存**加密密钥库**（引用 `copilot:`/`kimi:`/`xai:`/`meta:`/`chatgpt:` + provider id），绝不进 `settings.json`、绝不写日志；刷新按提供商串行，401 只在被拒的 refresh token 仍是当前值时才清库。
 - OpenRouter 走浏览器回环（PKCE）：开 `openrouter.ai/auth`，本机 `127.0.0.1` 临时端口回调，再 `POST api/v1/auth/keys` 换一把长期 key——落地为普通 API 密钥（引用 `provider:<id>`），没有刷新。
 - Claude 订阅登录弹窗检测本机 `claude` 命令与登录状态；未安装给三步说明与官方安装页，已登录则“使用此登录”，保存前尽力列一次模型。
 - 密钥库：`<数据根>/provider-secrets.json`，AES-GCM，密钥为 `<数据根>/provider-secrets.key`（32 字节，非 Windows 上 `0600`），`settings.json` 只存 `secretRef`。库损坏时明确报 `Problem`，绝不把“读不出”当“没有密钥”再覆盖写入。它防误泄露与云同步，不承诺抵挡能读用户目录的本机攻击者。

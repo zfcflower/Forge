@@ -590,12 +590,12 @@ internal sealed partial class SessionWorkspaceViewModel
                 this.turn?.Dispose();
                 this.turn = null;
                 IsRunning = false;
-                // A receipt interjected into this turn that the loop never reached its boundary for: it goes through the
-                // shell's idle path (stored, then drawn) instead of waiting for a turn the user never asked for. It runs
-                // after the run is marked idle on purpose - while it looked busy, the shell would hand the receipt straight
-                // back into the run that just ended - and before TurnCompleted, which may dispose this view (the tab was
-                // closed while the turn ran) and would take the leftovers with it.
-                TakeUndeliveredReplies();
+                // Interjections put into this turn that the loop never reached its boundary for: a receipt goes through the
+                // shell's idle path (stored, then drawn) instead of waiting for a turn the user never asked for, and a message
+                // the user typed goes back to the queue. It runs after the run is marked idle on purpose - while it looked
+                // busy, the shell would hand a receipt straight back into the run that just ended - and before TurnCompleted,
+                // which may dispose this view (the tab was closed while the turn ran) and would take the leftovers with it.
+                TakeUndeliveredInterjections();
                 TurnCompleted?.Invoke(this);
                 ScheduleNext();
             }

@@ -31,7 +31,7 @@ internal static class OrchestrationPrompt
         </skills>
 
         <workflow-routing>
-        At the start of each new piece of work the user gives you in this session, load the choosing-a-workflow skill and follow its routing before any other tool call. It decides whether the work needs a workflow at all: a feature, a behavior change or a bug fix goes through brainstorming first, finished work shipping as a pull request goes through shipping-a-pr, and a question, a check or an edit that changes no behavior needs no workflow.
+        At the start of each new piece of work the user gives you in this session, load the choosing-a-workflow skill and follow its routing before any other tool call. It decides whether the work needs a workflow at all: a feature, a behavior change or a bug fix goes through brainstorming first, work on the tests themselves (hardening a module, pinning behavior through a refactor, an audit of test quality) goes through hardening-tests, finished work shipping as a pull request goes through shipping-a-pr, and a question, a check or an edit that changes no behavior needs no workflow.
         Work already routed resumes its workflow instead of routing again. One piece of work gets one route. The plan panel and the step gates are part of the workflow, not optional extras: read the todos skill before you plan or mark a step done.
         </workflow-routing>
         """;

@@ -13,11 +13,11 @@
 
 ## 6.2 TextMate 词法着色
 
-- TextMate 组件内化自 Tint（MIT），Oniguruma 正则翻译为 .NET 正则（不内化 GregsEx，体积过大）：翻译不了的模式报诊断并不匹配；include 规则展开带环检测与深度上限。
-- 增量与全量结果一致：状态相等性覆盖影响后续分词的全部字段（含 `BeginRuleCapturedEol`）。
-- 用户语法可放在 `~/.forge/grammars` 与 `<workspace>/.forge/grammars`。
-- 分词在 span 上零分配匹配；仅当命中规则需要捕获组时才把缓冲物化为字符串；单次搜索 500 ms 预算，超预算**先重试一次**（首次搜索有解释器启动成本），仍超时才当作不匹配并记诊断。
-- 字符串与快照高亮把 LF/CRLF/CR 都视为换行、行内容不含换行符。
+- **主文件编辑器**使用 `AvaloniaEdit.TextMate`（`ForgeEditorBridge`），超过 1 Mi 字符时关闭词法着色；LSP 语义 token 仍可叠加。
+- **`Forge.Editor` 自有 TextMate 分词器**内化自 Tint（MIT），Oniguruma 正则翻译为 .NET 正则（不内化 GregsEx，体积过大）：翻译不了的模式报诊断并不匹配；include 规则展开带环检测与深度上限。它保留供语言服务/预览等无 UI 调用方使用；主文件编辑路径当前不走这套分词器。
+- 自有分词器的增量与全量结果一致：状态相等性覆盖影响后续分词的全部字段（含 `BeginRuleCapturedEol`）；用户语法可放在 `~/.forge/grammars` 与 `<workspace>/.forge/grammars`。
+- 自有分词器在 span 上零分配匹配；仅当命中规则需要捕获组时才把缓冲物化为字符串；单次搜索 500 ms 预算，超预算**先重试一次**（首次搜索有解释器启动成本），仍超时才当作不匹配并记诊断。
+- 自有字符串与快照高亮把 LF/CRLF/CR 都视为换行、行内容不含换行符。
 
 ## 6.3 LSP 客户端
 

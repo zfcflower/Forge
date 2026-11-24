@@ -1044,19 +1044,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             return TryInterject(text) is not null;
         }
 
-        AgentHost? built;
-        lock (gate)
-        {
-            built = host;
-        }
-
-        if (built?.FindUserChild(sessionId) is not { } child)
-        {
-            return false;
-        }
-
-        child.Interject(text);
-        return true;
+        return TryInterjectChild(sessionId, text, []) is not null;
     }
 
     /// <summary>
@@ -1200,6 +1188,39 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         {
             return activeRoot?.Withdraw(interjection) == true;
         }
+    }
+
+    /// <summary>
+    /// Hands a user message with attachments to the running turn of the user-driven session <paramref name="sessionId"/> (an
+    /// agent-session tab's own run), delivered with them at the next tool-batch boundary - the root's very inbox on the root's
+    /// own turn, this session's instance here. The text may be empty only when an attachment is present. Null when this host
+    /// holds no instance for that session, in which case the caller queues the message as it does for the root.
+    /// </summary>
+    internal Interjection? TryInterjectChild(string sessionId, string text, IReadOnlyList<ContentBlock> attachments)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(attachments);
+        if (attachments.Count == 0)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        }
+
+        if (string.IsNullOrEmpty(sessionId) || FindUserChild(sessionId) is not { } child)
+        {
+            return null;
+        }
+
+        return child.Interject(UserContent(text, attachments));
+    }
+
+    /// <summary>
+    /// Takes back an interjection of a user-driven session's turn the loop has not delivered yet, the child's counterpart of
+    /// <see cref="TryWithdraw"/>. False when it already reached the model or that session holds none.
+    /// </summary>
+    internal bool TryWithdrawChild(string sessionId, Interjection interjection)
+    {
+        ArgumentNullException.ThrowIfNull(interjection);
+        return !string.IsNullOrEmpty(sessionId) && FindUserChild(sessionId)?.Withdraw(interjection) == true;
     }
 
     // --- compaction (feature B) ---

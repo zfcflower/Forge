@@ -12,44 +12,30 @@
 | JIT 组件随发布分发 | **未接线** | AOT `publish` 产物不含 `Forge.ExtensionHost`/`PluginWorker`/`ScriptExecutor`；它们只在 `FORGE_JIT_DIR` 或仓内构建布局里被找到，更新包也只装 AOT 目录——按现状发出去，宿主起不来（`diag.jitHostMissing`），终端/插件/codemode 全部不可用（见 13.7） |
 | 运行时探测 | **未实现** | 没有 .NET 版本检查；缺 `dotnet` 只表现为 `diag.hostStartFailed` 的启动失败文本，不是“缺运行时”的明确错误（`architecture.md` 原先那句“启动时检测并给出明确错误”已按现状改正） |
 | 三平台 AOT `publish` 矩阵 | **未接线** | 只有 Windows AOT publish 冒烟；macOS/Linux publish 从未跑过 |
-| 测试项目与 CI 运行时覆盖 | **部分接线** | `tests/Forge.App.Tests`（290 例，见 `Docs/13-operations-and-tooling.md` §13.5）在 CI 三 OS 矩阵里真跑：存储 schema/purge、git 探针与 diff 账本、bash 门禁、三个流式适配器、转录 VM 与 headless 面板均有运行时覆盖；POSIX 进程归属、PTY/终端、`ExtensionHost` 拉起、MCP 传输、AOT 产物行为与提示词来源的信号侧仍无测试宿主 |
+| 测试项目与 CI 运行时覆盖 | **部分接线** | `tests/Forge.App.Tests` 在 CI 三 OS 矩阵里真跑：存储 schema/purge、git 探针与 diff 账本、bash 门禁、三个流式适配器、转录 VM 与 headless 面板均有运行时覆盖；仓内 `artifacts/app-tests-run.log` 记录一次失败运行（3 失败 / 5938 通过 / 0 跳过 / 5941 总计），不是当前全绿证明；POSIX 进程归属、PTY/终端、`ExtensionHost` 拉起、MCP 传输、AOT 产物行为与提示词来源的信号侧仍无测试宿主 |
 | macOS 从 Dock 启动的语言检测 | 已知会落到英文 | 无 `LANG` 时的退路 |
 
 ## 14.2 明确未实现的产品功能
 
 | 功能 | 现状 |
 |---|---|
-| 插件声明式 UI 面板 | `PanelDeclaration` 只做记录，不注册、不渲染；App 侧“声明式插件面板渲染未做” |
+| 插件声明式 UI 面板 | `PanelDeclaration`/`UiSchema` 只做声明记录与 IPC 传递，不注册、不渲染；App 尚无插件面板渲染器 |
 | 多光标 | AvaloniaEdit 12.0.0 没有实现；按用户确认改用**矩形（列）选择**，已在设置与菜单写明 |
 | 语义 token 的 range 请求 | 只用 full/delta；编辑后旧索引不重映射（下一次答案纠正，不做热路径第二份坐标表） |
-| `WorkspaceEdit` 跨标签 | 打开在另一标签的文件跳过并计入 dropped（不背后写盘）；完整修法待后续 |
 | `inlayHint` 的 `textEdit` | 接受提示不改写文本 |
 | `codeAction` 的 `only` 过滤 / `disabledSupport` | 只防御性地读并禁用，不按 `only` 过滤；`context.diagnostics` 留空由服务器按范围自算 |
-| 内联提示按视口分片 | 按整文件 range 请求 |
 | 全局 `core.excludesFile` / `.gitmodules` | 不参与忽略判定（需读 git config） |
-| `edit` 的 UTF-16 保留 | 会把 UTF-16 文件写回 UTF-8（已在工具文档与 SPEC 写明） |
 | 终端缩放重排行 / OSC 133 / 重启后恢复 / 图片协议 / 双向文本 | 未做；macOS 实机未验证 |
-| 终端搜索的并发预算 | 大缓冲（万行级）下持锁逐行快照，与输出流并发时可能超一帧预算（待度量） |
 | MCP 会话 id 跨重启持久化 | 未做 |
 | MCP `completions/complete` | 未做（按需） |
-| `mcp.json` 注释保留 | 写回丢注释、统一两空格缩进（`JsonNode` 无 trivia） |
 | 工作流 `onError: retry/continue`、步骤级超时、`when`/`foreach`、`$expr` | 未实现；格式按可向前兼容设计 |
 | 额度读数覆盖面 | 只有 Anthropic 订阅窗口 + 通用 `x-ratelimit-*` 分钟级；非 Anthropic 的订阅额度端点、设置页额度摘要、历史曲线、跨会话持久化未做 |
-| 上下文继承的根因 | 继承前缀本身已超触发线时，现在会在发请求前就判 `Irreducible`（不再白花摘要请求），并由裁剪级尝试救回；根因仍需新的存储契约（T0） |
-| 上下文裁剪的仪器读数 | **已计算未接缑**：`SessionInstrumentsViewModel.UsageReductionText` / `UsageReductionRatioText`（释放总量与按工具拆分、裁剪即够/仍需摘要比例）没有视图绑定，用量弹层与工具/提示词组都还不显示 |
 | 历史检索沿继承链 | `search_history`/`read_history` 不沿继承链回溯 |
 | 交接对话框的模型/推理档位、缓存剩余时间、接近压缩阈值、前缀指纹不符提示 | 未做；摘要只用旧会话自有消息，不沿继承链取父会话 |
-| 文件追踪的广度 | `read` 记**实际显示的行范围**（取回答的 `Shown lines X–Y` 或 `path: N lines`，不取请求的 limit），`edit`/`write`/`delete`/`copy`/`move` 只记路径；`grep`/`ls`/`find` 与插件工具不产生条目 |
 | 只读并行会话 | 刻意推迟（`bash` 无法区分读写，要么禁要么每次审批） |
 | 一个会话切换多个工作区目录 | 推迟（`turn_checkpoints` 主键、步骤提交、PR 闸门、索引都要按当前目录取） |
 | 恢复到某一轮 | 推迟（届时被接手会话的检查点只读） |
 | 子 Agent 跨工作区派发、同父多子 Agent 抢 `obj/`/`bin/` | 另立任务 |
-| Agent 会话切换种类/模型不落库 | 切换在下一轮前重建实例并生效，但 `sessions.agent_kind` 只在建行时写、`composer.json` 只由“设为默认”写；重启进程后重开该会话，chip 仍显示库里的旧种类与偏好模型 |
-| 无标签的投递回合没有工具计数 | Core 自驱的 `message_session` 回合会写 `turn_metrics`（token/流式时长/状态都真实），但工具调用次数未知，该行 `tool_calls` 写 NULL 而不是 0 |
-| 根终结路径不等待在飞回合 | 归档、移除、接手、交接在拆除根时直接释放 runtime，可能打断其 Agent 会话正在跑的一轮（既有整体拆除语义；关标签路径已改成等回合结束） |
-| Agent 会话的未读是文本前缀 | 标签与树行用 `● ` 前缀而非图形圆点（`TabModel`/`TabHeaderView`/`ProjectView` 未加未读状态） |
-| `message_session` 的授权只在该进程内 | 内存态，重启即清空：同一会话里重启后需要重新 `@` 点名 |
-| 投递回执的通知不可测 | 唯一发出点是窗口私有方法，`AppComposition` 内部自建 `NotificationCenter`，无法注入替身——接线正确性只有代码审查保证 |
 | Worker 资源限制（CPU/内存/活动进程） | 受威胁模型决策门控，未实现；Windows 可设 Job Object 上限，其他平台不承诺 |
 | 预启动执行器池 | 未采用；只允许“取”不允许“还”，须由分段实测决定 |
 | 自动更新的发布管线 | 只有 `scripts/make-update-manifest.ps1`，没有 tag 触发的打包/哈希/上传 workflow |
@@ -57,9 +43,18 @@
 
 ## 14.3 已实现但有明确缺口的行为
 
-| 功能 | 缺口 |
+| 已实现但有缺口的行为 | 缺口 |
 |---|---|
+| `WorkspaceEdit` 跨标签 | 打开在另一标签的文件跳过并计入 dropped（不背后写盘）；完整修法待后续 |
+| 内联提示按视口分片 | 已实现整文件 range 请求；按视口分片未做 |
+| `edit` 的 UTF-16 保留 | `edit` 已实现，但会把 UTF-16 文件写回 UTF-8（已知偏差） |
+| 终端搜索的并发预算 | 搜索已实现；大缓冲（万行级）下持锁逐行快照，与输出流并发时可能超一帧预算（待度量） |
+| `mcp.json` 注释保留 | 写回已实现，但丢注释、统一两空格缩进（`JsonNode` 无 trivia） |
 | 步骤完成门禁 | 评审结论已绑定工作树内容指纹、步骤记起始基线；剩余：没走过 `in_progress` 的步骤无基线（自己 `git commit` 的代码会被当成“没改代码”）；子模块内的未提交改动不进指纹；评审后构建写入未 ignore 的文件会使结论过期；步骤交错时可能多一次评审；台账已落库（后台串行写，被杀时可能丢最后一条，重启后多评一次） |
+| 文件追踪的广度 | `read` 记**实际显示的行范围**（取回答的 `Shown lines X–Y` 或 `path: N lines`，不取请求的 limit），`edit`/`write`/`delete`/`copy`/`move` 只记路径；`grep`/`ls`/`find` 与插件工具不产生条目 |
+| 无标签的投递回合没有工具计数 | Core 自驱的 `message_session` 回合会写 `turn_metrics`（token/流式时长/状态都真实），但工具调用次数未知，该行 `tool_calls` 写 NULL 而不是 0 |
+| 根终结路径不等待在飞回合 | 归档（以及移除工作区前的归档）会关闭 Agent 会话标签并直接释放根 runtime，可能打断其正在跑的一轮；当前未调用 `SessionMessenger.CancelPending`，因此已投递但尚未完成的任务可能收不到回执。正常关标签路径会保留 runtime 到回合结束；交接前有合并了 Agent 会话忙原因的守卫，不会在它们忙时拆除 |
+| Agent 会话的未读是文本前缀 | 标签与树行用 `● ` 前缀而非图形圆点（`TabModel`/`TabHeaderView`/`ProjectView` 未加未读状态） |
 | `pr_create` 第三道闸门 | 只强制“重读过完整 diff”，清理是否彻底是 Agent 的判断（工具描述诚实写明） |
 | 评论队列 | 队列接受与数据库标记不是跨系统原子事务，不承诺 exactly-once 或崩溃恢复；接受后标记失败必须提示并在本次运行阻塞重复发送；应用退出时异步恢复可能尚未完成 |
 | 合并冲突快照 | 冲突在终端里解决后，标志要等下一次树刷新才解除（回合前校验按只读快照，不跑 git） |

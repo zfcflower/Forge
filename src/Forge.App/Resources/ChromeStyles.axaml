@@ -238,7 +238,16 @@
 
   <!-- The agent-state dot: one shape, one colour per fate, shared by the project tree and every list that prints the same
        state (the bottom group's finished menu). A completed run is the one green mark; anything else that ended stays
-       neutral, and only a run that went wrong or was stopped takes a status colour. -->
+       neutral, and only a run that went wrong or was stopped takes a status colour. The bare dot comes first on
+       purpose: within one sheet the style declared later is the one that wins, so every variant must sit below the
+       resting colour it overrides. -->
+  <Style Selector="Ellipse.status-dot">
+    <Setter Property="Width" Value="7" />
+    <Setter Property="Height" Value="7" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
   <Style Selector="Ellipse.status-dot.agent-completed">
     <Setter Property="Fill" Value="{DynamicResource StatusSuccessBrush}" />
   </Style>
@@ -251,18 +260,19 @@
     <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}" />
   </Style>
 
+  <!-- A child this app run watched live before it retired into the finished menu: the dot takes the shell's live tint
+       instead of its fate colour, so the row of a tab the user just closed reads as "that live tab, finished" - and a
+       store-replayed row beside it still reads as pure history. Declared after the fate styles: when both classes hit
+       the same dot, the live tint wins. The fate's words stay reachable in the row's tooltip. -->
+  <Style Selector="Ellipse.status-dot.agent-lived">
+    <Setter Property="Fill" Value="{DynamicResource TiffanyInkBrush}" />
+  </Style>
+
   <Style Selector="Ellipse.status-dot.agent-running">
     <Setter Property="Fill" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot.agent-queued">
-    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
-  </Style>
-
-  <Style Selector="Ellipse.status-dot">
-    <Setter Property="Width" Value="7" />
-    <Setter Property="Height" Value="7" />
-    <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 

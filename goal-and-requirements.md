@@ -36,7 +36,7 @@ Forge 是一个桌面应用,承载 LLM 编码 Agent 的完整工作环境:会话
 
 - 不提供 Web/移动版,只做桌面。
 - 不含 Python/JS 代码或运行时依赖。
-- 不随意引用第三方 NuGet 包(针对 Forge 主程序开发):仅限 BCL、官方基础包(Avalonia)、Microsoft.Data.Sqlite 与特别指定的包(neuecc 的库);Roslyn 只用于扩展宿主;其他包默认内化源码,不值得内化的由 Agent 提示用户后加入白名单。插件自己的 NuGet 依赖由使用者控制并经审批,不受此限(见 Technology)。
+- 不随意引用第三方 NuGet 包(针对 Forge 主程序开发):当前已批准清单以 `architecture.md` 的「NuGet 引用规则」为准;官方 .NET 库无需逐个批准,第三方库仍须事先征得用户同意。Roslyn 只用于扩展宿主;其他包默认内化源码,不值得内化的由 Agent 提示用户后加入白名单。插件自己的 NuGet 依赖由使用者控制并经审批,不受此限(见 Technology)。
 - 内化开源代码按需保留署名:许可证要求的保留,不要求的不保留;只取有用代码和结构。
 - 不把进程隔离当作安全沙箱;未经审批的插件不执行,批准也不代表代码没有可靠性风险。
 
@@ -53,8 +53,8 @@ Forge 是一个桌面应用,承载 LLM 编码 Agent 的完整工作环境:会话
 - codemode:Agent 生成 C# 脚本(Roslyn),经 Host 常驻编译服务编译、在一次性执行器中并行按需调用已注册的 C# 工具,只向模型返回最终一次结果。
 - 动态工作流:可自定义,参考 ThinkRail 的 choosing-a-workflow(按任务类型路由到不同工作流技能)。
 - 可自定义命令、工具、Prompts:系统提示词 + 全局 Agent + 项目 Agent 三层,机制与 PI harness 一致。
-- 可重用 SubAgents:相同目的的子 Agent 复用提示词缓存以省 Token;内置 Scout、Worker、Plan、Reviewer;嵌套最多三级。
-- 用户侧动态扩展:Agent 可在使用中自主发现能力缺口,创建、修改、注册、禁用、删除工具与插件;扩展持久化、重启自动恢复,不需要重新编译主程序。扩展形态为声明式工作流(L0,只含顺序、并行、JSON 路径映射)与动态 C# 插件(L2,由 Roslyn 编译);插件默认未批准,按源码哈希审批,默认在独立 Worker 进程执行;UI 面板为声明式 Schema,由主程序渲染。模型提供商内置,不开放插件注册。
+- 可重用 SubAgents:相同目的的子 Agent 复用提示词缓存以省 Token;内置 Scout、Worker、Plan、Reviewer;嵌套深度上限 2(根 Agent 深度 0,深度 2 的 Agent 不再派生)。
+- 用户侧动态扩展:Agent 可在使用中自主发现能力缺口,创建、修改、注册、禁用、删除工具与插件;扩展持久化、重启自动恢复,不需要重新编译主程序。扩展形态为声明式工作流(L0,只含顺序、并行、JSON 路径映射)与动态 C# 插件(L2,由 Roslyn 编译);插件默认未批准,按源码哈希审批,默认在独立 Worker 进程执行;UI 面板为声明式 Schema,由主程序按契约接收,当前阶段只记录与传递声明,尚未注册或渲染面板。模型提供商内置,不开放插件注册。
 
 **界面与编辑**
 - Avalonia 桌面 UI,风格参考 ThinkRail,支持 Windows / macOS / Linux(已确认)。
@@ -70,10 +70,10 @@ Forge 是一个桌面应用,承载 LLM 编码 Agent 的完整工作环境:会话
 | 语言 | C# 15 / .NET 11 | 用户指定 |
 | UI | Avalonia(仅桌面) | 用户指定;跨平台 |
 | Agent 核心 | 参考 microsoft/agent-framework (dotnet) 与 microsoft/mcp | 只取必要源码并改命名空间,不引用 NuGet 包 |
-| 编辑器/Git 及其他三方 | 学习成熟开源库并内化源码 | NuGet 白名单:BCL、Avalonia、Roslyn、neuecc 的库;新增须经用户同意 |
+| 编辑器/Git 及其他三方 | 学习成熟开源库并内化源码 | 当前 NuGet 白名单以 `architecture.md` 为准；BCL、官方 .NET 库与已批准第三方库按该表使用，新增须经用户同意 |
 | 开发 Skills | 采用 Avalonia-skills、BlazingFastDotnet、dotnet/skills 中适用者 | 约束本项目开发实践 |
 | codemode | Roslyn 脚本:Host 常驻编译服务编译,一次性 ScriptExecutor 执行 | 全 C#,并行调用工具;主程序保持 AOT |
 | 主程序发布 | Native AOT(可行性经 Stage 0 实测确认) | 主程序不可变、启动快;用户扩展不需重新编译 |
 | 扩展执行 | 独立 Extension Host(JIT,要求已安装 .NET 运行时)+ Plugin Worker 进程 | Roslyn 与 AssemblyLoadContext 不进入 AOT 主程序;崩溃与死循环可整体终止 |
 
-内化的开源代码只取有用部分与结构参考,不引用库本身;署名按许可证要求保留,不要求则不保留。
+内化的开源代码只取有用部分与结构参考,不引用库本身;署名按许可证要求保留,不要求则不保留。具体批准清单以 `architecture.md` 的 NuGet 表为准。

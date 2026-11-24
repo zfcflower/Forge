@@ -15,7 +15,7 @@ parent: forge-architecture
 - 不依赖 UI 工具包,快照与事件供上层(Avalonia)消费;LSP 服务器本体由用户安装,Forge 只负责启动与通信。
 - 着色分两层:TextMate 词法层立即给关键字/字符串/注释,LSP `semanticTokens` 返回后叠加标识符类别;不使用 tree-sitter。
 - **AvaloniaEdit 与自有实现的边界。** AvaloniaEdit 已获准作为 `Forge.App` 的编辑 UI,不进入本项目;本项目仍提供语言服务器协议与会话、词法着色、原子编码保存、文本快照与 Diff,它们不是 AvaloniaEdit 的替代品。重叠评估(已核对 AvaloniaEdit 12.0.0):其文档已有 Rope、不可变快照、版本跟踪、撤销分组与文本锚点,应优先复用、不以保留本项目为目的长期维护重复编辑内核;该版本未提供 LSP 会话与同步、Diff 内容重定位或等价原子保存,`TextEditor.Load(string)`/`Save(string)` 尚为未实现方法、不得调用。剩余服务经适配与测试后可重新划分模块归属,项目去留取决于迁移结果;删除项目须先完成等价能力迁移与调用方验证,不能仅因替换编辑控件而删除。
-- 用户已批准 AvaloniaEdit 的配套额外依赖(含 TextMate 集成与语法包),语言范围以实际采用的着色方案为准;自有 TextMate 实现须评估被替换后的调用方与 Native AOT 兼容性,无剩余用途再移除。LSP 服务器并不因此自动具备。
+- 用户已批准 AvaloniaEdit 的配套额外依赖(含 TextMate 集成与语法包),语言范围以实际采用的着色方案为准。**主文件编辑器当前使用 `AvaloniaEdit.TextMate`**(`Forge.App/Editing/ForgeEditorBridge.cs`),本项目的自有 TextMate 分词器不在该路径上;自有实现仍保留供语言服务/预览等无 UI 调用方评估与使用,无剩余用途再移除。LSP 服务器并不因此自动具备。
 
 ## 关键决策
 

@@ -23,7 +23,7 @@ depends-on: [forge-plugin-sdk]
 - 不编译、不装载程序集、不做反射 Emit 或动态代码生成(结果解包仅用单处 `GetProperty("Result")` 读 `Task<T>.Result`):入口委托由调用方交给本模块(编译器在同一进程内装载,或执行器用 `AssemblyLoadContext.LoadFromStream` 装载)。
 - 不解析工具、不评估审批、不截断主程序结果:每次调用只经传入的 `IHostFacade` 离开进程,拒绝(`IsError`)以可捕获的 `ToolCallException` 呈现;`run_code` 自身永久拒绝(`Denied=true`)。
 - 不是沙箱:内存与 CPU 无法在进程内限制,空转靠上层杀进程收尾;`RequiresTermination` 是“必须终止承载进程”的通知,不是能力边界。
-- 预算由调用方给,本模块只消费:`TimeoutMilliseconds` 是本次运行可用的绝对毫秒数,不含排队与启动。
+- 预算由调用方给,本模块只消费:`TimeoutMilliseconds` 是本次 `executor.run` 的剩余毫秒预算;Host 的总 deadline 已扣除排队、编译、启动与装载,本模块不再次扣除这些时间。
 
 ## 关键决策
 

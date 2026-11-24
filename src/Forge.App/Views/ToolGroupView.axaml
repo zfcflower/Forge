@@ -39,12 +39,13 @@
               <wc:FluentIcon Classes="tool-status fail"
                              Data="{StaticResource IconClose}"
                              IsVisible="{Binding IsError}" />
-              <wc:FluentIcon Classes="tool-status run"
-                             Data="{StaticResource IconRefresh}"
-                             IsVisible="{Binding IsRunning}" />
-              <wc:FluentIcon Classes="tool-status wait"
-                             Data="{StaticResource IconEllipsis}"
-                             IsVisible="{Binding IsWaiting}" />
+              <!-- A call that has not returned yet: the same glyph the history loader waits with, so one control covers every
+                   spinner in the app and no style animation has to run inside the transcript. -->
+              <views:WaitingGlyph Data="{StaticResource IconRefresh}"
+                                  Width="13"
+                                  Height="13"
+                                  Foreground="{DynamicResource BrandActionBrush}"
+                                  IsVisible="{Binding IsRunning}" />
             </Panel>
           </Grid>
           <TextBlock Classes="mono tool-card-body" Text="{Binding CardBody}" />

@@ -1047,7 +1047,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         NotifyWorking();
         foreach (var row in toolRows.Values)
         {
-            if (row.Status == "…")
+            if (row.IsRunning)
             {
                 row.Complete(SessionStrings.NoToolResult, isError: true);
             }

@@ -45,7 +45,16 @@
                   ToolTip.Tip="{Binding Headline}">
             <TextBlock Classes="caption" Text="{Binding Headline}" TextDecorations="Underline" TextTrimming="CharacterEllipsis" />
           </Button>
-          <TextBlock Grid.Column="3" Classes="caption" Text="{Binding Status}" />
+          <!-- The call's status: the ✓/✗ of a returned call, and the same turning glyph the cards wear while it has not
+               returned yet. -->
+          <Panel Grid.Column="3" VerticalAlignment="Center">
+            <TextBlock Classes="caption" Text="{Binding Status}" IsVisible="{Binding !IsRunning}" />
+            <views:WaitingGlyph Data="{StaticResource IconRefresh}"
+                                Width="12"
+                                Height="12"
+                                Foreground="{DynamicResource BrandActionBrush}"
+                                IsVisible="{Binding IsRunning}" />
+          </Panel>
         </Grid>
       </Button>
       <ContentControl Content="{Binding ExpandedBody}" IsVisible="{Binding IsExpanded}">

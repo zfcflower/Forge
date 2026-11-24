@@ -113,11 +113,23 @@ public sealed class SubAgentRosterTests : IDisposable
         session.Dispose();
     });
 
-    private async Task<SessionWorkspaceViewModel> SessionAsync(TimeProvider clock)
+    private async Task<SessionWorkspaceViewModel> SessionAsync(
+        TimeProvider clock,
+        Func<string, IReadOnlyList<SessionInfo>>? childRows = null)
     {
         Directory.CreateDirectory(directory);
         await using var store = new SqliteSessionStore(directory);
         var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+        // The stored children a reopened session reads back: keyed by the parent so the recursive descent the restore
+        // walks does not find the same child under itself.
+        Func<string, CancellationToken, Task<IReadOnlyList<SessionInfo>>>? query = null;
+        if (childRows is not null)
+        {
+            var rows = childRows(root.Id);
+            query = (parent, _) => Task.FromResult<IReadOnlyList<SessionInfo>>(
+                rows.Where(row => string.Equals(row.ParentSessionId, parent, StringComparison.Ordinal)).ToArray());
+        }
+
         return new SessionWorkspaceViewModel(
             root,
             runtime: null,
@@ -126,8 +138,53 @@ public sealed class SubAgentRosterTests : IDisposable
             new ProviderServices(Path.Combine(directory, "settings.json"), directory, http))
         {
             Clock = clock,
+            ChildQuery = query,
         };
     }
+
+    [Fact]
+    public Task A_stored_row_the_run_resumes_is_a_lived_tab_of_this_run() => SharedUi.RunAsync(async () =>
+    {
+        var clock = new Clock();
+        var startedAt = clock.GetUtcNow();
+        var session = await SessionAsync(
+            clock,
+            rootId => new[]
+            {
+                new SessionInfo("child-1", directory, "First task.", startedAt)
+                {
+                    ParentSessionId = rootId,
+                    AgentKind = "Worker",
+                    Task = "First task.",
+                },
+            });
+
+        // The reopened tab replays the stored child into the history menu: a row of a run before this process, whose
+        // dot in the menu must read as replayed history, not as a live tab of this run.
+        await session.LoadHistoryAsync(CancellationToken.None);
+        Pump();
+        var stored = Assert.Single(session.Finished);
+        Assert.True(stored.IsReadOnly);
+        Assert.False(stored.WasLiveTab);
+
+        // The scheduler hands that stored child its next task: the start event names the run id and, in its child
+        // session, the id the menu's row is keyed by - the resume pulls the row back out of history onto the roster.
+        session.OnAgentEvent(new AgentSubAgentStarted("root", "Worker-9", "Worker", "Next task.", "test-model", "child-1", startedAt.AddMinutes(1)));
+        Pump();
+        Assert.Same(stored, Assert.Single(session.SubAgents));
+        Assert.True(stored.WasLiveTab);
+        Assert.Empty(session.Finished);
+
+        // And back into the menu: the row's dot now says the tab was live in this run, whatever it was before.
+        session.OnAgentEvent(new AgentSubAgentFinished("Worker-9", SubAgentStatus.Completed, TokenUsage.Empty, TimeSpan.FromMinutes(1), null, startedAt.AddMinutes(2)));
+        Pump();
+        clock.Now = startedAt.AddHours(2);
+        session.Tick();
+        Assert.Same(stored, Assert.Single(session.Finished));
+        Assert.True(stored.WasLiveTab);
+
+        session.Dispose();
+    });
 
     private static void Start(SessionWorkspaceViewModel session, DateTimeOffset at, string childId = "Worker-1")
     {

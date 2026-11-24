@@ -336,36 +336,6 @@
     <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
-  <Style Selector="wc|FluentIcon.tool-status.run">
-    <Setter Property="Foreground" Value="{DynamicResource BrandActionBrush}" />
-    <Setter Property="RenderTransform" Value="rotate(0deg)" />
-    <Style.Animations>
-      <Animation Duration="0:0:1" IterationCount="INFINITE">
-        <KeyFrame Cue="0%">
-          <Setter Property="RotateTransform.Angle" Value="0" />
-        </KeyFrame>
-        <KeyFrame Cue="100%">
-          <Setter Property="RotateTransform.Angle" Value="360" />
-        </KeyFrame>
-      </Animation>
-    </Style.Animations>
-  </Style>
-
-  <Style Selector="wc|FluentIcon.tool-status.wait">
-    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-    <Setter Property="RenderTransform" Value="rotate(0deg)" />
-    <Style.Animations>
-      <Animation Duration="0:0:1.6" IterationCount="INFINITE">
-        <KeyFrame Cue="0%">
-          <Setter Property="RotateTransform.Angle" Value="0" />
-        </KeyFrame>
-        <KeyFrame Cue="100%">
-          <Setter Property="RotateTransform.Angle" Value="360" />
-        </KeyFrame>
-      </Animation>
-    </Style.Animations>
-  </Style>
-
   <Style Selector="Border.tool-open">
     <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />

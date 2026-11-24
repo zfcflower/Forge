@@ -33,7 +33,6 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     private RelayCommand? toggleCommand;
     private RelayCommand? toggleResultCommand;
 
-    private string status = "…";
     private LocText result;
     private bool hasResult;
     private bool isError;
@@ -47,11 +46,12 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
 
     public string ArgumentSummary { get; } = Compact(argumentsJson, SummaryLimit);
 
-    public string Status
-    {
-        get => status;
-        private set => Set(ref status, value);
-    }
+    /// <summary>
+    /// The row's status mark: a returned call is ✓ or ✗, a running one carries none - the transcript draws a spinner for
+    /// it - so the text stays "…" only as the placeholder a call without input falls back to (<see cref="OutputLine"/>).
+    /// Derived from the state it reports, never stored, so a status text can never disagree with <see cref="IsRunning"/>.
+    /// </summary>
+    public string Status => IsRunning ? "…" : isError ? "✗" : "✓";
 
     /// <summary>The tool's answer in the current language; null until it returned something.</summary>
     public string? Result => hasResult ? result.Resolve() : null;
@@ -129,11 +129,8 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         }
     }
 
-    /// <summary>True once the call returned without failing; the card's check.</summary>
-    public bool IsSucceeded => HasResult && !IsError;
-
-    /// <summary>True while the call has produced nothing yet: queued or just started, drawn as a waiting spinner.</summary>
-    public bool IsWaiting => !IsRunning && !HasResult && !IsError;
+    /// <summary>True once the call returned without failing; the card's check. An empty answer still returned.</summary>
+    public bool IsSucceeded => !IsRunning && !isError;
 
     /// <summary>The question itself for an <c>ask_user</c> card, in place of the arguments JSON nobody answers.</summary>
     private string QuestionSummary
@@ -383,10 +380,13 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     {
         result = content;
         hasResult = !string.IsNullOrEmpty(content.Resolve());
-        IsError = isError;
-        Status = isError ? "✗" : "✓";
+        // The state moves first, the binding notifications follow: every derived mark (Status, IsSucceeded) reads the new
+        // state when the view asks for it.
         isRunning = false;
+        IsError = isError;
         OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(Status));
+        OnPropertyChanged(nameof(IsSucceeded));
         OnPropertyChanged(nameof(Result));
         OnPropertyChanged(nameof(ResultDisplay));
         OnPropertyChanged(nameof(ResultNote));

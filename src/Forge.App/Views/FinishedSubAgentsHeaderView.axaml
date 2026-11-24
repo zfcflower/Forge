@@ -80,26 +80,32 @@
                 <Button Classes="finished-row"
                         HorizontalAlignment="Stretch"
                         Click="OnAgentClick"
-                        AutomationProperties.Name="{Binding Task}"
+                        AutomationProperties.Name="{Binding HistoryName}"
                         AutomationProperties.HelpText="{Binding StatusText}"
-                        ToolTip.Tip="{Binding Task}">
+                        ToolTip.Tip="{Binding HistoryToolTip}">
                   <Grid ColumnDefinitions="Auto,*">
                     <!-- The fate is the colour of the dot: green finished, red failed, amber stopped, grey when the store
-                         could not say how it ended. The words live in the row's tooltip, not beside it. -->
+                         could not say how it ended - except for a child this app run watched live, whose dot instead wears
+                         the shell's live tint to say "that tab, finished". The live tint buries the fate colour, so a
+                         lived row carries the fate's words in its own hover; the words of every row also stay in the
+                         accessible help text. -->
                     <Ellipse Classes="status-dot"
                              Classes.agent-completed="{Binding EndedCompleted}"
                              Classes.agent-failed="{Binding EndedFailed}"
                              Classes.agent-stopped="{Binding EndedStopped}"
+                             Classes.agent-lived="{Binding WasLiveTab}"
                              VerticalAlignment="Center" />
-                    <!-- The row is one line: the task trims to whatever the flyout leaves it, and its tooltip carries the
-                         whole task, so a name that runs past the edge is still readable in full. -->
+                    <!-- The row is one line: the agent's own name - the same word its live tab was titled by, so the row
+                         matches the tab it came from - ahead of the task. The task trims to whatever the flyout leaves
+                         it, and the row's tooltip carries the whole task, so a name that runs past the edge is still
+                         readable in full. -->
                     <TextBlock Grid.Column="1"
                                Margin="8,0,0,0"
-                               Text="{Binding TaskSummary}"
+                               Text="{Binding HistoryName}"
                                TextWrapping="NoWrap"
                                TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"
-                               ToolTip.Tip="{Binding Task}" />
+                               ToolTip.Tip="{Binding HistoryToolTip}" />
                   </Grid>
                 </Button>
               </DataTemplate>

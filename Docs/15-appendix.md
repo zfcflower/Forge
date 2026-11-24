@@ -1,6 +1,6 @@
 # 15 附录：工具总表、常量与术语
 
-## 15.1 内置工具总表
+## 15.1 内置工具总表（条件注册见各项；MCP 服务器工具另计）
 
 副作用列：`R` = 只读，`W` = 写，`X` = 执行；`*` = 可被 `tools` 分区关闭，`—` = 必需项不可关闭，`†` = 只有根 Agent 可用（工具自身按调用深度拒绝，不是靠开关）。
 
@@ -9,13 +9,17 @@
 | `read` | 文件 | R | * | 有界窗口读（2000 行 / 256 KiB，上限 20000 行 / 1 MiB） |
 | `write` | 文件 | W | * | 原子整写或追加 |
 | `edit` | 文件 | W | * | 唯一匹配替换，否则报错给行号 |
+| `copy` | 文件 | W | * | 路径/glob/数组复制；默认不覆盖，不复制链接与 `.git` |
+| `move` | 文件 | W | * | 路径/glob/数组移动；默认不覆盖，不替换目录 |
+| `delete` | 文件 | W | * | 路径/glob/数组删除；非空目录须 `recursive` |
 | `ls` | 文件 | R | * | 单层列目录，最多 10000 条 |
-| `find` | 文件 | R | * | 遍历 + glob，最多 1000 条，深度 64 |
+| `find` | 文件 | R | * | 遍历 + glob，默认 1000 条、深度 16（硬上限 10000 条 / 64） |
 | `grep` | 文件 | R | * | 托管/ripgrep，1000 命中，单文件 8 MiB |
 | `bash` | 文件 | X | * | Direct 优先进程，每流 512 KiB，默认 120 s |
 | `todo` | 会话 | R/W | * | 7 种操作：清单、分组、计划摘要 |
 | `set_title` | 会话 | W | * | 命名本会话（只写 `sessions.title_source`，只在第一轮生效、名字截成 24 字符标签，用户改名永久优先，不动分支与目录） |
 | `ask_user` | 会话 | R | * | 问题卡（选项/自由文本/多选） |
+| `message_session` | 会话 | W | * † | 根会话与 Agent 会话间的用户授权异步投递（见 02 §2.3） |
 | `skill` | 会话 | R | — | 按名取技能全文（≤64000 字符） |
 | `spawn_agent` | Agent | R | * | 派生 Scout/Worker/Plan/Reviewer 或用户 Agent；可带这一次的模型与档位 |
 | `models` | Agent | R | * | 列已连接模型与接受档位，隐藏模型不列，内置子 Agent 不持有 |
@@ -64,12 +68,12 @@
 | 常量 | 默认 | 可调范围 |
 |---|---|---|
 | `read` 窗口 | 2000 行 / 256 KiB | 上限 20000 行 / 1 MiB |
-| `bash` 超时 / 每流输出 / 并发 | 120 s / 512 KiB / 8 | 1–600 s / 硬上限 4 MiB |
+| `bash` 超时 / 每流输出 / 并发 | 120 s / 512 KiB / 8 | 1–600 s / 16–4096 KiB（硬上限 4 MiB） |
 | `grep` 命中 / 单文件上限 | 1000 / 8 MiB（固定，不可调） | 命中硬上限 10000 |
 | `find` 命中 / 遍历深度 | 1000 / 16 | 命中硬上限 10000；深度 1–64 |
 | 子 Agent 深度 / 并发 | 2 / 4 | 并发 1–16 |
-| 压缩触发 / 目标 / 保留 | 85% / 50% / `max(1, min(20000, 0.2U))` | 触发 50–95，目标 ≥1 且低于触发 |
-| 手动压缩保留 | keepRecent（W 未知时 20000） | — |
+| 压缩触发 / 目标 / 保留 | 85% / 50% / `max(1, min(20000, 0.2U))` | 触发 50–95；目标 ≥1% 且低于触发；紧急 90–99 且高于触发；keepRecent 1000–1000000 |
+| 手动压缩保留 | keepRecent（W 未知时 20000），不再夹 `T/2` | — |
 | 计划摘要修订 | 50 条/会话 | limit 1–50 |
 | 评审包 | diff 48000 字符 / 提交 50 / 文件 200 / 字段 2000 | 1000–500000 / 5–500 / 20–2000 / 200–20000 |
 | Reviewer 原文上限 | 8000 字符 | — |
@@ -100,14 +104,14 @@
 
 ## 15.3 设置分区速查
 
-`provider` 100 · `rate-limit` 115 · `agents` 120 · `prompts` 130 · `web` 140 · `automations` 150 · `appearance` 200 · `keymap` 210 · `language` 300 · `editor` 350 · `files` 360 · `palette` 380 · `git` 500 · `projects` 510 · `notifications` 550 · `notification-permission` 560 · `idle-archive` 570 · `network` 580 · `extensions` 600 · `approvals` 700 · `skills` 710 · `mcp` 720 · `tools` 730 · `inspector` 740 · `updates` 800 · `paths` 900。分组：AGENT（100–150）、界面（200–380、500–510）、系统（550–900）。每个分区的内容见 [07-workbench-ui.md](07-workbench-ui.md) 7.12。
+`provider` 100 · `rate-limit` 115 · `agents` 120 · `prompts` 130 · `web` 140 · `automations` 150 · `appearance` 200 · `keymap` 210 · `language` 300 · `editor` 350 · `files` 360 · `palette` 380 · `git` 500 · `projects` 510 · `notifications` 550 · `notification-permission` 560 · `idle-archive` 570 · `network` 580 · `extensions` 600 · `approvals` 700 · `skills` 710 · `mcp` 720 · `tools` 730 · `inspector` 740 · `updates` 800 · `paths` 900。分组：AGENT（100–150、700–730）、界面（200–380、500–510、740）、系统（550–600、800–900）。每个分区的内容见 [07-workbench-ui.md](07-workbench-ui.md) 7.12。
 
 ## 15.4 数据文件速查
 
 见 [12-storage-and-data.md](12-storage-and-data.md) 12.1 的目录树。最常见的四个：
 
 - `settings.json`：唯一的偏好/提供商/Agent 配置源，三个写者互斥。
-- `forge.db`：会话与工作台状态，`user_version` 当前 12。
+- `forge.db`：会话与工作台状态，`user_version` 当前 14。
 - `reviews.db`：评论、标记、结论，无 schema 版本、幂等建表。
 - `approvals.db`：插件审批，Host 所有，App 只读。
 
@@ -133,7 +137,7 @@
 | 减少动画 | `appearance` 分区的全局动效闸门，树与时间轴都读它 |
 | 首启向导 | 三步覆盖层（语言、提供商、通知权限），由 `ui_state` 决定是否显示 |
 | 资源窗口 | 一眼看全当前会话的自动化子 Agent、MCP 服务器、工具与提示词占用 |
-| 编排（orchestration） | 四份内置技能 + 根 Agent 的 per-task 路由，开关 `orchestrationEnabled` |
+| 编排（orchestration） | 五份内置技能 + 根 Agent 的 per-task 路由，开关 `orchestrationEnabled` |
 | 机械门禁 | 由代码强制（而非提示引导）的两个节点：步骤完成门禁与 `pr_create` 全步骤 done |
 
 相关文档：[README.md](README.md)、[02-agent-runtime.md](02-agent-runtime.md)、[07-workbench-ui.md](07-workbench-ui.md)、[11-extensions-and-codemode.md](11-extensions-and-codemode.md)、[14-limitations.md](14-limitations.md)。

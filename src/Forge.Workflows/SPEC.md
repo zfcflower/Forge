@@ -33,6 +33,7 @@ tags: [workflow, declarative, l0]
 ## 未决
 
 - ~~源生成反序列化对缺失属性写 `default(T)`~~:已在 .NET 11 上回归并解决——缺失属性保留属性初始化器,`steps` 缺失改由文档扫描判定(见「关键决策」),其余缺失属性取初始化器默认值,不再需要解析后归一化。
+- 工作流在 Host 内执行,每一步直接调用底层工具;工作流和插件/脚本回调里都禁止嵌套 `run_code`(`ExtensionHost.WorkflowPlugins` 与 `CallBinding` 机械拒绝)。
 - `onError` 的 `retry`/`continue`、步骤级超时、`when`/`foreach`、`{"$expr": ...}` 表达式均未实现;格式按向前兼容设计(未知属性忽略、`version` 守卫、`$` 前缀指令命名空间),加入时需扩展 README 与校验错误码。
 - 每步只保留 `Content` 文本,未记录解析后的 `args`;排查绑定问题目前靠错误文本,必要时再加可选的 `CaptureResolvedArgs`。
 - 并发上限是每次运行的上限而不是全局上限:多工作流并行时总并发为运行数乘该值。

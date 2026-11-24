@@ -17,7 +17,7 @@
 
 工具由四类来源合成：Core 内置、App 内置（文件/git/PR/web/spec/扩展编写）、插件工具、MCP 适配器。同名以**首个注册者**为准（内置优先）；`run_code` 的脚本面里插件工具在前、同名先注册者生效。
 
-### 内置工具清单（49 个内置工具 + MCP 服务器工具）
+### 内置工具清单（条件注册见各项；MCP 服务器工具另计）
 
 | 组 | 工具 | 副作用 | 说明 |
 |---|---|---|---|
@@ -31,6 +31,7 @@
 | | `grep` | 只读 | 托管引擎（可选 ripgrep 加速），默认 1000 条命中，单文件 8 MiB，并发 `min(核数,8)`，正则 2 秒超时 |
 | | `bash` | 执行 | 先 Direct（参数向量、不经 shell），出现 shell 语法才走解释器；每流 512 KiB、默认超时 120 s（1–600）、全局并发 8；超时/取消杀整棵树；只做没有专用工具的事：与 `read/grep/find/ls/edit/write/copy/move/delete/web_fetch` 重叠的命令被拒绝并指路，`git` / `gh pr|run|workflow|api` 只对持有 `git_*` / `pr_*` 工具的调用者开放(持有任一 `pr_*` 则整个 `gh` 放行)(git 另分只读/写两档,且不含工具已覆盖的子命令);只过滤管道输入的 `grep/head/tail` 放行；非廉价命令按工作区串行（等锁不计超时） |
 | 会话 | `todo` | 读/写按参数 | 7 种操作：`list`/`add`/`update`/`remove`/`promote`/`plan_summary_get`/`plan_summary_set`；写操作先确认条目属于本会话 |
+| | `set_title` | 写 | 仅在会话首轮可命名；用户改名永久优先，只写 `sessions.title_source`，不动分支与目录 |
 | | `ask_user` | 只读 | 仅在宿主提供问题处理器时注册；问题卡 + 选项/自由文本；支持多选 min/max |
 | | `skill` | 只读 | 按名返回 `SKILL.md` 全文（上限 64000 字符）；名字只在本会话发现的四个技能根里解析 |
 | Agent | `spawn_agent` | 只读 | 派生内置 Scout/Worker/Plan/Reviewer 或用户 Agent；`<kind>-<n>` 登记；深度上限 2；没有 `tools` 列表的用户 Agent 会被拒绝派生（返回错误并引导模型问用户选角色）；不能关闭子 Agent 时用它停；可选 `model`/`provider`/`thinking` 只作用于这一次派生（`models` 给确切 id，多命中列候选绝不猜），不写设置，与 `resume_id` 互斥 |
@@ -65,11 +66,11 @@
 - `spawn_agent` 与 `request_review` 各按自己在允许清单里的条目开关；不再有“允许派生 Agent”总开关。
 - 工具面是可替换快照（`ToolSurface`：版本 + 注册表，`Volatile` 读）：版本未变复用同一 `Definitions` 数组，提示词缓存不破；集合没变时不发布。批准后的下一次模型请求就能看到新工具。
 - `AgentHost.AllTools` 列出全部内置与外部工具（含已禁用），供 `tools` 分区显示。
-- `run_code` 的脚本面只收“只读的文件/web/MCP 三类 + 插件工具”（按 `SideEffect == ReadOnly` 判定，不认名字）；`write`/`edit`/`bash`、git/PR 写工具、扩展编写工具一概不进。
+- `run_code` 的脚本面只收“插件工具 + `SideEffect == ReadOnly` 的文件/web/MCP 三族”（只读判定不认名字）；`copy`/`move`/`delete`、所有 git/PR 工具（含只读）以及 `write`/`edit`/`bash`、扩展编写工具一概不进。
 
 ## 2.3 子 Agent
 
-- 内置四种：**Scout**（只读侦察，read/grep/find/ls）、**Worker**（实现一个任务，加 edit/write/bash）、**Plan**（只读产出有序计划）、**Reviewer**（只读评审，多一个只读 `git_diff`）。模型与思考强度可分别设置。
+- 内置四种：**Scout**（只读侦察，read/grep/find/ls）、**Worker**（实现一个任务，加 edit/write/copy/move/delete/bash）、**Plan**（只读产出有序计划）、**Reviewer**（只读评审，多一个只读 `git_diff`）。模型与思考强度可分别设置。
 - 生成：`spawn_agent` 按 `<kind>-<n>` 登记实例，同类型共享稳定提示词前缀以命中缓存；同类型实例可按 id 续跑（当前未在运行）。可选 `model`/`provider`/`thinking` 只作用于这一次派生：`models` 给出确切 id 与接受档位，解析器绝不猜（多命中一律列候选），thinking 夹到模型接受档并在回执注明，覆盖不写设置、与 `resume_id` 互斥。
 - 并发与深度：嵌套深度上限 2；整棵树的活跃 Agent 数默认 4，可在 `agents` 分区调到 1–16（扩容立即唤醒排队中的 Agent，缩容不打断已在跑的一轮）；父 Agent 等子结果时交还名额，避免嵌套死锁。
 - 生命周期事件：`Started`（父发出）→ 仅在确实等名额时 `Queued` → `Running` → 每个 run 恰一次 `Finished`（含异常与父取消；父取消记 `Stopped "parent cancelled"`）。用量是本 run 增量，耗时从 spawn 起算（含排队）。
@@ -91,10 +92,10 @@
 
 ## 2.5 上下文压缩与摘要
 
-- 触发以**本次会话自身的模型窗口 W** 为基准：预留输出 R = min(maxOut, ⌊0.2W⌋)，再抬到至少 `min(4096, W/2)`；可用预算 U = W − R；触发线 = ⌊U × triggerPercent⌋（默认 85%，范围 50–95），目标 = max(1, ⌊U × targetPercent⌋)（默认 50%），再生长量 ⌊0.1U⌋。**触发线只用于回合的第一个请求**：同一回合内工具结果还在累积，改用紧急线 ⌊U × emergencyPercent⌋（默认 95%，范围 90–99 且高于触发），否则一个回合会把自己刚收集的证据压成摘要。
+- 触发以**本次会话自身的模型窗口 W** 为基准：先取请求实际携带的输出上限 `wireMax`，否则 `R = min(maxOut, ⌊0.2W⌋)`（`maxOut` 未知时取 `⌊0.2W⌋`），再抬到至少 `min(4096, W/2)`；`R ≥ W` 时自动压缩不启用。可用预算 U = W − R；触发线 = ⌊U × triggerPercent⌋（默认 85%，范围 50–95），目标 = max(1, ⌊U × targetPercent⌋)（默认 50%），再生长量 ⌊0.1U⌋。**触发线只用于回合的第一个请求**：同一回合内工具结果还在累积，改用紧急线 ⌊U × emergencyPercent⌋（默认 95%，范围 90–99 且高于触发），否则一个回合会把自己刚收集的证据压成摘要。
 - 当前上下文 C：模型与历史版本未变时用上次真实输入 token + 新增消息估算；否则全量估算（历史 + 稳定前缀 + 可见工具定义，每个定义另加 8 token）。
 - 迟滞：压缩后仍不低于触发线即“无效尝试”，要等实例自有内容再长 0.1U；连续两次无效标记 Stalled 并发一次 `AgentCompactionStalled`，直到手动压缩、换模型或一次把上下文带回线下的裁剪。
-- 切点只落在下标 ≥1 的 user/assistant 消息上，不拆开工具调用与结果；保留近期原文 keepRecent = 设置的 `keepRecentTokens`，缺省 max(1, min(20000, ⌊0.2U⌋))（设置值夹在 [min(1000,U), U/2]）。
+- 切点只落在下标 ≥1 的 user/assistant 消息上，不拆开工具调用与结果；保留近期原文 keepRecent = 设置的 `keepRecentTokens`，缺省 max(1, min(20000, ⌊0.2U⌋))（设置值夹在 [min(1000,U), U/2]；自动与溢出路径再夹到不超过目标的一半，手动压缩只夹前者）。
 - 摘要格式固定六节：Goal / Constraints & Preferences / Progress(Done / In Progress / Blocked) / Key Decisions / Next Steps / Critical Context。消息序列化时 thinking 不写、工具结果截到 2000 字符、图片/文件只写占位；超预算分批，工具调用与其结果绝不分开；长回合被切开时另发一次 TURN-PREFIX 摘要并合并成 `Turn Context (split turn)`。
 - 文件追踪：`CompactionFiles` 把 `read` 的路径与**实际显示的行范围**（`Shown lines X–Y` 或 `path: N lines` 从 offset 起算）合进 `<read-files>`，同一文件的重叠/相邻区间合并（`1-420` + `421-840` → `1-840`），无 limit 记 `500-`，整文件读记裸路径；修改类只记路径，读后又改的只出现在 `<modified-files>`；与上一份摘要里的清单合并后排序追加。
 - 摘要被拒（MaxTokens 截断、发起工具调用、提供商报错、空正文）即整次压缩失败、什么也不写；自动与溢出路径把它当作“没腾出空间”，不让回合失败。
@@ -122,8 +123,8 @@
 - 证据来源是窄接口 `IStepChangeProbe.ProbeAsync(sessionId, workingDirectory, ct)`，返回 `NotApplicable` / `Clean` / `Dirty` / `Unknown`：
   - 无 probe、`NotApplicable` → 放行；`Unknown` → **失败关闭**并写出 git 的原因；`Clean` 且该步骤没有自己的 `CommitId`、也没有基线 → 放行；步骤基线（首次转 `in_progress` 时记下的工作树内容指纹）与当前相等 → 放行；其余要 approve + 有效 verification，且评审结论记录的工作树指纹必须等于当前指纹（评审后内容变过即过期，需重新评审；`Clean` 但内容与基线不同表示代码在步骤自己的提交之外被提交了，同样要评审）。
 - 门禁在写状态**之前**判定：拒绝时条目状态不变、不提交；只上抛取消，probe 其它异常按 `Unknown`。
-- 结论落 per-host `StepReviewLedger`（按 session + step），**不持久化**：重启后每个步骤要重新评审；步骤离开 done 时 `Forget`。
-- 三个相互独立的开关（均在 `settings.json`，原总开关 `workflowGatesEnabled` 已删除，旧文件里的 `false` 迁移为第二项关）：`reviewToolEnabled`（默认开）——Agent 能否自行发起评审，即是否提供 `request_review`，建宿主时读取；关掉则没有证据来源，步骤门禁随之不存在；`stepReviewRequired`（默认开）——改了代码的步骤标 done 是否要过本节门禁，每次尝试读取；`reviewAutoFix`（默认开）+ `reviewAutoFixMaxRounds`（默认 3，1–10）——`request changes` 后 Agent 自己修复并再评审，同一步骤已完成的非 approve 评审达到上限时停止并用 `ask_user` 问用户，一次评审的发现要合并在一轮里全部修；关掉自动修复则只向用户汇报并等待。`ledger.Rounds` 在 approve 或步骤离开 done 时清零。非空 verification 与 `pr_create` 的五道闸门是固定行为，不可关。
+- 结论落 per-host `StepReviewLedger`（按 session + step），App 经 `StepReviewLedgerStore` 持久化到 `reviews.db.step_review_verdicts`：重启后恢复仍与当前工作树指纹匹配的结论；未配置 store 的宿主重启后需重新评审。步骤离开 done 时 `Forget` 并删除台账行。
+- 三个相互独立的开关（均在 `settings.json`）：`reviewToolEnabled`（默认开）——Agent 能否自行发起评审，即是否提供 `request_review`，建宿主时读取；关掉则没有证据来源，步骤门禁随之不存在；`stepReviewRequired`（默认开）——改了代码的步骤标 done 是否要过本节门禁，每次尝试读取；`reviewAutoFix`（默认开）+ `reviewAutoFixMaxRounds`（默认 3，1–10）——`request changes` 后 Agent 自己修复并再评审，同一步骤已完成的非 approve 评审达到上限时停止并用 `ask_user` 问用户，一次评审的发现要合并在一轮里全部修；关掉自动修复则只向用户汇报并等待。旧总开关 `workflowGatesEnabled` 已删除，仅在加载旧文件时把 `false` 迁移为 `stepReviewRequired=false`。`ledger.Rounds` 在 approve 或步骤离开 done 时清零。非空 verification 与 `pr_create` 的五道闸门是固定行为，不可关。
 
 ### `request_review`
 
@@ -139,7 +140,7 @@
 
 - 模型给问题与可选项，回合挂起等待；选项或自由文本作答、取消即返回取消结果。
 - 多选题可带 `minSelect`/`maxSelect`（整数，1 ≤ min ≤ max ≤ 选项数；允许自由输入时再加 1，因自由文本算一次选择）；单选题带这两个参数会报错。
-- 每题有“跳过本题”开关；全部跳过时提交禁用，改用“忽略”（Declined）。
+- 每题有“跳过本题”开关；全部跳过时提交禁用，改用“忽略”（Declined）。当前 UI 已删除逐题“跳过本题”，只保留底部“忽略”；`UserQuestionAnswer.Skipped` 仍作为公共契约保留。
 - 同一会话（含子 Agent，共用会话 id）同时多个提问时，审批队列每会话只把一张卡放进列表，其余 FIFO 暂存；当前卡解决后下一张出现，可见卡显示“还有 N 个问题等待”。不同会话互不阻塞，问题不阻塞审批卡。
 
 ## 2.9 附件输入

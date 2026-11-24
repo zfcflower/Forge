@@ -248,47 +248,47 @@
           </Border>
 
           <Border Grid.Row="1" Classes="composer-body">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="0,10,0,0">
-              <!-- the session-messaging grants of this session: one revocable mark per target ("Authorized: X") -->
-              <ItemsControl Grid.Row="0"
-                            ItemsSource="{Binding SessionAuthorizations}"
-                            Margin="8,8,8,0"
-                            IsVisible="{Binding HasSessionAuthorizations}"
-                            AutomationProperties.AutomationId="composer-authorizations">
-                <ItemsControl.ItemsPanel>
-                  <ItemsPanelTemplate>
-                    <WrapPanel />
-                  </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:SessionAuthorizationMarkViewModel">
-                    <Border Classes="queued-chip"
-                            Margin="0,0,6,4"
-                            ToolTip.Tip="{Binding RevokeTip}">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <wc:FluentIcon Data="{StaticResource IconSparkle}" Width="12" Height="12" VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding Text}" VerticalAlignment="Center" />
-                        <Button Classes="icon composer-mini"
-                                Command="{Binding RevokeCommand}"
-                                AutomationProperties.AutomationId="composer-authorization-revoke"
-                                AutomationProperties.Name="{Binding RevokeText}"
-                                ToolTip.Tip="{Binding RevokeTip}">
-                          <wc:FluentIcon Data="{StaticResource IconClose}" Width="10" Height="10" />
-                        </Button>
-                      </StackPanel>
-                    </Border>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-
-              <!-- queued and interjected messages. The card's top border is drawn 10px above this grid (the body's
-                   Margin="0,-10,0,0" plus this grid's 10px is the shared-outline trick), so -8 puts the chips' own top
-                   2px below that border: the strip hugs the input area's top edge instead of floating 18px under it. -->
-              <StackPanel Grid.Row="1"
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,10,0,0">
+              <!-- The one strip above the input: the session-messaging grants of this session (one revocable mark per target,
+                   "Authorized: X") and then the queued and interjected messages. They share one strip so both hug the card's
+                   top edge at the same offset - the card's top border is drawn 10px above this grid (the body's
+                   Margin="0,-10,0,0" plus this grid's 10px is the shared-outline trick), so -8 puts a chip's own top 2px
+                   below that border. A row of its own with a +8 margin instead put the same kind of chip 16px lower. -->
+              <StackPanel Grid.Row="0"
                           Spacing="4"
                           Margin="8,-8,8,0"
-                          IsVisible="{Binding HasQueued}">
+                          IsVisible="{Binding HasComposerStrip}">
+                <ItemsControl ItemsSource="{Binding SessionAuthorizations}"
+                              IsVisible="{Binding HasSessionAuthorizations}"
+                              AutomationProperties.AutomationId="composer-authorizations">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SessionAuthorizationMarkViewModel">
+                      <Border Classes="queued-chip"
+                              Margin="0,0,6,4"
+                              ToolTip.Tip="{Binding RevokeTip}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <wc:FluentIcon Data="{StaticResource IconSparkle}" Width="12" Height="12" VerticalAlignment="Center" />
+                          <TextBlock Text="{Binding Text}" VerticalAlignment="Center" />
+                          <Button Classes="icon composer-mini"
+                                  Command="{Binding RevokeCommand}"
+                                  AutomationProperties.AutomationId="composer-authorization-revoke"
+                                  AutomationProperties.Name="{Binding RevokeText}"
+                                  ToolTip.Tip="{Binding RevokeTip}">
+                            <wc:FluentIcon Data="{StaticResource IconClose}" Width="10" Height="10" />
+                          </Button>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
                 <ItemsControl ItemsSource="{Binding Queued}"
+                              IsVisible="{Binding HasQueued}"
                               AutomationProperties.AutomationId="composer-queue">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -329,7 +329,7 @@
               </StackPanel>
 
               <!-- attachments of the draft (image thumbnails, file chips), why the last one was refused, and why they block sending -->
-              <StackPanel Grid.Row="2" Spacing="4">
+              <StackPanel Grid.Row="1" Spacing="4">
                 <ItemsControl ItemsSource="{Binding Composer.Attachments}"
                               Margin="8,8,8,0"
                               IsVisible="{Binding Composer.HasImageAttachments}"
@@ -416,7 +416,7 @@
               </StackPanel>
 
               <TextBox x:Name="Input"
-                       Grid.Row="3"
+                       Grid.Row="2"
                        Classes="composer-input"
                        Text="{Binding Draft, Mode=TwoWay}"
                        AcceptsReturn="True"
@@ -429,7 +429,7 @@
                        AutomationProperties.Name="{Binding [session.messageName], Source={x:Static loc:Loc.Instance}}" />
 
               <!-- toolbar: the agent, model and orchestration pickers on the left, send / running menu on the right -->
-              <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="6,0,6,6">
+              <Grid Grid.Row="3" ColumnDefinitions="*,Auto" Margin="6,0,6,6">
                 <views:ComposerToolbar HorizontalAlignment="Left" DataContext="{Binding Composer}" />
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom">

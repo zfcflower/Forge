@@ -512,6 +512,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     public bool HasQueued => queued.Count > 0;
 
+    /// <summary>
+    /// Whether the strip above the input has anything in it: the session-messaging marks and then the waiting messages. It is
+    /// one strip (they share the composer card's top edge), so a collapsed one hides them all - and, with nothing to show, the
+    /// strip is not measured at all, whose negative top margin would otherwise pull the input up by 8px.
+    /// </summary>
+    public bool HasComposerStrip => SessionAuthorizations.Count > 0 || queued.Count > 0;
+
     /// <summary>True after Stop while messages wait: the queue resumes with the next send.</summary>
     public bool QueuePaused => queuePaused && queued.Count > 0 && !isRunning;
 
@@ -1865,11 +1872,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         // Attachments travel with the interjection: the loop delivers text and attachments together at the next tool-batch
         // boundary. When no turn takes it, the message is queued normally. The chip keeps the instance, so the message can be
-        // withdrawn (back into the composer) right up to the moment the loop hands it to the model. An agent-session tab never
-        // interjects: the root's interjection inbox belongs to the root's own conversation, and the child's run has no such
-        // boundary yet.
-        var delivered = agentSession is null && isRunning && runtime is { } live
-            ? live.TryInterject(prompt.Text, prompt.Attachments)
+        // withdrawn (back into the composer) right up to the moment the loop hands it to the model. The inbox is the running
+        // turn's own: the root's instance on a root tab, this tab's own agent-session instance on an agent-session tab (the
+        // root's belongs to another conversation). A draft whose session row does not exist yet has no instance to reach, so
+        // its message queues like the root's does before its turn starts.
+        var delivered = isRunning && runtime is { } live
+            ? agentSession is null
+                ? live.TryInterject(prompt.Text, prompt.Attachments)
+                : live.TryInterjectChild(agentChildSessionId ?? string.Empty, prompt.Text, prompt.Attachments)
             : null;
         var front = queued.TakeWhile(message => message.IsInterjection).Count();
         AddQueued(
@@ -1920,7 +1930,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return;
         }
 
-        if (message.Interjection is { } interjection && runtime?.TryWithdraw(interjection) != true)
+        if (message.Interjection is { } interjection && !WithdrawInterjection(interjection))
         {
             // The loop took it at a tool-batch boundary: the chip goes away on its own when AgentInterjected lands, so the
             // message is not restored (that would send it twice) and the user is told why nothing came back.
@@ -1939,6 +1949,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         Composer.RestoreAttachments(message.Attachments);
     }
+
+    /// <summary>
+    /// Takes one pending interjection back out of the turn that holds it: the root's own instance on a root tab, this tab's
+    /// agent-session instance on an agent-session tab - the same inbox <see cref="Interject"/> handed it to.
+    /// </summary>
+    private bool WithdrawInterjection(Interjection interjection) => agentSession is null
+        ? runtime?.TryWithdraw(interjection) == true
+        : runtime?.TryWithdrawChild(agentChildSessionId ?? string.Empty, interjection) == true;
 
     /// <summary>
     /// Whether the composer can take everything this message carries back. Images and files are capped per message and a
@@ -1989,6 +2007,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private void OnQueueChanged()
     {
         OnPropertyChanged(nameof(HasQueued));
+        OnPropertyChanged(nameof(HasComposerStrip));
         RefreshCanSend();
     }
 
@@ -2016,8 +2035,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (!isRunning)
         {
             // The undelivered interjections are the root instance's inbox, so only the root's own tab may take them: an agent
-            // session's run has its own leftovers, and they are routed by TakeUndeliveredReplies. A child tab that took them
-            // would draw the root's receipts in its own transcript and lose them to the session they belong to.
+            // session's run has its own leftovers, and they are routed by TakeUndeliveredInterjections. A child tab that took
+            // them would draw the root's receipts in its own transcript and lose them to the session they belong to.
             IReadOnlyList<Interjection> undelivered = agentSession is null
                 ? runtime?.TakeUndeliveredInterjections() ?? []
                 : [];
@@ -3313,6 +3332,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     {
         resumed.IsReadOnly = false;
         resumed.MarkResumed();
+        // A stored row the run pulls back out of history is a live tab of this app run from here on; its dot in the
+        // menu has to say so after the next retire, not the colour of a recorded fate from before this process.
+        resumed.MarkLiveThisRun();
         subAgentById[started.ChildId] = resumed;
         if (!stillDocked && !subAgents.Contains(resumed))
         {
@@ -3676,6 +3698,36 @@ internal sealed class SubAgentViewModel : NotifyingObject
 
     public string TaskSummary => ToolRowViewModel.Compact(Task, 120);
 
+    /// <summary>
+    /// The finished menu's row name: the sub-agent's own name - the same word its live tab was titled by, so a row the
+    /// retire moved into history can be matched back to the tab it came from - ahead of the task it ran. A row whose
+    /// task is empty is the name alone.
+    /// </summary>
+    public string HistoryName => Task.Length == 0 ? DisplayName : DisplayName + " · " + TaskSummary;
+
+    /// <summary>
+    /// The finished menu's row hover: the whole task, and - for a row that was a live tab of this app run, whose dot
+    /// wears the live tint instead of its fate colour - the outcome's words underneath, so the fate the dot no longer
+    /// spells out stays one hover away. A replayed row's dot already says how it ended; its hover is the task alone.
+    /// </summary>
+    public string HistoryToolTip => WasLiveTab ? Task + "\n" + StatusText : Task;
+
+    /// <summary>
+    /// True for a child this app run watched live: every child a live start event created, and a stored row the
+    /// scheduler pulled back out of the menu and ran again (<see cref="MarkLiveThisRun"/>). A row the store replayed
+    /// into the menu and nothing ran since, never did - which is what the menu's dot says with its colour: lived tabs
+    /// wear the shell's live tint, replayed rows keep the colour of their recorded fate.
+    /// </summary>
+    public bool WasLiveTab => wasLiveThisRun || !FromStoredRow;
+
+    private bool wasLiveThisRun;
+
+    /// <summary>
+    /// Sets the lived mark the finished menu's dot reads. The resume of a stored row calls it: the run it is about to
+    /// take makes that row a live tab of this app run, whatever it was before the pull-back.
+    /// </summary>
+    internal void MarkLiveThisRun() => wasLiveThisRun = true;
+
     public TranscriptViewModel Transcript { get; }
 
     public RelayCommand StopCommand { get; }
@@ -3923,6 +3975,8 @@ internal sealed class SubAgentViewModel : NotifyingObject
     {
         OnPropertyChanged(nameof(Kind));
         OnPropertyChanged(nameof(TabTitle));
+        OnPropertyChanged(nameof(HistoryName));
+        OnPropertyChanged(nameof(HistoryToolTip));
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(StatusNote));
         OnPropertyChanged(nameof(HasStatusNote));
@@ -4018,8 +4072,8 @@ internal sealed class SubAgentViewModel : NotifyingObject
 }
 
 /// <summary>
-/// The menu at the end of the bottom group's title bar that lists finished sub-agents in finish order. The title bar shows
-/// it as a compact button with the item count; a kept item opens its read-only tab.
+/// The menu at the end of the bottom group's title bar that lists finished sub-agents, newest end first. The title bar
+/// shows it as a compact button with the item count; a kept item opens its read-only tab.
 /// </summary>
 internal sealed class FinishedSubAgentsViewModel : ObservableObject
 {
@@ -4027,7 +4081,9 @@ internal sealed class FinishedSubAgentsViewModel : ObservableObject
 
     public ObservableCollection<SubAgentViewModel> Items { get; } = [];
 
-    /// <summary><c>已结束 (3)</c>: derived on every read so a language switch only has to re-raise it.</summary>
+    /// <summary>
+    /// <c>已结束 (3)</c>: derived on every read so a language switch only has to re-raise it.
+    /// </summary>
     public string Title => SessionStrings.FinishedAgentsMenu(Items.Count);
 
     public string Hint => SessionStrings.FinishedAgentsHint;
@@ -4046,12 +4102,17 @@ internal sealed class FinishedSubAgentsViewModel : ObservableObject
     /// <summary>Also enables the title-bar button: an empty menu has nothing to list.</summary>
     public bool HasItems => Items.Count > 0;
 
-    /// <summary>Points the menu at one session's finished sub-agents; choosing one opens its read-only tab.</summary>
+    /// <summary>
+    /// Points the menu at one session's finished sub-agents; choosing one opens its read-only tab. The rows read newest
+    /// first - by when each run ended, which a replayed row knows as its own last activity - so the child the user just
+    /// closed sits at the top; the session's own <c>finished</c> list keeps its run-end order for everything else that
+    /// reads it (the tree's snapshot, the resume scan).
+    /// </summary>
     public void Bind(IEnumerable<SubAgentViewModel> items, Action<SubAgentViewModel> openAction)
     {
         open = openAction;
         Items.Clear();
-        foreach (var item in items)
+        foreach (var item in items.OrderByDescending(item => item.FinishedAt ?? DateTimeOffset.MinValue))
         {
             Items.Add(item);
         }

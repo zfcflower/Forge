@@ -67,7 +67,7 @@ FORGE 的扩展执行全部在进程外：主程序保持 Native AOT、不可变
 ## 11.6 Plugin Worker
 
 - 一个进程一个插件；协议 `worker.load/execute/command/prompt/unload/stop`。
-- 加载前校验：入口程序集只读一次进内存，先算 SHA-256 与 `assemblySha256` 比对，再用**同一份字节**装载；`files` 每项必须存在且哈希一致；目录中任何未被声明（递归）的文件一律拒绝并指名。
+- 加载前校验：入口程序集只读一次进内存，先算 SHA-256 与 `assemblySha256` 比对，再用**同一份字节**装载；`files` 每项必须存在且哈希一致；目录中任何未被声明（递归）的文件一律拒绝并指名。当前 Host 把入口也列入 `files`；Worker 为兼容旧 Host，允许入口只由 `assemblySha256` 覆盖。
 - **私有依赖只从已验证字节装载**：托管 `.dll` 按程序集简单名交给 `PluginLoadContext.FromVerifiedImages`（只从内存 `LoadFromStream`，不探测插件目录、不读 `.deps.json`）；非共享且未提供的依赖以 `FileNotFoundException` 指名失败，不回退磁盘。
 - **已验证插件进程内不装载任何本地库**：任何按文件头签名是本地二进制（无 CLI 头的 PE、ELF、Mach-O 含 fat）的文件一律拒绝（与扩展名无关）；ALC 的 `LoadUnmanagedDll` 抛 `DllNotFoundException` 而不是返回零，所以 `DllImport` 不可能拿到它。
 - 注册记录器校验全部非 UI 贡献：名称非空、同类不重复、枚举必须是已定义值、`run_code` 身份不得被工具或命令占用、Agent 必须有 prompt/model/合法 `maxOutputTokens`、工作流必须有 body、只带元数据的命令明确失败；不合法项以 `load_failed` 指名失败，不静默丢弃。
@@ -93,7 +93,7 @@ FORGE 的扩展执行全部在进程外：主程序保持 Native AOT、不可变
 - 运行回路 `ScriptHarness`：在 `Task.Run` 上跑，预算由 `WaitAsync` 收口；超时/取消先给 1 秒宽限，停下即普通错误结果，否则判为“被放弃、必须终止承载进程”；脚本返回 `Task` 时在同一预算下等待并解包；结果与日志有界后附在结果后。
 - 内层工具调用经 `host.tool_call` 回 Host → 主程序审批、限流、截断；未知工具与 `run_code` 自身永久拒绝（不递归）。
 - 预算与上限（`tools` 分区可改）：内部调用并发上限 1–32（默认 8）、返回结果字符上限 1000–400000（默认 40000）、单次内部结果上限 500–400000（默认 20000）、可见工具名单（逗号/分号/空白分隔，末尾 `*` 前缀通配，空白 = 全部候选）；`run_code` 的 `timeout_seconds` 默认 60、上限 600；`--script-workers` 默认 4 是并发槽位，不是池。
-- **脚本面**：只收“插件工具 + 所有 `SideEffect == ReadOnly` 的文件/web/MCP 三族”；`write`/`edit`/`bash`、git/PR 写工具、扩展编写工具一概不进（既调不到也看不到）；同名遮蔽：插件工具先注册者生效，并剔除与内置/会话策略/文件/git/PR/web 工具同名的插件工具；用户关掉的工具同样从脚本面去掉。
+- **脚本面**：只收“插件工具 + 所有 `SideEffect == ReadOnly` 的文件/web/MCP 三族”；`write`/`edit`/`copy`/`move`/`delete`/`bash`、所有 git/PR 工具（含只读）、扩展编写工具一概不进（既调不到也看不到）；同名遮蔽：插件工具先注册者生效，并剔除与内置/会话策略/文件/git/PR/web 工具同名的插件工具；用户关掉的工具同样从脚本面去掉。
 - **脚本内审批折叠**：同（run, tool）的待审调用串行——首个建卡，其余等在卡后（不建卡、不发 toast），卡上显示“本脚本还有 N 个同类调用在等待”，并有“允许本次运行内剩余同类调用”按钮；许可只存在 handler 内存里（以 runId 为键，FIFO ≤64），不落盘。
 - 嵌套规则：`run_code` 只能在顶层执行；脚本或插件回调里再调 `run_code` 一律拒绝；`$run_code` 是保留身份，插件不得以它注册或执行。
 - 实测（正式路径）：暖调用约 134–137 ms（进程创建约 48 ms、新进程首次初始化约 38 ms、杀树约 2 ms）；实现自测约 129–131 ms。预启动池未采用。

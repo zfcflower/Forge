@@ -1480,6 +1480,24 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Runtimes.Release(holder.Id);
         }
 
+        // The old root's still-active agent tabs follow the workspace to the taker in place - the same re-home a promotion
+        // does. Left pointing at the archived old root, their turn gate would reject the next message as "taken over" and
+        // their in-memory root would disagree with the store the handover just re-homed them in. An archived or removed
+        // agent tab is a read-only view of a history row and stays with the old root; the taker's own tab is opened below.
+        var takerRuntime = composition.Runtimes.Get(taker);
+        foreach (var view in agentViews.Keys.ToArray())
+        {
+            if (!string.Equals(view.AgentSessionRoot?.Id, holder.Id, StringComparison.Ordinal)
+                || string.Equals(view.SessionId, taker.Id, StringComparison.Ordinal)
+                || view.Info.Status != SessionStatus.Active)
+            {
+                continue;
+            }
+
+            view.RehomeTo(taker, takerRuntime);
+            view.TurnGate = token => CheckTurnAsync(taker.Id, token);
+        }
+
         await OpenSessionAsync(taker, CancellationToken.None).ConfigureAwait(true);
         await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
         if (done.Warning is { } warning)

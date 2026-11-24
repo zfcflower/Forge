@@ -74,6 +74,7 @@ internal sealed partial class SessionWorkspaceViewModel
         }
 
         OnPropertyChanged(nameof(HasSessionAuthorizations));
+        OnPropertyChanged(nameof(HasComposerStrip));
     }
 
     /// <summary>The user pressed the revoke button of one mark: that pair is gone for good (a new <c>@</c> pick is a new grant).</summary>
@@ -271,28 +272,51 @@ internal sealed partial class SessionWorkspaceViewModel
     /// <summary>
     /// Interjections of a finished agent-session turn that the loop never delivered. A receipt among them is not sent as a new
     /// turn (that is the unattended loop the feature forbids): it goes through the shell's path like the root's leftovers
-    /// (<see cref="DeliverSessionReply"/>). The root instance's own inbox is never read here - it belongs to the root's tab.
+    /// (<see cref="DeliverSessionReply"/>). Everything else is a message the user typed at this tab, so it goes back to the
+    /// front of the queue, oldest first - the same result the root's leftovers get, and the next turn sends it. The root
+    /// instance's own inbox is never read here - it belongs to the root's tab.
     /// </summary>
-    internal void TakeUndeliveredReplies()
+    internal void TakeUndeliveredInterjections()
     {
-        if (disposed)
+        if (disposed || agentChildSessionId is not { Length: > 0 } childSessionId)
         {
             return;
         }
 
-        AgentInstance? child = agentInstance;
-        if (child is null)
+        // The first turn's instance is registered on the run's own thread before the tab learns of it, so a turn whose start
+        // event has not materialised the tab yet still has one to ask.
+        agentInstance ??= runtime?.FindUserChild(childSessionId);
+        if (agentInstance is not { } child)
         {
             return;
         }
 
-        foreach (var leftover in child.TakeInterjections())
+        var leftovers = child.TakeInterjections();
+        for (var index = leftovers.Count - 1; index >= 0; index--)
         {
+            var leftover = leftovers[index];
             if (SessionReplyViewModel.IsReply(leftover.Text))
             {
                 DeliverSessionReply(leftover.Text);
+                continue;
             }
+
+            // The chip that stood for it is replaced by the queued one below, here rather than in ScheduleNext: a turn end is
+            // the moment the strip is read, and it must never show the same message twice.
+            if (queued.FirstOrDefault(chip => ReferenceEquals(chip.Interjection, leftover)) is { } pending)
+            {
+                queued.Remove(pending);
+            }
+
+            queued.Insert(
+                0,
+                new QueuedMessageViewModel(
+                    new ComposerPrompt(leftover.Text, [.. leftover.Attachments]),
+                    isInterjection: false,
+                    WithdrawQueued));
         }
+
+        OnQueueChanged();
     }
 
     /// <summary>Puts session mentions into the picker of a tab the shell has just built.</summary>
