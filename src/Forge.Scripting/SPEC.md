@@ -9,13 +9,12 @@ depends-on: [forge-script-runtime]
 
 # Forge.Scripting
 
-Extension Host 的动态 C# 插件编译/缓存/加载层,以及 `run_code` 的编译服务:Roslyn 编译、源码哈希缓存、版本化产物、可卸载 AssemblyLoadContext、脚本白名单与产物发射。JIT 侧项目(不 AOT),只依赖 BCL + Roslyn + `Forge.Plugin.Sdk` + `Forge.ScriptRuntime`;脚本的**执行面与运行回路在 `Forge.ScriptRuntime`**,一次性执行器不引用本模块。
+Extension Host 的动态 C# 插件编译/缓存/加载层,以及 `run_code` 的编译服务:Roslyn 编译、源码哈希缓存、版本化产物、可卸载 AssemblyLoadContext、脚本白名单与产物发射。JIT 侧项目(不 AOT),只依赖 BCL + Roslyn + `Forge.Plugin.Sdk` + `Forge.ScriptRuntime`;脚本的**执行面与运行回路在 `Forge.ScriptRuntime`**,脚本只在一次性执行器(`Forge.ScriptExecutor`)里装载并运行,执行器不引用本模块、只装载产物。
 
 ## 边界
 
 - 插件编译:插件是普通类库(`IPlugin` 入口),不用 CSharpScript;不提供插件发现、注册、manifest 读取(属 ExtensionHost)。
-- 脚本编译服务:公开入口 `ScriptCodeCompiler.CompileAsync(code, options, ct) → ScriptCompilation`(可装载 PE 映像 + `ScriptArtifactDescriptor`),Host 持有**唯一**实例,即唯一缓存所有者。脚本可见表面(`ScriptGlobals`/`ToolsFacade`/`ToolCallException`)在 `Forge.ScriptRuntime`;内层工具调用只经传入的 `IHostFacade` 离开进程,本模块不做工具解析、审批、会话/调用链绑定或结果截断策略(均由主程序执行)。
-- 本模块只负责编译与产物校验,不提供进程内运行入口:脚本只在一次性执行器(`Forge.ScriptExecutor`)里装载并运行,执行器**不**引用本模块,它只装载产物。
+- 脚本编译服务:公开入口 `ScriptCodeCompiler.CompileAsync(code, options, ct) → ScriptCompilation`(可装载 PE 映像 + `ScriptArtifactDescriptor`),Host 持有**唯一**实例,即唯一缓存所有者。脚本可见表面(`ScriptGlobals`/`ToolsFacade`/`ToolCallException`)在 `Forge.ScriptRuntime`;内层工具调用只经传入的 `IHostFacade` 离开进程,工具解析、审批、会话/调用链绑定与结果截断策略全由主程序决定。
 - 不做语法白名单/安全分析(插件):权限由 `forge-approval` 审批与 Worker 进程隔离承担,ALC 只负责加载与卸载。脚本侧相反:保留白名单 + 语义检查。
 
 ## 关键决策
