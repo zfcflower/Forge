@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace Forge.Core.Providers;
 
 /// <summary>One connected provider as the resolver sees it: its id, the name the user sees, and the model ids it lists.</summary>
@@ -151,95 +149,6 @@ public static class ModelResolver
                         normalized.Contains(listed, StringComparison.Ordinal));
             });
         return contains.Count > 0 ? Settle(contains) : ModelResolution.UnknownModel;
-    }
-
-    /// <summary>
-    /// The listed models closest to a text that matched nothing: shared alphanumeric tokens (<c>luna-6.1</c> →
-    /// <c>gpt-6-luna</c>), ranked by how many they share and then by how close the spelling is. A suggestion is never a
-    /// match — the caller offers it so the next attempt can use the real id instead of guessing four more times.
-    /// </summary>
-    public static IReadOnlyList<ResolvedModel> Suggest(string? text, IReadOnlyList<ProviderModels> providers, int max = 5)
-    {
-        ArgumentNullException.ThrowIfNull(providers);
-        var needle = Tokens(text);
-        if (needle.Count == 0 || max <= 0)
-        {
-            return [];
-        }
-
-        var typed = text!.Trim().Length;
-        var ranked = new List<(int Shared, int Distance, ResolvedModel Model)>();
-        foreach (var provider in providers)
-        {
-            foreach (var model in provider.Models)
-            {
-                var listed = Tokens(model);
-                var shared = 0;
-                foreach (var token in needle)
-                {
-                    if (listed.Contains(token))
-                    {
-                        shared++;
-                    }
-                }
-
-                if (shared > 0)
-                {
-                    ranked.Add((shared, Math.Abs(model.Length - typed), new ResolvedModel(provider.ProviderId, model)));
-                }
-            }
-        }
-
-        return ranked
-            .OrderByDescending(static entry => entry.Shared)
-            .ThenBy(static entry => entry.Distance)
-            .ThenBy(static entry => entry.Model.Model, StringComparer.Ordinal)
-            .Take(max)
-            .Select(static entry => entry.Model)
-            .ToArray();
-    }
-
-    /// <summary>The words of a model id: split on every non-alphanumeric and between letters and digits; single
-    /// characters are dropped because every id shares them.</summary>
-    private static HashSet<string> Tokens(string? id)
-    {
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(id))
-        {
-            return tokens;
-        }
-
-        var builder = new StringBuilder(16);
-        var digits = false;
-        foreach (var character in id)
-        {
-            if (!char.IsLetterOrDigit(character))
-            {
-                Flush(tokens, builder);
-                continue;
-            }
-
-            if (builder.Length > 0 && digits != char.IsDigit(character))
-            {
-                Flush(tokens, builder);
-            }
-
-            digits = char.IsDigit(character);
-            builder.Append(character);
-        }
-
-        Flush(tokens, builder);
-        return tokens;
-
-        static void Flush(HashSet<string> into, StringBuilder from)
-        {
-            if (from.Length > 1)
-            {
-                into.Add(from.ToString());
-            }
-
-            from.Clear();
-        }
     }
 
     /// <summary>

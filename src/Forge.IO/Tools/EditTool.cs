@@ -110,8 +110,7 @@ public sealed class EditTool : ToolBase
             if (occurrences == 0)
             {
                 return new ToolResult(
-                    $"{Definition.Name}: no match for old_string in '{display}' ({CountLines(text)} lines); nothing changed."
-                    + Diagnose(text, oldString),
+                    $"{Definition.Name}: no match for old_string in '{display}' ({CountLines(text)} lines); nothing changed.",
                     IsError: true);
             }
 
@@ -143,131 +142,6 @@ public sealed class EditTool : ToolBase
             return new ToolResult($"replaced {replacedCount} {unit} in {display} (line {line})");
         }
     }
-
-    /// <summary>
-    /// Why a literal match missed, in at most two lines: the line of the file closest to the payload's own lines and where
-    /// it diverges, and whether the payload carries the two characters <c>\</c> + <c>r</c> that a model writes when it
-    /// believes the file is CRLF (matching runs in LF space, so no <c>\r</c> is ever needed). Empty when there is nothing
-    /// to add, and cheap: one pass over the lines whose first character could start an anchor.
-    /// </summary>
-    private static string Diagnose(string text, string oldString)
-    {
-        var hints = new List<string>(2);
-        if (HasLiteralEscape(oldString))
-        {
-            hints.Add("old_string contains '\\' followed by 'r' or 'n': those are two literal characters, not a line break; matching runs on LF text, so no \\r is needed.");
-        }
-
-        if (NearestLine(text, oldString) is { } nearest)
-        {
-            hints.Add(nearest);
-        }
-
-        return hints.Count == 0 ? string.Empty : "\n" + string.Join('\n', hints);
-    }
-
-    /// <summary>True when the payload carries a backslash before <c>r</c> or <c>n</c> — the escape a model writes when it
-    /// thinks it has to spell a line break itself.</summary>
-    private static bool HasLiteralEscape(string text)
-    {
-        var span = text.AsSpan();
-        for (var index = 0; index < span.Length - 1; index++)
-        {
-            if (span[index] == '\\' && span[index + 1] is 'r' or 'n')
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// The line of the file closest to the payload's first three usable lines: the longest shared prefix, reported with the
-    /// character where the two part. A line that matches on its own is a different mistake from a payload that is wrong,
-    /// so it says so; a payload line the file continues is reported with the tail. One pass, no index.
-    /// </summary>
-    private static string? NearestLine(string text, string oldString)
-    {
-        var anchors = new List<string>(3);
-        foreach (var line in oldString.Split('\n'))
-        {
-            var trimmed = line.Trim();
-            if (trimmed.Length < 4)
-            {
-                continue;
-            }
-
-            anchors.Add(trimmed);
-            if (anchors.Count == 3)
-            {
-                break;
-            }
-        }
-
-        if (anchors.Count == 0)
-        {
-            return null;
-        }
-
-        var best = (Shared: 0, Number: 0, Line: string.Empty, Anchor: string.Empty);
-        var number = 0;
-        var remaining = text.AsSpan();
-        while (remaining.Length > 0)
-        {
-            number++;
-            var newline = remaining.IndexOf('\n');
-            var line = newline < 0 ? remaining : remaining[..newline];
-            var trimmedLine = line.Trim();
-            foreach (var anchor in anchors)
-            {
-                var shared = CommonPrefix(anchor, trimmedLine);
-                if (shared == anchor.Length && shared == trimmedLine.Length)
-                {
-                    return $"line {number} matches an old_string line on its own; the surrounding lines are what differ.";
-                }
-
-                // Four shared characters is enough to recognize a line; the best one alone becomes the hint.
-                if (shared >= Math.Min(anchor.Length, 4) && shared > best.Shared)
-                {
-                    best = (shared, number, trimmedLine.ToString(), anchor);
-                }
-            }
-
-            if (newline < 0)
-            {
-                break;
-            }
-
-            remaining = remaining[(newline + 1)..];
-        }
-
-        if (best.Shared == 0)
-        {
-            return null;
-        }
-
-        return best.Shared == best.Anchor.Length
-            ? $"closest line {best.Number}: your line ends at character {best.Shared}; the file continues \"{Clip(best.Line.AsSpan(best.Shared))}\"."
-            : $"closest line {best.Number} differs at character {best.Shared + 1}: \"{Clip(best.Anchor)}\" vs \"{Clip(best.Line)}\".";
-    }
-
-    /// <summary>How many leading characters two lines share.</summary>
-    private static int CommonPrefix(ReadOnlySpan<char> left, ReadOnlySpan<char> right)
-    {
-        var limit = Math.Min(left.Length, right.Length);
-        var index = 0;
-        while (index < limit && left[index] == right[index])
-        {
-            index++;
-        }
-
-        return index;
-    }
-
-    /// <summary>One short excerpt for a hint: enough to recognize the line, never a whole one.</summary>
-    private static string Clip(ReadOnlySpan<char> text) =>
-        text.Length <= 60 ? text.ToString() : string.Concat(text[..60], "…");
 
     /// <summary>True when the payload holds nothing but line breaks and carries a carriage return.</summary>
     private static bool IsLineBreaksOnly(string text)

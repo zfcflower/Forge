@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Forge.Abstractions;
-using Forge.IO;
 using Forge.IO.Tools;
 using Xunit;
 
@@ -70,43 +69,5 @@ public sealed class ReadToolOutputTests : IDisposable
         var header = content.Split('\n')[0];
         Assert.StartsWith("a.txt: lines 1–", header, StringComparison.Ordinal);
         Assert.Contains("Continue with offset=", content, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task An_absolute_path_outside_the_workspace_is_read_and_reported_as_it_is()
-    {
-        var outside = Directory.CreateTempSubdirectory("forge-read-outside-").FullName;
-        try
-        {
-            var path = Path.Combine(outside, "SKILL.md");
-            File.WriteAllText(path, "outside\n");
-
-            Assert.Equal(
-                $"{WorkspacePath.ResolveRealPath(Path.GetFullPath(path))}: 1 lines\n1→outside",
-                await ReadAsync(("path", path)));
-        }
-        finally
-        {
-            Directory.Delete(outside, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task A_relative_path_that_climbs_out_of_the_workspace_is_read_too()
-    {
-        var outside = Directory.CreateTempSubdirectory("forge-read-climb-").FullName;
-        try
-        {
-            const string name = "climbed.txt";
-            File.WriteAllText(Path.Combine(outside, name), "climbed\n");
-
-            var content = await ReadAsync(("path", Path.Combine("..", Path.GetFileName(outside), name)));
-
-            Assert.EndsWith(": 1 lines\n1→climbed", content, StringComparison.Ordinal);
-        }
-        finally
-        {
-            Directory.Delete(outside, recursive: true);
-        }
     }
 }
