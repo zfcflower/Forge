@@ -1,11 +1,13 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Forge.App.Localization;
 
 namespace Forge.App.Views;
 
@@ -130,6 +132,10 @@ internal sealed class SelectableCard : Border
     private readonly Stack<Visual> walk = new();
 
     private ISelectableBlock? pressed;
+    private ISelectableBlock? contextBlock;
+    private MenuFlyout? selectionMenu;
+    private MenuItem? copyItem;
+    private MenuItem? selectAllItem;
     private IPointer? pointer;
     private Point pressedAt;
     private bool dragging;
@@ -158,14 +164,35 @@ internal sealed class SelectableCard : Border
     /// </summary>
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        var properties = e.GetCurrentPoint(this).Properties;
+
+        // A right press is the menu's: the selection it was opened on has to survive, and the block that was hit gets the
+        // card's menu (a block that appeared after attach - an expanded tool output - still carries the framework's own
+        // single-block menu at this point). A left press is a new gesture, handled below.
+        if (properties.IsRightButtonPressed)
+        {
+            // Collect first: the menu decides "select all" from the blocks this card holds, and a card that was never
+            // pressed has not collected them yet.
+            Collect();
+            contextBlock = BlockOf(e.Source as Visual);
+            if (contextBlock is Control control)
+            {
+                control.ContextFlyout = Menu();
+            }
+
+            return;
+        }
+
+        if (!properties.IsLeftButtonPressed)
         {
             return;
         }
 
-        if (owner is { } other && !ReferenceEquals(other, this))
+        // A left press drops the selection, this card's or another's: a plain click deselects, and a drag paints a new range
+        // from where it lands. Clearing on the press, not on release, also keeps a click inside the selection predictable.
+        if (owner is { } holder)
         {
-            other.Clear();
+            holder.Clear();
         }
 
         pressedAt = e.GetPosition(this);
@@ -467,9 +494,87 @@ internal sealed class SelectableCard : Border
             {
                 return;
             }
+
+            // A press inside a menu or a flyout is not a press in the transcript: dropping the selection there would empty it
+            // before the menu's Copy reads it.
+            if (visual is PopupRoot or OverlayPopupHost)
+            {
+                return;
+            }
         }
 
         Clear();
+    }
+
+    /// <summary>
+    /// The card's context menu. The framework's own menu copies the block it was opened on, which is only a slice of a card
+    /// selection; this one copies the selection the card holds (code blocks keep their fences, like Ctrl+C) and offers the
+    /// card's Ctrl+A as "select all". Enabled state is decided when the menu opens, because the hit block's own selection is
+    /// the fallback when the card holds none.
+    /// </summary>
+    private MenuFlyout Menu()
+    {
+        if (selectionMenu is not null)
+        {
+            return selectionMenu;
+        }
+
+        copyItem = new MenuItem
+        {
+            Header = Loc.Instance[ChatStrings.SelectionCopy],
+            InputGesture = new KeyGesture(Key.C, KeyModifiers.Control),
+        };
+        copyItem.Click += (_, _) => CopyFromMenu();
+        selectAllItem = new MenuItem
+        {
+            Header = Loc.Instance[ChatStrings.SelectionSelectAll],
+            InputGesture = new KeyGesture(Key.A, KeyModifiers.Control),
+        };
+        selectAllItem.Click += (_, _) => SelectAll();
+
+        var menu = new MenuFlyout();
+        menu.Items.Add(copyItem);
+        menu.Items.Add(selectAllItem);
+        menu.Opening += (_, _) =>
+        {
+            // Re-read the labels: a card lives long, and the language may change while its menu instance does not.
+            copyItem.Header = Loc.Instance[ChatStrings.SelectionCopy];
+            selectAllItem.Header = Loc.Instance[ChatStrings.SelectionSelectAll];
+            copyItem.IsEnabled = SelectedText() is { Length: > 0 } || contextBlock?.SelectedText is { Length: > 0 };
+            selectAllItem.IsEnabled = range.Count > 0;
+        };
+
+        return selectionMenu = menu;
+    }
+
+    private void CopyFromMenu()
+    {
+        // The card's selection wins: the framework's menu copied only the block it was opened on. Without a card selection the
+        // hit block keeps its own (a double-clicked word), which is what the framework menu did.
+        var text = SelectedText();
+        if (text is not { Length: > 0 } && contextBlock is { } block)
+        {
+            text = block.SelectedText;
+        }
+
+        if (text is { Length: > 0 } && TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+        {
+            _ = clipboard.SetTextAsync(text);
+        }
+    }
+
+    /// <summary>The selectable block a press landed on, by walking up from its source.</summary>
+    private static ISelectableBlock? BlockOf(Visual? source)
+    {
+        for (var visual = source; visual is not null; visual = visual.GetVisualParent())
+        {
+            if (visual is ISelectableBlock block)
+            {
+                return block;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Whether the keyboard focus sits inside this card, which is what makes it the target of Ctrl+A.</summary>
@@ -567,6 +672,12 @@ internal sealed class SelectableCard : Border
                 range.Add(block);
                 appliedStart.Add(-1);
                 appliedEnd.Add(-1);
+                if (block is Control control)
+                {
+                    // The card's menu replaces the framework's single-block one: Copy takes the card's selection (the block's
+                    // own when there is none) and Select all is the Ctrl+A of this card.
+                    control.ContextFlyout = Menu();
+                }
             }
             else
             {

@@ -1,6 +1,10 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Headless;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Forge.App.Changes.Markdown;
 using Forge.App.Views;
@@ -162,11 +166,91 @@ public sealed class TranscriptSelectionTests
         Assert.False(card.HasSelection);
         Assert.Equal(0, text.SelectionEnd);
 
-        // A press inside the card is that card's own business: it starts a word select or a new drag, not a clear.
+        // The root-level check leaves a press inside the card to the card itself (a left press clears there too; the drag
+        // needs the press to start a new range).
         card.SelectAll();
         card.ClearWhenPressOutside(text);
         Assert.True(card.HasSelection);
         return Task.CompletedTask;
+    });
+
+    /// <summary>
+    /// A left press drops the selection wherever it lands, the selected text included: a plain click deselects, and a drag
+    /// paints a new range from the press. Only the right press keeps it, because the context menu acts on it.
+    /// </summary>
+    [Fact]
+    public Task A_left_click_inside_the_card_drops_the_selection() => SharedUi.RunAsync(() =>
+    {
+        var text = new MarkdownTextBlock { Text = "select me", TextWrapping = TextWrapping.Wrap };
+        var card = new SelectableCard { Child = new StackPanel { Children = { text } } };
+        var window = new Window
+        {
+            Content = new Panel { Background = Brushes.Transparent, Children = { card } },
+            Width = 420,
+            Height = 200,
+        };
+        window.Show();
+        SharedUi.Settle(window);
+
+        card.SelectAll();
+        Assert.True(card.HasSelection);
+        var point = text.TranslatePoint(new Point(6, 4), window)!.Value;
+        window.MouseDown(point, MouseButton.Left, RawInputModifiers.None);
+        window.MouseUp(point, MouseButton.Left, RawInputModifiers.None);
+        SharedUi.Settle(window);
+
+        Assert.False(card.HasSelection);
+        Assert.Equal(text.SelectionStart, text.SelectionEnd);
+        return Task.CompletedTask;
+    });
+
+    /// <summary>
+    /// The card's context menu: right-clicking a block must not drop the selection (the menu is about it), Copy takes the
+    /// card's whole selection — not just the block it was opened on, which is what the framework's own menu did — and
+    /// Select all is the card's Ctrl+A.
+    /// </summary>
+    [Fact]
+    public Task The_context_menu_copies_the_card_selection_and_selects_it_all() => SharedUi.RunAsync(async () =>
+    {
+        var one = new MarkdownTextBlock { Text = "first paragraph", TextWrapping = TextWrapping.Wrap };
+        var two = new MarkdownCodeTextBlock { Text = "return Managed(path);", TextWrapping = TextWrapping.Wrap };
+        var card = new SelectableCard { Child = new StackPanel { Children = { one, two } } };
+        var window = new Window
+        {
+            Content = new Panel { Background = Brushes.Transparent, Children = { card } },
+            Width = 420,
+            Height = 200,
+        };
+        window.Show();
+        SharedUi.Settle(window);
+
+        card.SelectAll();
+        var point = two.TranslatePoint(new Point(6, 4), window)!.Value;
+        window.MouseDown(point, MouseButton.Right, RawInputModifiers.None);
+        window.MouseUp(point, MouseButton.Right, RawInputModifiers.None);
+        SharedUi.Settle(window);
+
+        Assert.True(card.HasSelection);
+        var menu = Assert.IsType<MenuFlyout>(two.ContextFlyout);
+        Assert.Same(menu, one.ContextFlyout);
+        var items = menu.Items.OfType<MenuItem>().ToArray();
+        Assert.Equal(2, items.Length);
+        Assert.Equal(new KeyGesture(Key.C, KeyModifiers.Control), items[0].InputGesture);
+        Assert.Equal(new KeyGesture(Key.A, KeyModifiers.Control), items[1].InputGesture);
+
+        // The card's selection is copied as a whole, code block fenced like Ctrl+C.
+        items[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, items[0]));
+        var copied = await window.Clipboard!.TryGetTextAsync();
+        Assert.NotNull(copied);
+        Assert.Contains("first paragraph", copied, StringComparison.Ordinal);
+        Assert.Contains("```", copied, StringComparison.Ordinal);
+        Assert.Contains("return Managed(path);", copied, StringComparison.Ordinal);
+
+        card.Clear();
+        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, items[1]));
+        Assert.True(card.HasSelection);
+        Assert.Equal("first paragraph".Length, one.SelectionEnd);
+        Assert.Equal("return Managed(path);".Length, two.SelectionEnd);
     });
 
     /// <summary>The point-to-character map the card's drag relies on: a point in a block lands on the character under it.</summary>

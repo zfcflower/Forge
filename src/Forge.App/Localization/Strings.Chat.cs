@@ -26,6 +26,11 @@ internal static class ChatStrings
     /// <summary>The caption under both rows: the thumbnail never re-encodes the stored image and the switch only changes what the model receives.</summary>
     public const string SettingsHint = "chat.settings.hint";
 
+    /// <summary>The transcript card's context menu: one card-wide selection, so Copy takes the whole selection.</summary>
+    public const string SelectionCopy = "chat.selection.copy";
+
+    public const string SelectionSelectAll = "chat.selection.selectAll";
+
     [ModuleInitializer]
     internal static void Register()
     {
@@ -42,5 +47,7 @@ internal static class ChatStrings
             SettingsHint,
             "缩略图只约束会话记录里显示时解码的大小，从不重新编码已存储的图片；此开关只决定模型是否收到这些图片，记录始终照常显示。",
             "The thumbnail edge only bounds how large a tool image is decoded for the transcript; the stored image is never re-encoded. The switch only decides whether the model receives the images — the transcript always shows them.");
+        Loc.Register(SelectionCopy, "复制", "Copy");
+        Loc.Register(SelectionSelectAll, "全选", "Select all");
     }
 }
