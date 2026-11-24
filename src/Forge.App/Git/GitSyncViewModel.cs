@@ -1337,9 +1337,10 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         this.context = context;
         gitWrites = context.GitWrites;
 
+        // The row reads the workspace's git state, not the session's: switching to another session of the same worktree (a
+        // restore, a promoted session, the root and its agent session) keeps the reads and only the write policy changes.
         var active = HasContext;
-        var changed = !string.Equals(previous.SessionId, context.SessionId, StringComparison.Ordinal)
-            || !string.Equals(previous.WorkingDirectory, context.WorkingDirectory, StringComparison.Ordinal);
+        var changed = !string.Equals(previous.WorkingDirectory, context.WorkingDirectory, StringComparison.Ordinal);
         if (changed)
         {
             // A read belongs to the context it was started for: it is cancelled and can no longer apply anything. A
@@ -1355,11 +1356,11 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
         if (changed || !active)
         {
-            // Nothing of the previous session may stay on screen while the new read is in flight.
+            // Nothing of the previous workspace may stay on screen while the new read is in flight.
             Clear();
         }
 
-        if (active)
+        if (active && changed)
         {
             RequestRefresh();
         }

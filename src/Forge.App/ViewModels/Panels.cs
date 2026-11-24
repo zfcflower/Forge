@@ -649,10 +649,22 @@ internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
 
     public void Attach(PanelContext context)
     {
+        // The file tree, its expansion and the changed-file list belong to the directory, not to the session: a tab switch
+        // inside one worktree (a restore, a promotion that reopens a tab, two sessions of one branch) keeps them. Only the
+        // session's review marks follow, and the changes panel attaches on its own for those.
+        var sameWorkspace = context.HasSession
+            && Context.HasSession
+            && index is not null
+            && string.Equals(Context.WorkingDirectory, context.WorkingDirectory, StringComparison.OrdinalIgnoreCase);
         var changed = !string.Equals(Context.SessionId, context.SessionId, StringComparison.Ordinal);
         Context = context;
         OnPropertyChanged(nameof(Context));
         RaiseCounts();
+        if (sameWorkspace)
+        {
+            return;
+        }
+
         if (changed)
         {
             expandedPaths.Clear();

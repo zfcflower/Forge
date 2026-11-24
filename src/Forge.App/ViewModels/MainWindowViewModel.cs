@@ -544,11 +544,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// The two trees of the left column answer the same questions about the same sessions; every "refresh", "mark running"
     /// or "active session" notification has to reach both, or one panel shows stale rows.
     /// </summary>
-    private async Task RefreshTreesAsync(CancellationToken ct)
+    private async Task RefreshTreesAsync(CancellationToken ct, bool reuseStaleGitReads = false, bool refreshConflicts = true)
     {
-        await GeneralChats.RefreshAsync(ct).ConfigureAwait(true);
-        await Projects.RefreshAsync(ct).ConfigureAwait(true);
-        await RefreshConflictSnapshotAsync(ct).ConfigureAwait(true);
+        await GeneralChats.RefreshAsync(ct, reuseStaleGitReads).ConfigureAwait(true);
+        await Projects.RefreshAsync(ct, reuseStaleGitReads).ConfigureAwait(true);
+        if (refreshConflicts)
+        {
+            await RefreshConflictSnapshotAsync(ct).ConfigureAwait(true);
+        }
     }
 
     /// <summary>
@@ -2007,14 +2010,24 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                    StringComparison.Ordinal);
     }
 
-    private async Task RefreshTreesAfterLifecycleAsync()
+    /// <param name="gitChanged">
+    /// The flow moved a branch, a checkout, a worktree or a merge, so the menus' cached git reads are stale now. A flow
+    /// that only changed session rows (a restore into an existing directory, an archive, a session removal) passes false:
+    /// the rebuild then serves the cached reads even past their lifetime so the rows move at once, and a fresh rebuild
+    /// follows in the background to pick up whatever changed outside Forge. The conflict snapshot is workspace git state
+    /// too, so only a changed checkout refreshes it here; the next turn end or manual refresh reads it anyway.
+    /// </param>
+    private async Task RefreshTreesAfterLifecycleAsync(bool gitChanged = true)
     {
-        // A lifecycle flow may have moved a branch, a checkout or a merge: the menus' cached git reads are stale now.
-        Projects.InvalidateGitState();
-        GeneralChats.InvalidateGitState();
+        if (gitChanged)
+        {
+            Projects.InvalidateGitState();
+            GeneralChats.InvalidateGitState();
+        }
+
         try
         {
-            await RefreshTreesAsync(CancellationToken.None).ConfigureAwait(true);
+            await RefreshTreesAsync(CancellationToken.None, reuseStaleGitReads: !gitChanged, refreshConflicts: gitChanged).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
         {

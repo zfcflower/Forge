@@ -57,18 +57,21 @@ internal sealed partial class MainWindowViewModel
         await TakeOverAsync(holder, HandoverIntent.NewSession(create with { Branch = branch }), ct).ConfigureAwait(true);
     }
 
-    /// <summary>HEAD, a running merge / rebase and the sparse flag of one workspace; read at tree refresh, never on menu open.</summary>
+    /// <summary>
+    /// HEAD, a running merge / rebase and the sparse flag of one workspace; read at tree refresh, never on menu open. The
+    /// head and the operation come from one call (<see cref="GitCli.GetCheckoutStateAsync"/>): this runs for every
+    /// registered worktree directory on every cold refresh, and process startup is what it costs.
+    /// </summary>
     private static async Task<WorkspaceGitState> ReadWorkspaceStateAsync(GitCli git, string directory, CancellationToken ct)
     {
-        var head = await git.GetHeadAsync(directory, ct).ConfigureAwait(false);
+        var (head, operation) = await git.GetCheckoutStateAsync(directory, ct).ConfigureAwait(false);
         if (head.Kind == GitHeadKind.NotRepository)
         {
             return new WorkspaceGitState(head.Kind, false, false);
         }
 
-        var conflict = await git.GetConflictStateAsync(directory, ct).ConfigureAwait(false);
         var sparse = await git.GetSparseConfigAsync(directory, ct).ConfigureAwait(false);
-        return new WorkspaceGitState(head.Kind, IsMergeOrRebase(conflict.Operation), sparse is not null);
+        return new WorkspaceGitState(head.Kind, IsMergeOrRebase(operation), sparse is not null);
     }
 
     private static bool IsMergeOrRebase(GitOperationKind operation) =>

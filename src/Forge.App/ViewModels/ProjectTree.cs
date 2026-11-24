@@ -732,6 +732,9 @@ internal sealed record PlannedTree(
     List<TreeNodePlan> Plans,
     ILookup<string, SessionInfo> StoredChildren);
 
+/// <summary>The project roots' HEAD as one refresh read it, and whether a stale cached answer was served for any of them.</summary>
+internal sealed record ProjectHeadReads(IReadOnlyDictionary<string, GitHead> Heads, bool StaleUsed);
+
 /// <summary>One planned node of a rebuild; plain data, so the tree can be planned on a pool thread.</summary>
 internal sealed record TreeNodePlan(
     TreeNodeKind Kind,
@@ -1060,8 +1063,13 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// <summary>
     /// One rebuild at a time; a request that arrives while a rebuild runs is coalesced into a single follow-up run instead
     /// of being dropped, so a turn or watcher tick during a refresh is never lost.
+    /// <para><paramref name="reuseStaleGitReads"/> serves this rebuild from the cached git reads even when they are older
+    /// than <see cref="GitStateLifetime"/>: a lifecycle action (archive, promotion, rename, a restore with the directory
+    /// still there) changes no checkout, worktree or branch, so re-reading git before the rows can move only delays them.
+    /// When any cached read was stale, one fresh rebuild follows in the background and corrects whatever changed outside
+    /// Forge.</para>
     /// </summary>
-    public async Task RefreshAsync(CancellationToken ct)
+    public async Task RefreshAsync(CancellationToken ct, bool reuseStaleGitReads = false)
     {
         if (busy)
         {
@@ -1071,12 +1079,13 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
 
         busy = true;
         RefreshCommands();
+        var staleUsed = false;
         try
         {
             do
             {
                 refreshPending = false;
-                await RefreshOnceAsync(ct).ConfigureAwait(true);
+                staleUsed = await RefreshOnceAsync(ct, reuseStaleGitReads).ConfigureAwait(true);
             }
             while (refreshPending);
         }
@@ -1084,6 +1093,11 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         {
             busy = false;
             RefreshCommands();
+        }
+
+        if (reuseStaleGitReads && staleUsed)
+        {
+            _ = RefreshAsync(CancellationToken.None);
         }
     }
 
@@ -1217,7 +1231,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         }
 
         SetStatus(promoted is null ? default : LocText.Literal(ProjectStrings.PromotedToMain(promoted.Title)));
-        await RefreshAsync(ct).ConfigureAwait(true);
+        await RefreshAsync(ct, reuseStaleGitReads: true).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -1234,7 +1248,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         await BackgroundRead.RunAsync(token => catalog.SetStatusAsync(sessionId, SessionStatus.Archived, token), ct)
             .ConfigureAwait(true);
         SessionArchived?.Invoke(sessionId);
-        await RefreshAsync(ct).ConfigureAwait(true);
+        await RefreshAsync(ct, reuseStaleGitReads: true).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -1259,17 +1273,17 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             SessionPromoted?.Invoke(rootSessionId, promoted);
         }
 
-        await RefreshAsync(ct).ConfigureAwait(true);
+        await RefreshAsync(ct, reuseStaleGitReads: true).ConfigureAwait(true);
     }
 
     public async Task RenameAsync(string sessionId, string title, CancellationToken ct)
     {
         await BackgroundRead.RunAsync(token => catalog.RenameAsync(sessionId, title, token), ct).ConfigureAwait(true);
         SessionRenamed?.Invoke(sessionId, title);
-        await RefreshAsync(ct).ConfigureAwait(true);
+        await RefreshAsync(ct, reuseStaleGitReads: true).ConfigureAwait(true);
     }
 
-    private async Task RefreshOnceAsync(CancellationToken ct)
+    private async Task<bool> RefreshOnceAsync(CancellationToken ct, bool reuseStaleGitReads)
     {
         try
         {
@@ -1282,14 +1296,17 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             var running = RunningSessionIds();
             var agents = SnapshotAgentTrees(roots);
             // The root HEADs and the menus' workspace reads are independent: they run side by side, not one after the other.
-            var headsRead = ReadProjectHeadsAsync(all, ct);
-            var gitRead = ReadMenuGitStateAsync(all, roots, ct);
+            var headsRead = ReadProjectHeadsAsync(all, ct, reuseStaleGitReads);
+            var gitRead = ReadMenuGitStateAsync(all, roots, ct, reuseStaleGitReads);
             await Task.WhenAll(headsRead, gitRead).ConfigureAwait(true);
             var heads = await headsRead.ConfigureAwait(true);
             var git = await gitRead.ConfigureAwait(true);
-            plainProjects = PlainProjectsOf(all, heads);
+            plainProjects = PlainProjectsOf(all, heads.Heads);
             remotelessProjects = await RemotelessProjectsOfAsync(all, plainProjects, ct).ConfigureAwait(true);
-            var planned = await Task.Run(() => Plan(all, roots, sessions, running, agents, heads, git), ct).ConfigureAwait(true);
+            var planned = await Task.Run(
+                    () => Plan(all, roots, sessions, running, agents, heads.Heads, git),
+                    ct)
+                .ConfigureAwait(true);
             var plans = planned.Plans;
             storedChildren = planned.StoredChildren;
             Merge(Sections, plans);
@@ -1297,10 +1314,12 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             GeneralSection = Sections.FirstOrDefault(static node => node.Kind == TreeNodeKind.General);
             SetStatus(scope != TreeScope.General && all.Count <= 1 ? ProjectStrings.EmptyProjects : default);
             OnPropertyChanged(nameof(SectionCount));
+            return heads.StaleUsed || git.ReusedStale;
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
             SetStatus(ProjectStrings.TreeFailed(exception.Message));
+            return false;
         }
     }
 
@@ -1327,16 +1346,18 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     }
 
     /// <summary>
-    /// The HEAD of every registered repository, read once per refresh so no row (and no render) starts a git process. The
-    /// reads run on the thread pool, at most <see cref="MaxConcurrentHeadReads"/> at a time; a repository whose read fails
-    /// is planned as "not a repository" and simply gets no main-checkout row. The general-chats panel plans no project rows,
-    /// so it reads nothing.
+    /// The HEAD of every registered repository, read once per refresh (and cached like the menus' workspace reads, so a
+    /// refresh that changes no checkout does not pay three git processes per project again) so no row (and no render)
+    /// starts a git process. The reads run on the thread pool, at most <see cref="MaxConcurrentHeadReads"/> at a time; a
+    /// repository whose read fails is planned as "not a repository" and simply gets no main-checkout row. The general-chats
+    /// panel plans no project rows, so it reads nothing. <paramref name="reuseStale"/> serves a cached answer even when it
+    /// is older than <see cref="GitStateLifetime"/> and reports it, so the caller can revalidate in the background.
     /// </summary>
-    private Task<IReadOnlyDictionary<string, GitHead>> ReadProjectHeadsAsync(IReadOnlyList<ProjectInfo> all, CancellationToken ct)
+    private Task<ProjectHeadReads> ReadProjectHeadsAsync(IReadOnlyList<ProjectInfo> all, CancellationToken ct, bool reuseStale)
     {
         if (scope == TreeScope.General)
         {
-            return Task.FromResult<IReadOnlyDictionary<string, GitHead>>(EmptyHeads);
+            return Task.FromResult(new ProjectHeadReads(EmptyHeads, false));
         }
 
         var roots = new List<string>(all.Count);
@@ -1349,35 +1370,69 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         }
 
         return roots.Count == 0
-            ? Task.FromResult<IReadOnlyDictionary<string, GitHead>>(EmptyHeads)
-            : BackgroundRead.RunAsync(token => ReadHeadsAsync(roots, token), ct);
+            ? Task.FromResult(new ProjectHeadReads(EmptyHeads, false))
+            : BackgroundRead.RunAsync(token => ReadHeadsAsync(roots, token, reuseStale), ct);
     }
 
-    private async Task<IReadOnlyDictionary<string, GitHead>> ReadHeadsAsync(IReadOnlyList<string> roots, CancellationToken ct)
+    private async Task<ProjectHeadReads> ReadHeadsAsync(IReadOnlyList<string> roots, CancellationToken ct, bool reuseStale)
     {
+        var now = Stopwatch.GetTimestamp();
         var heads = new ConcurrentDictionary<string, GitHead>(StringComparer.OrdinalIgnoreCase);
-        await Parallel.ForEachAsync(
-                roots,
-                new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentHeadReads, CancellationToken = ct },
-                async (root, token) =>
+        var reads = new List<string>(roots.Count);
+        var stale = false;
+        var known = new HashSet<string>(roots, StringComparer.OrdinalIgnoreCase);
+        foreach (var root in roots)
+        {
+            if (projectHeads.TryGetValue(root, out var cached) && (reuseStale || Fresh(cached.Stamp, now)))
+            {
+                if (reuseStale && !Fresh(cached.Stamp, now))
                 {
-                    GitHead head;
-                    try
-                    {
-                        head = await readHead(root, token).ConfigureAwait(false);
-                    }
-                    catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
-                    {
-                        // One unreadable repository must not fail the whole refresh: it plans as "not a repository",
-                        // which is exactly "no main-checkout row for this project".
-                        AppLogs.Tree.ZLogWarning($"could not read the HEAD of '{root}': {exception.Message}");
-                        head = GitHead.NotRepository;
-                    }
+                    stale = true;
+                }
 
-                    heads[root] = head;
-                })
-            .ConfigureAwait(false);
-        return heads;
+                heads[root] = cached.Head;
+                continue;
+            }
+
+            reads.Add(root);
+        }
+
+        // A project that left the tree takes its cached HEAD with it.
+        foreach (var key in projectHeads.Keys)
+        {
+            if (!known.Contains(key))
+            {
+                projectHeads.TryRemove(key, out _);
+            }
+        }
+
+        if (reads.Count > 0)
+        {
+            await Parallel.ForEachAsync(
+                    reads,
+                    new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentHeadReads, CancellationToken = ct },
+                    async (root, token) =>
+                    {
+                        GitHead head;
+                        try
+                        {
+                            head = await readHead(root, token).ConfigureAwait(false);
+                        }
+                        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+                        {
+                            // One unreadable repository must not fail the whole refresh: it plans as "not a repository",
+                            // which is exactly "no main-checkout row for this project".
+                            AppLogs.Tree.ZLogWarning($"could not read the HEAD of '{root}': {exception.Message}");
+                            head = GitHead.NotRepository;
+                        }
+
+                        projectHeads[root] = (head, Stopwatch.GetTimestamp());
+                        heads[root] = head;
+                    })
+                .ConfigureAwait(false);
+        }
+
+        return new ProjectHeadReads(heads, stale);
     }
 
     /// <summary>

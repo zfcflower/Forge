@@ -331,7 +331,7 @@ internal sealed partial class MainWindowViewModel
         if (current is null)
         {
             await NotifyOrReportAsync(title, RemovalStrings.Changed).ConfigureAwait(true);
-            await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+            await RefreshTreesAfterLifecycleAsync(gitChanged: false).ConfigureAwait(true);
             return;
         }
 
@@ -349,7 +349,7 @@ internal sealed partial class MainWindowViewModel
         if (rebuildError is not null)
         {
             await NotifyOrReportAsync(RemovalStrings.RestoreFailedTitle, rebuildError).ConfigureAwait(true);
-            await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+            await RefreshTreesAfterLifecycleAsync(gitChanged: false).ConfigureAwait(true);
             return;
         }
 
@@ -357,7 +357,7 @@ internal sealed partial class MainWindowViewModel
         if (!rebuilt && await RestoreBlockAsync(current, ct).ConfigureAwait(true) is { } block)
         {
             await NotifyOrReportAsync(RemovalStrings.RestoreFailedTitle, block).ConfigureAwait(true);
-            await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+            await RefreshTreesAfterLifecycleAsync(gitChanged: false).ConfigureAwait(true);
             return;
         }
 
@@ -408,7 +408,8 @@ internal sealed partial class MainWindowViewModel
             await NotifyOrReportAsync(RemovalStrings.RestoreFailedTitle, reason).ConfigureAwait(true);
         }
 
-        await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+        // Only a rebuilt directory changed git (a worktree came back); a restore into an existing one changes rows only.
+        await RefreshTreesAfterLifecycleAsync(gitChanged: rebuilt).ConfigureAwait(true);
     }
 
     /// <summary>"Restore workspace…" (7.5): rebuilds the directory only; its sessions stay removed until restored one by one.</summary>

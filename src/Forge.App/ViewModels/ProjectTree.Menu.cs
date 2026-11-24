@@ -198,6 +198,7 @@ internal sealed partial class ProjectTreeViewModel
     private static readonly TimeSpan GitStateLifetime = TimeSpan.FromSeconds(15);
 
     private readonly ConcurrentDictionary<string, (WorkspaceGitState? State, long Stamp)> gitStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (GitHead Head, long Stamp)> projectHeads = new(PathComparer);
     private readonly ConcurrentDictionary<string, (string? Branch, long Stamp)> defaultBranches = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -255,6 +256,7 @@ internal sealed partial class ProjectTreeViewModel
         gitStates.Clear();
         defaultBranches.Clear();
         worktreeLists.Clear();
+        projectHeads.Clear();
     }
 
     /// <summary>
@@ -265,7 +267,8 @@ internal sealed partial class ProjectTreeViewModel
     private async Task<MenuGitReads> ReadMenuGitStateAsync(
         IReadOnlyList<ProjectInfo> all,
         IReadOnlyList<SessionInfo> sessions,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool reuseStale)
     {
         var readState = ReadWorkspaceState;
         var readDefault = ReadDefaultBranch;
@@ -337,6 +340,8 @@ internal sealed partial class ProjectTreeViewModel
         var states = new ConcurrentDictionary<string, WorkspaceGitState>(StringComparer.OrdinalIgnoreCase);
         var defaults = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var lists = new ConcurrentDictionary<string, IReadOnlyList<GitWorktree>?>(PathComparer);
+        var staleReads = 0;
+        var staleServed = false;
 
         // The worktree lists come first: a registered worktree with no session gets a row of its own, and that row's
         // checkout state (HEAD kind, merge / rebase, sparse) is read below like every session workspace's - otherwise the
@@ -347,8 +352,16 @@ internal sealed partial class ProjectTreeViewModel
             var listWork = new List<Func<CancellationToken, Task>>(linked.Count);
             foreach (var (root, paths) in linked)
             {
-                listWork.Add(async token => lists[root] = await ReadWorktreeListAsync(readWorktrees, root, paths, now, token)
-                    .ConfigureAwait(false));
+                listWork.Add(async token =>
+                {
+                    var (list, stale) = await ReadWorktreeListAsync(readWorktrees, root, paths, now, reuseStale, token)
+                        .ConfigureAwait(false);
+                    lists[root] = list;
+                    if (stale)
+                    {
+                        Interlocked.Exchange(ref staleReads, 1);
+                    }
+                });
             }
 
             await RunReadsAsync(listWork, ct).ConfigureAwait(true);
@@ -390,8 +403,13 @@ internal sealed partial class ProjectTreeViewModel
         {
             foreach (var directory in directories)
             {
-                if (gitStates.TryGetValue(directory, out var cached) && Fresh(cached.Stamp, now))
+                if (gitStates.TryGetValue(directory, out var cached) && (reuseStale || Fresh(cached.Stamp, now)))
                 {
+                    if (reuseStale && !Fresh(cached.Stamp, now))
+                    {
+                        staleServed = true;
+                    }
+
                     if (cached.State is { } known)
                     {
                         states[directory] = known;
@@ -429,8 +447,13 @@ internal sealed partial class ProjectTreeViewModel
             foreach (var project in repositories.Values)
             {
                 var root = project.RootPath;
-                if (defaultBranches.TryGetValue(root, out var cached) && Fresh(cached.Stamp, now))
+                if (defaultBranches.TryGetValue(root, out var cached) && (reuseStale || Fresh(cached.Stamp, now)))
                 {
+                    if (reuseStale && !Fresh(cached.Stamp, now))
+                    {
+                        staleServed = true;
+                    }
+
                     if (cached.Branch is { } known)
                     {
                         defaults[root] = known;
@@ -465,7 +488,10 @@ internal sealed partial class ProjectTreeViewModel
 
         await RunReadsAsync(work, ct).ConfigureAwait(true);
 
-        return new MenuGitReads(states, defaults, lists);
+        return new MenuGitReads(states, defaults, lists)
+        {
+            ReusedStale = staleServed || Volatile.Read(ref staleReads) != 0,
+        };
     }
 
     /// <summary>Runs the refresh's git reads off the dispatcher, at most <see cref="MaxConcurrentHeadReads"/> at a time.</summary>
@@ -480,25 +506,27 @@ internal sealed partial class ProjectTreeViewModel
                 ct);
 
     /// <summary>
-    /// One repository's worktree list, off the dispatcher. The cached list is reused while it is fresh, unless a linked
-    /// directory appeared that the cached read was not asked about and that it does not name (a workspace made since):
-    /// that one sends git back to the list, so a new directory is never reported unregistered from an old answer, while
-    /// a directory already judged unregistered waits for the lifetime like every other read. A root that is gone, or a
-    /// read that failed, is null: unknown.
+    /// One repository's worktree list, off the dispatcher. The cached list is reused while it is fresh (or at any age when
+    /// <paramref name="reuseStale"/> asks for a lifecycle rebuild), unless a linked directory appeared that the cached read
+    /// was not asked about and that it does not name (a workspace made since): that one sends git back to the list, so a
+    /// new directory is never reported unregistered from an old answer, while a directory already judged unregistered
+    /// waits for the lifetime like every other read. A root that is gone, or a read that failed, is null: unknown, and a
+    /// reused answer older than the lifetime says so.
     /// </summary>
-    private async Task<IReadOnlyList<GitWorktree>?> ReadWorktreeListAsync(
+    private async Task<(IReadOnlyList<GitWorktree>? List, bool StaleServed)> ReadWorktreeListAsync(
         Func<string, CancellationToken, Task<IReadOnlyList<GitWorktree>>> read,
         string root,
         IReadOnlySet<string> paths,
         long now,
+        bool reuseStale,
         CancellationToken ct)
     {
         if (worktreeLists.TryGetValue(root, out var cached)
-            && Fresh(cached.Stamp, now)
+            && (reuseStale || Fresh(cached.Stamp, now))
             && (cached.List is null
                 || paths.All(path => cached.Judged.Contains(path) || WorktreeList.Find(cached.List, path) is not null || !Directory.Exists(path))))
         {
-            return cached.List;
+            return (cached.List, reuseStale && !Fresh(cached.Stamp, now));
         }
 
         IReadOnlyList<GitWorktree>? list = null;
@@ -528,7 +556,7 @@ internal sealed partial class ProjectTreeViewModel
         }
 
         worktreeLists[root] = (list, Stopwatch.GetTimestamp(), paths);
-        return list;
+        return (list, false);
     }
 
     /// <summary>The entry with <paramref name="directory"/>'s spelling (the background read added link-resolved ones).</summary>
@@ -875,6 +903,9 @@ internal sealed record MenuGitReads(
     IReadOnlyDictionary<string, string> DefaultBranches,
     IReadOnlyDictionary<string, IReadOnlyList<GitWorktree>?> Worktrees)
 {
+    /// <summary>At least one answer came from the cache older than <see cref="GitStateLifetime"/> (a lifecycle rebuild).</summary>
+    public bool ReusedStale { get; init; }
+
     public static readonly MenuGitReads Empty = new(
         new Dictionary<string, WorkspaceGitState>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
