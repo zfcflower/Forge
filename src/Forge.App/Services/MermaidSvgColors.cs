@@ -8,14 +8,22 @@ namespace Forge.App.Services;
 /// <para>Svg.Skia (4.9.1) understands the custom properties Mermaider emits (<c>var(--surface)</c>, nested fallbacks, a
 /// <c>&lt;style&gt;</c> block) but not CSS Color 5's <c>color-mix()</c>: it paints such a fill black. Mermaider derives most
 /// node fills and strokes with exactly that function, so the diamond of a flowchart would come out a black box with the label
-/// on top of it. Only the two forms Mermaider emits are supported - <c>color-mix(in srgb, A p%, B)</c> whose operands are a
-/// hex colour or <c>var(--x[, fallback])</c> against the palette written into the SVG root - and anything else fails the
-/// render instead of producing a wrong picture.</para>
+/// on top of it. Only the forms Mermaider emits are supported - <c>color-mix(in srgb, A p%, B)</c> whose operands are a
+/// hex colour, a <c>var(--x[, fallback])</c> against the palette written into the SVG root, or a name the SVG's own style
+/// block declares (the database shape's fills mix the internal <c>--_line</c>, which exists only there; a cycle of
+/// declarations is cut off by the nesting limit) - and anything else fails the render instead of producing a wrong
+/// picture.</para>
 /// </summary>
 internal static class MermaidSvgColors
 {
     private const string Marker = "color-mix(";
-    private const int MaxFallbackDepth = 4;
+
+    /// <summary>
+    /// The nesting ceiling for one operand: every <c>var()</c> step into a style-block declaration or its fallback costs a
+    /// level, so a cycle of declarations is cut off with a failure instead of recursing forever. Root mixes sit at level 0;
+    /// the deepest chain Mermaider emits is four.
+    /// </summary>
+    private const int MaxFallbackDepth = 12;
 
     /// <summary>
     /// Replaces every <c>color-mix()</c> in <paramref name="svg"/> with the colour it mixes. Returns false with a
@@ -37,6 +45,15 @@ internal static class MermaidSvgColors
         }
 
         var variables = palette.Variables();
+
+        // The style block's own custom-property declarations (--_line and friends), kept as raw text: a mix that
+        // references one resolves its value through the ordinary colour evaluator. A palette entry wins over a
+        // declaration of the same name - the cascade the renderer itself honours when it writes both.
+        foreach (var (name, value) in StyleDeclarations(svg))
+        {
+            variables.TryAdd(name, value);
+        }
+
         var builder = new StringBuilder(svg.Length + 64);
         var position = 0;
         while (position < svg.Length)
@@ -114,7 +131,7 @@ internal static class MermaidSvgColors
             }
 
             var expression = svg.AsSpan(at + Marker.Length, close - at - Marker.Length);
-            if (!TryEvaluate(expression, variables, out var hex, out var reason))
+            if (!TryEvaluate(expression, variables, 0, out var hex, out var reason))
             {
                 problem = $"color-mix({expression}): {reason}";
                 return false;
@@ -129,6 +146,7 @@ internal static class MermaidSvgColors
     internal static bool TryEvaluate(
         ReadOnlySpan<char> expression,
         IReadOnlyDictionary<string, string> variables,
+        int depth,
         out string hex,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? problem)
     {
@@ -140,8 +158,8 @@ internal static class MermaidSvgColors
             return false;
         }
 
-        if (!TryResolveOperand(parts[1], variables, out var first, out var firstWeight, out problem) ||
-            !TryResolveOperand(parts[2], variables, out var second, out var secondWeight, out problem))
+        if (!TryResolveOperand(parts[1], variables, depth, out var first, out var firstWeight, out problem) ||
+            !TryResolveOperand(parts[2], variables, depth, out var second, out var secondWeight, out problem))
         {
             return false;
         }
@@ -179,10 +197,11 @@ internal static class MermaidSvgColors
         return true;
     }
 
-    /// <summary>One operand: a hex colour or a <c>var()</c>, optionally followed by a percentage (null when omitted).</summary>
+    /// <summary>One operand: a colour (hex, <c>var()</c> or a nested mix), optionally followed by a percentage (null when omitted).</summary>
     private static bool TryResolveOperand(
         ReadOnlySpan<char> part,
         IReadOnlyDictionary<string, string> variables,
+        int depth,
         out Rgba color,
         out double? weight,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? problem)
@@ -211,10 +230,15 @@ internal static class MermaidSvgColors
             }
         }
 
-        return TryResolveColor(text, variables, 0, out color, out problem);
+        return TryResolveColor(text, variables, depth, out color, out problem);
     }
 
-    /// <summary>A colour operand: <c>#rgb</c>, <c>#rrggbb</c>, <c>#rrggbbaa</c>, or a CSS variable with an optional fallback.</summary>
+    /// <summary>
+    /// A colour operand: <c>#rgb</c>, <c>#rrggbb</c>, <c>#rrggbbaa</c>, a nested <c>color-mix()</c>, or a CSS variable
+    /// with an optional fallback. A variable resolves against the palette first and then the style block's own
+    /// declarations - either way the value is resolved recursively one level deeper, so a cycle of declarations runs
+    /// into the depth limit instead of the stack.
+    /// </summary>
     private static bool TryResolveColor(
         ReadOnlySpan<char> text,
         IReadOnlyDictionary<string, string> variables,
@@ -228,6 +252,24 @@ internal static class MermaidSvgColors
             return TryParseHex(text, out color, out problem);
         }
 
+        // A declaration's value may be a mix outright (--_line-soft and friends). The depth check here is what cuts a
+        // cycle of declarations that mix each other.
+        if (text.StartsWith(Marker, StringComparison.Ordinal) && text[^1] == ')')
+        {
+            if (depth >= MaxFallbackDepth)
+            {
+                problem = "colour operands nest too deep";
+                return false;
+            }
+
+            if (!TryEvaluate(text[Marker.Length..^1], variables, depth + 1, out var nested, out problem))
+            {
+                return false;
+            }
+
+            return TryParseHex(nested, out color, out problem);
+        }
+
         if (!text.StartsWith("var(", StringComparison.Ordinal) || text[^1] != ')')
         {
             problem = "operand is neither a hex colour nor var()";
@@ -236,17 +278,18 @@ internal static class MermaidSvgColors
 
         if (depth >= MaxFallbackDepth)
         {
-            problem = "var() fallbacks nest too deep";
+            problem = "var() references nest too deep";
             return false;
         }
 
         var inner = text[4..^1];
         var comma = IndexOfTopLevel(inner, ',');
         var name = (comma < 0 ? inner : inner[..comma]).Trim();
-        if (variables.TryGetValue(name.ToString(), out var value) &&
-            TryParseHex(value, out color, out problem))
+        if (variables.TryGetValue(name.ToString(), out var value))
         {
-            return true;
+            // A palette entry holds a hex string; a style-block declaration holds its raw value. Both go through the
+            // same recursive resolve, so neither needs a special case.
+            return TryResolveColor(value, variables, depth + 1, out color, out problem);
         }
 
         if (comma < 0)
@@ -256,6 +299,62 @@ internal static class MermaidSvgColors
         }
 
         return TryResolveColor(inner[(comma + 1)..].Trim(), variables, depth + 1, out color, out problem);
+    }
+
+    /// <summary>
+    /// The custom-property declarations of the SVG's first <c>&lt;style&gt;</c> block, name to raw value. Mermaider
+    /// writes one declaration per line; a line that does not parse as <c>--name: value;</c> is skipped, so a malformed
+    /// style block only narrows what the evaluator can resolve instead of failing the whole render.
+    /// </summary>
+    private static Dictionary<string, string> StyleDeclarations(string svg)
+    {
+        var declarations = new Dictionary<string, string>(StringComparer.Ordinal);
+        var open = svg.IndexOf("<style", StringComparison.OrdinalIgnoreCase);
+        if (open < 0)
+        {
+            return declarations;
+        }
+
+        var bodyStart = svg.IndexOf('>', open);
+        if (bodyStart < 0)
+        {
+            return declarations;
+        }
+
+        var bodyEnd = svg.IndexOf("</style", bodyStart, StringComparison.OrdinalIgnoreCase);
+        if (bodyEnd < 0)
+        {
+            bodyEnd = svg.Length;
+        }
+
+        var body = svg.AsSpan(bodyStart + 1, bodyEnd - bodyStart - 1);
+        foreach (var rawLine in body.EnumerateLines())
+        {
+            var line = rawLine.Trim();
+            if (!line.StartsWith("--"))
+            {
+                continue;
+            }
+
+            var colon = line.IndexOf(':');
+            if (colon < 3)
+            {
+                continue;
+            }
+
+            var value = line[(colon + 1)..].Trim();
+            if (value.EndsWith(';'))
+            {
+                value = value[..^1];
+            }
+
+            if (!value.IsEmpty)
+            {
+                declarations[line[..colon].Trim().ToString()] = value.ToString();
+            }
+        }
+
+        return declarations;
     }
 
     private static bool TryParseHex(ReadOnlySpan<char> text, out Rgba color, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? problem)
