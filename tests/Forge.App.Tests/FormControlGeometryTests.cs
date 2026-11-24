@@ -249,12 +249,12 @@ public sealed class FormControlGeometryTests
             SharedUi.Settle(window);
         }
 
-        // The two neutral tiers borrow the two greys, the brand tier its own three stops, the tinted tier the selection.
+        // The two neutral tiers borrow the two greys, the brand tier its own three stops, the tinted tier its own tint.
         AssertStates("ghost", "SurfaceHoverBrush", "IconButtonHoverBrush");
         AssertStates("outline", "SurfaceHoverBrush", "IconButtonHoverBrush");
         AssertStates("flat", "SurfaceHoverBrush", "IconButtonHoverBrush");
         AssertStates("primary", "BrandHoverBrush", "BrandPressedBrush");
-        AssertStates("tinted", "SelectionBackgroundBrush", "SelectionBackgroundBrush");
+        AssertStates("tinted", "BrandTintHoverBrush", "BrandTintHoverBrush");
 
         window.Close();
         return Task.CompletedTask;

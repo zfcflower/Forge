@@ -85,12 +85,12 @@
     <Setter Property="TextWrapping" Value="NoWrap" />
   </Style>
 
-  <!-- Text selection in a selectable transcript block takes the two selection tokens. A TextBox's own selection stays with
-       Fluent, exactly like its TextControl* brushes: there is no theme key to redirect it, and a `TextBox` type selector is
-       the one selector this file does not write (it reaches the inner box of a spinner or a combo box as well). -->
+  <!-- Text selection takes one standard (see "交互色" in SPEC): a translucent brand tint and no selection foreground, so
+       the selected text keeps the colour it already had. A TextBox reads the same brush through
+       `TextControlSelectionHighlightColor` (Tokens.axaml) - the composer, the search boxes and the dialogs select alike;
+       a `TextBox` type selector is still not written here (it reaches the inner box of a spinner or a combo box). -->
   <Style Selector="SelectableTextBlock">
     <Setter Property="SelectionBrush" Value="{DynamicResource SelectionBackgroundBrush}" />
-    <Setter Property="SelectionForegroundBrush" Value="{DynamicResource SelectionForegroundBrush}" />
   </Style>
 
   <!-- Buttons. The base look is scoped to Forge's own button classes so the workbench chrome keeps the geometry its

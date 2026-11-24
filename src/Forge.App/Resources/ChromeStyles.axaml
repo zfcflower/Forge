@@ -168,12 +168,12 @@
   </Style>
 
   <Style Selector="Button.tinted:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SelectionBackgroundBrush}" />
+    <Setter Property="Background" Value="{DynamicResource BrandTintHoverBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
   </Style>
 
   <Style Selector="Button.tinted:pressed /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SelectionBackgroundBrush}" />
+    <Setter Property="Background" Value="{DynamicResource BrandTintHoverBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BrandActionBrush}" />
   </Style>
 

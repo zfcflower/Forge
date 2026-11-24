@@ -42,6 +42,7 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.2.x,仅桌面)。承载组合�
 | `BrandPressedBrush` | `#055E5A` | `#1E9E9B` | 品牌实心按钮的按下档(比悬停再深一档) |
 | `BrandSoftBrush` | `#81D8D0` | `#81D8D0` | 品牌实心元素的禁用底 |
 | `BrandTintBrush` | `#E8F8F7` | `#0D3F3E` | 品牌浅底:用户气泡、来源徽标、拖放浮层底 |
+| `BrandTintHoverBrush` | `#D7F2EF` | `#17413F` | `Button.tinted` 的悬停/按下底(原借用选区底色;选区改半透明后独立) |
 | `TiffanyTintBrush` | `#BFE7F6F8` | `#B3103036` | 蒂芙尼浅底:表格里**可编辑单元格**的底、表格行按下;四分之三不透明,好让选中行透出来 |
 | `TiffanySelectionBrush` | `#CFECF1` | `#14424A` | 表格行选中 |
 | `TiffanySelectionStrongBrush` | `#BFE5EC` | `#1A5158` | 表格行选中+悬停、选中+按下 |
@@ -95,10 +96,9 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.2.x,仅桌面)。承载组合�
 | Token | Light | Dark | 用在哪 |
 |---|---|---|---|
 | `FocusRingBrush` | `#078A86` | `#3CD4CF` | `:focus-visible` 的环、聚焦中的输入卡轮廓 |
-| `SelectionBackgroundBrush` | `#D7F2EF` | `#17413F` | 文本选区(不透明) |
-| `SelectionForegroundBrush` | `#075D59` | `#B8F0EA` | 文本选区的字色 |
+| `SelectionBackgroundBrush` | `#3D0ABAB5` | `#4D26C6C1` | 文本选区:品牌主色 24% / 30% alpha 的浅色透明底,选中文字保持自身颜色 |
 
-`SelectionBackgroundBrush` 用在 `SelectableTextBlock` 的选区上。`TextBox` 自身的选区仍由 Fluent 负责:没有可覆盖的 theme key,而 `TextBox` 类型选择器是 `Controls.axaml` 明确不写的那一类(它连模板子控件一起命中)。编辑器选区用半透明的 `EditorSelectionBrush`,不取不透明的 `SelectionBackgroundBrush`,否则会盖住语法色。
+**选区标准:一层浅色透明的品牌底色,文字不变色。** `SelectionBackgroundBrush` 是品牌主色(`BrandPrimaryBrush`)24%(亮)/ 30%(暗)alpha 的半透明底;**不设选区前景色**(没有 `SelectionForegroundBrush`),选中文字因此保留块自身的 `Foreground`——正文色、语法色、占位色都照原样透出来。三处同源:`SelectableTextBlock` 的卡片选区直接用这个 brush;`TextBox` 的选区在 `Tokens.axaml` 里把 Fluent 的 `TextControlSelectionHighlightColor` 指向同一个 brush,所以 composer 输入区、搜索框与对话框输入框一致(`Controls.axaml` 仍不写 `TextBox` 类型选择器,它连模板子控件一起命中);代码编辑器的 `EditorSelectionBrush` 是该 brush 的别名,并与库默认的深底白字前景解耦。不透明的选区底色(任何主题)一律不用:它会盖住选中内容本身的颜色。
 
 ### 使用原则
 
@@ -133,7 +133,7 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.2.x,仅桌面)。承载组合�
 | `IconButtonPressedBrush` | `#C3CDD0` | `#465256` | 与 `BorderStrongBrush` 同值 |
 | `BackdropScrimBrush` | `#5A000000` | `#5A000000` | 浮层遮罩 |
 | `OnBrandSoftBrush` | `#072625` | `#072625` | `BrandSoftBrush` 两主题同值,前景也必须主题无关,9.65:1 |
-| `EditorSelectionBrush` | `#3D0ABAB5` | `#4D26C6C1` | 当前主题的 `BrandPrimaryBrush` 24% / 30% alpha |
+| `EditorSelectionBrush` | 同 `SelectionBackgroundBrush` | 同左 | 编辑器也走同一选区标准(别名,不再另存 hex) |
 | `EditorSearchResultBrush` | `#59F5C542` | `#59B58B00` | 半透明黄 |
 | `DiffAddBrush` | `#E7F4EF` | `#17332C` | `StatusSuccessBrush` 的浅底 |
 | `DiffRemoveBrush` | `#FBE9EC` | `#3A2126` | `StatusErrorBrush` 的浅底 |
@@ -180,7 +180,7 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.2.x,仅桌面)。承载组合�
 |---|---|---|---|---|---|---|
 | 无边框、无底色 | `Button.flat` | 透明 | 无 | `TextSecondaryBrush` | `SurfaceHoverBrush` | `IconButtonHoverBrush` |
 | 有边框、有底色(浅色) | `Button.ghost`(中) / `Button.outline`(小) | `CardBackgroundBrush` | 1px `BorderBrush`,**三态都不消失** | `TextPrimaryBrush` | `SurfaceHoverBrush`,边框不变 | `IconButtonHoverBrush`,边框不变 |
-| 有边框、有底色(主题色) | `Button.tinted` | `BrandTintBrush` | 1px `BrandInteractiveBrush` | `BrandActionBrush` | `SelectionBackgroundBrush`,边框不变 | `SelectionBackgroundBrush`,边框与字 `BrandActionBrush` |
+| 有边框、有底色(主题色) | `Button.tinted` | `BrandTintBrush` | 1px `BrandInteractiveBrush` | `BrandActionBrush` | `BrandTintHoverBrush`,边框不变 | `BrandTintHoverBrush`,边框与字 `BrandActionBrush` |
 | 无边框、有底色(主题色) | `Button.primary` | `BrandActionBrush` | 无 | `TextOnBrandBrush` | `BrandHoverBrush` | `BrandPressedBrush` |
 
 *规则*
@@ -545,7 +545,7 @@ TextMate 安装(`Installation` 的公开构造只收 `IRegistryOptions`,拿不�
 - 折叠:安装 `FoldingManager` 与 `FoldingMargin`,范围优先取语言服务器的 `textDocument/foldingRange`,服务器未声明 `foldingRangeProvider` 或无会话时回退到结构启发式(`Forge.Editor.Folding.StructuralFolding`),XML/HTML 类文件用库自带 `XmlFoldingStrategy`。文本变化后 250ms 防抖重算,结果按文档版本校验,过期结果丢弃。折叠状态属于控件,不写盘、不跨标签继承。超过 20000 行不折叠并在编辑器提示行说明,而不是卡顿。
 - 显示与交互开关:行号、空白、制表符、行尾符、控制字符、文档末尾以下滚动、当前行高亮、超链接、自动折叠、缩进宽度、Tab 转空格、列标尺、着色主题(跟随界面/固定亮/固定暗)。全部落 `settings.json` 的 `preferences` 段(每项可选、缺失取默认),设置页“编辑器”分区给出默认值,改动立即套用到已打开的编辑器。
 - 入口:编辑器工具栏 `⋯` 与编辑器右键菜单共用同一份**菜单构建逻辑**,但各自持有自己的实例——Avalonia 的 `ContextMenu` 只能在它挂接的那个控件上打开,工具栏按钮重新打开编辑器菜单会抛 `ArgumentException` 并终止进程,所以工具栏按钮用 `MenuFlyout`。菜单项无绑定:打开时读设置、点击时写设置,因此勾选状态不会说谎且 Native AOT 安全。内容:撤销/重做/剪切/复制/粘贴/全选、显示开关、折叠命令、转换命令(大小写四种、前导 Tab↔空格、缩进选区、删除行)、查找/替换。Ctrl+F / Ctrl+H 用库自带 `SearchPanel`;Ctrl+Shift+[ 折叠当前块、Ctrl+Alt+[ / ] 全部折叠/展开。
-- 选区配色:`EditorSelectionBrush` 是品牌主色 `BrandPrimaryBrush` 的半透明版(亮色 24%、暗色 30%),并清掉库主题给的深底白字前景与边框,选中不得遮住代码本身——所以编辑器选区没有取不透明的 `SelectionBackgroundBrush`。搜索命中底色同理用半透明黄。
+- 选区配色:编辑器遵守上面「交互色」的**选区标准**——`EditorSelectionBrush` 是 `SelectionBackgroundBrush` 的别名(品牌主色 24% / 30% alpha 的半透明底),并清掉库主题给的深底白字前景与边框,选中文字保留语法色;不透明的选区底色一律不用。搜索命中底色同理用半透明黄。
 - 评审图标位置:评论图标挂在选中终点(或行号点击所在行的行首)的**右下角**,靠右边界放不下就翻到左下方,并始终夹在可视区内。
 - 多光标:库 12.0.0 **没有实现**(README 宣称,源码只有单 `Caret` 与 `RectangleSelection`)。按用户确认改用矩形(列)选择:保持 `EnableRectangularSelection`,Alt+拖拽选出一列后输入/删除作用于整列,并在设置页与菜单里写明,不把多光标伪装成已实现。
 - 行内 adornment:诊断行尾的按严重度着色圆点(零文档长度元素,不改文本与光标;悬停显示该行消息),以及折叠占位符本身。库 12.0.0 的行尾符生成器被注释、`ShowTabs` 无读取者,因此 `¶` 与 `→` 由 Forge 自己的零长度元素绘制;空格与控制字符框仍用库内置生成器。
@@ -777,4 +777,4 @@ Cmd/Ctrl+P 三个入口之外没有第四种面板:一个覆盖层、五个来�
 - **W10 与遗留波次的未决汇总(2026-11-15)**:(1) ~~`TerminalSettingsViewModel` 与 `tools` 分区的终端组重复~~ **已收**:那个从未接线的分区与它的模板已删除,`tools` 分区是唯一入口;(2) 图片 diff 的解码时机是建文档即起(与 `ImageDiffViewModel` 类注释「滚到才解码」不符,每图有界且后台);(3) 思考行与回复文本在同一 flush 内固定「思考先于文本」,依赖提供商先思考后作答的常态,交织顺序异常的提供商会倒序;(4) ~~`pr_screenshots` 返回纯文本~~ **已交付**:工具现在返回文本报告 + 已发布图片的 `ImageBlock`(见 Workspace SPEC);(5) ~~自动更新阶段 B 未做真机冒烟~~ **已冒烟**:曾用真实子进程与真实目录 rename 走通「等旧进程退出→交换→新版本未确认→回滚」全链路;(6) W16b 面包屑的「根检出」键比较用 OrdinalIgnoreCase,与树的 OrdinalIgnoreCase 分组一致但路径规范化不覆盖符号链接。
 - **自动更新的发布管线未接(2026-11-16)。** 清单的生产者只有 `scripts/make-update-manifest.ps1` 本身,没有 tag 触发的 workflow 去按 RID 打包、算哈希、把 `updates.json` 推上滚动 `manifest` tag(`.github/workflows/` 只有 `ci.yml`:三平台 build+test 与 Windows AOT publish 冒烟,三平台 AOT 矩阵同样未接)。补齐前默认清单地址下没有可解析的资产,更新功能只在手工发版、手工跑脚本并手工上传时生效。
 
-**转录区的文本选择是「一张卡片一个选择域」。** `SelectableCard`(`Views/SelectableCard.cs`) 包住回复卡与用户气泡,把卡内的 `SelectableTextBlock`(段落/标题经 `MarkdownTextBlock`、代码块经 `MarkdownCodeTextBlock`)串成一次连续选择:按下照旧交给块(单击选词、链接照常打开),移动超过 3 px 才由卡片接管并清掉块自己的选择,之后按(块序号, 字符偏移)给沿途每个块设 `SelectionStart/End`(中间块全选);`Ctrl+A` 选中整张卡片、`Ctrl+C` 按块序拼文本(块序按视觉顺序收集;段落用 `Inlines` 建、`Text` 为 null,接口文本取 `Inlines.Text`;工具参数/结果、思考文本与用户气泡用 `SelectableBlock`,与 `MarkdownTextBlock` 同属一张卡)(代码块带围栏)、`Esc` 清除,按下另一张卡片或卡片之外的任何位置都清掉当前选择。选择存在卡片上而不是块上,行被回收重建后重新回填;拖到列表边缘自动滚动。**不跨卡片**:那是列表级手势,会把「拖动滚动」变成「选中」。输入框是 `TextBox`,只补三击全选。
+**转录区的文本选择是「一张卡片一个选择域」。** `SelectableCard`(`Views/SelectableCard.cs`) 包住回复卡与用户气泡,把卡内的 `SelectableTextBlock`(段落/标题经 `MarkdownTextBlock`、代码块经 `MarkdownCodeTextBlock`)串成一次连续选择:按下照旧交给块(单击选词、链接照常打开),移动超过 3 px 才由卡片接管并清掉块自己的选择,之后按(块序号, 字符偏移)给沿途每个块设 `SelectionStart/End`(中间块全选);`Ctrl+A` 选中整张卡片、`Ctrl+C` 按块序拼文本(块序按视觉顺序收集;段落用 `Inlines` 建、`Text` 为 null,接口文本取 `Inlines.Text`;工具参数/结果、思考文本与用户气泡用 `SelectableBlock`,与 `MarkdownTextBlock` 同属一张卡)(代码块带围栏)、`Esc` 清除,按下另一张卡片或卡片之外的任何位置都清掉当前选择。选择存在卡片上而不是块上,行被回收重建后重新回填;拖到列表边缘自动滚动。**不跨卡片**:那是列表级手势,会把「拖动滚动」变成「选中」。输入框是 `TextBox`,只补三击全选。选区配色遵守「交互色」里的**选区标准**:半透明品牌底色、选中文字保持自身颜色,卡片、输入区与编辑器一致。

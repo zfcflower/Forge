@@ -159,6 +159,9 @@
            (BrandTint is nearly the same lightness as that tint, so "mine" vanished), still light enough that the table's
            normal ink on it keeps its contrast. Worn by values the user set themselves. -->
       <SolidColorBrush x:Key="BrandTintStrongBrush" Color="#C8ECE7" />
+      <!-- The tinted button's hover / pressed fill. It used to borrow SelectionBackgroundBrush; the text selection turned
+           translucent so the ink under it shows through, so the button keeps this opaque step of its own. -->
+      <SolidColorBrush x:Key="BrandTintHoverBrush" Color="#D7F2EF" />
 
       <!-- The requested Tiffany accent (the round marker's #1B9EAA in `App.axaml`), as surfaces: the pale tint marks the
            editable cells of a table, the two deeper stops are its row states. A second family rather than another step of
@@ -203,8 +206,10 @@
       <SolidColorBrush x:Key="AccentWarmBrush" Color="#E97818" />
 
       <SolidColorBrush x:Key="FocusRingBrush" Color="#078A86" />
-      <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#D7F2EF" />
-      <SolidColorBrush x:Key="SelectionForegroundBrush" Color="#075D59" />
+      <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#3D0ABAB5" />
+      <!-- Fluent's TextBox reads this key for its own selection: point it at the one selection brush so the composer, the
+           search boxes and the dialogs select with the same translucent tint instead of the theme's opaque accent. -->
+      <StaticResource x:Key="TextControlSelectionHighlightColor" ResourceKey="SelectionBackgroundBrush" />
 
       <!-- Extension: dividers and chrome. A colour specification does not model a 1 px line, so the neutral ramp is
            extended two steps below the darkest surface; the existing rule that an icon button's hover equals the
@@ -274,9 +279,9 @@
       <!-- Extension: the modal scrim. One token instead of four literals in four views. -->
       <SolidColorBrush x:Key="BackdropScrimBrush" Color="#5A000000" />
 
-      <!-- Extension: the editor's own selection. Brand tint at 24% alpha rather than SelectionBackgroundBrush (#D7F2EF
-           is opaque and would paint over the syntax colours the selection exists to show). -->
-      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#3D0ABAB5" />
+      <!-- Extension: the editor's own selection is the shared selection standard (a translucent brand tint the syntax
+           colours show through), not a second brush with its own alpha. -->
+      <StaticResource x:Key="EditorSelectionBrush" ResourceKey="SelectionBackgroundBrush" />
       <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59F5C542" />
 
       <!-- Extension: chat and diff surfaces, both tints of a status colour. DiffRemove and ErrorBubble share a value on
@@ -336,6 +341,7 @@
       <!-- The same second mint step on dark: above the panel body and greener than the Tiffany blue steps, so a user-set
            cell reads apart from the inherited/empty ones the same way it does in light. -->
       <SolidColorBrush x:Key="BrandTintStrongBrush" Color="#14514D" />
+      <SolidColorBrush x:Key="BrandTintHoverBrush" Color="#17413F" />
 
       <!-- The Tiffany surfaces on dark: the same three steps, kept in the bluish range above the panel body so the editable
            cells still read as a band without glowing against the window. -->
@@ -369,8 +375,8 @@
       <SolidColorBrush x:Key="AccentWarmBrush" Color="#FF8F33" />
 
       <SolidColorBrush x:Key="FocusRingBrush" Color="#3CD4CF" />
-      <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#17413F" />
-      <SolidColorBrush x:Key="SelectionForegroundBrush" Color="#B8F0EA" />
+      <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#4D26C6C1" />
+      <StaticResource x:Key="TextControlSelectionHighlightColor" ResourceKey="SelectionBackgroundBrush" />
 
       <SolidColorBrush x:Key="BorderBrush" Color="#3A4447" />
       <SolidColorBrush x:Key="BorderStrongBrush" Color="#465256" />
@@ -420,7 +426,7 @@
 
       <SolidColorBrush x:Key="BackdropScrimBrush" Color="#5A000000" />
 
-      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#4D26C6C1" />
+      <StaticResource x:Key="EditorSelectionBrush" ResourceKey="SelectionBackgroundBrush" />
       <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59B58B00" />
 
       <SolidColorBrush x:Key="DiffAddBrush" Color="#17332C" />
