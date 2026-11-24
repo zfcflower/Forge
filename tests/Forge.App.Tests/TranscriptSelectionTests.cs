@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Media;
 using Forge.App.Changes.Markdown;
 using Forge.App.Views;
@@ -102,6 +103,39 @@ public sealed class TranscriptSelectionTests
         Assert.Contains("```", copied, StringComparison.Ordinal);
         Assert.Contains("return Managed(path);", copied, StringComparison.Ordinal);
 
+        return Task.CompletedTask;
+    });
+
+    /// <summary>
+    /// A rendered paragraph keeps its text in <c>Inlines</c>, so <c>Text</c> is null on it. The card must still select it: this is
+    /// the reply's normal shape, and treating the block as zero-length made every drag and Ctrl+A on a reply a no-op.
+    /// </summary>
+    [Fact]
+    public Task A_paragraph_built_from_inlines_is_selectable() => SharedUi.RunAsync(() =>
+    {
+        var inline = new MarkdownTextBlock
+        {
+            Inlines = [new Run("inline only")],
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var plain = new SelectableBlock { Text = "plain text", TextWrapping = TextWrapping.Wrap };
+        var card = new SelectableCard { Child = new StackPanel { Children = { inline, plain } } };
+        var window = new Window { Content = new Panel { Background = Brushes.Transparent, Children = { card } }, Width = 420, Height = 160 };
+        window.Show();
+        SharedUi.Settle(window);
+
+        Assert.Null(inline.Text);
+        card.SelectAll();
+
+        Assert.Equal(0, inline.SelectionStart);
+        Assert.Equal("inline only".Length, inline.SelectionEnd);
+        Assert.Equal(0, plain.SelectionStart);
+        Assert.Equal("plain text".Length, plain.SelectionEnd);
+
+        var copied = card.SelectedText();
+        Assert.NotNull(copied);
+        Assert.StartsWith("inline only", copied, StringComparison.Ordinal);
+        Assert.Contains("plain text", copied, StringComparison.Ordinal);
         return Task.CompletedTask;
     });
 

@@ -34,9 +34,8 @@ internal interface ISelectableBlock
 /// </summary>
 internal static class SelectableTextHit
 {
-    public static int IndexAt(SelectableTextBlock block, Point point)
+    public static int IndexAt(SelectableTextBlock block, int length, Point point)
     {
-        var length = block.Text?.Length ?? 0;
         if (block.TextLayout is not { } layout || layout.TextLines.Count == 0)
         {
             return 0;
@@ -543,9 +542,11 @@ internal sealed class SelectableCard : Border
             }
             else
             {
-                foreach (var child in visual.GetVisualChildren())
+                // Children are pushed so that the pop order is reading order, and a nested container's children keep theirs.
+                var children = visual.GetVisualChildren().ToList();
+                for (var index = children.Count - 1; index >= 0; index--)
                 {
-                    walk.Push(child);
+                    walk.Push(children[index]);
                 }
             }
         }
@@ -597,14 +598,24 @@ internal sealed class SelectableCard : Border
         return -1;
     }
 
-    private static Point Translate(Point point, ISelectableBlock block) =>
-        block is Visual visual && visual.TranslatePoint(point, visual) is { } translated ? translated : point;
+    /// <summary>A point of this card's coordinates in the block's own coordinates.</summary>
+    private Point Translate(Point point, ISelectableBlock block) =>
+        block is Visual visual && this.TranslatePoint(point, visual) is { } translated ? translated : point;
 }
 
 /// <summary>A code block's text: the same card selection, with the hit test its own <see cref="SelectableTextBlock"/> needs.</summary>
-internal sealed class MarkdownCodeTextBlock : SelectableTextBlock, ISelectableBlock
+internal class SelectableBlock : SelectableTextBlock, ISelectableBlock
 {
     protected override Type StyleKeyOverride => typeof(SelectableTextBlock);
 
-    public int IndexAt(Point point) => SelectableTextHit.IndexAt(this, point);
+    /// <summary>The text this block's offsets count into; a block built from inlines has it in <see cref="TextBlock.Inlines"/>.</summary>
+    protected virtual string EffectiveText => Text ?? Inlines?.Text ?? string.Empty;
+
+    string? ISelectableBlock.Text => EffectiveText;
+
+    public int IndexAt(Point point) => SelectableTextHit.IndexAt(this, EffectiveText.Length, point);
 }
+
+/// <summary>A code block's text: the same card selection, and the copy command fences it because it is code.</summary>
+internal sealed class MarkdownCodeTextBlock : SelectableBlock;
+

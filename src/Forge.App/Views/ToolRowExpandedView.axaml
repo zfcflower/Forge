@@ -19,8 +19,8 @@
                   Focusable="False"
                   HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-      <SelectableTextBlock Classes="mono"
-                           Text="{Binding Arguments}"
+      <views:SelectableBlock Classes="mono"
+                             Text="{Binding Arguments}"
                            TextWrapping="Wrap"
                            Margin="0,0,8,0"
                            Foreground="{DynamicResource TextSecondaryBrush}" />
@@ -34,8 +34,8 @@
                   HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto"
                   IsVisible="{Binding HasResult}">
-      <SelectableTextBlock Classes="mono"
-                           Text="{Binding ResultDisplay}"
+      <views:SelectableBlock Classes="mono"
+                             Text="{Binding ResultDisplay}"
                            TextWrapping="Wrap"
                            Margin="0,0,8,0"
                            Foreground="{DynamicResource TextSecondaryBrush}" />

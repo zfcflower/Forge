@@ -483,9 +483,9 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
         <views:SelectableCard Classes="user-bubble" IsVisible="{Binding HasText}">
-          <SelectableTextBlock Text="{Binding Text}"
-                               TextWrapping="Wrap"
-                               Foreground="{DynamicResource TextPrimaryBrush}" />
+          <views:SelectableBlock Text="{Binding Text}"
+                                  TextWrapping="Wrap"
+                                  Foreground="{DynamicResource TextPrimaryBrush}" />
         </views:SelectableCard>
         <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Left">
           <views:CopyTextButton Classes="ghost icon"
@@ -586,8 +586,8 @@
                           views:StreamFollow.Follow="True"
                           HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
-              <SelectableTextBlock Classes="thinking-line"
-                                   Margin="0,0,4,0"
+              <views:SelectableBlock Classes="thinking-line"
+                                      Margin="0,0,4,0"
                                    LineHeight="19.2"
                                    TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextSecondaryBrush}"

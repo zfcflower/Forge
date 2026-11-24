@@ -27,8 +27,14 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock, ISelectableBlock
 
     internal IReadOnlyList<(int Start, int End, string Url)> Links => links;
 
+    /// <summary>
+    /// The text a card's selection counts into. A rendered paragraph is built from <see cref="TextBlock.Inlines"/>, so
+    /// <see cref="TextBlock.Text"/> is null on it and every offset would clamp to zero without this.
+    /// </summary>
+    string? ISelectableBlock.Text => Text ?? Inlines?.Text;
+
     /// <summary>The card's drag maps a point on this block to the character under it.</summary>
-    public int IndexAt(Avalonia.Point point) => SelectableTextHit.IndexAt(this, point);
+    public int IndexAt(Avalonia.Point point) => SelectableTextHit.IndexAt(this, (Text ?? Inlines?.Text)?.Length ?? 0, point);
 
     internal void SetInlines(IReadOnlyList<MdInline> source)
     {
@@ -163,7 +169,15 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock, ISelectableBlock
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        Cursor = LinkAt(e.GetPosition(this)) is { } url && IsLive(url) ? HandCursor : null;
+        // Cleared, not set to null: a local null beats the theme's I-beam and the text stops looking selectable.
+        if (LinkAt(e.GetPosition(this)) is { } url && IsLive(url))
+        {
+            Cursor = HandCursor;
+        }
+        else
+        {
+            ClearValue(CursorProperty);
+        }
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
