@@ -380,7 +380,7 @@ internal sealed class ConnectedProvider
     /// <summary>
     /// The output cap the user pinned for one model on this provider: the per-model <c>modelMeta</c> override, else the
     /// provider-level figure. The only cap a request may carry: the catalogue's limit is the model's <em>capability</em> -
-    /// a display and compaction figure an aggregator re-derives rather than reports - so <see cref="MetadataFor" /> serves
+    /// a display and compaction figure an aggregator re-derives rather than reports - so <see cref="MetadataFor"/> serves
     /// that and this serves the wire. Null when nothing is pinned, which sends no cap at all.
     /// </summary>
     public int? UserMaxOutput(string? modelId) =>

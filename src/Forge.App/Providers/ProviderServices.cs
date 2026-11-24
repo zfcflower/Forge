@@ -43,7 +43,7 @@ internal sealed class ProviderServices
         this.http = http;
         // The usage log is optional by construction: the store always exists (the settings row drives it) and the recorder writes only
         // while it is enabled, so flipping the switch takes effect on the next request without rebuilding the catalogue.
-        UsageLog = new UsageLogSettingsStore(settingsPath);
+        UsageLog = new LogSwitchSettingsStore(settingsPath, LogSections.Usage);
         UsageRecorder = new JsonlUsageRecorder(Path.Combine(dataDirectory, "usage"), UsageLog, time);
         Store = new ProviderStore(settingsPath, usageRecorder: UsageRecorder);
         Secrets = new ProviderSecretStore(dataDirectory);
@@ -67,7 +67,7 @@ internal sealed class ProviderServices
     public ProviderStore Store { get; }
 
     /// <summary>The <c>usageLog</c> section, shared by the settings row (writes) and the recorder (reads).</summary>
-    public UsageLogSettingsStore UsageLog { get; }
+    public LogSwitchSettingsStore UsageLog { get; }
 
     /// <summary>Where model requests are recorded while the log is on; always present, silent while it is off.</summary>
     public JsonlUsageRecorder UsageRecorder { get; }

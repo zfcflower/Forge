@@ -23,12 +23,12 @@ namespace Forge.App.Providers;
 internal sealed class JsonlUsageRecorder : IUsageRecorder
 {
     private readonly string directory;
-    private readonly UsageLogSettingsStore? settings;
+    private readonly LogSwitchSettingsStore? settings;
     private readonly TimeProvider time;
     private readonly Lock gate = new();
     private string? reportedFailure;
 
-    public JsonlUsageRecorder(string directory, UsageLogSettingsStore? settings = null, TimeProvider? time = null)
+    public JsonlUsageRecorder(string directory, LogSwitchSettingsStore? settings = null, TimeProvider? time = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         this.directory = directory;

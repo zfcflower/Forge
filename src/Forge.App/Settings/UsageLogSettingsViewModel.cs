@@ -16,7 +16,7 @@ namespace Forge.App.Settings;
 /// </remarks>
 internal sealed class UsageLogSettingsViewModel : NotifyingObject, IDisposable
 {
-    private readonly UsageLogSettingsStore store;
+    private readonly LogSwitchSettingsStore store;
     private readonly Func<string> directory;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool enabled;
@@ -24,7 +24,7 @@ internal sealed class UsageLogSettingsViewModel : NotifyingObject, IDisposable
     private bool loading;
 
     /// <param name="directory">Where the files land, for the hint under the switch; a function so a moved data root shows up.</param>
-    public UsageLogSettingsViewModel(UsageLogSettingsStore store, Func<string> directory)
+    public UsageLogSettingsViewModel(LogSwitchSettingsStore store, Func<string> directory)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(directory);
@@ -54,7 +54,7 @@ internal sealed class UsageLogSettingsViewModel : NotifyingObject, IDisposable
 
             try
             {
-                store.Save(new UsageLogSettings(value));
+                store.Save(new LogSwitchSettings(value));
                 saveError = null;
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)

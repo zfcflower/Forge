@@ -23,19 +23,6 @@ internal sealed class SettingsDocument
 
     [JsonPropertyName(ClaudeWireSettings.SectionName)]
     public ClaudeWireSectionDocument? ClaudeWire { get; set; }
-
-    [JsonPropertyName("usageLog")]
-    public UsageLogSectionDocument? UsageLog { get; set; }
-}
-
-/// <summary>
-/// The <c>usageLog</c> section: whether every model request is recorded. The recorder asks the live store before each write, so turning
-/// it on or off takes effect without a restart.
-/// </summary>
-internal sealed class UsageLogSectionDocument
-{
-    [JsonPropertyName("enabled")]
-    public bool? Enabled { get; set; }
 }
 
 /// <summary>

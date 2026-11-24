@@ -10,6 +10,13 @@ public static class ProviderErrors
     /// <summary>Key under which a provider records the server's Retry-After delay on <see cref="ProviderException.Data"/>.</summary>
     public const string RetryAfterKey = "Forge.RetryAfter";
 
+    /// <summary>
+    /// Key under which a rejected request keeps the body the server sent, verbatim. The exception's message is the readable
+    /// sentence a user can act on, so anything that has to see the whole body — a phrase rule, a support follow-up, the wire
+    /// recorder — reads it from here instead of guessing from the sentence.
+    /// </summary>
+    public const string ErrorBodyKey = "Forge.ErrorBody";
+
     /// <summary>Key of the flag a caller may set on <see cref="ProviderException.Data"/> to mark a context-overflow rejection.</summary>
     public const string ContextOverflowKey = "Forge.ContextOverflow";
 
@@ -65,10 +72,10 @@ public static class ProviderErrors
                 return true;
             }
 
-            var message = provider.Message;
+            var text = MatchText(provider);
             foreach (var phrase in ContextOverflowPhrases)
             {
-                if (message.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                if (text.Contains(phrase, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
@@ -89,14 +96,28 @@ public static class ProviderErrors
     {
         var code = (int)status;
         var exception = new ProviderException(
-            $"{providerId} returned {code} {status}: {body}",
+            $"{providerId} returned {code} {status}: {ProviderErrorBody.Describe(body)}",
             IsRetryableStatus(code),
             code)
         {
             RateLimit = rateLimit,
         };
+        exception.Data[ErrorBodyKey] = body;
         AttachRetryAfter(exception, retryAfter);
         return exception;
+    }
+
+    /// <summary>
+    /// The text a phrase rule matches against: the readable sentence followed by the body it was derived from. Both halves earn
+    /// their place — a server names the offending field in <c>error.param</c> (only in the body) as often as it names it inside
+    /// the sentence, and a rule that matched only the sentence would stop recognizing requests it used to recover.
+    /// </summary>
+    internal static string MatchText(ProviderException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return exception.Data[ErrorBodyKey] is string body && body.Length > 0
+            ? string.Concat(exception.Message, "\n", body)
+            : exception.Message;
     }
 
     internal static void AttachRetryAfter(ProviderException exception, RetryConditionHeaderValue? retryAfter)

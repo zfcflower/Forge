@@ -1,6 +1,6 @@
 # 03 模型提供商、认证与网络
 
-本文件说明 FORGE 如何连接模型服务：三家协议、七种认证、凭据存储、模型目录与元数据、缓存策略、官方身份、网络栈与用量日志。
+本文件说明 FORGE 如何连接模型服务：三家协议、七种认证、凭据存储、模型目录与元数据、缓存策略、官方身份、网络栈、用量日志、错误文本与失败请求取证。
 
 ## 3.1 三家协议
 
@@ -62,7 +62,7 @@
   - GitHub Copilot：`X-Interaction-Id`（按它分桶，不填几乎拿不到 Claude 模型缓存命中）。
   - DeepSeek/自定义：只有自动前缀缓存，不发任何请求级旋钮。
 - 缓存路由键取 `CacheRoutingKey ?? SessionId`（`CacheRoutingKey` = 谱系根），交接/分叉后仍命中同一批条目。
-- 被 400 拒的旋钮走**一次性降级**：缩到必需 beta、不写 ttl，按 `Id|AuthStyle|入口` 记进进程级备忘，之后不再多付一个往返；降级必须可见——`MessageCompleted.Notice` 转成 `AgentNotice`，UI 以警告色 toast 呈现，并在当轮卡片留一行说明。
+- 被 400 拒的旋钮走**一次性降级**：缩到必需 beta、不写 ttl，按 `Id|AuthStyle|入口` 记进进程级备忘，之后不再多付一个往返；降级必须可见——`MessageCompleted.Notice` 转成 `AgentNotice`，UI 以警告色 toast 呈现，并在当轮卡片留一行说明。是否算“点名了旋钮”按可读句**加原始错误体**判定（`ProviderErrors.MatchText`，见 §3.9）：字段名常常只出现在 `error.param` 里。
 - 同一前缀一小时内被整段重写 3 次时，以信息色 toast 提示一次（会话级去重，首轮全量写入排除）。
 - **缓存寿命小片**（`strip-cache-ttl`，`缓存 1h` / `缓存 5m`）显示真正发出去的值；`已连接` 列表每行一个下拉（`缓存自动` / `缓存 5 分钟` / `缓存 1 小时`），只有协议里真有这个旋钮的提供商显示（Anthropic、OpenAI）。
 
@@ -92,7 +92,12 @@
 - **与 `forge.db.turn_metrics` 的分工**：轮级指标（起止、结局、本轮 token 快照、工具次数）已常开进库、两种会话都有（见 Docs/12 §12.2）；本文件只做逐请求取证（延迟、失败、请求形状指纹、限流快照），默认关是既定隐私立场，不因轮级入库而改变。
 - **绝不写提示词或回复正文**：只写分析与复现需要的形状。录制是 best-effort：磁盘满、文件被占、目录被拒一律吞掉，只经诊断日志 Warning 报一次，绝不因为日志让回合失败。要看原文（含提示词与响应字节）时走 `Docs/13` §13.8 的代理抓包，不为此日志开例外。
 
-## 3.9 提供商设置页与登录流
+## 3.9 错误文本
+
+- **被拒的身体读成一句话。** 非 2xx 的模型请求由 `ProviderErrors.FromStatus` 解析错误体：`error.message` → `message` → 字符串 `error` → 原始文本（换行折成一行），并补上可执行的提示 `(param: …)`、`(use: <替代模型>)`、非泛型的 `(type: …)`。所以 OpenCode 网关那句 `{"error":{"param":null,…,"message":"Upstream request failed: [invalid_request] the request is invalid (request_id: gw-…)"}}` 在回合脚注里就是这句话本身，而不是一段 JSON。
+- **原始体不丢。** 整段响应体存在 `ProviderException.Data[ProviderErrors.ErrorBodyKey]`，`turn_metrics.error` 记的是可读版本。短语规则（上下文溢出、`prompt_cache_key`/`prompt_cache_retention`/`x-grok-conv-id`/`X-Interaction-Id`/`anthropic-beta` 的一次性降级）统一用 `ProviderErrors.MatchText`（可读句 + 原始体）匹配——字段名常常只出现在 `error.param` 里，只匹配句子会让以前能救回的 400 变成硬失败。
+
+## 3.10 提供商设置页与登录流
 
 - `provider` 分区自上而下：无可运行提供商时的顶部横幅；全局“默认上下文窗口”；«模型目录»一行（状态“更新于 … · N 个提供商 · M 个模型”、可编辑地址、立即更新；刷新期间按钮禁用）；已连接列表（名称、凭据摘要、状态点、编辑、N 个模型、设为默认、删除需点两次）；自定义提供商（“添加提供商”）；内置提供商（按预设能力显示“登录”与“API 密钥”，同一家允许多份）；底部“内置 Agent 默认”（每个 agent 一行：模型下拉 + 思考下拉）。
 - 添加/编辑是同一个模态：名称、Base URL（自定义才可改）、密钥（勾选=密钥本身进加密库，不勾选=环境变量名）、请求头（每行 `名称: 值`，按第一个冒号拆分、名称不分大小写、后行覆盖前行，值里的 `{session}` 按请求替换为会话 id；无会话的请求不发这条头）。底部“测试连接”通过后变“保存”；改动 URL/密钥/请求头会回到“测试连接”。取消时删除为未保存提供商写入的测试密钥。

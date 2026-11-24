@@ -105,15 +105,16 @@ public abstract class HttpChatProvider : IChatProvider
         var downgraded = false;
         UsageAttempt? attempt = null;
         HttpResponseMessage response;
-        while (true)
+        for (var attemptNumber = 1; ; attemptNumber++)
         {
             using var message = CreateRequest(body, request);
 #if DEBUG
-            // Debug builds keep this attempt's bytes in .log/. Nothing of it survives into Release: the type and every call
-            // below are compiled out, so a shipped binary has no capture call to skip.
+            // Debug builds with FORGE_WIRE_DIR set keep this attempt's bytes. Nothing of this survives into Release: the
+            // type and every call below are compiled out, so a shipped binary has no capture call to skip.
             using var wire = WireDump.Start(message, body, Config.Id, downgraded ? 2 : 1, downgraded);
 #endif
-            attempt = new UsageAttempt(Config.Id, request, Config.Wire?.Entrypoint, downgraded, Options.UsageRecorder);
+            attempt = new UsageAttempt(
+                Config.Id, request, Config.Wire?.Entrypoint, downgraded, Options.UsageRecorder);
             try
             {
                 response = await SendAsync(message, ct).ConfigureAwait(false);

@@ -71,7 +71,7 @@ public sealed class AnthropicProvider : HttpChatProvider
     protected override bool CanDegrade(ProviderException failure) =>
         !downgraded
         && failure.StatusCode == 400
-        && failure.Message.Contains("anthropic-beta", StringComparison.OrdinalIgnoreCase);
+        && ProviderErrors.MatchText(failure).Contains("anthropic-beta", StringComparison.OrdinalIgnoreCase);
 
     protected override void Degrade()
     {

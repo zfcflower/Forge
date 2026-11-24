@@ -59,12 +59,20 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     /// A 400 naming one of the cache knobs means this model or gateway does not know it: the answer is to send less, not to
     /// fail the turn. Both families count — the body fields and the cache headers a strict gateway can refuse just the same.
     /// </summary>
-    protected override bool CanDegrade(ProviderException failure) =>
-        failure.StatusCode == 400
-        && (failure.Message.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
-            || failure.Message.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase)
-            || failure.Message.Contains("x-grok-conv-id", StringComparison.OrdinalIgnoreCase)
-            || failure.Message.Contains("X-Interaction-Id", StringComparison.OrdinalIgnoreCase));
+    protected override bool CanDegrade(ProviderException failure)
+    {
+        if (failure.StatusCode != 400)
+        {
+            return false;
+        }
+
+        // Both halves count: a field named in `error.param` lives only in the body, one named in the sentence lives there.
+        var text = ProviderErrors.MatchText(failure);
+        return text.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("x-grok-conv-id", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("X-Interaction-Id", StringComparison.OrdinalIgnoreCase);
+    }
 
     protected override void Degrade()
     {
