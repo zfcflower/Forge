@@ -28,10 +28,8 @@ internal static class WorkbenchStripText
 /// indicator bar along its outer (window-edge) side. Strips are shown only for auto-hidden regions. Clicking a tab floats
 /// that one panel in the drawer.
 /// </summary>
-internal sealed class AutoHideStrip : Panel
+internal sealed partial class AutoHideStrip : Panel
 {
-    public static readonly StyledProperty<IBrush?> SeparatorBrushProperty =
-        AvaloniaProperty.Register<AutoHideStrip, IBrush?>(nameof(SeparatorBrush));
 
     private readonly StackPanel buttons = new() { Orientation = Orientation.Vertical, Spacing = 2, Margin = new Thickness(0, 4, 0, 4) };
     private readonly ScrollViewer scroller;
@@ -101,11 +99,8 @@ internal sealed class AutoHideStrip : Panel
         }
     }
 
-    public IBrush? SeparatorBrush
-    {
-        get => GetValue(SeparatorBrushProperty);
-        set => SetValue(SeparatorBrushProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial IBrush? SeparatorBrush { get; set; }
 
     /// <summary>Rebuilds the tabs; called when a panel is added, removed, hidden or renamed.</summary>
     public void Rebuild()

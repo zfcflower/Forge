@@ -48,23 +48,9 @@ internal enum TimelineRowRole
 /// turn's expansion changes, the language and the motion gate). The row keeps its position current across append, expand and
 /// collapse without rebuilding anything.</para>
 /// </summary>
-internal sealed class TimelineGutter : Control
+internal sealed partial class TimelineGutter : Control
 {
-    public static readonly StyledProperty<TimelineNodeKind> KindProperty =
-        AvaloniaProperty.Register<TimelineGutter, TimelineNodeKind>(nameof(Kind));
 
-    public static readonly StyledProperty<TimelineRowRole> RoleProperty =
-        AvaloniaProperty.Register<TimelineGutter, TimelineRowRole>(nameof(Role));
-
-    /// <summary>The tool call's name; only read when <see cref="Kind"/> is <see cref="TimelineNodeKind.Tool"/>.</summary>
-    public static readonly StyledProperty<string?> ToolNameProperty =
-        AvaloniaProperty.Register<TimelineGutter, string?>(nameof(ToolName));
-
-    public static readonly StyledProperty<bool> IsRunningProperty =
-        AvaloniaProperty.Register<TimelineGutter, bool>(nameof(IsRunning));
-
-    public static readonly StyledProperty<bool> IsFailingProperty =
-        AvaloniaProperty.Register<TimelineGutter, bool>(nameof(IsFailing));
 
     /// <summary>Whether this row draws its node: every row does, except the one row a turn with nothing visible of its own still shows.</summary>
     public static readonly StyledProperty<bool> ShowNodeProperty =
@@ -93,35 +79,21 @@ internal sealed class TimelineGutter : Control
     private (TimelineNodeKind Kind, TimelineNodeState State, bool ShowNode)? appliedNode;
     private (TimelineNodeKind Kind, TimelineNodeState State, bool ShowNode)? appliedName;
 
-    public TimelineNodeKind Kind
-    {
-        get => GetValue(KindProperty);
-        set => SetValue(KindProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial TimelineNodeKind Kind { get; set; }
 
-    public TimelineRowRole Role
-    {
-        get => GetValue(RoleProperty);
-        set => SetValue(RoleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial TimelineRowRole Role { get; set; }
 
-    public string? ToolName
-    {
-        get => GetValue(ToolNameProperty);
-        set => SetValue(ToolNameProperty, value);
-    }
+    /// <summary>The tool call's name; only read when <see cref="Kind"/> is <see cref="TimelineNodeKind.Tool"/>.</summary>
+    [GeneratedStyledProperty]
+    public partial string? ToolName { get; set; }
 
-    public bool IsRunning
-    {
-        get => GetValue(IsRunningProperty);
-        set => SetValue(IsRunningProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool IsRunning { get; set; }
 
-    public bool IsFailing
-    {
-        get => GetValue(IsFailingProperty);
-        set => SetValue(IsFailingProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool IsFailing { get; set; }
 
     public bool ShowNode
     {

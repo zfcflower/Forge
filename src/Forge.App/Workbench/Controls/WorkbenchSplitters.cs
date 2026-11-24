@@ -137,10 +137,8 @@ internal enum PanelSplitterKind
 }
 
 /// <summary>The 1 px splitter between two panels of one region; dragging writes the split back to the layout.</summary>
-internal sealed class PanelSplitter : WorkbenchSplitter
+internal sealed partial class PanelSplitter : WorkbenchSplitter
 {
-    public static readonly StyledProperty<bool> IsVerticalProperty =
-        AvaloniaProperty.Register<PanelSplitter, bool>(nameof(IsVertical));
 
     private PanelSplitterKind kind;
     private double startValue;
@@ -182,11 +180,8 @@ internal sealed class PanelSplitter : WorkbenchSplitter
     public double LowerHeight { get; set; }
 
     /// <summary>True for the line between the preview column and the files column.</summary>
-    public bool IsVertical
-    {
-        get => GetValue(IsVerticalProperty);
-        set => SetValue(IsVerticalProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool IsVertical { get; set; }
 
     /// <summary>
     /// True while the preview column sits left of the files column in the host that arranges this line: the drag adds the

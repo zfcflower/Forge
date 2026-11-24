@@ -90,7 +90,7 @@ internal sealed partial class DiffFileHeader : UserControl
 /// A horizontal row with one flexible child (the path) and one trailing cluster. Everything else takes its natural width; the
 /// flexible child gets what is left after the trailing cluster, so the path shortens before any button is pushed out.
 /// </summary>
-internal sealed class FlexRowPanel : Panel
+internal sealed partial class FlexRowPanel : Panel
 {
     public static readonly AttachedProperty<bool> IsFlexibleProperty =
         AvaloniaProperty.RegisterAttached<FlexRowPanel, Control, bool>("IsFlexible");
@@ -98,19 +98,14 @@ internal sealed class FlexRowPanel : Panel
     public static readonly AttachedProperty<bool> IsTrailingProperty =
         AvaloniaProperty.RegisterAttached<FlexRowPanel, Control, bool>("IsTrailing");
 
-    public static readonly StyledProperty<double> SpacingProperty =
-        AvaloniaProperty.Register<FlexRowPanel, double>(nameof(Spacing));
 
     static FlexRowPanel()
     {
         AffectsMeasure<FlexRowPanel>(SpacingProperty);
     }
 
-    public double Spacing
-    {
-        get => GetValue(SpacingProperty);
-        set => SetValue(SpacingProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial double Spacing { get; set; }
 
     public static bool GetIsFlexible(Control control) => control.GetValue(IsFlexibleProperty);
 

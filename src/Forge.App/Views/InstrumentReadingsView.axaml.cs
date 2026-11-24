@@ -20,8 +20,6 @@ namespace Forge.App.Views;
 /// </summary>
 public partial class InstrumentReadingsView : UserControl
 {
-    public static readonly StyledProperty<ICommand?> CompactCommandProperty =
-        AvaloniaProperty.Register<InstrumentReadingsView, ICommand?>(nameof(CompactCommand));
 
     /// <summary>The gauge's hover line, owned by this control and rewritten in place (see <see cref="ToolTipText"/>).</summary>
     private readonly TextBlock gaugeTip;
@@ -35,11 +33,8 @@ public partial class InstrumentReadingsView : UserControl
         CompactCommandProperty.Changed.AddClassHandler<InstrumentReadingsView>(static (view, _) => view.SyncGaugeTip());
     }
 
-    public ICommand? CompactCommand
-    {
-        get => GetValue(CompactCommandProperty);
-        set => SetValue(CompactCommandProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial ICommand? CompactCommand { get; set; }
 
     public InstrumentReadingsView()
     {

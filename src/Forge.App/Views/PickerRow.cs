@@ -15,10 +15,8 @@ namespace Forge.App.Views;
 /// matched against the whole style sheet) costs roughly an order of magnitude more per row than a decorator does. The
 /// bench's <c>composer.model.open</c> row is the number that decides whether that matters.
 /// </summary>
-internal sealed class PickerRow : Border
+internal sealed partial class PickerRow : Border
 {
-    public static readonly StyledProperty<ICommand?> CommandProperty =
-        AvaloniaProperty.Register<PickerRow, ICommand?>(nameof(Command));
 
     public static readonly RoutedEvent<RoutedEventArgs> ClickEvent =
         RoutedEvent.Register<PickerRow, RoutedEventArgs>(nameof(Click), RoutingStrategies.Bubble);
@@ -40,11 +38,8 @@ internal sealed class PickerRow : Border
         Classes.Add("picker-row");
     }
 
-    public ICommand? Command
-    {
-        get => GetValue(CommandProperty);
-        set => SetValue(CommandProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial ICommand? Command { get; set; }
 
     public event EventHandler<RoutedEventArgs>? Click
     {

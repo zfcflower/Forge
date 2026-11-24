@@ -15,11 +15,8 @@ namespace Forge.App.Workbench.Controls;
 /// one place (<c>Resources/Icons.axaml</c>) and painted by the built-in template below. It exists as its own type so the grid
 /// contract applies by type: the stock <c>PathIcon</c> theme is left alone for the built-in controls that use it.
 /// </remarks>
-internal sealed class FluentIcon : PathIcon
+internal sealed partial class FluentIcon : PathIcon
 {
-    /// <summary>Whether the glyph is drawn a quarter turn clockwise.</summary>
-    public static readonly StyledProperty<bool> RotatedProperty =
-        AvaloniaProperty.Register<FluentIcon, bool>(nameof(Rotated));
 
     static FluentIcon() =>
         RotatedProperty.Changed.AddClassHandler<FluentIcon>((icon, _) => icon.Turn());
@@ -33,11 +30,9 @@ internal sealed class FluentIcon : PathIcon
     /// <c>RotateTransform.Angle</c> setter is dropped with it. Treating the turn as part of the icon's own contract is what
     /// keeps one chevron behaving like the next.
     /// </remarks>
-    public bool Rotated
-    {
-        get => GetValue(RotatedProperty);
-        set => SetValue(RotatedProperty, value);
-    }
+    /// <summary>Whether the glyph is drawn a quarter turn clockwise.</summary>
+    [GeneratedStyledProperty]
+    public partial bool Rotated { get; set; }
 
     /// <summary>A closed row carries no transform at all: most glyphs on screen are chevrons that stay as they are.</summary>
     private void Turn() => RenderTransform = Rotated ? new RotateTransform(90) : null;

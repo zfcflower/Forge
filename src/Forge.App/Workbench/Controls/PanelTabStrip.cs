@@ -26,20 +26,10 @@ internal enum TabDragMode
 /// inside the group and floating a tab out of it — and gives every tab its own context menu instance. When the tabs no
 /// longer fit, an ellipsis button pinned to the strip's right edge lists the ones that were clipped.
 /// </summary>
-internal sealed class PanelTabStrip : TemplatedControl
+internal sealed partial class PanelTabStrip : TemplatedControl
 {
     /// <summary>Half a pixel: a tab whose edge lands exactly on the viewport edge still counts as visible.</summary>
     private const double ClippedEdge = 0.5;
-
-    public static readonly StyledProperty<WorkbenchLayout?> LayoutProperty =
-        AvaloniaProperty.Register<PanelTabStrip, WorkbenchLayout?>(nameof(Layout));
-
-    public static readonly StyledProperty<TabGroupModel?> GroupProperty =
-        AvaloniaProperty.Register<PanelTabStrip, TabGroupModel?>(nameof(Group));
-
-    /// <summary>True while at least one tab does not fit in the strip; the ellipsis button is visible exactly then.</summary>
-    public static readonly StyledProperty<bool> HasOverflowProperty =
-        AvaloniaProperty.Register<PanelTabStrip, bool>(nameof(HasOverflow));
 
     private readonly List<TabHeaderView> headers = [];
     private StackPanel? tabsHost;
@@ -68,23 +58,15 @@ internal sealed class PanelTabStrip : TemplatedControl
         LayoutProperty.Changed.AddClassHandler<PanelTabStrip>((strip, _) => strip.InvalidateMeasure());
     }
 
-    public WorkbenchLayout? Layout
-    {
-        get => GetValue(LayoutProperty);
-        set => SetValue(LayoutProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial WorkbenchLayout? Layout { get; set; }
 
-    public TabGroupModel? Group
-    {
-        get => GetValue(GroupProperty);
-        set => SetValue(GroupProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial TabGroupModel? Group { get; set; }
 
-    public bool HasOverflow
-    {
-        get => GetValue(HasOverflowProperty);
-        set => SetValue(HasOverflowProperty, value);
-    }
+    /// <summary>True while at least one tab does not fit in the strip; the ellipsis button is visible exactly then.</summary>
+    [GeneratedStyledProperty]
+    public partial bool HasOverflow { get; set; }
 
     /// <summary>Activates a tab of this strip (keyboard activation of a focused header).</summary>
     public void Activate(TabModel tab) => Layout?.ActivateTabByUser(tab);

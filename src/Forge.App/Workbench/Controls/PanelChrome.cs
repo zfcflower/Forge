@@ -20,139 +20,31 @@ namespace Forge.App.Workbench.Controls;
 /// right — the bottom group's two are drawn in every state) above the body. The control holds no layout state — every button
 /// calls back into <see cref="WorkbenchLayout"/>, and the title bar's blank space starts a region-swap drag on the host.
 /// </summary>
-internal sealed class PanelChrome : TemplatedControl
+internal sealed partial class PanelChrome : TemplatedControl
 {
     /// <summary>Height of the title bar; presses below it belong to the body, not to a region-swap drag.</summary>
     public const double TitleBarHeight = 28;
-
-    public static readonly StyledProperty<PanelModel?> ModelProperty =
-        AvaloniaProperty.Register<PanelChrome, PanelModel?>(nameof(Model));
-
-    public static readonly StyledProperty<WorkbenchLayout?> LayoutProperty =
-        AvaloniaProperty.Register<PanelChrome, WorkbenchLayout?>(nameof(Layout));
-
-    public static readonly StyledProperty<string?> HeaderTitleProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(HeaderTitle));
-
-    public static readonly StyledProperty<bool> ShowTitleProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(ShowTitle));
-
-    public static readonly StyledProperty<bool> ShowTabStripProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(ShowTabStrip));
-
-    public static readonly StyledProperty<TabGroupModel?> TabGroupProperty =
-        AvaloniaProperty.Register<PanelChrome, TabGroupModel?>(nameof(TabGroup));
-
-    public static readonly StyledProperty<IEnumerable?> HeaderToolsProperty =
-        AvaloniaProperty.Register<PanelChrome, IEnumerable?>(nameof(HeaderTools));
-
-    public static readonly StyledProperty<object?> BodyProperty =
-        AvaloniaProperty.Register<PanelChrome, object?>(nameof(Body));
-
-    public static readonly StyledProperty<bool> CoverVisibleProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(CoverVisible));
-
-    public static readonly StyledProperty<Geometry?> CoverIconProperty =
-        AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(CoverIcon));
-
-    public static readonly StyledProperty<string?> CoverTooltipProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(CoverTooltip));
-
-    public static readonly StyledProperty<string?> CoverAutomationIdProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(CoverAutomationId));
-
-    public static readonly StyledProperty<bool> PinVisibleProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(PinVisible));
-
-    public static readonly StyledProperty<Geometry?> PinIconProperty =
-        AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(PinIcon));
-
-    public static readonly StyledProperty<string?> PinTooltipProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(PinTooltip));
-
-    public static readonly StyledProperty<string?> PinAutomationIdProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(PinAutomationId));
-
-    public static readonly StyledProperty<bool> FloatVisibleProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(FloatVisible));
-
-    public static readonly StyledProperty<Geometry?> FloatIconProperty =
-        AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(FloatIcon));
-
-    public static readonly StyledProperty<string?> FloatTooltipProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(FloatTooltip));
-
-    public static readonly StyledProperty<string?> FloatAutomationIdProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(FloatAutomationId));
-
-    public static readonly StyledProperty<bool> SidebarProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(Sidebar));
-
-    public static readonly StyledProperty<bool> CloseVisibleProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(CloseVisible));
-
-    public static readonly StyledProperty<Geometry?> CloseIconProperty =
-        AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(CloseIcon));
-
-    public static readonly StyledProperty<string?> CloseTooltipProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(CloseTooltip));
-
-    public static readonly StyledProperty<string?> CloseAutomationIdProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(CloseAutomationId));
 
     private PanelIconButton? coverButton;
     private PanelIconButton? pinButton;
     private PanelIconButton? minimizeButton;
 
-    public static readonly StyledProperty<bool> MinimizeVisibleProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(MinimizeVisible));
-    public static readonly StyledProperty<Geometry?> MinimizeIconProperty =
-        AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(MinimizeIcon));
-    public static readonly StyledProperty<string?> MinimizeTooltipProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(MinimizeTooltip));
-    public static readonly StyledProperty<string?> MinimizeAutomationIdProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(MinimizeAutomationId));
+    [GeneratedStyledProperty]
+    public partial bool MinimizeVisible { get; set; }
 
     /// <summary>Text the body shows instead of a tab's content, for a group opened while it holds none.</summary>
-    public static readonly StyledProperty<string?> EmptyTextProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(EmptyText));
+    [GeneratedStyledProperty]
+    public partial string? EmptyText { get; set; }
 
-    public static readonly StyledProperty<bool> ShowEmptyTextProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(ShowEmptyText));
+    [GeneratedStyledProperty]
+    public partial bool ShowEmptyText { get; set; }
 
-    public bool MinimizeVisible
-    {
-        get => GetValue(MinimizeVisibleProperty);
-        set => SetValue(MinimizeVisibleProperty, value);
-    }
-
-    public string? EmptyText
-    {
-        get => GetValue(EmptyTextProperty);
-        set => SetValue(EmptyTextProperty, value);
-    }
-
-    public bool ShowEmptyText
-    {
-        get => GetValue(ShowEmptyTextProperty);
-        set => SetValue(ShowEmptyTextProperty, value);
-    }
-
-    public Geometry? MinimizeIcon
-    {
-        get => GetValue(MinimizeIconProperty);
-        set => SetValue(MinimizeIconProperty, value);
-    }
-    public string? MinimizeTooltip
-    {
-        get => GetValue(MinimizeTooltipProperty);
-        set => SetValue(MinimizeTooltipProperty, value);
-    }
-    public string? MinimizeAutomationId
-    {
-        get => GetValue(MinimizeAutomationIdProperty);
-        set => SetValue(MinimizeAutomationIdProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial Geometry? MinimizeIcon { get; set; }
+    [GeneratedStyledProperty]
+    public partial string? MinimizeTooltip { get; set; }
+    [GeneratedStyledProperty]
+    public partial string? MinimizeAutomationId { get; set; }
     private PanelIconButton? floatButton;
     private PanelIconButton? closeButton;
     private TabModel? watchedTab;
@@ -169,162 +61,87 @@ internal sealed class PanelChrome : TemplatedControl
             chrome.PseudoClasses.Set(":sidebar", e.NewValue is true));
     }
 
-    public PanelModel? Model
-    {
-        get => GetValue(ModelProperty);
-        set => SetValue(ModelProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial PanelModel? Model { get; set; }
 
-    public WorkbenchLayout? Layout
-    {
-        get => GetValue(LayoutProperty);
-        set => SetValue(LayoutProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial WorkbenchLayout? Layout { get; set; }
 
     /// <summary>True while this panel is drawn inside its region's drawer - not only the panel the drawer was opened on: a
     /// files drawer also holds the preview column beside it.</summary>
     private bool IsDrawerContent => Model is { } model && Layout?.DrawerPanel is { } drawer && drawer.Region == model.Region;
 
-    public string? HeaderTitle
-    {
-        get => GetValue(HeaderTitleProperty);
-        set => SetValue(HeaderTitleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? HeaderTitle { get; set; }
 
-    public bool ShowTitle
-    {
-        get => GetValue(ShowTitleProperty);
-        set => SetValue(ShowTitleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool ShowTitle { get; set; }
 
-    public bool ShowTabStrip
-    {
-        get => GetValue(ShowTabStripProperty);
-        set => SetValue(ShowTabStripProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool ShowTabStrip { get; set; }
 
-    public TabGroupModel? TabGroup
-    {
-        get => GetValue(TabGroupProperty);
-        set => SetValue(TabGroupProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial TabGroupModel? TabGroup { get; set; }
 
-    public IEnumerable? HeaderTools
-    {
-        get => GetValue(HeaderToolsProperty);
-        set => SetValue(HeaderToolsProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial IEnumerable? HeaderTools { get; set; }
 
     /// <summary>What the body shows: a plain panel's content, or the active tab's content for a tab group.</summary>
-    public object? Body
-    {
-        get => GetValue(BodyProperty);
-        set => SetValue(BodyProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial object? Body { get; set; }
 
     /// <summary>True for the panels of a sidebar region (Project or Inspector); their body uses the sidebar surface.</summary>
-    public bool Sidebar
-    {
-        get => GetValue(SidebarProperty);
-        set => SetValue(SidebarProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool Sidebar { get; set; }
 
-    public bool CoverVisible
-    {
-        get => GetValue(CoverVisibleProperty);
-        set => SetValue(CoverVisibleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool CoverVisible { get; set; }
 
-    public Geometry? CoverIcon
-    {
-        get => GetValue(CoverIconProperty);
-        set => SetValue(CoverIconProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial Geometry? CoverIcon { get; set; }
 
-    public string? CoverTooltip
-    {
-        get => GetValue(CoverTooltipProperty);
-        set => SetValue(CoverTooltipProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? CoverTooltip { get; set; }
 
-    public string? CoverAutomationId
-    {
-        get => GetValue(CoverAutomationIdProperty);
-        set => SetValue(CoverAutomationIdProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? CoverAutomationId { get; set; }
 
-    public bool PinVisible
-    {
-        get => GetValue(PinVisibleProperty);
-        set => SetValue(PinVisibleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool PinVisible { get; set; }
 
-    public Geometry? PinIcon
-    {
-        get => GetValue(PinIconProperty);
-        set => SetValue(PinIconProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial Geometry? PinIcon { get; set; }
 
     /// <summary>True while the pin is the solid one: the region is docked, so the click auto-hides it.</summary>
-    public string? PinTooltip
-    {
-        get => GetValue(PinTooltipProperty);
-        set => SetValue(PinTooltipProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? PinTooltip { get; set; }
 
-    public string? PinAutomationId
-    {
-        get => GetValue(PinAutomationIdProperty);
-        set => SetValue(PinAutomationIdProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? PinAutomationId { get; set; }
 
-    public bool FloatVisible
-    {
-        get => GetValue(FloatVisibleProperty);
-        set => SetValue(FloatVisibleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool FloatVisible { get; set; }
 
-    public Geometry? FloatIcon
-    {
-        get => GetValue(FloatIconProperty);
-        set => SetValue(FloatIconProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial Geometry? FloatIcon { get; set; }
 
-    public string? FloatTooltip
-    {
-        get => GetValue(FloatTooltipProperty);
-        set => SetValue(FloatTooltipProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? FloatTooltip { get; set; }
 
-    public string? FloatAutomationId
-    {
-        get => GetValue(FloatAutomationIdProperty);
-        set => SetValue(FloatAutomationIdProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? FloatAutomationId { get; set; }
 
-    public bool CloseVisible
-    {
-        get => GetValue(CloseVisibleProperty);
-        set => SetValue(CloseVisibleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool CloseVisible { get; set; }
 
-    public Geometry? CloseIcon
-    {
-        get => GetValue(CloseIconProperty);
-        set => SetValue(CloseIconProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial Geometry? CloseIcon { get; set; }
 
-    public string? CloseTooltip
-    {
-        get => GetValue(CloseTooltipProperty);
-        set => SetValue(CloseTooltipProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? CloseTooltip { get; set; }
 
-    public string? CloseAutomationId
-    {
-        get => GetValue(CloseAutomationIdProperty);
-        set => SetValue(CloseAutomationIdProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? CloseAutomationId { get; set; }
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {

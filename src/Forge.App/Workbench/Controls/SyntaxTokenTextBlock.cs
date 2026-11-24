@@ -4,21 +4,16 @@ using Forge.Editor.Highlighting;
 
 namespace Forge.App.Workbench.Controls;
 
-public sealed class SyntaxTokenTextBlock : TextBlock
+public sealed partial class SyntaxTokenTextBlock : TextBlock
 {
-    public static readonly StyledProperty<TokenCategory> CategoryProperty =
-        AvaloniaProperty.Register<SyntaxTokenTextBlock, TokenCategory>(nameof(Category));
 
     static SyntaxTokenTextBlock()
     {
         CategoryProperty.Changed.AddClassHandler<SyntaxTokenTextBlock>((control, _) => control.UpdateCategoryClasses());
     }
 
-    public TokenCategory Category
-    {
-        get => GetValue(CategoryProperty);
-        set => SetValue(CategoryProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial TokenCategory Category { get; set; }
 
     public SyntaxTokenTextBlock()
     {

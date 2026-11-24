@@ -10,12 +10,10 @@ namespace Forge.App.Changes;
 /// One line of text that shortens itself in the middle ("src/Forge.App/Lo…Strings.Inspector.cs") when it does not fit, so a
 /// long path keeps both its root and its file name. Measuring runs on width/text changes only; the formatted text is cached.
 /// </summary>
-internal sealed class MiddleEllipsisText : Control
+internal sealed partial class MiddleEllipsisText : Control
 {
     private const string Ellipsis = "…";
 
-    public static readonly StyledProperty<string?> TextProperty =
-        AvaloniaProperty.Register<MiddleEllipsisText, string?>(nameof(Text));
 
     public static readonly StyledProperty<FontFamily> FontFamilyProperty =
         TextElement.FontFamilyProperty.AddOwner<MiddleEllipsisText>();
@@ -37,11 +35,8 @@ internal sealed class MiddleEllipsisText : Control
         AffectsRender<MiddleEllipsisText>(ForegroundProperty);
     }
 
-    public string? Text
-    {
-        get => GetValue(TextProperty);
-        set => SetValue(TextProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? Text { get; set; }
 
     public FontFamily FontFamily
     {

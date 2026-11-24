@@ -8,21 +8,16 @@ namespace Forge.App.Views;
 /// A hand-drawn wavy rule: the round-end divider the turn's numbers sit on. Avalonia's <c>TextDecoration</c> can only draw
 /// straight strokes (solid or dashed), so the wave is one <see cref="StreamGeometry"/> of the visible width.
 /// </summary>
-internal sealed class WavyUnderline : Control
+internal sealed partial class WavyUnderline : Control
 {
-    public static readonly StyledProperty<IBrush?> StrokeProperty =
-        AvaloniaProperty.Register<WavyUnderline, IBrush?>(nameof(Stroke));
 
     /// <summary>Half a period, in DIP: the wave crests about every 6 px.</summary>
     private const double WaveLength = 6;
 
     private const double Amplitude = 1.1;
 
-    public IBrush? Stroke
-    {
-        get => GetValue(StrokeProperty);
-        set => SetValue(StrokeProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial IBrush? Stroke { get; set; }
 
     public override void Render(DrawingContext context)
     {

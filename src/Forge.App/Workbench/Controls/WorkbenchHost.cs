@@ -15,10 +15,8 @@ namespace Forge.App.Workbench.Controls;
 /// between them, the auto-hide strips on the window edges, the drawer over Main and the drop targets of a region swap —
 /// and keeps one <see cref="FloatingPanelWindow"/> per floating item. It holds no layout state of its own.
 /// </summary>
-internal sealed class WorkbenchHost : Panel
+internal sealed partial class WorkbenchHost : Panel
 {
-    public static readonly StyledProperty<WorkbenchLayout?> LayoutProperty =
-        AvaloniaProperty.Register<WorkbenchHost, WorkbenchLayout?>(nameof(Layout));
 
     private readonly RegionPresenter?[] presenters = new RegionPresenter?[3];
     private readonly AutoHideStrip?[] strips = new AutoHideStrip?[3];
@@ -64,11 +62,8 @@ internal sealed class WorkbenchHost : Panel
         AddHandler(PointerPressedEvent, OnDrawerOutsidePress, Avalonia.Interactivity.RoutingStrategies.Tunnel);
     }
 
-    public WorkbenchLayout? Layout
-    {
-        get => GetValue(LayoutProperty);
-        set => SetValue(LayoutProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial WorkbenchLayout? Layout { get; set; }
 
     /// <summary>Starts a region-swap drag from a panel title bar; the targets appear once the pointer travels sideways.</summary>
     public void BeginRegionSwapDrag(RegionRole source, PointerPressedEventArgs e)

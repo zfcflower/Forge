@@ -26,27 +26,6 @@ namespace Forge.App.Changes;
 /// </summary>
 internal sealed partial class DiffEditorView : UserControl
 {
-    public static readonly StyledProperty<IReadOnlyList<IDiffFileItem>?> FilesProperty =
-        AvaloniaProperty.Register<DiffEditorView, IReadOnlyList<IDiffFileItem>?>(nameof(Files));
-
-    public static readonly StyledProperty<DiffViewMode> ModeProperty =
-        AvaloniaProperty.Register<DiffEditorView, DiffViewMode>(nameof(Mode));
-
-    public static readonly StyledProperty<bool> WordWrapProperty =
-        AvaloniaProperty.Register<DiffEditorView, bool>(nameof(WordWrap));
-
-    public static readonly StyledProperty<DiffReviewContext?> ReviewProperty =
-        AvaloniaProperty.Register<DiffEditorView, DiffReviewContext?>(nameof(Review));
-
-    public static readonly StyledProperty<Func<IDiffFileItem, Control>?> MarkdownPreviewFactoryProperty =
-        AvaloniaProperty.Register<DiffEditorView, Func<IDiffFileItem, Control>?>(nameof(MarkdownPreviewFactory));
-
-    /// <summary>
-    /// Builds the side-by-side view of one image change (wave W17a); null shows an image file's change as its binary notice,
-    /// exactly like before this factory existed.
-    /// </summary>
-    public static readonly StyledProperty<Func<IDiffFileItem, Control>?> ImageDiffFactoryProperty =
-        AvaloniaProperty.Register<DiffEditorView, Func<IDiffFileItem, Control>?>(nameof(ImageDiffFactory));
 
     private readonly DiffPalette palette = new();
     private readonly Side primary;
@@ -106,41 +85,27 @@ internal sealed partial class DiffEditorView : UserControl
     /// <summary>Raised when the file under the top edge of the viewport changes.</summary>
     public event Action<IDiffFileItem>? TopFileChanged;
 
-    public IReadOnlyList<IDiffFileItem>? Files
-    {
-        get => GetValue(FilesProperty);
-        set => SetValue(FilesProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial IReadOnlyList<IDiffFileItem>? Files { get; set; }
 
-    public DiffViewMode Mode
-    {
-        get => GetValue(ModeProperty);
-        set => SetValue(ModeProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial DiffViewMode Mode { get; set; }
 
-    public bool WordWrap
-    {
-        get => GetValue(WordWrapProperty);
-        set => SetValue(WordWrapProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool WordWrap { get; set; }
 
-    public DiffReviewContext? Review
-    {
-        get => GetValue(ReviewProperty);
-        set => SetValue(ReviewProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial DiffReviewContext? Review { get; set; }
 
-    public Func<IDiffFileItem, Control>? MarkdownPreviewFactory
-    {
-        get => GetValue(MarkdownPreviewFactoryProperty);
-        set => SetValue(MarkdownPreviewFactoryProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial Func<IDiffFileItem, Control>? MarkdownPreviewFactory { get; set; }
 
-    public Func<IDiffFileItem, Control>? ImageDiffFactory
-    {
-        get => GetValue(ImageDiffFactoryProperty);
-        set => SetValue(ImageDiffFactoryProperty, value);
-    }
+    /// <summary>
+    /// Builds the side-by-side view of one image change (wave W17a); null shows an image file's change as its binary notice,
+    /// exactly like before this factory existed.
+    /// </summary>
+    [GeneratedStyledProperty]
+    public partial Func<IDiffFileItem, Control>? ImageDiffFactory { get; set; }
 
     /// <summary>Row map of the left (inline: only) document.</summary>
     internal DiffRowMap PrimaryMap => primary.Map;

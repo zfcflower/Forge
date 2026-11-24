@@ -14,7 +14,7 @@ namespace Forge.App.Workbench.Controls;
 /// One tab of a <see cref="PanelTabStrip"/>: the title, the active silhouette and the close button. Interaction is not
 /// handled here — presses are forwarded to the strip, which owns the drag, reorder and float-out state.
 /// </summary>
-internal sealed class TabHeaderView : TemplatedControl
+internal sealed partial class TabHeaderView : TemplatedControl
 {
     /// <summary>Radius of the two top corners, measured on the frame's outer edge.</summary>
     private const double Radius = 5;
@@ -32,32 +32,6 @@ internal sealed class TabHeaderView : TemplatedControl
 
     /// <summary>Thickness of the frame.</summary>
     private const double FrameThickness = 1;
-
-    /// <summary>Backdrop brush of the active tab; the theme keeps the rest transparent.</summary>
-    public static readonly StyledProperty<TabModel?> ModelProperty =
-        AvaloniaProperty.Register<TabHeaderView, TabModel?>(nameof(Model));
-
-    public static readonly StyledProperty<string?> TabTitleProperty =
-        AvaloniaProperty.Register<TabHeaderView, string?>(nameof(TabTitle));
-
-    public static readonly StyledProperty<bool> IsClosableProperty =
-        AvaloniaProperty.Register<TabHeaderView, bool>(nameof(IsClosable));
-
-    public static readonly StyledProperty<bool> IsActiveProperty =
-        AvaloniaProperty.Register<TabHeaderView, bool>(nameof(IsActive));
-
-    public static readonly StyledProperty<bool> IsIconVisibleProperty =
-        AvaloniaProperty.Register<TabHeaderView, bool>(nameof(IsIconVisible));
-
-    /// <summary>
-    /// The glyph this tab leads with: a conversation wears the chat bubble, a file preview wears the same document the
-    /// file tree puts in front of the file's name, and the remaining kinds carry their marker in the title text alone.
-    /// </summary>
-    public static readonly StyledProperty<Geometry?> IconProperty =
-        AvaloniaProperty.Register<TabHeaderView, Geometry?>(nameof(Icon));
-
-    public static readonly StyledProperty<string?> CloseAutomationIdProperty =
-        AvaloniaProperty.Register<TabHeaderView, string?>(nameof(CloseAutomationId));
 
     private PanelIconButton? closeButton;
     private TabModel? watched;
@@ -82,54 +56,38 @@ internal sealed class TabHeaderView : TemplatedControl
     /// <summary>The strip that owns this header; presses and the close button are routed through it.</summary>
     public PanelTabStrip? Strip { get; set; }
 
-    public TabModel? Model
-    {
-        get => GetValue(ModelProperty);
-        set => SetValue(ModelProperty, value);
-    }
+    /// <summary>Backdrop brush of the active tab; the theme keeps the rest transparent.</summary>
+    [GeneratedStyledProperty]
+    public partial TabModel? Model { get; set; }
 
-    public string? TabTitle
-    {
-        get => GetValue(TabTitleProperty);
-        set => SetValue(TabTitleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? TabTitle { get; set; }
 
-    public bool IsClosable
-    {
-        get => GetValue(IsClosableProperty);
-        set => SetValue(IsClosableProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool IsClosable { get; set; }
 
-    public bool IsActive
-    {
-        get => GetValue(IsActiveProperty);
-        set => SetValue(IsActiveProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool IsActive { get; set; }
 
     /// <summary>
     /// True for a tab whose kind draws a leading icon: a conversation's chat bubble, or the document a file preview opens
     /// with — the same glyph the file tree draws before the file's name. Other kinds reserve no icon slot and carry their
     /// marker in the title text.
     /// </summary>
-    public bool IsIconVisible
-    {
-        get => GetValue(IsIconVisibleProperty);
-        set => SetValue(IsIconVisibleProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool IsIconVisible { get; set; }
 
     /// <summary>The leading glyph, already resolved to the active/inactive variant of this tab's kind by <see cref="ApplyIcon"/>.</summary>
-    public Geometry? Icon
-    {
-        get => GetValue(IconProperty);
-        set => SetValue(IconProperty, value);
-    }
+    /// <summary>
+    /// The glyph this tab leads with: a conversation wears the chat bubble, a file preview wears the same document the
+    /// file tree puts in front of the file's name, and the remaining kinds carry their marker in the title text alone.
+    /// </summary>
+    [GeneratedStyledProperty]
+    public partial Geometry? Icon { get; set; }
 
     /// <summary>Automation id of the close button, so the tab's own close box can be clicked.</summary>
-    public string? CloseAutomationId
-    {
-        get => GetValue(CloseAutomationIdProperty);
-        set => SetValue(CloseAutomationIdProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial string? CloseAutomationId { get; set; }
 
     /// <summary>Refreshes the visuals after the tab model changed a property the header shows.</summary>
     public void Refresh()
