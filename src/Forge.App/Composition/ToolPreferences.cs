@@ -29,6 +29,7 @@ internal static class ToolPreferences
                 preferences.ToolsGrepMaxResults,
                 ToolOptions.MinGrepMaxResults,
                 ToolOptions.MaxGrepMaxResults),
+            IgnoredDirectories = ToolOptions.ParseIgnoredDirectories(preferences.ToolsIgnoredDirectories),
             ShellPath = Empty(preferences.ToolsShellPath),
             RipgrepPath = Empty(preferences.ToolsRipgrepPath),
         };

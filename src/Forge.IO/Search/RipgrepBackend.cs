@@ -89,7 +89,7 @@ public static class RipgrepBackend
                     : $"ripgrep failed: {Shorten(detail)}");
         }
 
-        var result = Parse(request, processResult, request.ApplyIgnoreRules ? new GitIgnore(request.Root) : null, out var failure);
+        var result = Parse(request, processResult, new SearchFilter(request.Root, request.IgnoredDirectories), out var failure);
         return result is null ? RipgrepOutcome.Skipped(failure!) : RipgrepOutcome.Completed(result);
     }
 
@@ -115,6 +115,19 @@ public static class RipgrepBackend
             arguments.Add(request.Glob);
         }
 
+        // Prune the build-output directories in ripgrep itself, so they are not scanned at all. The same names are filtered
+        // from the result afterwards (SearchFilter), which also covers a name a glob cannot express.
+        foreach (var name in request.IgnoredDirectories)
+        {
+            if (!IsGlobSafe(name))
+            {
+                continue;
+            }
+
+            arguments.Add("--glob");
+            arguments.Add("!" + name + "/");
+        }
+
         arguments.Add(request.CaseSensitive ? "--case-sensitive" : "--ignore-case");
         if (!request.Regex)
         {
@@ -135,7 +148,26 @@ public static class RipgrepBackend
         return arguments;
     }
 
-    private static GrepResult? Parse(GrepRequest request, ProcessResult process, GitIgnore? filter, out string? failure)
+    /// <summary>Whether a directory name can be handed to ripgrep as a glob without changing its meaning.</summary>
+    private static bool IsGlobSafe(ReadOnlySpan<char> name)
+    {
+        if (name.IsEmpty)
+        {
+            return false;
+        }
+
+        foreach (var character in name)
+        {
+            if (character is '[' or ']' or '{' or '}' or '*' or '?' or '!' or '\\')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static GrepResult? Parse(GrepRequest request, ProcessResult process, SearchFilter? filter, out string? failure)
     {
         failure = null;
         var output = new List<GrepLine>();

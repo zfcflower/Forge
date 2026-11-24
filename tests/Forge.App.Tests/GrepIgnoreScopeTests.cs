@@ -6,9 +6,10 @@ using Xunit;
 namespace Forge.App.Tests;
 
 /// <summary>
-/// One rule for all three walking tools: a search of the workspace root is a search of the repository and the ignore rules
-/// prune it, while a path the caller named is searched as it is. The same directory must not answer differently depending on
-/// which tool is asked, so <c>grep</c>, <c>find</c> and <c>ls</c> are pinned against each other here.
+/// One rule for all three walking tools: the ignore rules and the build-output directory list apply to everything below
+/// the path a caller named, never to that path itself — so a search of <c>src</c> prunes <c>src/**/obj</c> while naming
+/// <c>obj</c> still searches it. <c>grep</c>, <c>find</c> and <c>ls</c> are pinned against each other here because the same
+/// directory must not answer differently per tool.
 /// </summary>
 public sealed class GrepIgnoreScopeTests : IDisposable
 {
@@ -65,6 +66,59 @@ public sealed class GrepIgnoreScopeTests : IDisposable
 
         var grepped = await RunAsync(new GrepTool(new ToolOptions { RipgrepPath = null }), ("pattern", "needle"), ("path", "secret"));
         Assert.Equal(["secret/needle.txt:1:needle"], grepped.Content.Split('\n'));
+    }
+
+    [Fact]
+    public async Task A_search_below_a_named_directory_prunes_build_output_and_naming_it_searches_it()
+    {
+        Make("src/keep.cs", "x\n");
+        Make("src/obj/gen.cs", "needle\n");
+        var options = new ToolOptions { RipgrepPath = null };
+
+        var below = await RunAsync(new GrepTool(options), ("pattern", "needle"), ("path", "src"));
+        Assert.Equal(["no matches", "scanned 1 file(s)"], below.Content.Split('\n'));
+
+        var named = await RunAsync(new GrepTool(options), ("pattern", "needle"), ("path", "src/obj"));
+        Assert.Equal(["src/obj/gen.cs:1:needle"], named.Content.Split('\n'));
+
+        var found = await RunAsync(new FindTool(), ("pattern", "*.cs"), ("path", "src"));
+        Assert.Equal(["src/keep.cs"], found.Content.Split('\n'));
+    }
+
+    [Fact]
+    public async Task A_directory_the_preference_names_is_pruned_at_any_depth_and_an_empty_list_keeps_everything()
+    {
+        Make("src/keep.cs", "x\n");
+        Make("src/generated/gen.cs", "needle\n");
+
+        var pruned = await RunAsync(
+            new GrepTool(new ToolOptions { RipgrepPath = null, IgnoredDirectories = ["generated"] }),
+            ("pattern", "needle"),
+            ("path", "src"));
+        Assert.Equal(["no matches", "scanned 1 file(s)"], pruned.Content.Split('\n'));
+
+        var everything = await RunAsync(
+            new GrepTool(new ToolOptions { RipgrepPath = null, IgnoredDirectories = [] }),
+            ("pattern", "needle"),
+            ("path", "src"));
+        Assert.Equal(["src/generated/gen.cs:1:needle"], everything.Content.Split('\n'));
+    }
+
+    [Fact]
+    public async Task Ignore_rules_reach_below_a_named_directory_but_not_the_path_named_in_full()
+    {
+        Make(".gitignore", "src/secret/\n");
+        Make("src/keep.cs", "x\n");
+        Make("src/secret/needle.txt", "needle\n");
+
+        var below = await RunAsync(new GrepTool(new ToolOptions { RipgrepPath = null }), ("pattern", "needle"), ("path", "src"));
+        Assert.Equal(["no matches", "scanned 1 file(s)"], below.Content.Split('\n'));
+
+        var named = await RunAsync(
+            new GrepTool(new ToolOptions { RipgrepPath = null }),
+            ("pattern", "needle"),
+            ("path", "src/secret"));
+        Assert.Equal(["src/secret/needle.txt:1:needle"], named.Content.Split('\n'));
     }
 
     [Fact]

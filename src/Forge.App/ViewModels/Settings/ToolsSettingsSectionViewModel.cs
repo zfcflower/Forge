@@ -202,6 +202,21 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
 
     public string GrepResultsHint => ToolsLimitsStrings.GrepResultsHint;
 
+    public string IgnoredDirectoriesLabel => ToolsLimitsStrings.IgnoredDirectories;
+
+    public string IgnoredDirectoriesHint => ToolsLimitsStrings.IgnoredDirectoriesHint;
+
+    /// <summary>Directory names a search skips below the path it was given (comma separated); read back from the preference.</summary>
+    public string IgnoredDirectories
+    {
+        get => composition.Preferences.ToolsIgnoredDirectories;
+        set
+        {
+            composition.Preferences.ToolsIgnoredDirectories = value;
+            OnPropertyChanged();
+        }
+    }
+
     public int MinGrepResults => AppPreferences.MinToolsGrepMaxResults;
 
     public int MaxGrepResults => AppPreferences.MaxToolsGrepMaxResults;
@@ -218,9 +233,7 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
     }
 
     public string SpillLabel => ToolsLimitsStrings.Spill;
-
     public string SpillHint => ToolsLimitsStrings.SpillHint;
-
     public int MinSpillChars => AppPreferences.MinChatArtifactSpillChars;
 
     public int MaxSpillChars => AppPreferences.MaxChatArtifactSpillChars;
@@ -279,6 +292,7 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
         OnPropertyChanged(nameof(CodeScriptTools));
         OnPropertyChanged(nameof(BashCaptureKilobytes));
         OnPropertyChanged(nameof(GrepMaxResults));
+        OnPropertyChanged(nameof(IgnoredDirectories));
         OnPropertyChanged(nameof(SpillChars));
         OnPropertyChanged(nameof(PreviewChars));
         OnPropertyChanged(nameof(TerminalFontFamily));

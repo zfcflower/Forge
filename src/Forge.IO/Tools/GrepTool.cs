@@ -35,8 +35,9 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
         : base(
             "grep",
             "Search files for a literal string or a regular expression, one `path:line:text` line per matching line and "
-            + "`path-line-text` for context lines. Applies .gitignore to a search of the workspace root; a path named in "
-            + "full is searched as-is, like `ls`. Skips binary and oversized files and reports how "
+            + "`path-line-text` for context lines. Applies .gitignore and the build-output directory list to what lies below "
+            + "the path it searches, never to that path itself, so `path=obj` still searches obj. Skips binary and oversized "
+            + "files and reports how "
             + "many. A query with no hit says how many files it scanned (not an error), and warns when a pattern carrying "
             + "regular-expression syntax was searched literally.",
             Schema,
@@ -85,9 +86,9 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
             Limit = limit,
             MaxFileBytes = Math.Max(1, bounds.GrepMaxFileBytes),
             Concurrency = bounds.SearchConcurrency,
-            // A path the caller named is searched as it is, the rule `ls` already follows; only a search of the root is a
-            // search of the repository, and only that one is pruned by the workspace's ignore rules.
-            ApplyIgnoreRules = string.Equals(start, root, WorkspacePath.Comparison),
+            // A path the caller named is searched as it is (only its contents are pruned): both backends build the same
+            // filter, so they return the same hits.
+            IgnoredDirectories = bounds.IgnoredDirectories,
         };
 
         GrepResult result;

@@ -33,8 +33,9 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
         : base(
             "find",
             "Find files and directories by path glob below a directory, one workspace-relative path per line, in walk "
-            + "order. Applies .gitignore to a search of the workspace root; a path named in full is searched as-is, like "
-            + "`ls`. Directories end with `/`. Past the limit it reports the total count.",
+            + "order. Applies .gitignore and the build-output directory list below the path it is given, never to that "
+            + "path itself: a path named in full is searched as-is, like `ls`. Directories end with `/`. Past the limit "
+            + "it reports the total count.",
             Schema,
             ToolSideEffect.ReadOnly)
     {
@@ -75,9 +76,9 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
                 IsError: true));
         }
 
-        // The same rule `ls` and `grep` follow: a path the caller named is searched as it is, and only a search of the root
-        // is a search of the repository.
-        var ignore = string.Equals(start, root, WorkspacePath.Comparison) ? new GitIgnore(root) : null;
+        // The rules apply below the path the caller named, never to it: naming `obj` still searches it, which is what
+        // `grep` and `ls` do too.
+        var ignore = new SearchFilter(root, bounds.IgnoredDirectories);
         var lines = new List<string>(Math.Min(limit, 256));
         var walked = 0;
         var omitted = 0;

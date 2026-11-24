@@ -13,6 +13,8 @@ internal static class ToolsLimitsStrings
     public const string BashCaptureHintKey = "tools.limits.bashCaptureHint";
     public const string GrepResultsKey = "tools.limits.grepResults";
     public const string GrepResultsHintKey = "tools.limits.grepResultsHint";
+    public const string IgnoredDirectoriesKey = "tools.limits.ignoredDirectories";
+    public const string IgnoredDirectoriesHintKey = "tools.limits.ignoredDirectoriesHint";
     public const string SpillKey = "tools.limits.spill";
     public const string SpillHintKey = "tools.limits.spillHint";
     public const string PreviewKey = "tools.limits.preview";
@@ -30,6 +32,10 @@ internal static class ToolsLimitsStrings
     public static string GrepResults => Loc.Instance[GrepResultsKey];
 
     public static string GrepResultsHint => Loc.Instance[GrepResultsHintKey];
+
+    public static string IgnoredDirectories => Loc.Instance[IgnoredDirectoriesKey];
+
+    public static string IgnoredDirectoriesHint => Loc.Instance[IgnoredDirectoriesHintKey];
 
     public static string Spill => Loc.Instance[SpillKey];
 
@@ -58,6 +64,14 @@ internal static class ToolsLimitsStrings
             GrepResultsHintKey,
             "一次搜索返回的匹配行数上限，超出部分被截断并报出命中总数。默认 1000。",
             "Matching lines one search returns; past it the result is cut and reports how many matched in all. Default 1000.");
+        Loc.Register(
+            IgnoredDirectoriesKey,
+            "搜索跳过的目录",
+            "Directories a search skips");
+        Loc.Register(
+            IgnoredDirectoriesHintKey,
+            "按目录名跳过构建产物，逗号分隔。只作用于搜索起点之下的目录：直接搜 obj 仍然搜它。默认 bin, obj, .vs, node_modules, target, .gradle, .venv, venv, __pycache__, .pytest_cache, .mypy_cache, .ruff_cache, .tox, .turbo, .next, .nuxt, .dart_tool, .zig-cache, .idea。",
+            "Build output skipped by directory name, comma separated. It applies below the path a search was given: searching obj itself still searches it. Defaults to bin, obj, .vs, node_modules, target, .gradle, .venv, venv, __pycache__, .pytest_cache, .mypy_cache, .ruff_cache, .tox, .turbo, .next, .nuxt, .dart_tool, .zig-cache, .idea.");
         Loc.Register(
             SpillKey,
             "artifact 溢出阈值（字符）",

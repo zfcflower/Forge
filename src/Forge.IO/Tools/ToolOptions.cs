@@ -33,12 +33,25 @@ public sealed record ToolOptions
     public const int MaxGrepContextLines = 5;
     public const int DefaultSearchConcurrency = 8;
 
+    /// <summary>
+    /// Directory names a search never descends into: the conventional build outputs of the common toolchains (.NET, JS,
+    /// Rust, Gradle, Python, Dart). A preference carries the live value, so a project whose output directory is named
+    /// otherwise can add it. Applied to every directory below the search start and never to the start itself, so naming
+    /// <c>obj</c> still searches it.
+    /// </summary>
+    public const string DefaultIgnoredDirectoryText =
+        "bin, obj, .vs, node_modules, target, .gradle, .venv, venv, __pycache__, .pytest_cache, .mypy_cache, .ruff_cache, "
+        + ".tox, .turbo, .next, .nuxt, .dart_tool, .zig-cache, .idea";
+
     public const int DefaultFindMaxResults = 1000;
     public const int MaxFindMaxResults = 10000;
     public const int DefaultListMaxEntries = 10000;
     public const int MaxListMaxEntries = 50000;
     public const int DefaultWalkDepth = 16;
     public const int MaxWalkDepth = 64;
+
+    /// <summary>The built-in directory list, parsed once from <see cref="DefaultIgnoredDirectoryText"/>.</summary>
+    public static IReadOnlyList<string> DefaultIgnoredDirectories { get; } = ParseIgnoredDirectories(DefaultIgnoredDirectoryText);
 
     public static ToolOptions Default { get; } = new();
 
@@ -58,6 +71,9 @@ public sealed record ToolOptions
 
     public int GrepMaxFileBytes { get; init; } = DefaultGrepMaxFileBytes;
 
+    /// <summary>Directory names a search skips below the path it was given; the start itself is searched even when named.</summary>
+    public IReadOnlyList<string> IgnoredDirectories { get; init; } = DefaultIgnoredDirectories;
+
     public int FindMaxResults { get; init; } = DefaultFindMaxResults;
 
     public int ListMaxEntries { get; init; } = DefaultListMaxEntries;
@@ -73,4 +89,27 @@ public sealed record ToolOptions
 
     /// <summary>An optional shell for script-mode commands; empty means the platform default is resolved.</summary>
     public string? ShellPath { get; init; }
+
+    /// <summary>Splits a comma, semicolon or whitespace separated list of directory names, dropping blanks and duplicates.</summary>
+    public static IReadOnlyList<string> ParseIgnoredDirectories(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var part in text.Split(
+            [',', ';', ' ', '\t', '\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (seen.Add(part))
+            {
+                names.Add(part);
+            }
+        }
+
+        return names;
+    }
 }

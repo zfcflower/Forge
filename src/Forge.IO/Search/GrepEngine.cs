@@ -24,11 +24,11 @@ public sealed record GrepRequest
     public string? Glob { get; init; }
 
     /// <summary>
-    /// Whether the workspace's <c>.gitignore</c> rules prune the walk. True for a search of the root; false when the caller
-    /// named the path itself, which is the rule <c>ls</c> already follows — the same directory must not answer differently
-    /// depending on which tool is asked. Both backends honour it, so their result sets stay equal.
+    /// Directory names never descended into (build output). The ignore rules and this list apply below
+    /// <see cref="StartPath"/> and never to it: a search of the root and a search of <c>src</c> both prune what lies
+    /// underneath, while naming <c>obj</c> still searches it. Both backends honour it, so their result sets stay equal.
     /// </summary>
-    public bool ApplyIgnoreRules { get; init; } = true;
+    public IReadOnlyList<string> IgnoredDirectories { get; init; } = ToolOptions.DefaultIgnoredDirectories;
 
     /// <summary>Treat <see cref="Pattern"/> as a .NET regular expression instead of a literal string.</summary>
     public bool Regex { get; init; }
@@ -204,8 +204,8 @@ public static class GrepEngine
                 yield break;
             }
 
-            GitIgnore? ignore = request.ApplyIgnoreRules ? new GitIgnore(request.Root) : null;
-            foreach (var entry in FileWalker.Walk(request.Root, request.StartPath, int.MaxValue, ignore, external))
+            var filter = new SearchFilter(request.Root, request.IgnoredDirectories);
+            foreach (var entry in FileWalker.Walk(request.Root, request.StartPath, int.MaxValue, filter, external))
             {
                 if (entry.IsDirectory)
                 {

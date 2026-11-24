@@ -122,6 +122,15 @@
         </Grid>
         <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GrepResultsHint}" />
         <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding IgnoredDirectoriesLabel}" />
+          <TextBox Grid.Column="1"
+                   HorizontalAlignment="Stretch"
+                   Text="{Binding IgnoredDirectories, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="settings-ignore-directories"
+                   AutomationProperties.Name="{Binding IgnoredDirectoriesLabel}" />
+        </Grid>
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding IgnoredDirectoriesHint}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
           <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding SpillLabel}" />
           <NumericUpDown Grid.Column="1"
                          MinWidth="120"

@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.IO;
+using Forge.IO.Tools;
 using Forge.App.Logging;
 using ZLogger;
 
@@ -145,6 +146,9 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinToolsGrepMaxResults = 1;
     public const int MaxToolsGrepMaxResults = 10000;
     public const int DefaultToolsGrepMaxResults = 1000;
+
+    /// <summary>Directory names a search skips below the path it was given; the default covers the common build layouts.</summary>
+    public static string DefaultToolsIgnoredDirectories => ToolOptions.DefaultIgnoredDirectoryText;
 
     /// <summary>Characters of one tool result that stay inline before the rest becomes an artifact; clamped to [4000, 256000].</summary>
     public const int MinChatArtifactSpillChars = 4000;
@@ -314,6 +318,7 @@ internal sealed class AppPreferences : ObservableObject
     private bool chatContextBudget = DefaultChatContextBudget;
     private int toolsBashCaptureKilobytes = DefaultToolsBashCaptureKilobytes;
     private int toolsGrepMaxResults = DefaultToolsGrepMaxResults;
+    private string toolsIgnoredDirectories = DefaultToolsIgnoredDirectories;
     private int chatArtifactSpillChars = DefaultChatArtifactSpillChars;
     private int chatArtifactPreviewChars = DefaultChatArtifactPreviewChars;
     private int filesCsvMaxRows = DefaultFilesCsvMaxRows;
@@ -628,6 +633,13 @@ internal sealed class AppPreferences : ObservableObject
     {
         get => toolsGrepMaxResults;
         set => Set(ref toolsGrepMaxResults, Math.Clamp(value, MinToolsGrepMaxResults, MaxToolsGrepMaxResults));
+    }
+
+    /// <summary>Directory names a search skips below the path it was given (comma separated); the default covers the common build layouts.</summary>
+    public string ToolsIgnoredDirectories
+    {
+        get => toolsIgnoredDirectories;
+        set => Set(ref toolsIgnoredDirectories, value ?? string.Empty);
     }
 
     /// <summary>Characters of a tool result kept inline; past it the result is stored as an artifact and only a preview stays.</summary>
@@ -1032,6 +1044,7 @@ internal sealed class AppPreferences : ObservableObject
         toolsGrepMaxResults = section.ToolsGrepMaxResults is { } grepLoaded
             ? Math.Clamp(grepLoaded, MinToolsGrepMaxResults, MaxToolsGrepMaxResults)
             : DefaultToolsGrepMaxResults;
+        toolsIgnoredDirectories = section.ToolsIgnoredDirectories ?? DefaultToolsIgnoredDirectories;
         chatArtifactSpillChars = section.ChatArtifactSpillChars is { } spillLoaded
             ? Math.Clamp(spillLoaded, MinChatArtifactSpillChars, MaxChatArtifactSpillChars)
             : DefaultChatArtifactSpillChars;
@@ -1180,6 +1193,7 @@ internal sealed class AppPreferences : ObservableObject
             ChatContextBudget = chatContextBudget,
             ToolsBashCaptureKilobytes = toolsBashCaptureKilobytes,
             ToolsGrepMaxResults = toolsGrepMaxResults,
+            ToolsIgnoredDirectories = toolsIgnoredDirectories,
             ChatArtifactSpillChars = chatArtifactSpillChars,
             ChatArtifactPreviewChars = chatArtifactPreviewChars,
             FilesCsvMaxRows = filesCsvMaxRows,
@@ -1623,6 +1637,9 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("toolsGrepMaxResults")]
     public int? ToolsGrepMaxResults { get; set; }
+
+    [JsonPropertyName("toolsIgnoredDirectories")]
+    public string? ToolsIgnoredDirectories { get; set; }
 
     [JsonPropertyName("chatArtifactSpillChars")]
     public int? ChatArtifactSpillChars { get; set; }
