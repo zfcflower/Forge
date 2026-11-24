@@ -62,7 +62,7 @@
           <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
         </Button>
       </Grid>
-      <TextBox Margin="4,0,4,4"
+      <TextBox Classes="menu-search"
                Text="{Binding BranchSearch, Mode=TwoWay}"
                PlaceholderText="{Binding [changes.picker.search], Source={x:Static loc:Loc.Instance}}"
                AutomationProperties.AutomationId="changes-branch-search"
@@ -75,7 +75,10 @@
                          Foreground="{DynamicResource TextMutedBrush}" />
         </TextBox.InnerLeftContent>
       </TextBox>
-      <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <ScrollViewer x:Name="ListScroll"
+                    MaxHeight="360"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
         <StackPanel Spacing="0">
           <TextBlock Classes="change-menu-group"
                      IsVisible="{Binding HasVisibleRemoteBranches}"

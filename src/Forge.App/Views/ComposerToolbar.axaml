@@ -88,11 +88,25 @@
       <Button.Flyout>
         <Flyout Placement="TopEdgeAlignedLeft">
           <StackPanel Width="410" Spacing="6" AutomationProperties.AutomationId="composer-model-panel">
+            <!-- The picker content lives in the overlay layer when open, outside the composer's style scope: the field theme
+                 is brought along here so the search box looks like the branch picker's (FieldStyles, search box inset, icon). -->
+            <StackPanel.Styles>
+              <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
+            </StackPanel.Styles>
             <TextBox x:Name="ModelSearch"
+                     Classes="menu-search"
                      Text="{Binding ModelSearch, Mode=TwoWay}"
                      PlaceholderText="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}"
                      AutomationProperties.AutomationId="composer-model-search"
-                     AutomationProperties.Name="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}" />
+                     AutomationProperties.Name="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}">
+              <TextBox.InnerLeftContent>
+                <wc:FluentIcon Data="{StaticResource IconSearch}"
+                               Width="12"
+                               Height="12"
+                               Margin="8,0,0,0"
+                               Foreground="{DynamicResource TextMutedBrush}" />
+              </TextBox.InnerLeftContent>
+            </TextBox>
             <!-- Virtualized: the catalogue is ~180 rows, and only the ~8 that fit are ever built. -->
             <ItemsControl ItemsSource="{Binding Models}"
                             MaxHeight="220"

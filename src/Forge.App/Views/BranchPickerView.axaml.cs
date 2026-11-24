@@ -10,9 +10,26 @@ namespace Forge.App.Views;
 /// </summary>
 public partial class BranchPickerView : UserControl
 {
+    private double maximumListHeight = 360;
+
     public BranchPickerView()
     {
         InitializeComponent();
+    }
+
+    /// <summary>
+    /// The cap of the branch list. The new-branch dialog lowers it to the window space left around its picker: popups are
+    /// drawn in the window's overlay layer (Program.cs), so a flyout taller than the window is clipped, and the card has to
+    /// scroll its list instead of running off the window.
+    /// </summary>
+    public double MaximumListHeight
+    {
+        get => maximumListHeight;
+        set
+        {
+            maximumListHeight = value;
+            ListScroll.MaxHeight = value;
+        }
     }
 
     /// <summary>Raised when a branch row is clicked, after the row's selection command ran.</summary>

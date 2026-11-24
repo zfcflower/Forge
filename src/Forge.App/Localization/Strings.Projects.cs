@@ -120,7 +120,7 @@ internal static class ProjectStrings
         Loc.Register(NewGeneralSessionTooltipKey, "新建常规对话", "New general chat");
         Loc.Register(MainCheckoutDetachedKey, "游离 HEAD", "Detached HEAD");
 
-        Loc.Register(NewBranchTitleKey, "新建分支", "New branch");
+        Loc.Register(NewBranchTitleKey, "新建工作区", "New workspace");
         Loc.Register(NewBranchBaseLabelKey, "基于分支", "Start from");
         Loc.Register(NewBranchNameLabelKey, "分支名称", "Branch name");
         Loc.Register(NewBranchNamePlaceholderKey, "分支名称", "Branch name");

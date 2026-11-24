@@ -8,6 +8,7 @@
         x:DataType="vm:NewBranchDialogViewModel"
         Title="{Binding [project.newBranch.title], Source={x:Static loc:Loc.Instance}}"
         Width="520"
+        MinHeight="300"
         SizeToContent="Height"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
@@ -41,8 +42,12 @@
           <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
         </StackPanel>
         <Button.Flyout>
-          <Flyout Placement="BottomEdgeAlignedLeft" FlyoutPresenterClasses="change-flyout">
-            <views:BranchPickerView DataContext="{Binding Picker}" BranchSelected="OnBranchPicked" />
+          <Flyout Placement="BottomEdgeAlignedLeft"
+                  FlyoutPresenterClasses="change-flyout"
+                  Opening="OnBasePickerOpening">
+            <views:BranchPickerView x:Name="BasePickerView"
+                                    DataContext="{Binding Picker}"
+                                    BranchSelected="OnBranchPicked" />
           </Flyout>
         </Button.Flyout>
       </Button>

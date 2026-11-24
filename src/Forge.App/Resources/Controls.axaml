@@ -25,6 +25,13 @@
     <Setter Property="TextTrimming" Value="None" />
   </Style>
 
+  <!-- The search box of a menu or picker card (the branch pickers, the composer's model picker): inset from the card edges
+       so its text lines up with the rows below. The magnifier is each instance's InnerLeftContent, because content cannot
+       come from a style. -->
+  <Style Selector="TextBox.menu-search">
+    <Setter Property="Margin" Value="4,0,4,4" />
+  </Style>
+
   <!-- A form field's label: body size, regular weight, secondary ink - the same 13 px as the value it names, so a label
        labels instead of competing (a heading is `TextBlock.h2`). One line, never wrapped. -->
   <Style Selector="TextBlock.label">

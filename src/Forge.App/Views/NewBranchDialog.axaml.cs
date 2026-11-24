@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -54,4 +55,28 @@ internal partial class NewBranchDialog : Window
     // Button raises Click before it runs its Command; hiding the flyout on the dispatcher lets the pick land first.
     private void OnBranchPicked(object? sender, EventArgs e) =>
         Dispatcher.UIThread.Post(() => BasePicker.Flyout?.Hide(), DispatcherPriority.Input);
+
+    /// <summary>
+    /// Popups are drawn in the window's overlay layer (Program.cs), so this flyout cannot extend past the dialog: the branch
+    /// list is capped to the space left under the picker (or above it, where the flyout flips), and scrolls instead of being
+    /// cut off by a short window. The card's header, search box and padding take about 72 px above the list.
+    /// </summary>
+    private void OnBasePickerOpening(object? sender, EventArgs e)
+    {
+        if (BasePicker.TranslatePoint(default, this) is not { } origin)
+        {
+            return;
+        }
+
+        var below = Bounds.Height - (origin.Y + BasePicker.Bounds.Height) - 8;
+        var above = origin.Y - 8;
+        if (BasePicker.Flyout is Flyout flyout)
+        {
+            // Pick the side with room explicitly: the overlay host is clipped by the window, so a menu placed on the short
+            // side would be cut off no matter how small its content is.
+            flyout.Placement = below >= above ? PlacementMode.BottomEdgeAlignedLeft : PlacementMode.TopEdgeAlignedLeft;
+        }
+
+        BasePickerView.MaximumListHeight = Math.Clamp(Math.Max(below, above) - 72, 64, 360);
+    }
 }
