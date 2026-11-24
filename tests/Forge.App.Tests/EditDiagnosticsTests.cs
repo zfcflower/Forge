@@ -16,9 +16,14 @@ public sealed class EditDiagnosticsTests : IDisposable
 
     public void Dispose() => Directory.Delete(workspace, recursive: true);
 
-    private void Make(string content) => File.WriteAllText(Path.Combine(workspace, "a.txt"), content);
+    private string Make(string content)
+    {
+        var path = Path.Combine(workspace, "a.txt");
+        File.WriteAllText(path, content);
+        return path;
+    }
 
-    private async Task<ToolResult> EditAsync(string oldString, string newString = "x")
+    private async Task<ToolResult> EditAsync(string oldString, string newString = "x", IFileVersionLedger? ledger = null)
     {
         var json = JsonSerializer.Serialize(new Dictionary<string, object>
         {
@@ -28,7 +33,7 @@ public sealed class EditDiagnosticsTests : IDisposable
         });
         return await new EditTool().InvokeAsync(
             new ToolCall("call", "edit", json),
-            new ToolContext("session", workspace),
+            new ToolContext("session", workspace) { FileVersions = ledger },
             CancellationToken.None);
     }
 
@@ -93,5 +98,47 @@ public sealed class EditDiagnosticsTests : IDisposable
         var result = await EditAsync("zulu zulu");
 
         Assert.Equal("edit: no match for old_string in 'a.txt' (3 lines); nothing changed.", result.Content);
+    }
+
+    [Fact]
+    public async Task A_file_somebody_else_wrote_after_the_read_says_so()
+    {
+        // The shape that cost the most: the payload was right when the agent read the file, somebody else rewrote it, and
+        // the bare "no match" reads as "your text is wrong". The ledger already knows a read happened — it is the one thing
+        // that separates "typo" from "stale text", so it is said out loud.
+        Make("alpha\nbeta\ngamma\n");
+        var ledger = new Ledger();
+        ledger.Record(Path.Combine(workspace, "a.txt"), new FileVersion(1, 1));
+
+        var result = await EditAsync("zulu zulu", ledger: ledger);
+
+        Assert.Equal(
+            "edit: no match for old_string in 'a.txt' (3 lines); nothing changed.\n"
+            + "the file changed after your read (1 → 17 bytes); read it again and edit against what is there now.",
+            result.Content);
+    }
+
+    [Fact]
+    public async Task A_file_that_still_matches_the_read_keeps_the_bare_message()
+    {
+        // The control: a payload that really is wrong must not be excused by a stale-read note.
+        var path = Make("alpha\nbeta\ngamma\n");
+        var info = new FileInfo(path);
+        var ledger = new Ledger();
+        ledger.Record(path, new FileVersion(info.Length, info.LastWriteTimeUtc.Ticks));
+
+        var result = await EditAsync("zulu zulu", ledger: ledger);
+
+        Assert.Equal("edit: no match for old_string in 'a.txt' (3 lines); nothing changed.", result.Content);
+    }
+
+    /// <summary>The one thing <c>edit</c> asks of a ledger: what this agent last saw of the path.</summary>
+    private sealed class Ledger : IFileVersionLedger
+    {
+        private readonly Dictionary<string, FileVersion> versions = new(StringComparer.Ordinal);
+
+        public bool TryGet(string path, out FileVersion version) => versions.TryGetValue(path, out version);
+
+        public void Record(string path, FileVersion version) => versions[path] = version;
     }
 }

@@ -109,8 +109,21 @@ public sealed class EditTool : ToolBase
             var occurrences = CountOccurrences(text, oldString, out var first, out var second);
             if (occurrences == 0)
             {
+                // The most common reason a payload that was right stops matching: somebody else wrote the file between the
+                // agent's read and this call. The ledger holds what that read saw, so the difference is already known —
+                // saying it turns "your text is wrong" into "read it again", which is the only actionable advice there is.
+                var changed = string.Empty;
+                if (context.FileVersions is { } versions
+                    && versions.TryGet(path, out var read)
+                    && read != before)
+                {
+                    changed = $"\nthe file changed after your read ({read.Length} → {before.Length} bytes); "
+                        + "read it again and edit against what is there now.";
+                }
+
                 return new ToolResult(
                     $"{Definition.Name}: no match for old_string in '{display}' ({CountLines(text)} lines); nothing changed."
+                    + changed
                     + Diagnose(text, oldString),
                     IsError: true);
             }
