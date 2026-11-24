@@ -331,6 +331,154 @@ public sealed class ModelMetadataWindowTests : IDisposable
     });
 
     [Fact]
+    public Task Clicking_another_cell_moves_the_field_and_a_read_only_cell_never_wedges_it() => SharedUi.RunAsync(() =>
+    {
+        var (win, table, model) = Open();
+        try
+        {
+            var first = Cell(table, model.Rows[0], "context");
+            Click(win, first);
+            Assert.Single(first.GetVisualDescendants().OfType<NumericUpDown>());
+            Assert.True(Part(Field(first)).IsFocused);
+
+            // A click on another row's cell moves the open field there.
+            var second = Cell(table, model.Rows[1], "context");
+            Click(win, second);
+            Assert.Single(second.GetVisualDescendants().OfType<NumericUpDown>());
+            Assert.Empty(first.GetVisualDescendants().OfType<NumericUpDown>());
+            Assert.True(Part(Field(second)).IsFocused);
+
+            // A read-only column has no field to give: the open one goes away, and the next editable click still opens one.
+            Click(win, Cell(table, model.Rows[0], "model"));
+            Assert.Empty(table.GetVisualDescendants().OfType<NumericUpDown>());
+            Click(win, first);
+            Assert.Single(first.GetVisualDescendants().OfType<NumericUpDown>());
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            win.Close();
+        }
+    });
+
+    [Fact]
+    public Task A_field_opened_at_the_bottom_of_a_long_table_stays_open() => SharedUi.RunAsync(() =>
+    {
+        var (win, table, model) = OpenLong(60);
+        try
+        {
+            // Opening the field makes its row taller, and a table scrolled to the bottom follows that growth by moving its
+            // own offset (and by scrolling the caret into view). That is not the user scrolling: a handler that took it for
+            // one closed the field the instant it opened, undid the growth that caused it, and every click after that
+            // repeated the same cycle - so the table never showed a field again.
+            ScrollToEnd(win, table);
+            var row = model.Rows[^1];
+            var cell = Cell(table, row, "context");
+            Click(win, cell);
+            Assert.Single(cell.GetVisualDescendants().OfType<NumericUpDown>());
+            Assert.True(Part(Field(cell)).IsFocused);
+
+            // And the next click, later in the same session, still moves the field to the cell it landed on.
+            var other = Cell(table, model.Rows[^3], "maxOutput");
+            Click(win, other);
+            Assert.Single(other.GetVisualDescendants().OfType<NumericUpDown>());
+            Assert.Empty(cell.GetVisualDescendants().OfType<NumericUpDown>());
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            win.Close();
+        }
+    });
+
+    [Fact]
+    public Task An_invalid_number_keeps_the_field_it_was_typed_into() => SharedUi.RunAsync(() =>
+    {
+        var (win, table, model) = OpenLong(60);
+        try
+        {
+            // A window of zero fails the rule, so the cell turns red and its frame grows a pixel on each side: the table's
+            // layout shifts under the field while the user is still typing.
+            ScrollToEnd(win, table);
+            var row = model.Rows[^1];
+            var cell = Cell(table, row, "context");
+            Click(win, cell);
+            var field = Field(cell);
+            Part(field).Text = "0";
+            SharedUi.Settle(win);
+
+            Assert.True(row.HasContextWindowError);
+            Assert.Same(field, Field(cell));
+            Assert.True(Part(field).IsFocused);
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            win.Close();
+        }
+    });
+
+    [Fact]
+    public Task Scrolling_the_table_puts_the_field_away() => SharedUi.RunAsync(() =>
+    {
+        var (win, table, model) = OpenLong(60);
+        try
+        {
+            var cell = Cell(table, model.Rows[0], "context");
+            Click(win, cell);
+            Assert.Single(cell.GetVisualDescendants().OfType<NumericUpDown>());
+
+            // A scroll the user made - the offset moving with nothing about the table's own size moving with it - still
+            // closes the field: it does not travel to whatever row is under the pointer.
+            var scroll = Scroll(table);
+            scroll.Offset = new Vector(0, scroll.Offset.Y + 20);
+            SharedUi.Settle(win);
+            Assert.Empty(cell.GetVisualDescendants().OfType<NumericUpDown>());
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            win.Close();
+        }
+    });
+
+    /// <summary>A provider with <paramref name="count"/> models that all carry metadata: enough rows to scroll.</summary>
+    private (Window Window, TableView Table, ModelMetadataViewModel Model) OpenLong(int count)
+    {
+        Directory.CreateDirectory(directory);
+        var services = new ProviderServices(Path.Combine(directory, "settings.json"), directory, http);
+        var names = Enumerable.Range(0, count).Select(index => "model-" + index).ToArray();
+        var definition = ProbeDefinition() with
+        {
+            Models = names,
+            DefaultModel = names[0],
+            Overrides = names.ToDictionary(
+                name => name,
+                _ => new ModelMetadata(1000000, new ModelPricing(0.3, 15, 0.03, 0.375)),
+                StringComparer.Ordinal),
+        };
+        services.Store.Save([definition], "probe", ContextWindowDefault.Empty, services.Catalog.ModelCatalogSourceUrl);
+        services.Reload();
+        var provider = services.Catalog.Find("probe")!;
+        var model = new ModelMetadataViewModel(services, provider, new AppPreferences());
+        var window = new ModelMetadataWindow(model);
+        window.Show();
+        SharedUi.Settle(window);
+        return (window, window.GetVisualDescendants().OfType<TableView>().Single(), model);
+    }
+
+    private static ScrollViewer Scroll(TableView table) =>
+        table.GetVisualDescendants().OfType<ScrollViewer>().First();
+
+    /// <summary>Scrolls the table to its last row, where an offset the table moves by itself actually moves.</summary>
+    private static void ScrollToEnd(Window window, TableView table)
+    {
+        var scroll = Scroll(table);
+        scroll.Offset = new Vector(0, Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height));
+        SharedUi.Settle(window);
+    }
+
+    [Fact]
     public Task Arrow_keys_walk_the_highlighted_cell_while_the_table_is_text() => SharedUi.RunAsync(() =>
     {
         var (win, table, model) = Open();

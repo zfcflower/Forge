@@ -346,12 +346,21 @@ internal sealed partial class ModelMetadataWindow : Window
     }
 
     /// <summary>
-    /// Scrolling moves the rows under the editor; the field closes instead of travelling to another row. Only a moved
-    /// offset counts: realizing rows changes the extent and the viewport on every layout, which is not the user scrolling.
+    /// Scrolling moves the rows under the editor; the field closes instead of travelling to another row. Only a moved offset
+    /// counts, and only when the table's own size stayed put: opening the field makes the edited row taller (and an invalid
+    /// cell a pixel thicker on each side), the table follows that with an offset adjustment of its own - often by scrolling the
+    /// caret into view - and a handler that mistook that for the user's scroll closed the field the instant it opened, then
+    /// undid the growth that caused it, so no click could ever keep a field. A viewport change is the window being resized,
+    /// which is not the user scrolling either.
     /// </summary>
     private void OnTableScrolled(object? sender, ScrollChangedEventArgs e)
     {
-        if (e.OffsetDelta != default && e.Source is Visual source && source.FindAncestorOfType<TableViewCell>() is null)
+        if (e.OffsetDelta == default || e.ExtentDelta != default || e.ViewportDelta != default)
+        {
+            return;
+        }
+
+        if (e.Source is Visual source && source.FindAncestorOfType<TableViewCell>() is null)
         {
             StopEditing(refocus: false);
         }
