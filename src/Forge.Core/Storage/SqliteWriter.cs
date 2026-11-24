@@ -15,6 +15,11 @@ internal delegate ValueTask<T> SqliteRead<T>(SqliteConnection connection);
 /// </summary>
 internal sealed class SqliteWriter : IAsyncDisposable, IDisposable
 {
+    /// <summary>
+    /// The write gate. Deliberately never disposed: a write that was already waiting when the store went away still has to
+    /// run out its own <c>finally</c> and hand the connection back, and disposing the semaphore under it turns that hand-back
+    /// into an <see cref="ObjectDisposedException"/> from the release.
+    /// </summary>
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly string databasePath;
 
@@ -62,6 +67,12 @@ internal sealed class SqliteWriter : IAsyncDisposable, IDisposable
         finally
         {
             gate.Release();
+            // The writer was disposed while this call held the gate: the connection and the transaction just closed are this
+            // call's to hand back, so the disposing thread never closes a transaction the write still owns.
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                await CloseAsync().ConfigureAwait(false);
+            }
         }
     }
 
@@ -72,15 +83,21 @@ internal sealed class SqliteWriter : IAsyncDisposable, IDisposable
             return;
         }
 
-        var open = connection;
-        connection = null;
-        if (open is not null)
+        // Closing the connection is only safe with no write inside the gate: a write has its transaction open on that
+        // connection, and closing it from here rolls the transaction back under the write that still owns it (see WriteAsync).
+        if (!await gate.WaitAsync(0).ConfigureAwait(false))
         {
-            await open.DisposeAsync().ConfigureAwait(false);
+            return;
         }
 
-        gate.Dispose();
-        SqliteConnection.ClearAllPools();
+        try
+        {
+            await CloseAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public void Dispose()
@@ -90,10 +107,37 @@ internal sealed class SqliteWriter : IAsyncDisposable, IDisposable
             return;
         }
 
-        var open = connection;
-        connection = null;
-        open?.Dispose();
-        gate.Dispose();
+        if (!gate.Wait(0))
+        {
+            return;
+        }
+
+        try
+        {
+            Close();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>The synchronous half of <see cref="CloseAsync"/>, for a store disposed without an await.</summary>
+    private void Close()
+    {
+        Interlocked.Exchange(ref connection, null)?.Dispose();
+        SqliteConnection.ClearAllPools();
+    }
+
+    /// <summary>Closes the write connection and releases the file handles the read pool still holds.</summary>
+    private async ValueTask CloseAsync()
+    {
+        var open = Interlocked.Exchange(ref connection, null);
+        if (open is not null)
+        {
+            await open.DisposeAsync().ConfigureAwait(false);
+        }
+
         SqliteConnection.ClearAllPools();
     }
 
