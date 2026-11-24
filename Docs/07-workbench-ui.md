@@ -212,7 +212,7 @@
 - 格式：句式随语言，数字与时间不随区域——`TextFormat.Number` 千分位一律 `,`，标识符不分组，时间一律 `HH:mm:ss`，耗时写“4.2 秒 / 3 分 05 秒”。
 - 存下来以后再显示的文本（启动诊断、提供商状态、通知、轮次脚注）存成 `LocText`，显示时解析；长生命周期所有者订阅 `LanguageChanged` 并向下刷新，逐行逐卡不订阅静态事件。
 - 不翻译：模型输出、用户输入、文件内容与路径、插件文案、会话标题（默认标题按创建时语言生成并存库）、开发者才看的异常文本（英文）。
-- “跟随系统”由纯函数 `SystemLanguageDetector.Resolve` 决定（文化名 `zh*` → Windows 注册表 `PreferredUILanguages` → … → `LC_ALL`/`LC_MESSAGES`/`LANG` → 英文）；注册表读取失败当作不存在，无 P/Invoke。
+- “跟随系统”由纯函数 `SystemLanguageDetector.Resolve` 决定（**Avalonia `IPlatformSettings.PreferredApplicationLanguage` → 文化名 `zh*` → Windows 注册表 `PreferredUILanguages` → … → `LC_ALL`/`LC_MESSAGES`/`LANG` → 英文**）；平台值为空（X11/macOS 在 invariant 下就是空）时整条链照旧，注册表读取失败当作不存在，无 P/Invoke；系统换首选语言时经 `PreferredApplicationLanguageChanged` 立即生效。
 - 防回归要求（测试项目接线后由测试覆盖）：扫描 `src/Forge.App` 的 `.cs`/`.axaml`，`Strings.*.cs` 之外不得有中日韩字符；表完整性（中英齐全、英文无中日韩字符、占位符一致、XAML/C# 用到的键都已注册）。
 
 ## 7.15 首启向导与项目创建
