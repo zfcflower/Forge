@@ -37,9 +37,11 @@
                      AutomationProperties.AutomationId="subagent-breadcrumb-name" />
         </StackPanel>
         <!-- The run's state lives beside the breadcrumb (the bottom status row is gone): the dot and the word, the one-line
-             note when there is one, the read-only badge of a replayed tab, and - only while stopping would do something -
-             the run's stop. The task, the run usage and the live clock the row also carried are covered elsewhere: the
-             tab title and the finished menu carry the task, and the turn's divider carries the tokens. -->
+             note when there is one, and - only while stopping would do something - the run's stop. There is no separate
+             "finished" badge: a replayed tab's status word already says how the run ended (and says "已结束" itself when the
+             store cannot prove it), so the badge only ever repeated it. The task, the run usage and the live clock the row also
+             carried are covered elsewhere: the tab title and the finished menu carry the task, and the turn's divider carries
+             the tokens. -->
         <StackPanel Grid.Column="1"
                     Orientation="Horizontal"
                     Spacing="6"
@@ -50,13 +52,6 @@
                      Text="{Binding StatusNote}"
                      VerticalAlignment="Center"
                      IsVisible="{Binding HasStatusNote}" />
-          <Border IsVisible="{Binding ReadOnlyBadgeVisible}"
-                  Background="{DynamicResource BrandTintBrush}"
-                  CornerRadius="{StaticResource RadiusSm}"
-                  Padding="5,0"
-                  VerticalAlignment="Center">
-            <TextBlock Classes="label" Text="{Binding ReadOnlyBadgeText}" Foreground="{DynamicResource BrandActionBrush}" />
-          </Border>
           <!-- The child's own readings, the very control the composer strip hosts: its quota, its cache lifetime,
                its usage chip with the summary flyout, its context gauge. A sub-agent is its own session, so it reads
                its own numbers through the same instruments class; the gauge has no click action here - a child's

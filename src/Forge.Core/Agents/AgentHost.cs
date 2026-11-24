@@ -355,7 +355,9 @@ public sealed class AgentHost
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(sink);
         var context = new ToolContext(root.SessionId, root.WorkingDirectory, root.Depth);
-        var outcome = await scheduler.SpawnAsync(kind, task, null, context, sink, root.Id, ct).ConfigureAwait(false);
+        // An automation is not the parent conversation: its child is nobody's next task, so it never joins the reuse
+        // roster a later spawn_agent picks from.
+        var outcome = await scheduler.SpawnAsync(kind, task, null, context, sink, root.Id, ct, reuse: false).ConfigureAwait(false);
         if (scheduler.TryGetInstance(outcome.AgentId, out var child))
         {
             return new ChildAgentResult(child.SessionId, outcome.Text, outcome.IsError, child.Usage);

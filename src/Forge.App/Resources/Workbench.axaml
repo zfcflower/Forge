@@ -192,6 +192,15 @@
     <Style Selector="^:selected /template/ controls|FluentIcon#PART_Icon">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
+    <!-- The glyph's colour is a state of its own: the accent for a conversation whose turn is running, the muted one for a
+         history tab. Declared after the pointer/selection rules so a running tab stays accented while it is hovered or
+         active, and a history tab keeps the muted glyph even when selected. -->
+    <Style Selector="^[IconTone=History] /template/ controls|FluentIcon#PART_Icon">
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="^[IconTone=Running] /template/ controls|FluentIcon#PART_Icon">
+      <Setter Property="Foreground" Value="{DynamicResource TiffanyInkBrush}" />
+    </Style>
   </ControlTheme>
 
   <!-- The tab strip itself: horizontal and scrollable, no scrollbars in a title bar. Once the tabs no longer fit, an

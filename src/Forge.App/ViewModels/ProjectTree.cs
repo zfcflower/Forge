@@ -1103,8 +1103,9 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
 
     /// <summary>
     /// Rebuilds only the agent subtree of every session row, so a sub-agent that starts, changes state or finishes shows up
-    /// without re-reading the session catalog. An agent-session row has no live roster of its own (its tab is not part of the
-    /// root's), so its agents keep coming from the store.
+    /// without re-reading the session catalog. Both kinds of session row take the same route: the live roster when the tab is
+    /// open, the store's parent links when it is not - an agent session's roster is its own (its tab is not part of the root's),
+    /// and only its row's children differ in depth.
     /// </summary>
     public void RefreshAgentTrees()
     {
@@ -1114,6 +1115,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             return;
         }
 
+        var running = RunningSessionIds();
         foreach (var node in Enumerate(Sections).ToArray())
         {
             if (node.Kind is not (TreeNodeKind.Session or TreeNodeKind.AgentSession) || node.SessionId.Length == 0)
@@ -1121,18 +1123,12 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                 continue;
             }
 
-            List<TreeNodePlan> rows;
-            if (node.Kind == TreeNodeKind.AgentSession)
-            {
-                rows = PlanStoredAgents(storedChildren, node.SessionId, node.SessionId, RunningSessionIds(), level: 2);
-            }
-            else
-            {
-                var snapshot = provider(node.SessionId);
-                rows = snapshot.Count > 0
+            var snapshot = provider(node.SessionId);
+            var rows = node.Kind == TreeNodeKind.AgentSession
+                ? PlanAgentSessionChildren(storedChildren, node.SessionId, running, snapshot)
+                : snapshot.Count > 0
                     ? PlanSessionAgents(snapshot, node.SessionId)
-                    : PlanStoredAgents(storedChildren, node.SessionId, node.SessionId, RunningSessionIds(), level: 1);
-            }
+                    : PlanStoredAgents(storedChildren, node.SessionId, node.SessionId, running, level: 1);
 
             Merge(node.Children, rows, node.Depth + 1);
             node.NotifyChildrenChanged();
@@ -1294,7 +1290,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             // The session rows of the tree come from collections the dispatcher owns, so both the running set and the
             // agent trees are snapshotted here, before the planning leaves the UI thread.
             var running = RunningSessionIds();
-            var agents = SnapshotAgentTrees(roots);
+            var agents = SnapshotAgentTrees(sessions);
             // The root HEADs and the menus' workspace reads are independent: they run side by side, not one after the other.
             var headsRead = ReadProjectHeadsAsync(all, ct, reuseStaleGitReads);
             var gitRead = ReadMenuGitStateAsync(all, roots, ct, reuseStaleGitReads);
@@ -1803,7 +1799,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         ProjectInfo? project)
     {
         var rows = new List<TreeNodePlan>(2) { PlanSession(session, storedChildren, running, agents, project) };
-        foreach (var plan in PlanAgentSessions(storedChildren, session.Id, running, project))
+        foreach (var plan in PlanAgentSessions(storedChildren, session.Id, running, agents, project))
         {
             if (plan.Session?.Status == SessionStatus.Active)
             {
@@ -1833,11 +1829,11 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             if (session.Status != SessionStatus.Active)
             {
                 rows.Add(PlanSession(session, storedChildren, running, agents, project));
-                rows.AddRange(PlanAgentSessions(storedChildren, session.Id, running, project));
+                rows.AddRange(PlanAgentSessions(storedChildren, session.Id, running, agents, project));
                 continue;
             }
 
-            foreach (var plan in PlanAgentSessions(storedChildren, session.Id, running, project))
+            foreach (var plan in PlanAgentSessions(storedChildren, session.Id, running, agents, project))
             {
                 if (plan.Session?.Status != SessionStatus.Active)
                 {
@@ -1919,6 +1915,21 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             : PlanStoredAgents(storedChildren, sessionId, sessionId, running, level: 1);
 
     /// <summary>
+    /// The agent rows under an agent session: its own live roster when its tab is open, the store's parent links when it is
+    /// not - the same rule as a root session's children. The base level is 1 because the agent session row itself is a
+    /// depth-1 agent, which puts its sub-agents at depth 2 (the icon that says they cannot spawn further); the store path
+    /// spells that out as level 2.
+    /// </summary>
+    internal static List<TreeNodePlan> PlanAgentSessionChildren(
+        ILookup<string, SessionInfo> storedChildren,
+        string agentSessionId,
+        HashSet<string> running,
+        IReadOnlyList<AgentNodeSnapshot> snapshot) =>
+        snapshot.Count > 0
+            ? PlanSessionAgents(snapshot, agentSessionId, level: 1)
+            : PlanStoredAgents(storedChildren, agentSessionId, agentSessionId, running, level: 2);
+
+    /// <summary>
     /// The agent-session rows of a root session: the user-driven child sessions of it, drawn as sessions (a comment-mention icon
     /// and the child's own name) instead of as sub-agent rows. The plan keeps the child's parent link, which is what its
     /// "promote to main session" entry needs.
@@ -1927,6 +1938,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         ILookup<string, SessionInfo> children,
         string parentSessionId,
         HashSet<string> running,
+        IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents,
         ProjectInfo? project)
     {
         var plans = new List<TreeNodePlan>();
@@ -1948,7 +1960,11 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                 child.WorktreePath ?? child.WorkspacePath,
                 child.Branch,
                 false,
-                PlanStoredAgents(children, child.Id, child.Id, running, level: 2))
+                PlanAgentSessionChildren(
+                    children,
+                    child.Id,
+                    running,
+                    agents.TryGetValue(child.Id, out var snapshot) ? snapshot : []))
             {
                 IsArchived = child.Status == SessionStatus.Archived,
                 RowMark = RemovedMark(child),
@@ -2010,9 +2026,12 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// The rows under a session: the main agent is the session itself, so its sub-agents are lifted into the session row
     /// instead of hanging under a second row that repeated the same conversation and needed a second chevron to open.
     /// </summary>
-    internal static List<TreeNodePlan> PlanSessionAgents(IReadOnlyList<AgentNodeSnapshot> snapshot, string sessionId)
+    internal static List<TreeNodePlan> PlanSessionAgents(
+        IReadOnlyList<AgentNodeSnapshot> snapshot,
+        string sessionId,
+        int level = 0)
     {
-        var plans = PlanAgents(snapshot, sessionId);
+        var plans = PlanAgents(snapshot, sessionId, level);
         if (plans.Count == 0)
         {
             return plans;

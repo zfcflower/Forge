@@ -30,6 +30,29 @@ public sealed record AgentOptions
     /// <summary>How many generations may spawn: the root (depth 0) and its children (depth 1) can, a grandchild (depth 2) cannot.</summary>
     public int MaxSubAgentDepth { get; init; } = 2;
 
+    /// <summary>The default roster window: how long a finished sub-agent stays reusable.</summary>
+    public static readonly TimeSpan DefaultSubAgentReuseWindow = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// How long a finished sub-agent stays on the live roster: a <c>spawn_agent</c> of the same kind inside this window, whose
+    /// task overlaps what that child last worked on, continues the idle child instead of starting a new one - its prompt
+    /// prefix is still in the provider's cache and its context is the same work. Outside the window the child is history.
+    /// The app keeps the child's tab docked for the same window, so the roster the user sees is the one the scheduler picks
+    /// from.
+    /// </summary>
+    public TimeSpan SubAgentReuseWindow { get; init; } = DefaultSubAgentReuseWindow;
+
+    /// <summary>
+    /// How much context a candidate must share with the new task before it is reused: <see cref="SubAgentAffinity"/> scores
+    /// a shared file (3) and a shared identifier (1). Below the threshold an unrelated task gets a fresh child rather than
+    /// being stapled onto somebody else's conversation - reuse trades context pollution for cache hits, so it only pays
+    /// when the two tasks are the same work. Two means one shared file or two shared identifiers.
+    /// </summary>
+    public int SubAgentReuseThreshold { get; init; } = 2;
+
+    /// <summary>Clock for the reuse window only.</summary>
+    public TimeProvider SubAgentReuseClock { get; init; } = TimeProvider.System;
+
     /// <summary>
     /// When automatic compaction runs, relative to each model's window. Without a <see cref="CompactionPolicy.ContextWindow"/>
     /// resolver no window is known and only the overflow fallback and manual compaction apply.

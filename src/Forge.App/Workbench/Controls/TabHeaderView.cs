@@ -6,9 +6,23 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using SubAgentStatus = Forge.Abstractions.SubAgentStatus;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Workbench.Controls;
+
+/// <summary>What a tab's leading glyph says besides which kind of thing the tab is.</summary>
+internal enum TabIconTone
+{
+    /// <summary>The template's own tab-foreground colours (muted at rest, primary over the pointer, primary when active).</summary>
+    Default,
+
+    /// <summary>A conversation whose turn is running right now.</summary>
+    Running,
+
+    /// <summary>A history tab - a replayed or restored sub-agent that is not live.</summary>
+    History,
+}
 
 /// <summary>
 /// One tab of a <see cref="PanelTabStrip"/>: the title, the active silhouette and the close button. Interaction is not
@@ -35,6 +49,7 @@ internal sealed partial class TabHeaderView : TemplatedControl
 
     private PanelIconButton? closeButton;
     private TabModel? watched;
+    private INotifyPropertyChanged? watchedContent;
 
     /// <summary>The tip's content: the tab's whole text, wrapped so the tooltip's own width cap cannot clip it.</summary>
     private readonly TextBlock tipText = Views.ToolTipText.Wrap(null);
@@ -85,6 +100,15 @@ internal sealed partial class TabHeaderView : TemplatedControl
     [GeneratedStyledProperty]
     public partial Geometry? Icon { get; set; }
 
+    /// <summary>
+    /// What the leading glyph's colour says besides "this kind of thing": a conversation whose turn is running wears the
+    /// accent colour, a history tab (a replayed or restored sub-agent) wears the muted one, and everything else takes the
+    /// template's own tab-foreground colours. The tone is an attribute so the template can pick the brush with a style
+    /// instead of the header writing one onto the icon.
+    /// </summary>
+    [GeneratedStyledProperty]
+    public partial TabIconTone IconTone { get; set; }
+
     /// <summary>Automation id of the close button, so the tab's own close box can be clicked.</summary>
     [GeneratedStyledProperty]
     public partial string? CloseAutomationId { get; set; }
@@ -97,13 +121,15 @@ internal sealed partial class TabHeaderView : TemplatedControl
             return;
         }
 
+        // A tab's content can be re-bound in place (OpenTab does that); the tone follows the content, so it follows the swap.
+        WatchContent(tab.Content);
         TabTitle = tab.Title;
         IsClosable = tab.IsClosable;
         IsActive = ReferenceEquals(tab, tab.Group?.ActiveTab);
         ApplyIcon();
         AutomationProperties.SetName(this, tab.Title);
-        // The tab is titled by the sub-agent's own id (`▸ Worker-3`) and says nothing about the task, so the tip carries
-        // the task in full, otherwise the tab's own title. Wrapped, because the tooltip has a width cap of its own and a
+        // The tab is titled by the sub-agent's own id (`Worker-3`) and says nothing about the task, so the tip carries the
+        // task in full, otherwise the tab's own title. Wrapped, because the tooltip has a width cap of its own and a
         // one-line string is clipped there without any ellipsis to tell the reader something was left out.
         tipText.Text = tab.Content is SubAgentViewModel agent ? agent.Task : tab.Title;
         ToolTip.SetTip(this, tipText);
@@ -136,7 +162,20 @@ internal sealed partial class TabHeaderView : TemplatedControl
 
         IsIconVisible = rest is not null;
         Icon = IsActive && active is not null ? active : rest;
+        ApplyIconTone();
     }
+
+    /// <summary>
+    /// What the icon's colour reads: running beats history (a read-only tab is never running), and a tab that is neither
+    /// keeps the template's colours. Only conversations have a tone - a file preview's document says nothing about a turn.
+    /// </summary>
+    private void ApplyIconTone() => IconTone = Model?.Content switch
+    {
+        SessionWorkspaceViewModel { IsRunning: true } => TabIconTone.Running,
+        SubAgentViewModel { Status: SubAgentStatus.Running } => TabIconTone.Running,
+        SubAgentViewModel { IsReadOnly: true } => TabIconTone.History,
+        _ => TabIconTone.Default,
+    };
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
@@ -335,6 +374,7 @@ internal sealed partial class TabHeaderView : TemplatedControl
         if (Model is not { } tab)
         {
             CloseAutomationId = null;
+            WatchContent(null);
             return;
         }
 
@@ -342,6 +382,7 @@ internal sealed partial class TabHeaderView : TemplatedControl
         CloseAutomationId = "tab-" + tab.Id + "-close";
         IsVisible = !tab.IsFloating;
         Watch(tab);
+        WatchContent(tab.Content);
         Refresh();
     }
 
@@ -349,6 +390,7 @@ internal sealed partial class TabHeaderView : TemplatedControl
     {
         base.OnAttachedToVisualTree(e);
         Watch(Model);
+        WatchContent(Model?.Content);
 
         // Resource lookups need a host, so a header that was refreshed before it joined the tree resolves its glyph here.
         ApplyIcon();
@@ -357,6 +399,7 @@ internal sealed partial class TabHeaderView : TemplatedControl
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         Watch(null);
+        WatchContent(null);
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -393,5 +436,38 @@ internal sealed partial class TabHeaderView : TemplatedControl
         }
 
         Refresh();
+    }
+
+    /// <summary>
+    /// Watches the view model the tab shows: a running turn and a read-only history are states of the content, not of the
+    /// tab model, so the header follows the content's own notifications. Called wherever the tab model is watched, so the
+    /// two subscriptions live and die together.
+    /// </summary>
+    private void WatchContent(object? content)
+    {
+        if (ReferenceEquals(watchedContent, content))
+        {
+            return;
+        }
+
+        if (watchedContent is not null)
+        {
+            watchedContent.PropertyChanged -= OnContentChanged;
+        }
+
+        watchedContent = content as INotifyPropertyChanged;
+        if (watchedContent is not null)
+        {
+            watchedContent.PropertyChanged += OnContentChanged;
+        }
+    }
+
+    private void OnContentChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SessionWorkspaceViewModel.IsRunning) or nameof(SubAgentViewModel.Status)
+            or nameof(SubAgentViewModel.IsReadOnly))
+        {
+            ApplyIconTone();
+        }
     }
 }

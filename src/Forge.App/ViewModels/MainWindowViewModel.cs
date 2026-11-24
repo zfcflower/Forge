@@ -159,6 +159,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly Dictionary<string, SessionWorkspaceViewModel> sessions = new(StringComparer.Ordinal);
     private readonly HashSet<string> handingOver = new(StringComparer.Ordinal);
     private readonly HashSet<string> openTabs = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Sub-agent tabs the shell itself closed while syncing the roster. Their close is bookkeeping, not the user ending a
+    /// topic, so <see cref="OnTabClosed"/> must not retire the child out of the roster because of it.
+    /// </summary>
+    private readonly HashSet<SubAgentViewModel> prunedSubAgentTabs = [];
     private readonly FinishedSubAgentsViewModel emptyFinishedMenu = new();
     private readonly Dictionary<string, string> projectRoots = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> projectNames = new(StringComparer.Ordinal);
@@ -2421,14 +2427,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private void OnSubAgentToolRequested(SubAgentViewModel agent) => OpenSubAgentTab(agent);
 
     /// <summary>Opens (or re-binds) the bottom-group tab of one sub-agent.</summary>
-    private void OpenSubAgentTab(SubAgentViewModel agent)
+    private void OpenSubAgentTab(SubAgentViewModel agent, bool activate = true)
     {
         Workbench.OpenTab(
             Workbench.BottomTabs,
             WorkbenchIds.SubAgentTab(agent.AgentId),
             TabKind.SubAgent,
             agent,
-            agent.TabTitle);
+            agent.TabTitle,
+            activate);
     }
 
     /// <summary>
@@ -2469,11 +2476,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         foreach (var agent in session.SubAgents)
         {
-            OpenSubAgentTab(agent);
+            // Docking a child never activates it: the roster holds finished children too now, and syncing on every
+            // member change would otherwise drag the user's selection onto the last one in the list. A tab that just
+            // started announces itself through OpenSubAgentTabAsync instead.
+            OpenSubAgentTab(agent, activate: false);
         }
 
-        // The chip reads the real thing, not the wish: a session whose sub-agents have all finished docks no tab, so the
-        // group folds to its title bar (its finished menu stays) and the chip rests - disabled - until a tab lands again.
+        // The chip reads the real thing, not the wish: a session whose sub-agents have all left the roster docks no tab, so
+        // the group folds to its title bar (its finished menu stays) and the chip rests - disabled - until a tab lands
+        // again. A child that finished a moment ago is still on the roster, so its tab is still there.
         session.SubAgentRegionOpen = Workbench.IsBottomBodyOpen;
         session.CanToggleSubAgents = Workbench.HasBottomTab;
         SyncTreeActiveAgent();
@@ -2502,6 +2513,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                               string.Equals(agent.SessionId, session.SessionId, StringComparison.Ordinal);
             if (!sameSession || (!live.Contains(agent.AgentId) && !agent.IsReadOnly))
             {
+                // A close the shell decided on says nothing about the topic: only the user's own close retires a child.
+                prunedSubAgentTabs.Add(agent);
                 Workbench.CloseTab(tabs[i]);
             }
         }
@@ -2676,6 +2689,18 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             if (!session.IsRunning)
             {
                 ReleaseClosedSession(session);
+            }
+        }
+
+        if (tab.Kind == TabKind.SubAgent && tab.Content is SubAgentViewModel agent)
+        {
+            // Closing a child's own tab is the user ending that topic: it leaves the roster now instead of when its reuse
+            // window closes, and its report moves to the finished menu. Core still holds the instance, so the scheduler may
+            // hand it the next task of the same kind - that pulls it back out of the menu and re-docks the tab.
+            // Remove() consumes the marker of a bookkeeping close; a read-only tab is already retired.
+            if (!prunedSubAgentTabs.Remove(agent) && !agent.IsReadOnly && sessions.TryGetValue(agent.SessionId, out var owner))
+            {
+                owner.RetireSubAgent(agent);
             }
         }
 

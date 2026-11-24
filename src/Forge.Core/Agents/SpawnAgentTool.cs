@@ -154,7 +154,12 @@ public sealed class SpawnAgentTool : ITool
         var outcome = await SpawnAsync(scope, kind, task, resumeId, context, resolved, ct).ConfigureAwait(false);
         var content = outcome.AgentId.Length == 0
             ? outcome.Text
-            : string.Concat(outcome.Text, "\n\n[agent_id: ", outcome.AgentId, "]");
+            : string.Concat(
+                outcome.Text,
+                "\n\n[agent_id: ",
+                outcome.AgentId,
+                outcome.Resumed ? ", resumed" : string.Empty,
+                "]");
         if (resolved is not null && outcome.AgentId.Length > 0)
         {
             content = string.Concat(
@@ -192,7 +197,10 @@ public sealed class SpawnAgentTool : ITool
     {
         var builder = new StringBuilder(256);
         builder.Append("Delegate one self-contained task to a sub-agent and get its final report back. ")
-            .Append("Parallel spawns run concurrently; nested depth is limited. Use resume_id to continue a finished sub-agent of the same kind.\n\nKinds:\n");
+            .Append("Parallel spawns run concurrently; nested depth is limited. An idle sub-agent of the same kind that ")
+            .Append("recently worked on the same files or topic is continued automatically, so its earlier context ")
+            .Append("carries over; a task about something else starts a fresh agent. Use resume_id to continue one ")
+            .Append("specific finished sub-agent of the same kind.\n\nKinds:\n");
         foreach (var kind in kinds)
         {
             builder.Append("- ").Append(kind.Name).Append(": ").Append(kind.Description).Append('\n');

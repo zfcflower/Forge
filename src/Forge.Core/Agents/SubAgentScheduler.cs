@@ -16,6 +16,12 @@ public sealed record SubAgentOutcome(string AgentId, string Text, bool IsError)
     /// line) must not trust it.
     /// </summary>
     public bool Stopped { get; init; }
+
+    /// <summary>
+    /// The scheduler picked an idle same-kind child instead of starting a new one, so this spawn continues that child's
+    /// conversation (and its prompt cache). The tool reports it to the model: the answer's id is not a fresh agent.
+    /// </summary>
+    public bool Resumed { get; init; }
 }
 
 /// <summary>Who drives an instance: the model (<c>spawn_agent</c> and its control tools) or the user (a session the user opened under a root).</summary>
@@ -48,6 +54,20 @@ public sealed class SubAgentScheduler : ISubAgentControl
     private readonly Dictionary<string, AgentOwner> owners = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SubAgentRun> runs = new(StringComparer.Ordinal);
     private readonly HashSet<string> finished = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// When each child's last run ended, for the reuse window only: a child is a candidate while its last run ended less
+    /// than <see cref="AgentOptions.SubAgentReuseWindow"/> ago. Kept beside <see cref="finished"/> rather than on the
+    /// instance because it is scheduling state - the instance itself does not care when it last ran.
+    /// </summary>
+    private readonly Dictionary<string, DateTimeOffset> lastFinishedAt = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Children a <c>reuse: false</c> spawn created - an automation's child and a review's reviewer. Their runs are not the
+    /// parent conversation's work (a reviewer must not carry its previous verdict into the next review), so the scheduler
+    /// never hands them a later <c>spawn_agent</c> task on its own; an explicit <c>resume_id</c> still can.
+    /// </summary>
+    private readonly HashSet<string> notReusable = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> counters = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
 
@@ -180,7 +200,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
         string parentId,
         CancellationToken ct,
         AgentOwner owner = AgentOwner.Model,
-        ModelSettings? model = null)
+        ModelSettings? model = null,
+        bool reuse = true)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(sink);
@@ -224,6 +245,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
 
         AgentInstance? instance = null;
         var holdsGate = false;
+        var reused = false;
         var watch = Stopwatch.StartNew();
         try
         {
@@ -256,11 +278,39 @@ public sealed class SubAgentScheduler : ISubAgentControl
                 holdsGate = true;
             }
 
+            if (instance is null && resumeId is null && reuse && owner == AgentOwner.Model && model is null)
+            {
+                // Nobody named an id, so the scheduler may hand the task to a child that just did this same work: its
+                // context and its cached prompt prefix are exactly what a fresh child would have to rebuild.
+                foreach (var candidate in Reusable(definition.Name, task))
+                {
+                    if (!candidate.TryAcquire())
+                    {
+                        continue;
+                    }
+
+                    instance = candidate;
+                    holdsGate = true;
+                    reused = true;
+                    break;
+                }
+            }
+
             if (instance is null)
             {
                 var sessionId = await CreateSessionAsync(definition, task, context, ct).ConfigureAwait(false);
                 instance = NewInstance(definition, sessionId, context.WorkingDirectory, context.AgentDepth + 1, owner);
                 Register(instance, owner);
+                if (!reuse)
+                {
+                    // The caller opted out (automation, review): its child must not be picked up by a later spawn either,
+                    // or the review that just ran would answer the next one with its old verdict.
+                    lock (gate)
+                    {
+                        notReusable.Add(instance.Id);
+                    }
+                }
+
                 instance.TryAcquire();
                 holdsGate = true;
             }
@@ -274,7 +324,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
 
         try
         {
-            return await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, watch, ct).ConfigureAwait(false);
+            var outcome = await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, watch, ct).ConfigureAwait(false);
+            return reused ? outcome with { Resumed = true } : outcome;
         }
         finally
         {
@@ -283,6 +334,56 @@ public sealed class SubAgentScheduler : ISubAgentControl
                 instance.Release();
             }
         }
+    }
+
+    /// <summary>
+    /// The children a spawn of <paramref name="kind"/> may continue, best first: same kind, the model's own, idle, and with
+    /// their last run ended inside the reuse window; ranked by <see cref="SubAgentAffinity"/> and then by how recently they
+    /// ran, and only above the threshold - an unrelated task starts a fresh child rather than joining somebody else's
+    /// conversation. The gate is still taken by the caller, so two spawns racing for one child cannot both win it.
+    /// </summary>
+    private List<AgentInstance> Reusable(string kind, string task)
+    {
+        var now = options.SubAgentReuseClock.GetUtcNow();
+        var candidates = new List<(AgentInstance Instance, int Score, DateTimeOffset FinishedAt)>();
+        lock (gate)
+        {
+            foreach (var instance in instances.Values)
+            {
+                if (!string.Equals(instance.Definition.Name, kind, StringComparison.OrdinalIgnoreCase)
+                    || instance.IsAcquired
+                    || notReusable.Contains(instance.Id)
+                    || (owners.TryGetValue(instance.Id, out var owner) && owner != AgentOwner.Model)
+                    || !lastFinishedAt.TryGetValue(instance.Id, out var finishedAt)
+                    || now - finishedAt > options.SubAgentReuseWindow)
+                {
+                    continue;
+                }
+
+                var (lastTask, lastReport) = SubAgentAffinity.ReadLastExchange(instance.History);
+                var score = SubAgentAffinity.Score(task, lastTask, lastReport);
+                if (score >= options.SubAgentReuseThreshold)
+                {
+                    candidates.Add((instance, score, finishedAt));
+                }
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        candidates.Sort(static (left, right) => left.Score != right.Score
+            ? right.Score.CompareTo(left.Score)
+            : right.FinishedAt.CompareTo(left.FinishedAt));
+        var ordered = new List<AgentInstance>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            ordered.Add(candidate.Instance);
+        }
+
+        return ordered;
     }
 
     /// <summary>
@@ -561,6 +662,10 @@ public sealed class SubAgentScheduler : ISubAgentControl
                 instance.Control = null;
                 Detach(instance.Id, run);
                 run.Dispose();
+                lock (gate)
+                {
+                    lastFinishedAt[instance.Id] = options.SubAgentReuseClock.GetUtcNow();
+                }
             }
         }
     }

@@ -1335,6 +1335,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     public void Tick()
     {
+        TickSubAgentRoster();
         foreach (var agent in subAgents)
         {
             agent.Tick();
@@ -2568,8 +2569,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
     }
 
-    /// <summary>Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer.</summary>
-    private void OnAgentEvent(AgentEvent value)
+    /// <summary>
+    /// Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer. Internal
+    /// because it is the one funnel every agent event enters through, and a test that drives the roster (start, finish,
+    /// resume, retire) has no other way in - the runtime that normally calls it cannot be built without a model.
+    /// </summary>
+    internal void OnAgentEvent(AgentEvent value)
     {
         Interlocked.Exchange(ref lastActivityTicks, DateTimeOffset.UtcNow.UtcTicks);
         if (value is AgentToolStarted)
@@ -3245,31 +3250,22 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             agentUsage.TryGetValue(started.ChildId, out var known) ? known : TokenUsage.Empty,
             liveUsage.TryGetValue(started.ChildId, out var told) ? told : TokenUsage.Empty);
 
-        if (subAgentById.ContainsKey(started.ChildId))
+        if (subAgentById.TryGetValue(started.ChildId, out var existing))
         {
+            // The same run's start arriving twice: nothing to do. A finished child that starts again is a resume, and it is
+            // still on the roster (its tab never left), so the resumed run continues exactly that tab.
+            if (!existing.IsFinished)
+            {
+                return;
+            }
+
+            ResumeSubAgent(existing, started, stillDocked: true);
             return;
         }
 
-        // A resumed child (the parent handing the same agent its next task) comes back as the tab it already was: its
-        // transcript, round counter, cumulative usage reading and turn-metric rows all continue - a fresh tab would
-        // restart the rounds and collide (child session, turn 1) with the rows its earlier runs already wrote.
-        if (TakeFinishedSubAgent(started.ChildId, started.ChildSessionId) is { } resumed)
+        if (TakeFinishedSubAgent(started.ChildId, started.ChildSessionId) is { } retired)
         {
-            resumed.IsReadOnly = false;
-            resumed.MarkResumed();
-            subAgentById[started.ChildId] = resumed;
-            subAgents.Add(resumed);
-            resumed.Transcript.AddUserMessage(started.Task, started.At);
-            DrainEarlyDeltas(resumed);
-            OnPropertyChanged(nameof(HasSubAgents));
-            OnPropertyChanged(nameof(HasSubAgentActivity));
-            RaiseSubAgentCounters();
-            SubAgentsChanged?.Invoke();
-            OnAgentStateChanged();
-            OpenSubAgent(resumed);
-            // The menu holds a snapshot of the list, not the list itself, so pulling a tab back out of the history has
-            // to be told - or the count still lists a tab that is live again.
-            SyncFinishedMenu();
+            ResumeSubAgent(retired, started, stillDocked: false);
             return;
         }
 
@@ -3306,12 +3302,46 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         OpenSubAgent(agent);
     }
 
+    /// <summary>
+    /// A resumed child (the parent handing the same agent its next task) comes back as the tab it already was: its
+    /// transcript, round counter, cumulative usage reading and turn-metric rows all continue - a fresh tab would restart the
+    /// rounds and collide (child session, turn 1) with the rows its earlier runs already wrote. <paramref name="stillDocked"/>
+    /// tells the two shapes apart: a child still on the roster (its window has not closed) versus one pulled back out of the
+    /// history menu.
+    /// </summary>
+    private void ResumeSubAgent(SubAgentViewModel resumed, AgentSubAgentStarted started, bool stillDocked)
+    {
+        resumed.IsReadOnly = false;
+        resumed.MarkResumed();
+        subAgentById[started.ChildId] = resumed;
+        if (!stillDocked && !subAgents.Contains(resumed))
+        {
+            subAgents.Add(resumed);
+        }
+
+        resumed.Transcript.AddUserMessage(started.Task, started.At);
+        DrainEarlyDeltas(resumed);
+        OnPropertyChanged(nameof(HasSubAgents));
+        OnPropertyChanged(nameof(HasSubAgentActivity));
+        RaiseSubAgentCounters();
+        SubAgentsChanged?.Invoke();
+        OnAgentStateChanged();
+        OpenSubAgent(resumed);
+        // The menu holds a snapshot of the list, not the list itself, so pulling a tab back out of the history has to be
+        // told - or the count still lists a tab that is live again.
+        SyncFinishedMenu();
+    }
+
     private void StartSubAgentStop(string agentId) => StopSubAgent(agentId);
 
-    /// <summary>Opens a sub-agent tab; a live one only pops the region when the user has not collapsed it for this session.</summary>
+    /// <summary>
+    /// Opens a sub-agent tab. A live one only pops the region open when the user has not collapsed it for this session;
+    /// a history tab was asked for on purpose, and so was a finished child still on the roster (its tree row is the way
+    /// back to a run that ended a moment ago), so both open the region regardless.
+    /// </summary>
     private void OpenSubAgent(SubAgentViewModel agent)
     {
-        if (agent.IsReadOnly || !SubAgentsCollapsed)
+        if (agent.IsReadOnly || agent.IsFinished || !SubAgentsCollapsed)
         {
             subAgentOpened?.Invoke(agent);
         }
@@ -3371,7 +3401,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             agent.Instruments.NoteTurnEnded(openCard.Round, finishedEvent.Elapsed);
         }
 
-        agent.Finish(finishedEvent.Status, finishedEvent.Elapsed, finishedEvent.Error);
+        agent.Finish(finishedEvent.Status, finishedEvent.Elapsed, finishedEvent.Error, finishedEvent.At);
         subAgentToolCalls.TryRemove(finishedEvent.AgentId, out _);
         subAgentLastCards.TryRemove(finishedEvent.AgentId, out _);
 
@@ -3384,11 +3414,36 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 NotificationsStrings.SubAgentFinished(agent.Kind, agent.StatusText),
                 "subagent:" + finishedEvent.AgentId);
         }
-        subAgentById.TryRemove(finishedEvent.AgentId, out _);
         FinishToolsOf(finishedEvent.AgentId);
-        // The usage and stream counters stay: a resumed run differences its turns against them, so its first turn reports
-        // only the new task's tokens and not the whole instance cumulative again.
-        subAgents.Remove(agent);
+        // The child keeps its tab and stays on the roster until its reuse window closes (Tick retires it): the job just
+        // finished is still the best context for the next one of the same kind, so it is not history the moment its report
+        // arrives. The usage and stream counters stay too - a resumed run differences its turns against them, so its first
+        // turn reports only the new task's tokens and not the whole instance cumulative again.
+        SyncFinishedMenu();
+        OnPropertyChanged(nameof(HasSubAgents));
+        OnPropertyChanged(nameof(HasSubAgentActivity));
+        RaiseSubAgentCounters();
+        SubAgentsChanged?.Invoke();
+        OnAgentStateChanged();
+    }
+
+    /// <summary>
+    /// Takes a finished child off the live roster: its reuse window closed, or the user closed its tab. It moves into the
+    /// finished menu (read-only when reopened) and stops appearing on the tree as a live row; the scheduler still holds the
+    /// instance for the rest of its own window, so the parent may still hand it the next task - that pulls it back out of
+    /// the menu and into the roster (<see cref="StartSubAgent"/>).
+    /// </summary>
+    public void RetireSubAgent(SubAgentViewModel agent)
+    {
+        // Only a finished child leaves the roster. Closing the tab of a running one is just closing the tab: tearing it out
+        // here would strand the run - its streamed deltas and its finish event look the tab up by id, find nothing, and the
+        // child would go on burning tokens as a ghost row that nothing can stop or report.
+        if (!agent.IsFinished || finished.Contains(agent) || !subAgents.Remove(agent))
+        {
+            return;
+        }
+
+        subAgentById.TryRemove(agent.AgentId, out _);
         finished.Add(agent);
         SyncFinishedMenu();
         OnPropertyChanged(nameof(HasSubAgents));
@@ -3396,6 +3451,25 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
         OnAgentStateChanged();
+    }
+
+    /// <summary>The roster's clock: tests move it, the app reads the wall clock.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// Retires every finished child whose window has closed. Runs on the shell's one-second clock, so a tab that has been
+    /// sitting finished for an hour disappears on its own instead of waiting for the next refresh.
+    /// </summary>
+    private void TickSubAgentRoster()
+    {
+        var now = Clock.GetUtcNow();
+        for (var index = subAgents.Count - 1; index >= 0; index--)
+        {
+            if (subAgents[index].FinishedAt is { } finishedAt && now - finishedAt >= AgentOptions.DefaultSubAgentReuseWindow)
+            {
+                RetireSubAgent(subAgents[index]);
+            }
+        }
     }
 
     public void Dispose()
@@ -3502,6 +3576,7 @@ internal sealed class SubAgentViewModel : NotifyingObject
     private readonly Action? backToParent;
     private SubAgentStatus status = SubAgentStatus.Queued;
     private DateTimeOffset startedAt;
+    private DateTimeOffset? finishedAt;
     private TimeSpan elapsed;
     private LocText error;
     private LocText statusNote = SessionStrings.SubAgentWaitingSlot;
@@ -3636,10 +3711,12 @@ internal sealed class SubAgentViewModel : NotifyingObject
     /// <summary>True when this row came from the store rather than a live start event.</summary>
     internal bool FromStoredRow { get; init; }
 
-    // The marker is the tab's own at-a-glance state: ○ a read-only history tab, ▸ one that is (or was last) live. The
-    // breadcrumb's badge and the status word say the same thing, but the tab strip shows only this line - the marker is
-    // how a tab tells its state without being open.
-    public string TabTitle => (IsReadOnly ? "○ " : "▸ ") + DisplayName;
+    /// <summary>
+    /// The tab's title: the sub-agent's own name, nothing in front of it. The read-only/history state is a colour on the
+    /// tab icon (the shell's tab header) instead of a glyph in the text - a prefix character pushed the name off the tab
+    /// strip's baseline grid and had to be stripped again wherever the name was used.
+    /// </summary>
+    public string TabTitle => DisplayName;
 
     // ---------------------------------------------------------------- breadcrumb
 
@@ -3661,18 +3738,8 @@ internal sealed class SubAgentViewModel : NotifyingObject
     public bool IsReadOnly
     {
         get => isReadOnly;
-        set
-        {
-            if (SetAndNotify(ref isReadOnly, value, nameof(TabTitle)))
-            {
-                OnPropertyChanged(nameof(ReadOnlyBadgeVisible));
-            }
-        }
+        set => SetAndNotify(ref isReadOnly, value, nameof(TabTitle));
     }
-
-    public bool ReadOnlyBadgeVisible => isReadOnly;
-
-    public string ReadOnlyBadgeText => SessionStrings.ReadOnlyBadge;
 
     public SubAgentStatus Status
     {
@@ -3792,9 +3859,21 @@ internal sealed class SubAgentViewModel : NotifyingObject
         Transcript.AddNotice(SessionStrings.FollowUpNotice(ToolRowViewModel.Compact(instruction, 160)));
     }
 
-    public void Finish(SubAgentStatus finalStatus, TimeSpan finalElapsed, string? finalError)
+    /// <summary>
+    /// When this child's last run ended, null while it has not run yet. It is what the roster window counts from: a finished
+    /// child keeps its tab (and stays a reuse candidate for the scheduler) for <see cref="AgentOptions.DefaultSubAgentReuseWindow"/>,
+    /// not until the next refresh.
+    /// </summary>
+    public DateTimeOffset? FinishedAt
+    {
+        get => finishedAt;
+        private set => Set(ref finishedAt, value);
+    }
+
+    public void Finish(SubAgentStatus finalStatus, TimeSpan finalElapsed, string? finalError, DateTimeOffset at)
     {
         Status = finalStatus;
+        FinishedAt = at;
         elapsed = finalElapsed;
         error = finalError is null ? default : LocText.Literal(finalError);
         SetStatusNote(error);
@@ -3816,6 +3895,7 @@ internal sealed class SubAgentViewModel : NotifyingObject
         isStopRequested = false;
         error = default;
         outcomeUnknown = false;
+        FinishedAt = null;
         SetStatusNote(default);
         OnPropertyChanged(nameof(Error));
         StopCommand.NotifyCanExecuteChanged();
@@ -3848,7 +3928,6 @@ internal sealed class SubAgentViewModel : NotifyingObject
         OnPropertyChanged(nameof(HasStatusNote));
         // The child's own instruments follow the language switch by themselves (they subscribe like the root's do).
         OnPropertyChanged(nameof(ElapsedText));
-        OnPropertyChanged(nameof(ReadOnlyBadgeText));
         OnPropertyChanged(nameof(BreadcrumbName));
         OnPropertyChanged(nameof(BackToParentText));
         Transcript.RefreshText();
@@ -3887,7 +3966,7 @@ internal sealed class SubAgentViewModel : NotifyingObject
         };
         if (status is { } known)
         {
-            agent.Finish(known, TimeSpan.Zero, null);
+            agent.Finish(known, TimeSpan.Zero, null, session.LastActiveAt);
         }
         else
         {

@@ -240,6 +240,14 @@ public sealed class AgentInstance
 
     internal void Release() => Volatile.Write(ref running, 0);
 
+    /// <summary>
+    /// A run holds this instance right now, read from the gate itself rather than from <see cref="Control"/>: the control
+    /// object is attached a moment later (after the run is created and the text reset), so a scheduler picking a reuse
+    /// candidate from the control would briefly see an instance that is already running as idle - and scan its history
+    /// while the new run appends to it.
+    /// </summary>
+    internal bool IsAcquired => Volatile.Read(ref running) != 0;
+
     internal void Add(ChatMessage message, long seq) => history.Add(new AgentMessage(message, seq));
 
     /// <summary>

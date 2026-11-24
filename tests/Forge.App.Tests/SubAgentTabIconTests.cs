@@ -1,3 +1,7 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.VisualTree;
+using Forge.Abstractions;
 using Forge.App.ViewModels;
 using Forge.App.Workbench;
 using Forge.App.Workbench.Controls;
@@ -29,6 +33,49 @@ public sealed class SubAgentTabIconTests
         Assert.Same(TreeIcons.ChatLock, lastLevel.Icon);
         return Task.CompletedTask;
     });
+
+    [Fact]
+    public Task The_glyph_says_running_or_history_by_its_colour() => SharedUi.RunAsync(() =>
+    {
+        var agent = new SubAgentViewModel(
+            "session-1", "Worker-3", "child-session-1", "Worker", "Say hi.", "test-model", stopRequested: null, parentAgentId: "root");
+        var header = new TabHeaderView { Model = new TabModel("tab-subagent", TabKind.SubAgent, agent, agent.TabTitle) };
+        var window = new Window { Width = 320, Height = 120, Content = header };
+        window.Show();
+        SharedUi.Settle(window);
+        // The header's own leading glyph; the close button's template has an icon of the same name inside itself.
+        var icon = header.GetVisualDescendants()
+            .OfType<FluentIcon>()
+            .Single(glyph => ReferenceEquals(glyph.TemplatedParent, header));
+
+        // Idle: the template's resting colour, the same one every inactive tab wears.
+        Assert.Equal(TabIconTone.Default, header.IconTone);
+        Assert.Same(Resource(window, "TextMutedBrush"), icon.Foreground);
+
+        // A turn of its own: the tab wears the accent, live, without the header being rebuilt.
+        agent.MarkRunning(DateTimeOffset.UtcNow);
+        SharedUi.Settle(window);
+        Assert.Equal(TabIconTone.Running, header.IconTone);
+        Assert.Same(Resource(window, "TiffanyInkBrush"), icon.Foreground);
+
+        // A replayed/history tab: muted again - the tab strip says "history" with a colour instead of a prefix glyph.
+        agent.Finish(SubAgentStatus.Completed, TimeSpan.FromSeconds(3), null, DateTimeOffset.UtcNow);
+        agent.IsReadOnly = true;
+        SharedUi.Settle(window);
+        Assert.Equal(TabIconTone.History, header.IconTone);
+        Assert.Same(Resource(window, "TextMutedBrush"), icon.Foreground);
+
+        window.Close();
+        return Task.CompletedTask;
+    });
+
+    /// <summary>The named resource of the window's current theme; a missing key fails here instead of comparing two nulls.</summary>
+    private static object Resource(Window window, string key)
+    {
+        Assert.True(window.TryFindResource(key, window.ActualThemeVariant, out var value), "missing resource: " + key);
+        Assert.NotNull(value);
+        return value;
+    }
 
     private static TabHeaderView TabHeaderViewFor(string? parentAgentId)
     {

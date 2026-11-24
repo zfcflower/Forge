@@ -154,10 +154,12 @@
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="HorizontalAlignment" Value="Center" />
     </Style>
+    <!-- No LineHeight on the count: a line height shorter than the font's natural line box clamps the baseline to the
+         full ascent, which sinks the digit in the 16 px disc (measured: 2 px low, against half a pixel once the line box
+         is left alone). -->
     <Style Selector="Border.instrument-badge > TextBlock">
       <Setter Property="FontSize" Value="10" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="LineHeight" Value="10" />
       <Setter Property="Foreground" Value="{DynamicResource TextOnBrandBrush}" />
       <Setter Property="HorizontalAlignment" Value="Center" />
       <Setter Property="VerticalAlignment" Value="Center" />

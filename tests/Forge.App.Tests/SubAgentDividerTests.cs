@@ -79,14 +79,15 @@ public class SubAgentDividerTests
     public void The_tab_is_titled_by_the_speakable_id_and_the_stored_row_by_its_kind()
     {
         // A live child's id already says what it is (Core's kind-prefixed counter): the tab and the breadcrumb show it
-        // alone, and the task rides on the hover instead of the title.
+        // alone - no state prefix in front of the name; the tab icon carries live/history - and the task rides on the
+        // hover instead of the title.
         var live = new SubAgentViewModel("session", "Worker-3", "child", "Worker", "go fix the failing test", "m", null);
-        Assert.Equal("▸ Worker-3", live.TabTitle);
+        Assert.Equal("Worker-3", live.TabTitle);
         Assert.Equal("Worker-3", live.BreadcrumbName);
 
         // A kind Core had to sanitize lost its name in the id, so the kind rides along in the kind·id form.
         var sanitized = new SubAgentViewModel("session", "---3", "child", "调研员", "调研一下", "m", null);
-        Assert.Equal("▸ 调研员 · ---3", sanitized.TabTitle);
+        Assert.Equal("调研员 · ---3", sanitized.TabTitle);
 
         // A stored row's live id died with the process that issued it and can never be resumed: the kind alone.
         var stored = SubAgentViewModel.FromStored(
@@ -97,8 +98,27 @@ public class SubAgentDividerTests
             },
             "root",
             SubAgentStatus.Completed);
-        Assert.Equal("○ Worker", stored.TabTitle);
+        Assert.Equal("Worker", stored.TabTitle);
         Assert.Equal("Worker", stored.BreadcrumbName);
+    }
+
+    [Fact]
+    public void A_finished_child_keeps_the_moment_its_run_ended_until_it_resumes()
+    {
+        // The live roster's window counts from this stamp: a finished child stays docked and reusable for an hour after it
+        // ended, and a resumed run clears it so the child is live again.
+        var agent = new SubAgentViewModel("session", "Worker-3", "child", "Worker", "go", "m", null);
+        Assert.Null(agent.FinishedAt);
+
+        var endedAt = new DateTimeOffset(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
+        agent.MarkRunning(endedAt);
+        agent.Finish(SubAgentStatus.Completed, TimeSpan.FromMinutes(2), null, endedAt);
+        Assert.Equal(endedAt, agent.FinishedAt);
+        Assert.True(agent.IsFinished);
+
+        // A resumed run is live again: the window no longer counts from the run that ended.
+        agent.MarkResumed();
+        Assert.Null(agent.FinishedAt);
     }
 
     [Fact]
@@ -113,7 +133,7 @@ public class SubAgentDividerTests
         agent.Transcript.QueueDelta("half an answer");
         agent.Transcript.FlushPending();
         Assert.NotNull(agent.Transcript.Current);
-        agent.Finish(SubAgentStatus.Stopped, TimeSpan.FromSeconds(5), null);
+        agent.Finish(SubAgentStatus.Stopped, TimeSpan.FromSeconds(5), null, DateTimeOffset.UnixEpoch);
         Assert.Null(agent.Transcript.Current);
 
         // A stop that was requested closed the gate for that run's life; the next task reopens it.

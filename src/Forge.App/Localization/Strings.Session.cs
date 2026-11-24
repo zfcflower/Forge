@@ -171,7 +171,6 @@ internal static class SessionStrings
     public const string SubAgentFinishedHintKey = "subagent.finishedHint";
     public const string SubAgentFinishedMenuKey = "subagent.finishedMenu";
     public const string SubAgentNoTranscriptKey = "subagent.noTranscript";
-    public const string SubAgentReadOnlyBadgeKey = "subagent.readOnlyBadge";
     public const string SubAgentNoModelKey = "subagent.noModel";
     public const string SubAgentCollapseKey = "subagent.collapse";
     public const string SubAgentExpandKey = "subagent.expand";
@@ -533,14 +532,12 @@ internal static class SessionStrings
 
     public static string FinishedAgentsHint => Loc.Instance[SubAgentFinishedHintKey];
 
-    /// <summary><c>已结束 (3)</c> / <c>Finished (3)</c>: the dropdown button of the finished sub-agents.</summary>
+    /// <summary><c>SubAgents 历史 (3)</c>: the dropdown button of the finished sub-agents.</summary>
     public static string FinishedAgentsMenu(int count) =>
         Loc.Instance.Format(SubAgentFinishedMenuKey, TextFormat.Number(count));
 
     /// <summary>The note of a finished sub-agent whose stored conversation is empty; stored in its transcript.</summary>
     public static LocText FinishedAgentsNoTranscript => new(SubAgentNoTranscriptKey);
-
-    public static string ReadOnlyBadge => Loc.Instance[SubAgentReadOnlyBadgeKey];
 
     public static string NoModel => Loc.Instance[SubAgentNoModelKey];
 
@@ -750,18 +747,17 @@ internal static class SessionStrings
         Loc.Register(SubAgentStoppedByUserKey, "已停止", "Stopped");
         Loc.Register(SubAgentTitleKey, "子 Agent", "Sub-agents");
         Loc.Register(SubAgentMainAgentKey, "主 Agent", "Main agent");
-        Loc.Register(SubAgentFinishedKey, "SubAgent 历史会话", "Sub-agent history");
+        Loc.Register(SubAgentFinishedKey, "SubAgents 历史", "SubAgents history");
         Loc.Register(
             SubAgentFinishedHintKey,
             "本会话的子 Agent 历史会话，按最近一次运行排序；同一子 Agent 被再次领任务时会先回到活标签。选择一个查看只读记录。",
             "The session's sub-agent sessions, ordered by their latest run; one handed a new task returns to the live tabs first. Pick one to see its read-only record.");
-        Loc.Register(SubAgentFinishedMenuKey, "SubAgent 历史会话 ({0})", "Sub-agent history ({0})");
+        Loc.Register(SubAgentFinishedMenuKey, "SubAgents 历史 ({0})", "SubAgents history ({0})");
         Loc.Register(SubAgentNoTranscriptKey, "这次子 Agent 没有存下可重放的消息。", "This sub-agent stored no messages to replay.");
-        Loc.Register(SubAgentReadOnlyBadgeKey, "已结束", "Finished");
         Loc.Register(SubAgentNoModelKey, "未配置模型", "No model");
         Loc.Register(SubAgentCollapseKey, "收起", "Collapse");
         Loc.Register(SubAgentExpandKey, "展开", "Expand");
-        Loc.Register(SubAgentToggleKey, "子 Agent", "Sub-agents");
+        Loc.Register(SubAgentToggleKey, "SubAgents", "SubAgents");
         Loc.Register(
             LocText.PluralKey(SubAgentRunningNameBase, 1),
             "{0} 个子 Agent 正在运行",

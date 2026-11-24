@@ -6,6 +6,9 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="11.*" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Forge.App.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />
   </ItemGroup>
 </Project>
