@@ -396,6 +396,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     private string? titleSource;
 
     /// <summary>
+    /// 1 while the turn now running may still name the session: only the turn that starts its first user message, so a
+    /// session is named once and a reopened one never again.
+    /// </summary>
+    private int namingOpen;
+
+    /// <summary>
     /// The name this session is now called, and who wrote it (<c>derived</c> placeholder or <c>agent</c>), raised after the
     /// store accepted it. The shell relabels its tab and tree row from this; a write the store refused raises nothing.
     /// </summary>
@@ -486,9 +492,25 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     /// </summary>
     public void NoteNamed(string source) => Volatile.Write(ref titleSource, source);
 
-    /// <summary>The <c>set_title</c> seam: the name the model asked for, kept only if it is still replaceable.</summary>
-    private async ValueTask<bool> NameSessionAsync(string title, CancellationToken ct) =>
-        await TryWriteTitleAsync(title, SessionTitleSource.Agent, ct).ConfigureAwait(false);
+    /// <summary>True while the turn now running may still write the model's name (<c>set_title</c>).</summary>
+    internal bool CanName => Volatile.Read(ref namingOpen) == 1;
+
+    /// <summary>
+    /// The <c>set_title</c> seam: the name the model asked for, cut to one tab label and written only while this turn may still
+    /// name the session - its first one. Null when nothing was written.
+    /// </summary>
+    private async ValueTask<string?> NameSessionAsync(string title, CancellationToken ct)
+    {
+        if (!CanName || SessionTitles.Name(title) is not { } name)
+        {
+            return null;
+        }
+
+        return await TryWriteTitleAsync(name, SessionTitleSource.Agent, ct).ConfigureAwait(false) ? name : null;
+    }
+
+    /// <summary>True while the title is still the creation default or the placeholder derived from the first message.</summary>
+    private bool IsReplaceableTitle => Volatile.Read(ref titleSource) is null or SessionTitleSource.Derived;
 
     private async ValueTask<bool> TryWriteTitleAsync(string title, string source, CancellationToken ct)
     {
@@ -535,6 +557,16 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             await DeriveTitleAsync(OrchestrationDirective.Strip(userText), ct).ConfigureAwait(false);
         }
 
+        // set_title has one window: the turn that starts this session's first user message. The store says whether that turn
+        // ever started, asked again every turn so a first turn that never wrote a message (cancelled, or failed before the
+        // user turn landed) leaves the window open - and a session reopened after it already holds a message is neither named
+        // nor nudged again. An automation turn never opens the window: the automation named the session.
+        Volatile.Write(
+            ref namingOpen,
+            deriveTitle && IsReplaceableTitle && await services.Store.LastSeqAsync(SessionId, ct).ConfigureAwait(false) == 0
+                ? 1
+                : 0);
+
         // What this request is about decides which MCP tools are offered (see RefreshMcpTools); it is read when the tool
         // surface is refreshed at the start of the turn and never stored.
         Volatile.Write(ref mcpFocus, userText);
@@ -561,6 +593,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         }
         finally
         {
+            // The window belongs to the turn that is ending, whatever became of it: the next turn asks the store again.
+            Volatile.Write(ref namingOpen, 0);
             // Interject and this hand-back share the lock, so a message is either delivered by the loop or handed back.
             lock (gate)
             {

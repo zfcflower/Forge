@@ -12,8 +12,9 @@ namespace Forge.App.Tests;
 
 /// <summary>
 /// The session's name, end to end: a real store, a real runtime and one scripted model. The first message writes the
-/// placeholder title before the model is asked anything, <c>set_title</c> replaces it with the model's own words, and a name
-/// a person typed is never replaced again - the model is told "kept" instead, which is what stops it trying.
+/// placeholder title before the model is asked anything, <c>set_title</c> replaces it with the model's own words, and the
+/// name is settled with the turn that starts from that message: a person's name, the model's own, and a later turn of a
+/// session reopened from history all come back "kept", which is what stops the model from trying again.
 /// </summary>
 public sealed class SessionTitleNamingTests : IDisposable
 {
@@ -76,49 +77,186 @@ public sealed class SessionTitleNamingTests : IDisposable
 
         // The refusal reached the model as this turn's tool result, which is what keeps it from asking again.
         var results = events.OfType<AgentToolFinished>().Select(finished => finished.Result.Text).ToList();
-        Assert.Contains("Chat title kept: this chat is already named.", results);
+        Assert.Contains("Chat title kept: this chat's name is already settled.", results);
         Assert.Equal(2, provider.Requests);
     }
 
     [Fact]
-    public async Task A_still_unnamed_session_tells_its_model_so_for_two_requests_and_never_again()
+    public async Task A_session_gets_one_naming_turn_and_a_refusal_after_it()
     {
         Directory.CreateDirectory(directory);
-        var (store, runtime, _) = await Session();
+        var (store, runtime, provider) = await Session(
+            new Script(),
+            new Script("set_title", """{"title":"修复登录跳转"}"""),
+            new Script());
         using var http = new HttpClient();
-        var view = new SessionWorkspaceViewModel(
-            runtime.Session,
-            runtime,
-            checkpoints: null,
-            store,
-            new ProviderServices(Path.Combine(directory, "settings.json"), directory, http));
-        Assert.NotNull(runtime.ContextBudget);
+        _ = Tab(store, runtime, http);
 
-        // What the model reads on the requests of an unnamed session: the derived placeholder is called one, and the cap keeps
-        // an ignoring model from paying for the line forever.
-        var first = runtime.ContextBudget("root");
-        Assert.Contains("Session title: this chat is still unnamed", first, StringComparison.Ordinal);
-        Assert.Contains("Call set_title once", first, StringComparison.Ordinal);
+        // The first turn carries the line that asks for a name, and this model lets that one go by.
+        await RunTurnAsync(runtime);
+        Assert.Contains("Session title: this chat is still unnamed", Suffix(provider.Captured[0]), StringComparison.Ordinal);
+        var afterFirst = await store.GetSessionAsync(runtime.SessionId, CancellationToken.None);
+        Assert.NotNull(afterFirst);
+        Assert.Equal(DerivedTitle, afterFirst.Title);
+
+        // The second turn brings neither the line nor a writable title: the model's own name is refused and the placeholder stays.
+        var events = await RunTurnAsync(runtime, "再帮我看看这个重定向");
+        Assert.DoesNotContain("Session title", Suffix(provider.Captured[1]), StringComparison.Ordinal);
+        var afterSecond = await store.GetSessionAsync(runtime.SessionId, CancellationToken.None);
+        Assert.NotNull(afterSecond);
+        Assert.Equal(DerivedTitle, afterSecond.Title);
+        Assert.Equal(SessionTitleSource.Derived, afterSecond.TitleSource);
+        Assert.Contains(
+            "Chat title kept: this chat's name is already settled.",
+            events.OfType<AgentToolFinished>().Select(finished => finished.Result.Text));
+    }
+
+    [Fact]
+    public async Task A_reopened_session_keeps_the_name_it_settled_on()
+    {
+        Directory.CreateDirectory(directory);
+        var (store, runtime, _) = await Session(new Script());
+        using var http = new HttpClient();
+        _ = Tab(store, runtime, http);
+        await RunTurnAsync(runtime);
+
+        // The window is a fact of the store, not of the view that opened it: a session reopened from history already holds a
+        // message, so the turn it comes back on brings no reminder and cannot rename it either.
+        var stored = await store.GetSessionAsync(runtime.SessionId, CancellationToken.None);
+        Assert.NotNull(stored);
+        var provider = new ScriptedProvider(new Script("set_title", """{"title":"重开后的新名字"}"""), new Script());
+        var reopened = Runtime(store, stored, provider);
+        using var reopenedHttp = new HttpClient();
+        _ = Tab(store, reopened, reopenedHttp);
+
+        var events = await RunTurnAsync(reopened, "关掉又打开的会话");
+
+        Assert.DoesNotContain("Session title", Suffix(provider.Captured[0]), StringComparison.Ordinal);
+        var row = await store.GetSessionAsync(runtime.SessionId, CancellationToken.None);
+        Assert.NotNull(row);
+        Assert.Equal(DerivedTitle, row.Title);
+        Assert.Equal(SessionTitleSource.Derived, row.TitleSource);
+        Assert.Contains(
+            "Chat title kept: this chat's name is already settled.",
+            events.OfType<AgentToolFinished>().Select(finished => finished.Result.Text));
+    }
+
+    [Fact]
+    public async Task A_first_turn_that_wrote_nothing_leaves_the_naming_window_open()
+    {
+        Directory.CreateDirectory(directory);
+        var (store, runtime, _) = await Session(new Script("set_title", """{"title":"修复登录跳转"}"""), new Script());
+
+        // Cancelled before its user message reached the store: the session has not started, so its next turn is still its
+        // first one and the model's name lands there.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => runtime.RunTurnAsync(FirstMessage, [], _ => { }, new CancellationToken(canceled: true)));
+        Assert.Equal(0, await ((ISessionStore)store).LastSeqAsync(runtime.SessionId, CancellationToken.None));
+
+        await RunTurnAsync(runtime);
+
+        var row = await store.GetSessionAsync(runtime.SessionId, CancellationToken.None);
+        Assert.NotNull(row);
+        Assert.Equal(AgentTitle, row.Title);
+        Assert.Equal(SessionTitleSource.Agent, row.TitleSource);
+    }
+
+    [Fact]
+    public async Task The_naming_line_rides_two_requests_of_its_turn_and_no_sub_agent_request()
+    {
+        Directory.CreateDirectory(directory);
+        var (store, runtime, provider) = await Session(
+            new Script("set_title", """{"title":""}"""),
+            new Script("set_title", """{"title":""}"""),
+            new Script());
+        using var http = new HttpClient();
+        _ = Tab(store, runtime, http);
+        provider.SuffixOnFirstRequest = runtime.ContextBudget!;
+
+        await RunTurnAsync(runtime);
+
+        // Three requests in one turn (the two nameless set_title calls write nothing): the line stops after the second, so an
+        // ignoring model costs a fixed amount; and a sub-agent of that same turn is never told to name anything.
+        Assert.Contains("Session title", Suffix(provider.Captured[0]), StringComparison.Ordinal);
+        Assert.Contains("Session title", Suffix(provider.Captured[1]), StringComparison.Ordinal);
+        Assert.DoesNotContain("Session title", Suffix(provider.Captured[2]), StringComparison.Ordinal);
+        Assert.Null(provider.SubAgentSuffix);
+    }
+
+    [Fact]
+    public async Task A_long_name_from_the_model_is_cut_to_one_tab_label()
+    {
+        Directory.CreateDirectory(directory);
+        var (store, runtime, _) = await Session(
+            new Script("set_title", """{"title":"目前会话的命名出现了大段文本变成命名的情况；且没有约束到只有首轮才能命名"}"""),
+            new Script());
+
+        var events = await RunTurnAsync(runtime);
+
+        // The model answered with a sentence; the session keeps its first clause, and the model is told exactly what the tab
+        // now shows rather than the sentence it asked for.
+        var row = await store.GetSessionAsync(runtime.SessionId, CancellationToken.None);
+        Assert.NotNull(row);
+        Assert.Equal("目前会话的命名出现了大段文本变成命名的情况", row.Title);
+        Assert.Equal(SessionTitleSource.Agent, row.TitleSource);
+        Assert.Contains(
+            "Chat title set to \"目前会话的命名出现了大段文本变成命名的情况\".",
+            events.OfType<AgentToolFinished>().Select(finished => finished.Result.Text));
+    }
+
+    [Fact]
+    public async Task A_first_message_that_is_a_paragraph_derives_only_its_first_clause()
+    {
+        Directory.CreateDirectory(directory);
+        var (store, runtime, _) = await Session(new Script());
+
+        await RunTurnAsync(runtime, "目前会话的命名出现了大段文本变成命名的情况；且没有约束到只有首轮才能命名");
+
+        // The placeholder is a label, not the opening of the request: a long first message keeps its first clause and drops
+        // the rest, so a tab never reads as a paragraph.
+        var row = await store.GetSessionAsync(runtime.SessionId, CancellationToken.None);
+        Assert.NotNull(row);
+        Assert.Equal("目前会话的命名出现了大段文本变成命名的情况", row.Title);
+        Assert.Equal(SessionTitleSource.Derived, row.TitleSource);
+    }
+
+    [Fact]
+    public async Task An_agent_session_tab_leaves_the_root_requests_alone()
+    {
+        Directory.CreateDirectory(directory);
+        var (store, runtime, provider) = await Session(new Script());
+        using var http = new HttpClient();
+        _ = Tab(store, runtime, http);
 
         // An agent-session tab of the same root shares this runtime; built after the root's own tab, it must not decide what
-        // the root's requests say.
-        using var http2 = new HttpClient();
+        // the root's requests say - the naming line is the root's own.
+        using var childHttp = new HttpClient();
         _ = new SessionWorkspaceViewModel(
             new SessionInfo("child-session", directory, "Worker 1", DateTimeOffset.UnixEpoch) { ParentSessionId = runtime.SessionId },
             runtime,
             checkpoints: null,
             store,
-            new ProviderServices(Path.Combine(directory, "settings.json"), directory, http2),
+            new ProviderServices(Path.Combine(directory, "settings.json"), directory, childHttp),
             agentSession: new AgentSessionLaunch(runtime.Session, 1, IsDraft: true));
-        Assert.Contains("Session title", runtime.ContextBudget("root"), StringComparison.Ordinal);
 
-        // The second request is the last one that carries it; a sub-agent's request is not the session's naming moment.
-        Assert.DoesNotContain("Session title", runtime.ContextBudget("worker-1"), StringComparison.Ordinal);
-        Assert.DoesNotContain("Session title", runtime.ContextBudget("root"), StringComparison.Ordinal);
+        await RunTurnAsync(runtime);
 
-        // Once the session has a real name the line is gone on the very next request, however early that comes.
-        view.Rename(AgentTitle, SessionTitleSource.Agent);
-        Assert.DoesNotContain("Session title", runtime.ContextBudget("root"), StringComparison.Ordinal);
+        Assert.Contains("Session title", Suffix(provider.Captured[0]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_automation_turn_cannot_be_named_by_its_model()
+    {
+        Directory.CreateDirectory(directory);
+        var (store, runtime, _) = await Session(new Script("set_title", """{"title":"Nightly triage"}"""), new Script());
+
+        await runtime.RunTurnAsync(FirstMessage, [], _ => { }, CancellationToken.None, deriveTitle: false);
+
+        // The automation named this session when it created it, so its turn never opens the window - the name stays.
+        var row = await store.GetSessionAsync(runtime.SessionId, CancellationToken.None);
+        Assert.NotNull(row);
+        Assert.Equal(CreationDefault, row.Title);
+        Assert.Null(row.TitleSource);
     }
 
     [Fact]
@@ -180,7 +318,7 @@ public sealed class SessionTitleNamingTests : IDisposable
         var tool = new Forge.Core.Agents.SetTitleTool((_, _) =>
         {
             calls++;
-            return new ValueTask<bool>(true);
+            return new ValueTask<string?>("子 Agent 的名字");
         });
 
         var result = await tool.InvokeAsync(
@@ -194,7 +332,7 @@ public sealed class SessionTitleNamingTests : IDisposable
     }
 
     /// <summary>A session whose stored row still carries the creation default, the way the "+" button leaves it.</summary>
-    private async Task<(ISessionStore Store, SessionRuntime Runtime, ScriptedProvider Provider)> Session(params Script[] scripts)
+    private async Task<(SqliteSessionStore Store, SessionRuntime Runtime, ScriptedProvider Provider)> Session(params Script[] scripts)
     {
         var store = new SqliteSessionStore(directory);
         var created = await ((ISessionCatalog)store).CreateAsync(
@@ -203,7 +341,11 @@ public sealed class SessionTitleNamingTests : IDisposable
         Assert.Null(created.TitleSource);
 
         var provider = new ScriptedProvider(scripts);
-        var runtime = new SessionRuntime(
+        return (store, Runtime(store, created, provider), provider);
+    }
+
+    private SessionRuntime Runtime(SqliteSessionStore store, SessionInfo session, IChatProvider provider) =>
+        new(
             new AgentRuntimeServices(
                 ProviderFactory: _ => provider,
                 HostClient: null,
@@ -211,17 +353,28 @@ public sealed class SessionTitleNamingTests : IDisposable
                 Catalog: store,
                 Todos: new SqliteTodoStore(directory),
                 Model: new ModelSettings("test-model")),
-            created);
-        return (store, runtime, provider);
-    }
+            session);
 
-    private static async Task<List<AgentEvent>> RunTurnAsync(SessionRuntime runtime)
+    /// <summary>The tab that installs this session's per-request suffix (budget and naming lines) on the runtime.</summary>
+    private SessionWorkspaceViewModel Tab(ISessionStore store, SessionRuntime runtime, HttpClient http) =>
+        new(
+            runtime.Session,
+            runtime,
+            checkpoints: null,
+            store,
+            new ProviderServices(Path.Combine(directory, "settings.json"), directory, http));
+
+    private static async Task<List<AgentEvent>> RunTurnAsync(SessionRuntime runtime, string text = FirstMessage)
     {
         var events = new List<AgentEvent>();
-        await runtime.RunTurnAsync(FirstMessage, events.Add, CancellationToken.None);
+        await runtime.RunTurnAsync(text, events.Add, CancellationToken.None);
         Assert.Contains(events, e => e is AgentTurnCompleted);
         return events;
     }
+
+    /// <summary>The trailing dynamic suffix of a request - the last user message, which is where the naming line rides.</summary>
+    private static string Suffix(IReadOnlyList<ChatMessage> messages) =>
+        messages[^1].Content.OfType<TextBlock>().Aggregate(string.Empty, (text, block) => text + block.Text);
 
     private sealed record Script(string? CallName = null, string? ArgumentsJson = null);
 
@@ -236,11 +389,22 @@ public sealed class SessionTitleNamingTests : IDisposable
 
         public List<IReadOnlyList<ChatMessage>> Captured { get; } = [];
 
+        /// <summary>Reads the session's installed per-request suffix for a sub-agent on the first request; asking about the
+        /// root would spend the naming cap the assertions are about.</summary>
+        public Func<string, string?>? SuffixOnFirstRequest { get; set; }
+
+        public string? SubAgentSuffix { get; private set; }
+
         public async IAsyncEnumerable<ChatStreamEvent> StreamAsync(
             ChatRequest request,
             [EnumeratorCancellation] CancellationToken ct)
         {
             await Task.CompletedTask;
+            if (calls == 0 && SuffixOnFirstRequest is { } suffix)
+            {
+                SubAgentSuffix = suffix("worker-1");
+            }
+
             Captured.Add([.. request.Messages]);
             var script = scripts[calls];
             var index = ++calls;

@@ -9,8 +9,11 @@ namespace Forge.App.Agents;
 /// </summary>
 internal static class SessionTitles
 {
-    /// <summary>Longest derived title, in characters; single-line rows cut the rest off anyway.</summary>
-    internal const int MaxLength = 48;
+    /// <summary>
+    /// Longest name, in characters: one tab label (the strip's label is 180px wide, about two dozen characters), and the budget
+    /// both the derived placeholder and the model's own name are cut to.
+    /// </summary>
+    internal const int MaxLength = 24;
 
     /// <summary>Punctuation a kept word sheds from either end, so a label does not start or end with a colon.</summary>
     private static readonly char[] Edges = [' ', '\t', '.', ',', ':', ';', '!', '?', '(', ')', '[', ']', '"', '\'', '`',
@@ -45,13 +48,23 @@ internal static class SessionTitles
             .Select(static word => word.Trim(Edges))
             .Where(static word => word.Length > 0);
 
-        var title = string.Join(' ', kept).Trim(Edges);
-        if (title.Length == 0 || !title.Any(char.IsLetterOrDigit))
+        return Name(string.Join(' ', kept));
+    }
+
+    /// <summary>
+    /// The name a session shows for a line of text - the model's <c>set_title</c> argument, or the phrase derived from the
+    /// first message: folded onto one line, edges of punctuation shed, and cut to one tab label. Null when there is nothing
+    /// readable in it.
+    /// </summary>
+    public static string? Name(string? raw)
+    {
+        var text = string.Join(' ', (raw ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim(Edges);
+        if (text.Length == 0 || !text.Any(char.IsLetterOrDigit))
         {
             return null;
         }
 
-        return title.Length <= MaxLength ? title : Cut(title);
+        return text.Length <= MaxLength ? text : Cut(text);
     }
 
     /// <summary>The first line with a readable word in it; skips a leading fence, blank lines and a bare list marker.</summary>
@@ -100,13 +113,23 @@ internal static class SessionTitles
         return word.Any(char.IsLetter);
     }
 
-    /// <summary>Cuts at a word boundary; a single long word is cut hard so the label never overflows its row.</summary>
+    /// <summary>
+    /// Cuts a long name to the label budget: at the first clause end it can keep (a name that arrives as a sentence keeps the
+    /// part that says what the task is - "修复登录跳转：src/… 里写错了" → "修复登录跳转"), else at a word boundary, else hard, so
+    /// the label never overflows its row.
+    /// </summary>
     private static string Cut(string title)
     {
+        var clause = title.IndexOfAny(SentenceBreaks);
+        if (clause is > 1 && clause <= MaxLength)
+        {
+            return title[..clause].TrimEnd(Edges);
+        }
+
         var cut = title[..(MaxLength + 1)];
         var boundary = cut.LastIndexOf(' ');
-        var result = (boundary > 0 ? cut[..boundary] : title[..MaxLength]).TrimEnd();
-        return result.Length == 0 ? title[..MaxLength].TrimEnd() : result;
+        var result = (boundary > 0 ? cut[..boundary] : title[..MaxLength]).TrimEnd(Edges);
+        return result.Length == 0 ? title[..MaxLength].TrimEnd(Edges) : result;
     }
 
     /// <summary>

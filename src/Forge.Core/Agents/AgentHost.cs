@@ -122,11 +122,12 @@ public sealed record AgentHostOptions
     public bool IncludeRetrievalTools { get; init; } = true;
 
     /// <summary>
-    /// Writes a name the model asked for through <c>set_title</c> and returns whether it is now the session's title (false
-    /// when a person, or an earlier call, already named it). Null - the default - does not offer the tool at all, which is
-    /// what a host without a session store wants: the call would have nowhere to land.
+    /// Writes a name the model asked for through <c>set_title</c> and answers the name the session now shows - the host cuts
+    /// it to one tab label - or null when a person, an earlier call or the session's first turn already settled it. Null - the
+    /// default - does not offer the tool at all, which is what a host without a session store wants: the call would have
+    /// nowhere to land.
     /// </summary>
-    public Func<string, CancellationToken, ValueTask<bool>>? RenameSession { get; init; }
+    public Func<string, CancellationToken, ValueTask<string?>>? RenameSession { get; init; }
 
     /// <summary>
     /// Tool names switched off from the start (built-in or external); <see cref="AgentHost.SetDisabledTools"/> changes the

@@ -14,7 +14,7 @@
 | `grep` | 文件 | R | * | 托管/ripgrep，1000 命中，单文件 8 MiB |
 | `bash` | 文件 | X | * | Direct 优先进程，每流 512 KiB，默认 120 s |
 | `todo` | 会话 | R/W | * | 7 种操作：清单、分组、计划摘要 |
-| `set_title` | 会话 | W | * | 命名本会话（只写 `sessions.title_source`，用户改名永久优先，不动分支与目录） |
+| `set_title` | 会话 | W | * | 命名本会话（只写 `sessions.title_source`，只在第一轮生效、名字截成 24 字符标签，用户改名永久优先，不动分支与目录） |
 | `ask_user` | 会话 | R | * | 问题卡（选项/自由文本/多选） |
 | `skill` | 会话 | R | — | 按名取技能全文（≤64000 字符） |
 | `spawn_agent` | Agent | R | * | 派生 Scout/Worker/Plan/Reviewer 或用户 Agent；可带这一次的模型与档位 |

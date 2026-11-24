@@ -178,8 +178,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// call.</summary>
     private int turnToolCalls;
 
-    /// <summary>Requests this session has carried the naming line on: incremented from the agent loop's thread, so the cap
-    /// holds without a lock (a session naming itself drops the line before the cap anyway).</summary>
+    /// <summary>Requests of the naming turn that carried the naming line: incremented from the agent loop's thread, so the cap
+    /// holds without a lock. The window never reopens, so the counter never has to be reset.</summary>
     private int namingRequests;
 
     /// <summary>The card of the turn now running (or just ended). The root's usage lands on the card the turn used, not on
@@ -487,10 +487,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         appPreferences?.ChatContextBudget == false ? null : InstrumentsOf(agentId)?.ContextBudgetLine;
 
     /// <summary>
-    /// The trailing suffix one request carries: the instance's own budget line plus, while this session still has no real
-    /// name, one line saying so. Both are per-request text after the cached prefix; the naming line stops by itself once the
-    /// store holds a name (the model's own <c>set_title</c> or a person's rename) and never outlives the first two requests,
-    /// so a model that ignores it costs a fixed amount instead of one line per request forever.
+    /// The trailing suffix one request carries: the instance's own budget line plus, while this session's naming window is
+    /// still open, one line saying so. Both are per-request text after the cached prefix; the line rides only the session's
+    /// first turn (<see cref="SessionRuntime.CanName"/>), so a reopened session is never told to name itself again, and the
+    /// cap keeps an ignoring model from paying for it on every request of that one turn.
     /// </summary>
     private string? DynamicContext(string agentId)
     {
@@ -498,6 +498,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (automationTurn
             || !string.Equals(agentId, "root", StringComparison.Ordinal)
             || Info.TitleSource is not (null or SessionTitleSource.Derived)
+            || runtime?.CanName != true
             || Interlocked.Increment(ref namingRequests) > 2)
         {
             return budget;
