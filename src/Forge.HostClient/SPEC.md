@@ -181,8 +181,7 @@ depends-on: [forge-ipc]
   按原值透传:已文档化的 `draft`/`approved`/`disabled`/`uninstalled`/`invalid` 全数接受,Host 以后新增状态也不会让
   整份注册表变成“未知”。
 - **解码即形状校验。** MessagePack 解码拒绝非可空成员上的 nil 与类型不符的字段,这类应答整份以“无法解码”
-  拒绝(不再逐字段命名);之后的逐行规则只检查解码器不管的内容:空白字符串、nil 列表项、未定义的 `PermissionKind`
-  与空白 scope。`invalid` 行的 `version`/哈希/`sdkVersion` 可为空串。`plugins.status` 与 `extensions.commit` 内嵌的
+  拒绝(不再逐字段命名);之后的逐行规则只检查解码器不管的内容,即上一条那份清单。`invalid` 行的 `version`/哈希/`sdkVersion` 可为空串。`plugins.status` 与 `extensions.commit` 内嵌的
   `status` 共用同一份行校验(标签区分 `plugins[i]` 与 `status`),规则只有一处,消息带坏行下标与已知身份。
 - **授权的扩展写入同样只读 IPC、逐项校验。** `IExtensionAuthoringClient` 的八个方法先做本地参数校验——空白
   id/version/哈希、未知 `kind`、`Files`/`Permissions`/`Dependencies` 为 null 或含 null 项都抛 `ArgumentException`
@@ -203,5 +202,4 @@ depends-on: [forge-ipc]
   - **输入**:`WriteAsync` 把输入切成 ≤ 64 KiB 的 `terminal.input` 通知并串行发送。
   - **退出与断连**:退出后,写入和缩放一律忽略,`HasForegroundProcessAsync` 返回 false。该查询会把业务错误与超时也当成 false(关闭确认宁可不拦)。连接断开(Host 崩溃、重连换代)时,`Output` 以 `IpcConnectionClosedException` 完成,`Exited` 也以它失败。
   - **释放**:`DisposeAsync` 发 `terminal.stop`,限时 5 秒;超时或失败时写一条带 terminalId 的诊断,本地照常收尾(`Exited` 为 -1),属于尽力而为:Host 侧这个终端要等断连才会被清理。
-- **已知限制:** `IIpcPeer` 仍只有每 peer 一个默认超时,`RequestAsync` 没有 per-call 超时重载;本客户端因此把 peer
-  默认超时设为无限、在 `SendAsync` 里为每次调用自建 deadline。若将来 Ipc 增加 per-call 超时,这里应改为直接使用它。
+- **已知限制:** `RequestAsync` 没有 per-call 超时重载,所以 `IIpcPeer` 的 peer 默认超时设为无限、每次调用在 `SendAsync` 里自建 deadline;若将来 Ipc 增加 per-call 超时,这里应改为直接使用它。
