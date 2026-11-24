@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
+using Avalonia;
 using Microsoft.Win32;
 using UiLanguage = Forge.App.Preferences.UiLanguage;
 using Forge.App.Logging;
@@ -10,11 +11,13 @@ namespace Forge.App.Localization;
 
 /// <summary>
 /// Resolves "follow the system" to a concrete language. The build keeps <c>InvariantGlobalization</c> (no ICU), so the
-/// culture properties are usually the invariant culture; on Windows the user's display language is read from the
-/// registry (BCL <c>Microsoft.Win32.Registry</c>, no P/Invoke), elsewhere from the POSIX locale variables.
-/// <para>Order: culture names → Windows registry → <c>LC_ALL</c> → <c>LC_MESSAGES</c> → <c>LANG</c> → English. The
-/// registry goes before the variables because Git Bash exports <c>LANG=en_US.UTF-8</c>, and a Chinese Windows started
-/// from there must stay Chinese.</para>
+/// culture properties are usually the invariant culture; the platform's own answer is asked first, then the Windows
+/// registry (BCL <c>Microsoft.Win32.Registry</c>, no P/Invoke), then the POSIX locale variables.
+/// <para>Order: platform language → culture names → Windows registry → <c>LC_ALL</c> → <c>LC_MESSAGES</c> → <c>LANG</c> →
+/// English. The platform language leads because Avalonia reads it from the OS instead of the runtime
+/// (<c>IPlatformSettings.PreferredApplicationLanguage</c>, WinRT on Windows), which is what makes it usable at all under
+/// invariant globalization; it also beats the locale variables for the same reason the registry does — Git Bash exports
+/// <c>LANG=en_US.UTF-8</c>, and a Chinese Windows started from there must stay Chinese.</para>
 /// <para>Each step decides as soon as it has a value: a Windows display language or a locale variable that exists is
 /// authoritative, not merely consulted for "is it Chinese". Only the culture-name step looks for Chinese alone, because
 /// under invariant globalization both names are the invariant culture and never decide anything.</para>
@@ -31,6 +34,11 @@ internal static class SystemLanguageDetector
     private const string InternationalKey = @"Control Panel\International";
 
     /// <summary>Everything the decision depends on, read once by <see cref="ReadCurrent"/>. </summary>
+    /// <param name="PlatformLanguage">
+    /// <c>IPlatformSettings.PreferredApplicationLanguage</c>, a BCP 47 tag the platform reads from the operating system.
+    /// Empty when there is no application yet or the platform reports none (X11 and macOS fall back to the runtime's
+    /// installed culture, which is the invariant culture in this build).
+    /// </param>
     /// <param name="CurrentUiCulture"><c>CultureInfo.CurrentUICulture.Name</c> (empty under invariant globalization).</param>
     /// <param name="InstalledUiCulture"><c>CultureInfo.InstalledUICulture.Name</c>.</param>
     /// <param name="WindowsUiLanguage">
@@ -44,6 +52,7 @@ internal static class SystemLanguageDetector
     /// <param name="LcMessages">The <c>LC_MESSAGES</c> variable.</param>
     /// <param name="Lang">The <c>LANG</c> variable.</param>
     internal readonly record struct Inputs(
+        string? PlatformLanguage,
         string? CurrentUiCulture,
         string? InstalledUiCulture,
         string? WindowsUiLanguage,
@@ -54,6 +63,13 @@ internal static class SystemLanguageDetector
     /// <summary>Pure decision over <paramref name="inputs"/>; never returns <see cref="UiLanguage.System"/>.</summary>
     public static UiLanguage Resolve(in Inputs inputs)
     {
+        // 0. What the platform says the user wants, read from the OS by Avalonia: authoritative wherever it exists, and
+        //    the only step that survives invariant globalization on Windows without touching the registry.
+        if (HasValue(inputs.PlatformLanguage))
+        {
+            return IsChinese(inputs.PlatformLanguage) ? UiLanguage.Chinese : UiLanguage.English;
+        }
+
         // 1. The culture names. Chinese-only on purpose: this build has no ICU data, so both are the invariant culture
         //    and an empty name says nothing about the user's choice - it must not be read as "English decided".
         if (IsChinese(inputs.CurrentUiCulture) || IsChinese(inputs.InstalledUiCulture))
@@ -96,12 +112,20 @@ internal static class SystemLanguageDetector
     /// </summary>
     public static Inputs ReadCurrent() =>
         new(
+            ReadPlatformLanguage(),
             CultureInfo.CurrentUICulture.Name,
             CultureInfo.InstalledUICulture.Name,
             ReadWindowsUiLanguage(),
             ReadVariable("LC_ALL"),
             ReadVariable("LC_MESSAGES"),
             ReadVariable("LANG"));
+
+    /// <summary>
+    /// The preferred application language Avalonia read from the platform, or null when there is no application yet or the
+    /// platform reports none. Never throws: a platform without settings support answers null.
+    /// </summary>
+    private static string? ReadPlatformLanguage() =>
+        Application.Current?.PlatformSettings?.PreferredApplicationLanguage;
 
     /// <summary>
     /// True for <c>zh</c>, <c>zh-*</c> and <c>zh_*</c> (e.g. <c>zh-CN</c>, <c>zh-Hans-CN</c>, <c>zh_CN.UTF-8</c>),

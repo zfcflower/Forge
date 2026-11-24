@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Net;
 using System.Reflection;
 using Avalonia;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Agents;
@@ -44,6 +45,12 @@ namespace Forge.App.Composition;
 /// </summary>
 internal sealed class AppComposition : IAsyncDisposable
 {
+    /// <summary>The platform settings the language subscription hangs on; null when the app has none (tests, headless).</summary>
+    private readonly IPlatformSettings? platformSettings;
+
+    /// <summary>The handler kept so <see cref="DisposeAsync"/> can detach it from the process-wide platform settings.</summary>
+    private readonly EventHandler? platformLanguageChanged;
+
     private readonly HttpClient httpClient;
     private readonly WorkspaceServices? workspace;
     private readonly McpServices? mcp;
@@ -124,6 +131,15 @@ internal sealed class AppComposition : IAsyncDisposable
         GitPanelSettings = GitPreferences.PanelSettings(preferences.Current);
         Initialization = initialization;
         preferences.Current.PropertyChanged += OnPreferencesChanged;
+
+        // "Follow the system" stays live: the platform reports when the OS preferred language changes, and the language is
+        // re-resolved from it then. A pinned language is simply applied again, which changes nothing.
+        if (Application.Current?.PlatformSettings is { } platform)
+        {
+            platformSettings = platform;
+            platformLanguageChanged = (_, _) => ApplyLanguage(preferences.Current.Language);
+            platform.PreferredApplicationLanguageChanged += platformLanguageChanged;
+        }
     }
 
     public AppPaths Paths { get; }
@@ -1125,6 +1141,12 @@ internal sealed class AppComposition : IAsyncDisposable
         }
 
         preferences.Current.PropertyChanged -= OnPreferencesChanged;
+
+        if (platformSettings is { } platform && platformLanguageChanged is { } languageHandler)
+        {
+            platform.PreferredApplicationLanguageChanged -= languageHandler;
+        }
+
         await preferences.DisposeAsync().ConfigureAwait(false);
     }
 
