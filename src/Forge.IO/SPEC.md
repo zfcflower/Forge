@@ -13,7 +13,7 @@ parent: forge-architecture
 ## 边界
 
 - **路径**(`Paths/`):`WorkspacePath` 是工作区路径身份与包含检查的唯一实现,`Forge.Workspace` 的 `WorkspacePaths` 委托到这里;`PathGate` 串行同一路径的读-改-写。
-- **文件**(`Files/`):`FileWalker` 惰性 DFS 遍历;`TextFileReader` 有界窗口读;`TextFileWriter` 原子整写与追加。
+- **文件**(`Files/`):`FileWalker` 惰性 DFS 遍历;`TextFileReader` 有界窗口读;`LineEndings` 行尾归一(写入与匹配共用);`TextFileWriter` 原子整写与追加。
 - **进程**(`Process/`):`ProcessRunner` 有界字节捕获的进程执行;`ShellResolver` 平台 shell 解析;`CommandLine` 引用感知切分与 direct/script 判定。
   - **实时输出尾部**:`ProcessRequest.OnOutput`(空则零开销)收到 stdout/stderr 按到达顺序合并后的最新尾部快照(≤ `OutputTailChars`,默认 16 KiB),至多每 `OutputInterval`(默认 250 ms)一次,间隔内到达的输出由一次性定时器补报;每路一个 UTF-8 `Decoder`;`ProcessOutputTail` 在持锁时调用监听者,所以快照严格有序、不并发,监听者必须不阻塞、抛异常被吞;进程退出时未报的尾部丢弃(结果含全部输出)。
 - **搜索**(`Search/`):`GlobMatcher`、`GitIgnore`(完整 gitignore 语义)、`GrepEngine`(托管)、`RipgrepBackend`(可选加速)。
@@ -48,12 +48,13 @@ parent: forge-architecture
 
 - **`read` 有界且按字节算。** 默认窗口 2000 行 / 256 KiB(硬上限 20000 行 / 1 MiB)。行窗口走流式跳过与截取:读 100 行不会把 100 MiB 读进内存(本机实测三种大小的分配都在 14–16 KB)。行号右对齐,宽度按本次窗口最后一行算;表头只在**整读**时写 `<path>: N lines`(N 就是文件行数);带 `offset` 或被 `limit`/`max_bytes` 截断时改写 `<path>: lines 600–729`,`offset` 越过末尾时写 `<path>: the file ends before line N`。文件总行数不扫全文件(与“不得整体读入”冲突),所以窗口读从不声称它是多少——把窗口行数印成文件行数会被读成文件长度(生产库里 75 次截断读都带着那种表头)。单次返回另有 32,000 字符上限(等于循环的 spill 阈值,`read` 不会被转成 artifact):按整行截断,尾部给出已显示的行范围和续读的 `offset`;首行本身超过上限时只截这一行。`read`、`find`、`ls`、`grep` 都实现 `IBoundedOutputTool`,循环不再对它们的结果做 spill。
 - **编码策略明确。** 嗅探 BOM(UTF-8 / UTF-16LE / UTF-16BE);无 BOM 时按 UTF-8 **严格**解码,且只严格校验前 8 KiB(此后按宽松解码,因为半行截断本就会切在多字节字符中间)。首 8 KiB 含 `0x00` 或严格解码失败的,判为二进制/非 UTF-8 并报错(带字节数),不返回乱码。
-- **`edit` 要求唯一匹配。** 0 次出现、以及多于 1 次又没给 `replace_all`,都返回错误并给出文件行数与前两处行号:猜一处是最坏的结果。读-改-写整段持同一把 `PathGate` 租约,写回走 `AtomicFile`。
+- **`edit` 要求唯一匹配。** 0 次出现、以及多于 1 次又没给 `replace_all`,都返回错误并给出文件行数与前两处行号:猜一处是最坏的结果。匹配在归一 LF 之后做(见下一条行尾契约)。读-改-写整段持同一把 `PathGate` 租约,写回走 `AtomicFile`。
+- **行尾只有一个标准:LF。** `read` 交给模型的是 LF 视图(`TextFileReader` 删掉 CRLF 的 `\r` 再按 `\n` 连接;裸 `\r` 不裁也不当换行),所以 `edit` 的匹配也在同一空间里做:`LineEndings.Normalize` 把正文与 `old_string` 的 `\r\n`、裸 `\r` 都归一成 `\n` 再找,命中后整份以 LF 写回;`TextFileWriter`(`write`/`edit` 唯一的写入路径)对 content 做同一次归一,没有调用方能把 `\r` 漏进文件。不跟文件历史、不按平台、也不读 `.gitattributes`/`.editorconfig`:无探测、无分支,写出的字节只取决于内容,跨平台一致——一致性优先于“保持既有 CRLF 文件不动”是明确的取舍。归一不需要偏移映射(换行集合不变),所以行号、出现次数、`replace_all` 与原文逐一对得上;没有 `\r` 的文件付一次向量化 `IndexOf` 就返回原实例,零分配。**代价写明**:被工具碰过的 CRLF 文件整份变 LF(git 里存 LF 的仓库看不出差异,真存 CRLF 的仓库会看到整份 diff);`append` 只归一自己追加的那段、不重写已有前缀(重写就把 O(1) 追加变成整份读+整份写);故意造 CRLF 文件得走 `bash` 重定向;CR-only(旧 Mac)文件上 `edit` 的行号与 `read` 的行数不一致——`read` 按 `\n` 切,整个文件是 1 行,而 `edit` 把裸 `\r` 当断行,错误里报的是后者。**为什么不能只做字节精确匹配**:`read` 早就在删 `\r`,模型手里根本没有 `\r`,于是 CRLF 文件上的跨行 `old_string` 恒不命中(生产里就是 `no match for old_string`),那不是模型写错了 old_string,而是工具对这类文件结构性不可用。**一个护栏**:`old_string` 若全由换行组成且带 `\r`(典型是单个 `\r` 想“剥 CR”,这在 LF 标准下已不成立),直接报错而不是当成“匹配每个换行”去执行——否则 `replace_all` + 空 `new_string` 会把整份文件的换行删光。**2026-11-24 实测**(`tools/Forge.Bench`,i9-14900HX/Win11、Release;**只覆盖无 `\r` 的快路径,归一的 rent+copy 分支未测**,而 bench 的 payload 本来就是 LF):`write.atomic.1KiB` 2.258 → 2.32–2.69 ms、`write.atomic.1MiB` 3.549 → 3.20–3.76 ms(3 次运行区间;fsync 主导,单次抖动 ±15%),分配与 GC 不变(5,832 / 2,355 B/op,0/0/0);`ledger.write.4KiB` 同一 run 内的有/无账本对照 +1.2% → +2.0%,仍远低于 1.25x 门槛,而绝对值 46.3 → 64.5 ms 的漂移由同 run 基线同步抵消(45.0 → 62.3 ms)。
 - **`edit` 会把 UTF-16 文件写回 UTF-8。** 这是已知偏差:保留原编码要多一套编码探测与回写路径,而仓库里的文本文件几乎全是 UTF-8。已在工具文档与这里写明,不静默。
 - **`write` 覆盖检查。** 防止 Agent 用过期的内容整体覆盖别人(其他 Agent、用户、命令)的改动。依据是调用方 Agent 的读取记录 `ToolContext.FileVersions`(见 forge-core;null 时不检查):`路径 → (长度, LastWriteTimeUtc)`。规则:
   - `read`(含 `offset`/`limit` 的部分读取)在读**之前** stat 并记录;读的过程中被改则记下的是旧版本,之后的覆盖被拒,偏安全。
   - `write` 覆盖**已存在**的文件:在同一把 `PathGate` 租约内 stat,本 Agent 无记录或记录与磁盘不符即返回错误、不写(两种措辞:“覆盖前请先 read”与“在你上次读取后已被修改,请重新 read”);写成功后记录新状态。新建文件不检查,写后记录。
-  - `edit` 不检查(精确匹配本身就是乐观并发);写后**仅当编辑前的磁盘状态与本 Agent 的记录一致**才更新记录,否则保留旧记录——否则 Agent 在 v1 读、别人改成 v2、它 `edit` 成 v3 后记成 v3,再用记忆中的 v1 整体 `write` 就会通过检查。`append` 同 `edit`:不检查,记录按同一条件更新。
+  - `edit` 不检查(LF 归一后的精确匹配本身就是乐观并发);写后**仅当编辑前的磁盘状态与本 Agent 的记录一致**才更新记录,否则保留旧记录——否则 Agent 在 v1 读、别人改成 v2、它 `edit` 成 v3 后记成 v3,再用记忆中的 v1 整体 `write` 就会通过检查。`append` 同 `edit`:不检查,记录按同一条件更新。
   - `copy`/`move`/`delete` 的覆盖目标不纳入。
   - 局限:同一时间刻度内长度相同的两次修改比对不出(NTFS 100 ns;FAT、部分网络盘精度粗会漏判)。记录**不设上限、不淘汰**(只增;淘汰会让读过的文件突然要求重读,而这层检查的错误方向本就该偏安全),量级由基准实测给出。
   - `read`/`write` 是热路径,每次多一次 stat 与一次字典操作。**2026-11-19 实测**(`tools/Forge.Bench` 的 `ledger.*`,i9-14900HX / Win11 / Release,每样本 20 次工具调用、跨 10 次运行取中位):`read` 4 KiB 净增 +0.7~1%(≈+3.7 µs、+96 B/次)、`read` 1 MiB 测不出(与对照同量级);覆盖已存在文件的 `write` 净增 +2.1~2.9%(≈+60 µs、+200 B/次,相对原子写+fsync 本身可接受);账本 **276 B/条目**(表 36 B + 105 字符路径 240 B),1 万个不同文件 ≈ 2.6 MiB——这是「不设上限、不淘汰」的量化依据。工具描述补“覆盖已存在文件前须先 read”,工具定义变化使提示词缓存失效一次。
@@ -179,6 +180,7 @@ parent: forge-architecture
 
 - 全局 `core.excludesFile` 与 `.gitmodules` 未参与忽略判定(需要读 git config)。
 - `edit` 把 UTF-16 文件写回 UTF-8;保留原编码未做。
+- 行尾只认 LF:被工具编辑或重写过的 CRLF/CR 文件整份变 LF,`write` 也无法产出 CRLF 内容(需 `bash` 重定向)。想按仓库声明(`.gitattributes` 的 `eol=`、`.editorconfig` 的 `end_of_line`)改写 content 未做——那是一套 glob 与多级优先级的子系统。
 - ripgrep 不随应用分发,只接受偏好里给出的路径;是否按 RID 打包待基准数据决定(当前托管实现只比 rg 慢 11–15%)。
 - `GitCli`/`GhCli`/`ScreenshotShell` 仍各自实现进程执行与捕获,尚未改为复用 `ProcessRunner`(它们有各自的 head/tail 与逐行回调契约,单独立项)。
 - `bash` 的输出只在结束时一次性返回,不流式进 UI;`ls` 的截断发生在遍历顺序上而不是排序之后(保留的是遍历顺序的前 N 条,再排序)。

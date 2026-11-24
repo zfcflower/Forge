@@ -5,7 +5,8 @@ namespace Forge.IO.Tools;
 
 /// <summary>
 /// Replaces an exact string in a workspace text file. The read, the replacement and the atomic write back run under one
-/// <see cref="PathGate"/> lease, so a concurrent write of the same path cannot be lost in between. A match count other
+/// <see cref="PathGate"/> lease, so a concurrent write of the same path cannot be lost in between. Matching runs in the LF
+/// space read hands out (<see cref="LineEndings"/>). A match count other
 /// than one is reported instead of guessed, unless <c>replace_all</c> asks for every occurrence. The call is not subject
 /// to the overwrite check - an exact match is its own optimistic check - but it moves the agent's read record forward only
 /// when the file still matched that record (see <see cref="IFileVersionLedger"/>).
@@ -39,7 +40,7 @@ public sealed class EditTool : ToolBase
         CancellationToken ct)
     {
         var requested = ToolJson.RequiredString(arguments, "path");
-        if (ToolJson.OptionalString(arguments, "old_string") is not { Length: > 0 } oldString)
+        if (ToolJson.OptionalString(arguments, "old_string") is not { Length: > 0 } oldText)
         {
             throw new ToolArgumentException("'old_string' must be a non-empty string.");
         }
@@ -48,6 +49,18 @@ public sealed class EditTool : ToolBase
         {
             throw new ToolArgumentException("'new_string' is required.");
         }
+
+        // A payload that is nothing but line breaks loses its meaning to the normalization - a lone '\r' asked to strip the
+        // CRs, which the LF standard no longer offers - so it is refused instead of silently matching every line break.
+        if (IsLineBreaksOnly(oldText))
+        {
+            return new ToolResult(
+                $"{Definition.Name}: old_string is only line breaks and contains '\\r'; text files are written with LF, so it " +
+                "would match every line break. Rewrite the file with `write` instead.",
+                IsError: true);
+        }
+
+        var oldString = LineEndings.Normalize(oldText);
 
         var replaceAll = ToolJson.OptionalBool(arguments, "replace_all", false);
         var limit = Math.Clamp(options().EditMaxFileBytes, 1, ToolOptions.MaxEditMaxFileBytes);
@@ -92,6 +105,7 @@ public sealed class EditTool : ToolBase
                     IsError: true);
             }
 
+            text = LineEndings.Normalize(text);
             var occurrences = CountOccurrences(text, oldString, out var first, out var second);
             if (occurrences == 0)
             {
@@ -127,6 +141,27 @@ public sealed class EditTool : ToolBase
             var unit = replacedCount == 1 ? "occurrence" : "occurrences";
             return new ToolResult($"replaced {replacedCount} {unit} in {display} (line {line})");
         }
+    }
+
+    /// <summary>True when the payload holds nothing but line breaks and carries a carriage return.</summary>
+    private static bool IsLineBreaksOnly(string text)
+    {
+        var carriage = false;
+        foreach (var character in text)
+        {
+            switch (character)
+            {
+                case '\r':
+                    carriage = true;
+                    break;
+                case '\n':
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return carriage;
     }
 
     /// <summary>Counts the occurrences of <paramref name="value"/> and remembers the 0-based index of the first two.</summary>

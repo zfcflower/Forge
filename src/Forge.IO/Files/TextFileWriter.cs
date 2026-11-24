@@ -4,10 +4,11 @@ using System.Text;
 namespace Forge.IO;
 
 /// <summary>
-/// Whole-file and append writes for text, always UTF-8 without a BOM. The whole-file write goes through
-/// <see cref="AtomicFile"/> (temporary file in the same directory, fsync, rename), so a read-only destination is refused
-/// and a failed write never leaves a half file; the append is a plain <see cref="FileStream"/> and is not atomic.
-/// Callers serialize operations on the same path with <see cref="PathGate"/>.
+/// Whole-file and append writes for text, always UTF-8 without a BOM and always LF (<see cref="LineEndings"/>). The
+/// whole-file write goes through <see cref="AtomicFile"/> (temporary file in the same directory, fsync, rename), so a
+/// read-only destination is refused and a failed write never leaves a half file; the append is a plain
+/// <see cref="FileStream"/> and is not atomic, and it normalizes only its own text. Callers serialize operations on the
+/// same path with <see cref="PathGate"/>.
 /// </summary>
 public static class TextFileWriter
 {
@@ -20,6 +21,7 @@ public static class TextFileWriter
         ArgumentNullException.ThrowIfNull(content);
 
         EnsureDirectory(path);
+        content = LineEndings.Normalize(content);
         var byteCount = Utf8.GetByteCount(content);
         if (byteCount == 0)
         {
@@ -49,6 +51,7 @@ public static class TextFileWriter
         ArgumentNullException.ThrowIfNull(content);
 
         EnsureDirectory(path);
+        content = LineEndings.Normalize(content);
         var byteCount = Utf8.GetByteCount(content);
         if (byteCount == 0)
         {
