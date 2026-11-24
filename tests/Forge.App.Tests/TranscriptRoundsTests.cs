@@ -29,7 +29,7 @@ public sealed class TranscriptRoundsTests
             new StoredMessage(2, new ChatMessage(MessageRole.Tool, [new ToolResultBlock("t1", [new TextBlock("ok")])]), null, At),
         };
 
-        TranscriptReplay.Apply(transcript, messages);
+        TranscriptReplay.Apply(transcript, messages, []);
 
         var rows = transcript.FlatRows();
         var thinking = Assert.IsType<TurnThinkingViewModel>(rows[1]);
@@ -111,12 +111,11 @@ public sealed class TranscriptRoundsTests
         transcript.EndTurn(TimeSpan.FromSeconds(9), null);
 
         // The stored turn started behind a checkpoint, so its clock sits minutes away from the message the replay stamps.
-        transcript.SeedTurnMetrics(
-        [
+        // Pairing is by the row's seq, so the distance never enters the decision — the row's numbers arrive whole.
+        card.SeedReplayMetrics(
             new Forge.Core.Storage.TurnMetric(
                 "s", 1, at.AddMinutes(-4), at.AddMinutes(-4) + TimeSpan.FromSeconds(9), Forge.Core.Storage.TurnMetricStatus.Completed,
-                "openai", "gpt-5", null, 10, 20, 0, 0, 0, 1, TimeSpan.FromSeconds(4)),
-        ]);
+                "openai", "gpt-5", null, 10, 20, 0, 0, 0, 1, TimeSpan.FromSeconds(4)));
 
         var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.Contains("gpt-5", divider.Line, StringComparison.Ordinal);

@@ -270,13 +270,11 @@ public sealed class TurnDividerTests
         var dividerBefore = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.Contains("—", dividerBefore.Line);
 
-        transcript.SeedTurnMetrics(
-        [
+        card.SeedReplayMetrics(
             new TurnMetric(
                 "s", card.Round, At0.ToUniversalTime(), At0.AddSeconds(46.2).ToUniversalTime(),
                 TurnMetricStatus.Failed, "p", "m", "boom",
-                null, null, null, null, null, 6),
-        ]);
+                null, null, null, null, null, 6));
 
         Assert.Equal(TurnEndStatus.Failed, card.EndStatus);
         Assert.Equal(6, card.ToolCount);
@@ -287,21 +285,26 @@ public sealed class TurnDividerTests
     }
 
     [Fact]
-    public void A_round_the_table_never_recorded_keeps_reading_unknown()
+    public void A_row_that_names_a_position_no_card_consumed_keeps_the_round_reading_unknown()
     {
-        var transcript = MainTranscript();
-        transcript.AddUserMessage("hi", At0);
-        var card = transcript.BeginTurn(At0);
-        transcript.EndTurn(null, null);
+        var at = At0;
+        var messages = new List<StoredMessage>
+        {
+            new(1, ChatMessage.User("hi"), null, at),
+            new(2, ChatMessage.Assistant("hello"), null, at.AddSeconds(1)),
+        };
 
-        transcript.SeedTurnMetrics(
-        [
-            new TurnMetric("s", card.Round + 10, At0, At0.AddSeconds(1), TurnMetricStatus.Completed),
-        ]);
+        // The row names seq 99, a position this session never reached: pairing is exact or nothing, never a guess.
+        var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+        TranscriptReplay.Apply(
+            transcript,
+            messages,
+            [new TurnMetric("s", 1, at, at.AddSeconds(1), TurnMetricStatus.Completed, LastSeq: 99)]);
 
+        var card = Assert.Single(transcript.FlatRows().OfType<TurnDividerViewModel>()).Card;
         Assert.Equal(TurnEndStatus.Completed, card.EndStatus);
         Assert.Null(card.Elapsed);
-        var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
+        var divider = Assert.Single(transcript.FlatRows().OfType<TurnDividerViewModel>(), row => row.Card == card);
         Assert.Contains("—", divider.Line);
     }
 
@@ -334,25 +337,17 @@ public sealed class TurnDividerTests
         var divider = Assert.IsType<TurnDividerViewModel>(transcript.FlatRows()[^1]);
         Assert.DoesNotContain("tok/s", divider.Line);
 
-        transcript.SeedTurnMetrics(
-        [
-            new TurnMetric(
-                "s", card.Round, At0.ToUniversalTime(), At0.AddSeconds(46.2).ToUniversalTime(),
-                TurnMetricStatus.Completed, "p", "m", null,
-                null, null, null, null, null, null, TimeSpan.FromSeconds(40)),
-        ]);
+        var row = new TurnMetric(
+            "s", card.Round, At0.ToUniversalTime(), At0.AddSeconds(46.2).ToUniversalTime(),
+            TurnMetricStatus.Completed, "p", "m", null,
+            null, null, null, null, null, null, TimeSpan.FromSeconds(40));
+        card.SeedReplayMetrics(row);
 
         Assert.Equal(TimeSpan.FromSeconds(40), card.StreamElapsed);
         Assert.Contains(TurnDividerText.FormatRate(50d), divider.Line);
 
-        // Seeding twice (a reloaded history) keeps the row's total instead of doubling it.
-        transcript.SeedTurnMetrics(
-        [
-            new TurnMetric(
-                "s", card.Round, At0.ToUniversalTime(), At0.AddSeconds(46.2).ToUniversalTime(),
-                TurnMetricStatus.Completed, "p", "m", null,
-                null, null, null, null, null, null, TimeSpan.FromSeconds(40)),
-        ]);
+        // Seeding the same row twice keeps the row's total instead of doubling it — the stamp assigns, it never adds.
+        card.SeedReplayMetrics(row);
         Assert.Equal(TimeSpan.FromSeconds(40), card.StreamElapsed);
     }
 

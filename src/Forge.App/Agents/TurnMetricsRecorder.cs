@@ -29,7 +29,8 @@ internal readonly struct TurnMetricsRow
         int? cacheWriteTokens = null,
         int? cacheWrite1hTokens = null,
         int? toolCalls = null,
-        ThinkingEffort? effort = null)
+        ThinkingEffort? effort = null,
+        long? lastSeq = null)
     {
         ArgumentNullException.ThrowIfNull(sessionId);
         SessionId = sessionId;
@@ -47,6 +48,7 @@ internal readonly struct TurnMetricsRow
         CacheWrite1hTokens = cacheWrite1hTokens;
         ToolCalls = toolCalls;
         Effort = effort;
+        LastSeq = lastSeq;
     }
 
     public string SessionId { get; }
@@ -81,6 +83,14 @@ internal readonly struct TurnMetricsRow
     public ThinkingEffort? Effort { get; }
 
     /// <summary>
+    /// The seq of the last message this turn persisted — the row's one exact position in the session's stream, null when
+    /// no store was attached or the seq could not be read. Replays pair a card with the row whose seq falls inside the
+    /// card's own span, so receipts and interjections (stored user messages that never opened a live turn) can no longer
+    /// shift the pairing the way a counted turn number does.
+    /// </summary>
+    public long? LastSeq { get; }
+
+    /// <summary>
     /// How long the model spent streaming this turn's answers, in milliseconds — the difference of the root instance's
     /// stream counter between the turn start and the turn end. Always written, whatever the outcome: unlike the token
     /// columns, stream time is never unknown. A turn that streamed nothing (no output at all, a non-streaming fallback,
@@ -105,7 +115,8 @@ internal readonly struct TurnMetricsRow
         CacheWrite1hTokens,
         ToolCalls,
         TimeSpan.FromMilliseconds(StreamMs),
-        Effort);
+        Effort,
+        LastSeq);
 }
 
 /// <summary>
@@ -147,7 +158,8 @@ internal static class TurnMetricsRowFactory
         int? toolCalls,
         string? provider,
         string? model,
-        ThinkingEffort? effort) =>
+        ThinkingEffort? effort,
+        long? lastSeq) =>
         BuildRow(
             sessionId,
             turn,
@@ -162,7 +174,8 @@ internal static class TurnMetricsRowFactory
             toolCalls,
             provider,
             model,
-            effort);
+            effort,
+            lastSeq);
 
     /// <summary>
     /// Builds one row from the outcome Core reported through the delivery seam: a turn Core drove itself has no
@@ -186,7 +199,8 @@ internal static class TurnMetricsRowFactory
         int? toolCalls,
         string? provider,
         string? model,
-        ThinkingEffort? effort) =>
+        ThinkingEffort? effort,
+        long? lastSeq) =>
         BuildRow(
             sessionId,
             turn,
@@ -201,7 +215,8 @@ internal static class TurnMetricsRowFactory
             toolCalls,
             provider,
             model,
-            effort);
+            effort,
+            lastSeq);
 
     /// <summary>
     /// The row status of an outcome Core reported through the delivery seam. <see cref="SessionReplyStatus"/> has exactly the
@@ -216,6 +231,18 @@ internal static class TurnMetricsRowFactory
         SessionReplyStatus.Stopped => TurnMetricStatus.Stopped,
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "A reply status added to the enum must be mapped here explicitly."),
     };
+
+    /// <summary>
+    /// The seq a turn's row may name, from the two instance readings every writer already takes: the turn's own last
+    /// write, never the instance's lifetime tail. A turn that persisted nothing (cancelled before its input landed,
+    /// failed ahead of the first request) answers null — its row then pairs with nothing on replay and reads "—",
+    /// which is exactly right: naming the previous turn's tail would pair this row with <em>that</em> turn's card and
+    /// stamp the wrong divider. A rebuilt instance names nothing at all: its baseline belongs to the instance it
+    /// replaced, and a rebuilt instance carries history loaded from the store whose tail is not evidence of this
+    /// turn's writes — a rebuilt turn's divider reads "—", which is the honest reading.
+    /// </summary>
+    public static long? TurnLastSeq(long endSeq, long startSeq, bool sameInstance) =>
+        sameInstance && endSeq > startSeq ? endSeq : null;
 
     /// <summary>The one row shape both entry points share: an outcome already decided, and a token block only a completed turn fills.</summary>
     private static TurnMetricsRow BuildRow(
@@ -232,7 +259,8 @@ internal static class TurnMetricsRowFactory
         int? toolCalls,
         string? provider,
         string? model,
-        ThinkingEffort? effort)
+        ThinkingEffort? effort,
+        long? lastSeq)
     {
         int? input = null, output = null, cacheRead = null, cacheWrite = null, cacheWrite1h = null;
         if (status is TurnMetricStatus.Completed)
@@ -267,7 +295,8 @@ internal static class TurnMetricsRowFactory
             cacheWrite,
             cacheWrite1h,
             toolCalls,
-            effort)
+            effort,
+            lastSeq)
         {
             // Written for every outcome, outside the token block above: the two snapshots are always taken, they are
             // clamped because a counter that went backwards never means negative streaming, and nothing here reads a

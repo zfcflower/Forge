@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 13;
+    public const int Version = 14;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -154,6 +154,7 @@ internal static class StorageSchema
             tool_calls            INTEGER NULL,
             stream_ms             INTEGER NOT NULL,
             effort                TEXT NULL,
+            last_seq              INTEGER NULL,
             PRIMARY KEY (session_id, turn)
         ) WITHOUT ROWID;
         """;
@@ -371,6 +372,9 @@ internal static class StorageSchema
                 break;
             case 12:
                 await MigrateToV13Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 13:
+                await MigrateToV14Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
@@ -670,6 +674,25 @@ internal static class StorageSchema
         if (tables.ContainsKey("turn_metrics"))
         {
             await AddColumnIfMissingAsync(connection, transaction, "turn_metrics", "effort", "TEXT NULL", ct)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The v14 step: where each turn ended in the message stream. <c>turn_metrics</c> is created by the V1 script, so a
+    /// database that never used the feature has no table and the step alters nothing — the same guard v13 uses. Every
+    /// existing row keeps NULL: a turn recorded before this column has no seq to name, and such a row pairs with nothing
+    /// on replay (its divider reads "—") rather than with a guessed match.
+    /// </summary>
+    private static async Task MigrateToV14Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        var tables = await ExistingColumnsAsync(connection, transaction, ct).ConfigureAwait(false);
+        if (tables.ContainsKey("turn_metrics"))
+        {
+            await AddColumnIfMissingAsync(connection, transaction, "turn_metrics", "last_seq", "INTEGER NULL", ct)
                 .ConfigureAwait(false);
         }
     }

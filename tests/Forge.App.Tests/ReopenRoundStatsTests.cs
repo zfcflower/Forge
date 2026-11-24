@@ -50,7 +50,7 @@ public sealed class ReopenRoundStatsTests : IDisposable
         await using var store = await OpenStoreAsync();
         var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
         await store.AppendAsync(root.Id, ChatMessage.User("first question"), null, CancellationToken.None);
-        await store.AppendAsync(
+        var lastSeq = await store.AppendAsync(
             root.Id,
             ChatMessage.Assistant("first answer"),
             new TokenUsage(1_000, 1_200),
@@ -68,7 +68,8 @@ public sealed class ReopenRoundStatsTests : IDisposable
                 Model: "glm-5.3",
                 ToolCalls: 3,
                 StreamElapsed: TimeSpan.FromSeconds(12),
-                Effort: ThinkingEffort.High),
+                Effort: ThinkingEffort.High,
+                LastSeq: lastSeq),
             CancellationToken.None);
 
         var session = Reopen(root, store, metrics);
@@ -182,16 +183,21 @@ public sealed class ReopenRoundStatsTests : IDisposable
     {
         await using var store = await OpenStoreAsync();
         var root = await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+        long? turnOneLastSeq = null;
         for (var turn = 1; turn <= 51; turn++)
         {
             await store.AppendAsync(root.Id, ChatMessage.User($"question {turn}"), null, CancellationToken.None);
-            await store.AppendAsync(root.Id, ChatMessage.Assistant($"answer {turn}"), null, CancellationToken.None);
+            var seq = await store.AppendAsync(root.Id, ChatMessage.Assistant($"answer {turn}"), null, CancellationToken.None);
+            if (turn == 1)
+            {
+                turnOneLastSeq = seq;
+            }
         }
 
-        // Only turn 1's row matters here: it is on the page that is not loaded yet, so the seeding has to happen there.
+        // Only turn 1's row matters here: it is on the page that is not loaded yet, so the pairing has to happen there.
         await using var metrics = new SqliteTurnMetricsStore(directory);
         await metrics.WriteAsync(
-            new TurnMetric(root.Id, 1, At0, At0.AddSeconds(30), TurnMetricStatus.Completed, "probe", "model-b"),
+            new TurnMetric(root.Id, 1, At0, At0.AddSeconds(30), TurnMetricStatus.Completed, "probe", "model-b", LastSeq: turnOneLastSeq),
             CancellationToken.None);
 
         var session = Reopen(root, store, metrics);

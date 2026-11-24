@@ -30,7 +30,8 @@ public sealed class TranscriptReplayUsageTests
     {
         var total = TranscriptReplay.Apply(
             new TranscriptViewModel(collapseOlderTurns: false),
-            Session(new TokenUsage(1000, 200, 5000, 142, 42), new TokenUsage(500, 100, 0, 0, 8)));
+            Session(new TokenUsage(1000, 200, 5000, 142, 42), new TokenUsage(500, 100, 0, 0, 8)),
+            []);
 
         Assert.Equal(1500, total.InputTokens);
         Assert.Equal(300, total.OutputTokens);
@@ -44,7 +45,8 @@ public sealed class TranscriptReplayUsageTests
     {
         var total = TranscriptReplay.Apply(
             new TranscriptViewModel(collapseOlderTurns: false),
-            Session(new TokenUsage(1000, 200, 5000, 142)));
+            Session(new TokenUsage(1000, 200, 5000, 142)),
+            []);
 
         Assert.Equal(142, total.CacheWriteTokens);
         Assert.Equal(0, total.CacheWrite1hTokens);

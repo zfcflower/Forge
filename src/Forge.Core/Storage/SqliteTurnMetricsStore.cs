@@ -26,7 +26,7 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
 
     private const string Columns =
         "session_id, turn, started_at, ended_at, provider, model, status, error, " +
-        "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, tool_calls, stream_ms, effort";
+        "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, tool_calls, stream_ms, effort, last_seq";
 
     private const string StatusCompleted = "completed";
     private const string StatusStopped = "stopped";
@@ -104,7 +104,7 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
                 command.CommandText = $"""
                     INSERT INTO turn_metrics ({Columns})
                     VALUES ($session, $turn, $started, $ended, $provider, $model, $status, $error,
-                            $input, $output, $cache_read, $cache_write, $cache_write_1h, $tool_calls, $stream_ms, $effort)
+                            $input, $output, $cache_read, $cache_write, $cache_write_1h, $tool_calls, $stream_ms, $effort, $last_seq)
                     ON CONFLICT (session_id, turn) DO UPDATE SET
                         started_at = excluded.started_at,
                         ended_at = excluded.ended_at,
@@ -119,7 +119,8 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
                         cache_write_1h_tokens = excluded.cache_write_1h_tokens,
                         tool_calls = excluded.tool_calls,
                         stream_ms = excluded.stream_ms,
-                        effort = excluded.effort
+                        effort = excluded.effort,
+                        last_seq = excluded.last_seq
                     """;
                 command.Parameters.AddWithValue("$session", metric.SessionId);
                 command.Parameters.AddWithValue("$turn", metric.Turn);
@@ -137,6 +138,7 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
                 command.Parameters.AddWithValue("$tool_calls", ToDb(metric.ToolCalls));
                 command.Parameters.AddWithValue("$stream_ms", ToStreamMs(metric.StreamElapsed));
                 command.Parameters.AddWithValue("$effort", metric.Effort is { } effort ? EffortName(effort) : DBNull.Value);
+                command.Parameters.AddWithValue("$last_seq", ToDb(metric.LastSeq));
                 return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             },
             ct);
@@ -276,16 +278,19 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
     private static async Task<bool> TableExistsAsync(SqliteConnection connection, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
-        // Both columns, not just the newest one: a table that already carried effort but not stream_ms (one an older build of
-        // this feature created after the step above added the column) must read as "no table" too, or every insert and list
-        // would fail on the column it still lacks instead of the feature quietly standing aside.
-        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info($name) WHERE name IN ('stream_ms', 'effort')";
+        // The same shape probe logic as always, grown by one column: a table that carries the older columns but not
+        // last_seq (one an older build created after the v14 step already ran) must read as "no table" too, or every
+        // insert and list would fail on the column it still lacks instead of the feature quietly standing aside.
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info($name) WHERE name IN ('stream_ms', 'effort', 'last_seq')";
         command.Parameters.AddWithValue("$name", TableName);
-        return await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is 2L;
+        return await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is 3L;
     }
 
     /// <summary>A null token column binds as NULL — a column a turn never measured is never written as zero.</summary>
     private static object ToDb(int? value) => value is { } number ? number : DBNull.Value;
+
+    /// <summary>The same binding for the seq column — null is a turn recorded before the column existed.</summary>
+    private static object ToDb(long? value) => value is { } seq ? seq : DBNull.Value;
 
     /// <summary>
     /// The milliseconds the turn's model calls spent streaming, rounded half up and clamped at zero. The column is
@@ -336,6 +341,9 @@ public sealed class SqliteTurnMetricsStore : ITurnMetricsStore, IAsyncDisposable
             StreamElapsed = TimeSpan.FromMilliseconds(
                 StorageDb.ReadInt64(reader, 14, "stream_ms", _databasePath, row)),
             Effort = ParseEffort(reader, 15, row),
+            LastSeq = reader.IsDBNull(16)
+                ? null
+                : StorageDb.ReadInt64(reader, 16, "last_seq", _databasePath, row),
         };
     }
 

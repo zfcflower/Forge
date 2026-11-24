@@ -227,6 +227,7 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
         SessionReplyStatus status,
         string? reason,
         string workingDirectory,
+        long lastSeq,
         CancellationToken ct)
     {
         try
@@ -235,7 +236,7 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
         }
         finally
         {
-            await RecordDeliveryTurnMetricsAsync(sessionId, turn, status, reason).ConfigureAwait(false);
+            await RecordDeliveryTurnMetricsAsync(sessionId, turn, status, reason, lastSeq).ConfigureAwait(false);
         }
     }
 
@@ -248,7 +249,7 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// complete keeps its token columns null. The streaming time is still written on every row, as the difference of the
     /// instance's own two readings clamped at zero (a counter that went backwards is not negative streaming).</para>
     /// </summary>
-    private async Task RecordDeliveryTurnMetricsAsync(string sessionId, int turn, SessionReplyStatus status, string? reason)
+    private async Task RecordDeliveryTurnMetricsAsync(string sessionId, int turn, SessionReplyStatus status, string? reason, long lastSeq)
     {
         if (!deliveryTurns.TryRemove(sessionId, out var started) || started.Turn != turn)
         {
@@ -280,7 +281,8 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
                 toolCalls: null,
                 started.Provider,
                 started.Model,
-                effort: null));
+                effort: null,
+                lastSeq: TurnMetricsRowFactory.TurnLastSeq(lastSeq, started.Start.LastSeq, same)));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -306,7 +308,7 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
 
             var (usage, stream) = child.ReadCounters();
             var model = child.Definition.Model;
-            return (new RootCounters(usage, stream, child),
+            return (new RootCounters(usage, stream, child, child.LastPersistedSeq),
                 model.ProviderId is { Length: > 0 } provider ? provider : null,
                 model.Model is { Length: > 0 } declared ? declared : null);
         }

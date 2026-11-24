@@ -41,13 +41,18 @@ public sealed record AgentSubAgentStarted(
 /// <param name="StartedAt">When the turn began running — after its run slot was acquired, the same moment the strip's
 /// running marker counts from. Their difference is the turn's wall clock, the number the turn's divider shows.</param>
 /// <param name="EndedAt">When the turn's loop finished.</param>
+/// <param name="LastSeq">The seq of the last message this turn persisted in its session store, 0 when no store is
+/// attached. The turn's exact stream position — an immutable join key that cannot drift the way a counted turn number
+/// does (stored user messages exist that never opened a live turn: receipts, interjections), so a reopened transcript
+/// pairs this turn's metrics row with the card that spans this seq.</param>
 public sealed record AgentTurnCompleted(
     string AgentId,
     TokenUsage Usage,
     StopReason Stop,
     TimeSpan StreamElapsed = default,
     DateTimeOffset StartedAt = default,
-    DateTimeOffset EndedAt = default) : AgentEvent(AgentId);
+    DateTimeOffset EndedAt = default,
+    long LastSeq = 0) : AgentEvent(AgentId);
 
 
 /// <summary>

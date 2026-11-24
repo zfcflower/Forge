@@ -252,7 +252,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             instance.StreamElapsed += streamElapsed;
             ReportFirstRequest(instance, provider, usage);
             instance.CommitText(Text(assistant));
-            await PersistAsync(instance, assistant, usage, ct).ConfigureAwait(false);
+            var lastSeq = await PersistAsync(instance, assistant, usage, ct).ConfigureAwait(false);
             ReportContext(instance, sink, ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter)));
             await TouchAsync(instance, ct).ConfigureAwait(false);
 
@@ -264,7 +264,7 @@ public sealed class AgentLoop(AgentLoopServices services)
                     continue;
                 }
 
-                sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop, instance.StreamElapsed, turnStartedAt, DateTimeOffset.UtcNow));
+                sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop, instance.StreamElapsed, turnStartedAt, DateTimeOffset.UtcNow, lastSeq));
                 return new AgentRunResult(Text(assistant), instance.Usage, stop);
             }
 
@@ -1006,9 +1006,9 @@ public sealed class AgentLoop(AgentLoopServices services)
         var text = NoEvidenceText(instance, turns);
         instance.AppendText(text);
         instance.CommitText(text);
-        await PersistAsync(instance, new ChatMessage(MessageRole.Assistant, [new TextBlock(text)]), null, ct).ConfigureAwait(false);
+        var lastSeq = await PersistAsync(instance, new ChatMessage(MessageRole.Assistant, [new TextBlock(text)]), null, ct).ConfigureAwait(false);
         sink.Emit(new AgentTextDelta(instance.Id, text));
-        sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop, instance.StreamElapsed, turnStartedAt, DateTimeOffset.UtcNow));
+        sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop, instance.StreamElapsed, turnStartedAt, DateTimeOffset.UtcNow, lastSeq));
         return new AgentRunResult(text, instance.Usage, stop);
     }
 
@@ -1331,12 +1331,17 @@ public sealed class AgentLoop(AgentLoopServices services)
         return new ToolResult(spilled, result.IsError);
     }
 
-    private async Task PersistAsync(AgentInstance instance, ChatMessage message, TokenUsage? usage, CancellationToken ct)
+    /// <summary>
+    /// Persists one conversation message and answers the seq the store gave it, 0 when no store is attached: the run-end
+    /// event carries that seq so the turn's metrics row can name its exact stream position.
+    /// </summary>
+    private async Task<long> PersistAsync(AgentInstance instance, ChatMessage message, TokenUsage? usage, CancellationToken ct)
     {
         var seq = services.Store is null
             ? 0
             : await services.Store.AppendAsync(instance.SessionId, message, usage, ct).ConfigureAwait(false);
         instance.Add(message, seq);
+        return seq;
     }
 
     /// <summary>Best-effort activity marker for the session list; a store failure must not fail the turn.</summary>

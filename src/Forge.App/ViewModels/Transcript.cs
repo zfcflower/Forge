@@ -122,9 +122,24 @@ internal sealed class UserMessageViewModel : TranscriptItemViewModel, ICopyableT
     /// <summary>
     /// The round this message starts, peeked from the transcript's counter when the message arrived. The card the next
     /// <c>BeginTurn</c> opens carries the same number, so the subtitle names the round the reply below belongs to.
-    /// Null for a transcript that never numbers rounds (sub-agent transcripts have no user turns).
+    /// Null for a transcript that never numbers rounds (sub-agent transcripts have no user turns). A replay adopts the
+    /// number the turn's own metrics row recorded (see <see cref="Renumber"/>), which is the truth the live turn ran
+    /// under — the peeked count drifts on stored user messages that never opened a live turn.
     /// </summary>
-    public int? Round { get; }
+    public int? Round { get; private set; }
+
+    /// <summary>Adopts the round number the turn's metrics row recorded; the replayed count only ever approximated it.</summary>
+    internal void Renumber(int round)
+    {
+        if (Round == round)
+        {
+            return;
+        }
+
+        Round = round;
+        OnPropertyChanged(nameof(RoundText));
+        OnPropertyChanged(nameof(MetaText));
+    }
 
     /// <summary>How long after the previous user message this one arrived; null for the first round of the transcript.</summary>
     public TimeSpan? GapSincePrevious { get; }
@@ -616,7 +631,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         Blocks = new ReadOnlyObservableCollection<TurnBlockViewModel>(blocks);
     }
 
-    public int Round { get; }
+    public int Round { get; internal set; }
 
     /// <summary>When the turn began (live) or when its user message was stored (replay).</summary>
     internal DateTimeOffset StartedAt => startedAt;
@@ -796,6 +811,16 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     internal void SeedReplayMetrics(TurnMetric metric)
     {
         ArgumentNullException.ThrowIfNull(metric);
+
+        // The row's own number is the authority the replay adopts: the transcript's recount only approximates it (stored
+        // user messages exist that never opened a live turn — receipts, interjections), and the user message's subtitle
+        // follows the card. Live cards are never seeded, so this touches replayed numbers only.
+        if (metric.Turn > 0 && metric.Turn != Round)
+        {
+            Round = metric.Turn;
+            UserMessage?.Renumber(metric.Turn);
+        }
+
         var duration = metric.EndedAt - metric.StartedAt;
         if (lastElapsed is null && duration >= TimeSpan.Zero)
         {
@@ -1599,40 +1624,17 @@ internal sealed class TranscriptViewModel : ObservableObject
         }
     }
 
-    /// <summary>A stored row only meets a card whose start is this close to its own; see <see cref="SeedTurnMetrics"/>.</summary>
-    private static readonly TimeSpan MetricsMatchWindow = TimeSpan.FromSeconds(15);
-
     /// <summary>
-    /// Seeds what the stored conversation cannot reconstruct (wall clock, stream time, tool count, outcome) from the metrics
-    /// table: each stored row meets the card with the same round number whose start is within <see cref="MetricsMatchWindow"/>
-    /// of the row's. A round the table never recorded or whose number does not line up with the replay's own count keeps its replayed
-    /// values and reads "—" — that mismatch is a known limitation, not a lookup failure.
+    /// The turn numbers the replay's matched rows carry, taken as the truth the next live turn continues from: the
+    /// recount <see cref="SeedRoundCounter"/> started from only approximates them, and stored user messages that never
+    /// opened a live turn inflate it. A replay that matched no row keeps the recount — rows recorded before the seq
+    /// column existed still count turns even though their dividers read "—".
     /// </summary>
-    public void SeedTurnMetrics(IReadOnlyList<TurnMetric> metrics)
+    internal void AdoptReplayTurnNumbers(int maxTurn)
     {
-        if (metrics is null || metrics.Count == 0)
+        if (maxTurn > 0)
         {
-            return;
-        }
-
-        var byTurn = new Dictionary<int, TurnMetric>(metrics.Count);
-        foreach (var metric in metrics)
-        {
-            byTurn[metric.Turn] = metric;
-        }
-
-        foreach (var item in items)
-        {
-            if (item is not TurnCardViewModel card || !byTurn.TryGetValue(card.Round, out var metric))
-            {
-                continue;
-            }
-
-            // The round number is the authority: both sides count user turns, and the row is keyed by it. The clock window is
-            // only a sanity check — a replayed card is stamped with its user message's time, which can sit minutes away from
-            // the turn's own start (queued behind a checkpoint or a slow first token), so a mismatch means drifted clocks,
-            // not a different turn: seeding anyway is what keeps the divider from reading "—" on every reopened session.
-            card.SeedReplayMetrics(metric);
+            round = maxTurn;
         }
     }
 

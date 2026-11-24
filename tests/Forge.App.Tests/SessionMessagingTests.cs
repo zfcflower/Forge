@@ -132,7 +132,7 @@ public sealed class SessionMessagingTests
             return Task.FromResult(1);
         }
 
-        public Task EndSessionTurnAsync(string sessionId, int turn, SessionReplyStatus status, string? reason, string workingDirectory, CancellationToken ct)
+        public Task EndSessionTurnAsync(string sessionId, int turn, SessionReplyStatus status, string? reason, string workingDirectory, long lastSeq, CancellationToken ct)
         {
             turnEnded.TrySetResult();
             return Task.CompletedTask;

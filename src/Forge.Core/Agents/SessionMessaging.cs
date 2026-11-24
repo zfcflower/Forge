@@ -179,12 +179,16 @@ public interface ISessionMessageEndpoint
     /// metrics row (completed, failed or stopped) and never the checkpoint's own write.</param>
     /// <param name="reason">The failure or stop text the receipt carries; null for a turn that went through. Recorded as the
     /// row's error, and nothing is made up for a row that has none.</param>
+    /// <param name="lastSeq">The seq of the last message the delivered turn persisted, read off the child instance at the
+    /// source: it is the turn's exact stream position, the one key a replay pairs the row by, and reading it here rather
+    /// than after the fact is what keeps a message that lands meanwhile from taking the position.</param>
     Task EndSessionTurnAsync(
         string sessionId,
         int turn,
         SessionReplyStatus status,
         string? reason,
         string workingDirectory,
+        long lastSeq,
         CancellationToken ct);
 
     /// <summary>
@@ -822,11 +826,23 @@ public sealed class SessionMessenger
     /// closes the checkpoint, so passing the status here is what keeps a failed or stopped delivery from being recorded as a
     /// completed turn. A checkpoint that cannot be closed is never a reason to report a different outcome.
     /// </summary>
-    private static async Task EndTurnAsync(ISessionMessageEndpoint seam, AgentInstance child, int turn, SessionReplyStatus status, string? reason)
+    private static async Task EndTurnAsync(
+        ISessionMessageEndpoint seam,
+        AgentInstance child,
+        int turn,
+        SessionReplyStatus status,
+        string? reason)
     {
         try
         {
-            await seam.EndSessionTurnAsync(child.SessionId, turn, status, reason, child.WorkingDirectory, CancellationToken.None).ConfigureAwait(false);
+            await seam.EndSessionTurnAsync(
+                child.SessionId,
+                turn,
+                status,
+                reason,
+                child.WorkingDirectory,
+                child.LastPersistedSeq,
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

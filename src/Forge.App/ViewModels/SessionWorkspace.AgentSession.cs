@@ -26,7 +26,7 @@ internal sealed record AgentSessionLaunch(SessionInfo Root, int Ordinal, bool Is
 /// against its predecessor. A class rather than a struct because the run thread writes the start reading and the UI thread
 /// reads it whole.
 /// </summary>
-internal sealed record AgentSessionCounters(TokenUsage Usage, TimeSpan Stream, object Instance);
+internal sealed record AgentSessionCounters(TokenUsage Usage, TimeSpan Stream, object Instance, long LastSeq = 0);
 
 /// <summary>The texts an agent-session tab derives that are not localized sentences: the label separator and the default name.</summary>
 internal static class AgentSessionLabel
@@ -561,7 +561,7 @@ internal sealed partial class SessionWorkspaceViewModel
                     // holds (a stopped run) leaves the stream time at zero and the row's outcome as the run reported it.
                     var counters = ReadAgentCounters();
                     var stream = AgentTurnStream(counters);
-                    RecordAgentTurnMetrics(childSessionId, number, definition, error, stream);
+                    RecordAgentTurnMetrics(childSessionId, number, definition, error, stream, counters);
                     if (!disposed && Volatile.Read(ref agentTurnCompleted) == 0)
                     {
                         // A run that stopped or failed emits no turn-completed event, so nothing has shown its spend or its
@@ -652,7 +652,13 @@ internal sealed partial class SessionWorkspaceViewModel
     /// (<paramref name="streamTime"/>): the column records the model's streaming and never the run's wall-clock span, and a
     /// reading that was gone writes 0, which is a fact the table can hold (NOT NULL, no fallback).
     /// </summary>
-    private void RecordAgentTurnMetrics(string childSessionId, int turn, AgentDefinition definition, LocText? error, TimeSpan streamTime)
+    private void RecordAgentTurnMetrics(
+        string childSessionId,
+        int turn,
+        AgentDefinition definition,
+        LocText? error,
+        TimeSpan streamTime,
+        AgentSessionCounters? end)
     {
         if (metricsRecorder is not { Enabled: true } recorder)
         {
@@ -670,6 +676,9 @@ internal sealed partial class SessionWorkspaceViewModel
                 { Status: SubAgentStatus.Failed, Error: { Length: > 0 } failure } => LocText.Literal(failure),
                 _ => error,
             };
+            // The seq is this turn's own last write, measured against the turn-start reading of the same instance:
+            // a turn that persisted nothing leaves it null rather than naming the previous turn's tail.
+            var lastSeq = TurnLastSeqForAgentTurn(end);
             recorder.Record(TurnMetricsRowFactory.Build(
                 childSessionId,
                 turn,
@@ -690,13 +699,24 @@ internal sealed partial class SessionWorkspaceViewModel
                         ? chosen
                         : null,
                 definition.Model.Model,
-                definition.Model.Thinking));
+                definition.Model.Thinking,
+                lastSeq));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // The writer promises never to throw, but a row is never worth a turn: this is the belt to that suspender.
             AppLogs.Usage.ZLogWarning($"agent session metrics row not queued: {exception.GetType().Name}: {exception.Message}");
         }
+    }
+
+    /// <summary>The turn's own last write, never the child instance's lifetime tail; see <see cref="TurnMetricsRowFactory.TurnLastSeq"/>.</summary>
+    private long? TurnLastSeqForAgentTurn(AgentSessionCounters? end)
+    {
+        var start = Volatile.Read(ref agentTurnStartCounters);
+        return TurnMetricsRowFactory.TurnLastSeq(
+            end?.LastSeq ?? 0,
+            start?.LastSeq ?? 0,
+            end is not null && start is not null && ReferenceEquals(end.Instance, start.Instance));
     }
 
     /// <summary>
@@ -726,7 +746,7 @@ internal sealed partial class SessionWorkspaceViewModel
     {
         if (runtime is { } live && live.TryReadAgentCounters(AgentChildAgentId, out var counters) && counters.Instance is { } instance)
         {
-            var reading = new AgentSessionCounters(counters.Usage, counters.Stream, instance);
+            var reading = new AgentSessionCounters(counters.Usage, counters.Stream, instance, counters.LastSeq);
             Volatile.Write(ref agentLastCounters, reading);
             return reading;
         }

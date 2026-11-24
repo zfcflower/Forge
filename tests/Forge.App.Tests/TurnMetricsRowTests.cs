@@ -24,7 +24,8 @@ public sealed class TurnMetricsRowTests
         int toolCalls = 2,
         TimeSpan? rootStream = null,
         TimeSpan? turnStartStream = null,
-        ThinkingEffort? effort = null) =>
+        ThinkingEffort? effort = null,
+        long? lastSeq = null) =>
         TurnMetricsRowFactory.Build(
             "s1",
             7,
@@ -39,7 +40,8 @@ public sealed class TurnMetricsRowTests
             toolCalls,
             "anthropic",
             "claude",
-            effort);
+            effort,
+            lastSeq);
 
     /// <summary>
     /// The reasoning step a turn ran with is part of its row, not a display-only detail: the reopened divider reads it back
@@ -55,6 +57,45 @@ public sealed class TurnMetricsRowTests
 
         // A turn nobody recorded a step for keeps it unknown instead of reading as "off".
         Assert.Null(Build().ToMetric().Effort);
+    }
+
+    /// <summary>
+    /// The row's seq is the turn's exact stream position — the key a reopened transcript pairs by. A factory that dropped
+    /// it would leave every sub-agent and delivery row unpaired and every reopened divider reading "—", with no error
+    /// anywhere on the way.
+    /// </summary>
+    [Fact]
+    public void The_row_carries_the_stream_position_it_was_handed()
+    {
+        Assert.Equal(9, Build(lastSeq: 9).ToMetric().LastSeq);
+
+        // A caller with no position (no store attached) keeps it unknown instead of naming a wrong one.
+        Assert.Null(Build().ToMetric().LastSeq);
+    }
+
+    /// <summary>
+    /// The row's seq is the turn's own last write, measured against the turn-start reading of the same instance — the
+    /// one rule all three writers share. A turn that persisted nothing answers null (naming the instance's lifetime tail
+    /// would pair this row with the previous turn's card on replay), and a rebuilt instance answers nothing: it carries
+    /// history loaded from the store, whose tail is not this turn's write.
+    /// </summary>
+    [Fact]
+    public void The_row_names_the_turns_own_last_write_and_nothing_else()
+    {
+        // The turn wrote two messages: the row names the last of them.
+        Assert.Equal(17, TurnMetricsRowFactory.TurnLastSeq(17, 15, sameInstance: true));
+
+        // The turn was cancelled before its input landed: nothing was written, so the row names no position at all —
+        // never the previous turn's tail, which would pair it with the wrong card on replay. The delivered-turn seam
+        // measures this against the child's own turn-start reading: a resumed child whose history already ends at 15,
+        // cancelled ahead of its first write, reads end == start here.
+        Assert.Null(TurnMetricsRowFactory.TurnLastSeq(15, 15, sameInstance: true));
+        Assert.Null(TurnMetricsRowFactory.TurnLastSeq(14, 15, sameInstance: true));
+
+        // The instance was rebuilt mid-turn: its baseline belongs to the instance it replaced, and the history it was
+        // built from ends at the store's own tail — not this turn's write. The row names nothing.
+        Assert.Null(TurnMetricsRowFactory.TurnLastSeq(3, 99, sameInstance: false));
+        Assert.Null(TurnMetricsRowFactory.TurnLastSeq(99, 3, sameInstance: false));
     }
 
     [Fact]

@@ -242,6 +242,14 @@ public sealed class AgentInstance
 
     internal void Add(ChatMessage message, long seq) => history.Add(new AgentMessage(message, seq));
 
+    /// <summary>
+    /// The seq of the last message this instance persisted in its own session, 0 when nothing did or the newest entry
+    /// was inherited from an ancestor (an inherited seq names the ancestor's session, not this one). The run-end event
+    /// and the shell's counters read this: it is the turn's exact stream position, the one key a replay pairs the
+    /// turn's metrics row by.
+    /// </summary>
+    public long LastPersistedSeq => history is [.., var last] && !last.Inherited && last.Seq > 0 ? last.Seq : 0;
+
     /// <summary>Bumped whenever the history is replaced rather than appended to, so recorded positions stop matching.</summary>
     internal int HistoryVersion { get; private set; }
 

@@ -1333,7 +1333,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         }
 
         var (usage, stream) = current.ReadCounters();
-        return new RootCounters(usage, stream, current);
+        return new RootCounters(usage, stream, current, current.LastPersistedSeq);
     }
 
     /// <summary>
@@ -1356,7 +1356,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             if (live is not null && live.SubAgents.TryGetInstance(agentId, out var instance))
             {
                 var (usage, stream) = instance.ReadCounters();
-                counters = new RootCounters(usage, stream, instance);
+                counters = new RootCounters(usage, stream, instance, instance.LastPersistedSeq);
                 return true;
             }
         }
@@ -2572,8 +2572,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
 /// <summary>Stands in for a provider when none is configured, so a turn fails with one clear sentence instead of a null.</summary>
 
-/// <summary>The root agent instance's cumulative usage and model-streaming time, with the instance they belong to (a rebuilt root is a different one, counting from zero).</summary>
-internal readonly record struct RootCounters(TokenUsage Usage, TimeSpan Stream, object? Instance)
+/// <summary>The root agent instance's cumulative usage and model-streaming time, with the instance they belong to (a rebuilt root is a different one, counting from zero) and the seq of the last message that instance persisted — the turn's exact stream position, 0 when nothing did.</summary>
+internal readonly record struct RootCounters(TokenUsage Usage, TimeSpan Stream, object? Instance, long LastSeq = 0)
 {
     public static RootCounters None { get; } = new(TokenUsage.Empty, TimeSpan.Zero, null);
 }

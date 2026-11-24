@@ -898,21 +898,21 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         loadingOlderHistory = true;
         try
         {
-            var page = await TranscriptReplay.ReadPageAsync(store, SessionId, historyBeforeSeq, HistoryPageMessages, ct)
+            var load = await TranscriptReplay
+                .ReadPageAsync(store, instrumentSources.TurnMetrics, SessionId, historyBeforeSeq, HistoryPageMessages, ct)
                 .ConfigureAwait(true);
-            if (page.Messages.Count == 0)
+            if (load.Page.Messages.Count == 0)
             {
                 HasOlderHistory = false;
                 return;
             }
 
-            var (older, _) = TranscriptReplay.ReplayPage(page);
-            // The older page's rounds seed from the same table as the first one, before they join the transcript: seeding
-            // through the merged transcript could also stamp a run in progress. The read is one query per page.
-            await SeedTurnMetricsAsync(older, SessionId, ct).ConfigureAwait(true);
+            // The older page pairs its own rows inside the replay, before it joins the transcript: pairing through the
+            // merged transcript could also stamp a run in progress.
+            var (older, _) = TranscriptReplay.ReplayPage(load);
             Transcript.PrependRounds(older);
-            historyBeforeSeq = page.Messages[0].Seq;
-            HasOlderHistory = page.HasMore;
+            historyBeforeSeq = load.Page.Messages[0].Seq;
+            HasOlderHistory = load.Page.HasMore;
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
@@ -967,19 +967,17 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         historyLoaded = true;
         try
         {
-            var page = await TranscriptReplay
-                .ReadPageAsync(store, SessionId, long.MaxValue, HistoryPageMessages, ct)
+            var load = await TranscriptReplay
+                .ReadPageAsync(store, instrumentSources.TurnMetrics, SessionId, long.MaxValue, HistoryPageMessages, ct)
                 .ConfigureAwait(true);
-            Transcript.SeedRoundCounter(page.TurnsBefore);
-            Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, page.Messages));
-            // The clock, the stream time, the tool count, the outcome and the model are not in the stored messages: a
-            // replayed round takes them from its own metrics row, so it reads the same line the live turn showed.
-            await RestoreComposerSelectionAsync(
-                    await SeedTurnMetricsAsync(Transcript, SessionId, ct).ConfigureAwait(true),
-                    ct)
-                .ConfigureAwait(true);
-            historyBeforeSeq = page.Messages.Count > 0 ? page.Messages[0].Seq : 1;
-            HasOlderHistory = page.HasMore;
+            Transcript.SeedRoundCounter(load.Page.TurnsBefore);
+            Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, load.Page.Messages, load.Metrics));
+            // The clock, the stream time, the tool count, the outcome and the model are not in the stored messages: the
+            // replay pairs each round with its own metrics row by the row's recorded seq, inside the one funnel every
+            // loading path shares. The same rows also restore the composer's last model below.
+            await RestoreComposerSelectionAsync(load.Metrics, ct).ConfigureAwait(true);
+            historyBeforeSeq = load.Page.Messages.Count > 0 ? load.Page.Messages[0].Seq : 1;
+            HasOlderHistory = load.Page.HasMore;
 
             // The divider tooltips price with the composer's current choice when a replayed row names no model;
             // live turns resolve the same way, so a model switch re-prices what the next hover shows.
@@ -1037,9 +1035,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// what the store holds; when it holds nothing conclusive the row says it ended without claiming a result.
     /// </summary>
     /// <summary>
-    /// The one replay sequence both a main session's open and a history sub-agent's open run: read the stored messages,
-    /// draw them, and seed the dividers from the turn metrics the session recorded. Returns the usage the replay summed,
-    /// for the caller's own instruments to seed.
+    /// The one replay sequence both a main session's open and a history sub-agent's open run: read the stored messages
+    /// with their turn metrics and draw them, the dividers pairing their own rows inside the same pass. Returns the usage
+    /// the replay summed, for the caller's own instruments to seed.
     /// </summary>
     private async Task<TokenUsage> ReplayIntoAsync(TranscriptViewModel transcript, string sessionId, CancellationToken ct)
     {
@@ -1048,45 +1046,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return TokenUsage.Empty;
         }
 
-        var messages = await TranscriptReplay.ReadAsync(store, sessionId, ct).ConfigureAwait(true);
-        if (messages.Count == 0)
+        var load = await TranscriptReplay.ReadAllAsync(store, instrumentSources.TurnMetrics, sessionId, ct)
+            .ConfigureAwait(true);
+        if (load.Page.Messages.Count == 0)
         {
             return TokenUsage.Empty;
         }
 
-        var total = TranscriptReplay.Apply(transcript, messages);
-        await SeedTurnMetricsAsync(transcript, sessionId, ct).ConfigureAwait(true);
-        return total;
-    }
-
-    /// <summary>
-    /// Fills what a stored conversation cannot reconstruct — wall clock, stream time, tool count, outcome, model — from the
-    /// session's own <c>turn_metrics</c> rows, matching each replayed round by its number. Returns the rows it read, so a
-    /// caller that also needs the session's last model reuses the same read; a view without a metrics table, or a read that
-    /// failed, answers empty and leaves every round reading "—" — metrics only fill blanks, so they never turn into a notice.
-    /// </summary>
-    private async Task<IReadOnlyList<TurnMetric>> SeedTurnMetricsAsync(
-        TranscriptViewModel transcript,
-        string sessionId,
-        CancellationToken ct)
-    {
-        if (instrumentSources.TurnMetrics is not { } turnMetrics)
-        {
-            return [];
-        }
-
-        try
-        {
-            var metrics = await turnMetrics.ListAsync(sessionId, ct).ConfigureAwait(true);
-            transcript.SeedTurnMetrics(metrics);
-            return metrics;
-        }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException
-            or ObjectDisposedException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
-        {
-            AppLogs.Session.ZLogWarning($"turn metrics seed skipped: {exception.GetType().Name}: {exception.Message}");
-            return [];
-        }
+        return TranscriptReplay.Apply(transcript, load.Page.Messages, load.Metrics);
     }
 
     /// <summary>
@@ -2884,7 +2851,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     tools,
                     agent.ProviderId,
                     agent.Model.Length == 0 ? null : agent.Model,
-                    effort: null));
+                    effort: null,
+                    lastSeq: completed.LastSeq is 0 ? null : completed.LastSeq));
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
@@ -2915,7 +2883,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// Hands the turn's metrics to the app's background writer: one struct channel write, synchronous, and the only cost the
     /// turn end pays for its own metrics. The provider and the model are the composer's current choice by reference (the same
     /// ones the turn card and the strip price with); the error text is the one the footnote already shows; the two stream
-    /// snapshots are field reads, so the stream duration costs the turn end one subtraction.
+    /// snapshots are field reads, so the stream duration costs the turn end one subtraction; and the row's seq is the root
+    /// instance's own last persisted position, read under the same lock the counters are — the exact key a reopened
+    /// transcript pairs this row by.
     /// </summary>
     private void RecordTurnMetrics(int turn, LocText? error)
     {
@@ -2944,7 +2914,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 turnToolCalls,
                 turnModel.ProviderId is { Length: > 0 } provider ? provider : null,
                 turnModel.Model is { Length: > 0 } model ? model : null,
-                turnModel.Thinking));
+                turnModel.Thinking,
+                TurnMetricsRowFactory.TurnLastSeq(end.LastSeq, start.LastSeq, ReferenceEquals(end.Instance, start.Instance))));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

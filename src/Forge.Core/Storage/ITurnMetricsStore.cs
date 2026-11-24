@@ -28,7 +28,11 @@ public enum TurnMetricStatus
 /// measured. <see cref="TurnMetric.StreamElapsed"/> is never null and never a fallback: every model call produces it
 /// (first output increment to stream end, accumulated over the turn's calls), zero for a turn that streamed nothing —
 /// a missing measurement is an adapter defect. Derived quantities (cost, cache-hit ratio) are never stored; readers
-/// compute them.
+/// compute them. <see cref="LastSeq"/> is the turn's exact stream position — the seq of the last message the turn
+/// persisted — and the one key a replay pairs this row by: seqs are immutable, monotonic and written by the same
+/// writer as the messages, so they cannot drift the way a counted turn number does (stored user messages exist that
+/// never opened a live turn: receipts, interjections). Null on rows recorded before the column existed; such rows pair
+/// with nothing and read "—", never with a guess.
 /// </summary>
 public sealed record TurnMetric(
     string SessionId,
@@ -46,7 +50,8 @@ public sealed record TurnMetric(
     int? CacheWrite1hTokens = null,
     int? ToolCalls = null,
     TimeSpan StreamElapsed = default,
-    ThinkingEffort? Effort = null);
+    ThinkingEffort? Effort = null,
+    long? LastSeq = null);
 
 /// <summary>
 /// Per-turn metrics of main sessions, keyed by <c>(session_id, turn)</c> — the table records the number the transcript
