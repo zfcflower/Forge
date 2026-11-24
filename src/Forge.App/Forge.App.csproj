@@ -20,15 +20,15 @@
     <EmbeddedResource Include="Skills\BuiltIn\**\*.md" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="12.1.6" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.6" />
+    <PackageReference Include="Avalonia" Version="12.2.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.2.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.2.0" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.2.0" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
     <PackageReference Include="AvaloniaEdit.TextMate" Version="12.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="11.*" />
-    <PackageReference Include="Mermaider" Version="0.15.1" />
-    <PackageReference Include="Svg.Skia" Version="4.9.1" />
+    <PackageReference Include="Mermaider" Version="0.18.0" />
+    <PackageReference Include="Svg.Skia" Version="5.2.3" />
     <PackageReference Include="ZLogger" Version="2.6.2" />
     <PackageReference Include="ZLinq" Version="1.6.1" />
   </ItemGroup>

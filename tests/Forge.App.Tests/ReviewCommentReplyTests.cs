@@ -67,14 +67,14 @@ public sealed class ReviewCommentReplyTests : IDisposable
 
         var asked = await Resolve(tools, $$"""{"id":{{comment.Id}},"verdict":"clarify","note":"Which caller?"}""");
         Assert.False(asked.IsError, asked.Content);
-        var stored = (await reviews.GetAsync(comment.Id))!;
+        var stored = (await reviews.GetAsync(comment.Id, TestContext.Current.CancellationToken))!;
         Assert.False(stored.IsResolved);
         Assert.Equal("clarify", stored.ReplyVerdict);
         Assert.Equal("Which caller?", stored.ReplyText);
 
         var applied = await Resolve(tools, $$"""{"id":{{comment.Id}},"verdict":"apply","note":"renamed"}""");
         Assert.False(applied.IsError, applied.Content);
-        stored = (await reviews.GetAsync(comment.Id))!;
+        stored = (await reviews.GetAsync(comment.Id, TestContext.Current.CancellationToken))!;
         Assert.True(stored.IsResolved);
         Assert.Equal("apply", stored.ReplyVerdict);
         Assert.Equal("renamed", stored.ReplyText);
@@ -98,11 +98,11 @@ public sealed class ReviewCommentReplyTests : IDisposable
     {
         var reviews = new ReviewStore(dir);
         var comment = await AddSent(reviews);
-        await reviews.SetReplyAsync(comment.Id, "push_back", "keeps the contract", resolve: true);
+        await reviews.SetReplyAsync(comment.Id, "push_back", "keeps the contract", resolve: true, ct: TestContext.Current.CancellationToken);
 
-        await reviews.CopySessionAsync(Workspace, "s1", "s2");
+        await reviews.CopySessionAsync(Workspace, "s1", "s2", TestContext.Current.CancellationToken);
 
-        var copy = (await reviews.QueryAsync(new ReviewQuery { WorkspacePath = Workspace, SessionId = "s2" })).Single();
+        var copy = (await reviews.QueryAsync(new ReviewQuery { WorkspacePath = Workspace, SessionId = "s2" }, TestContext.Current.CancellationToken)).Single();
         Assert.Equal("push_back", copy.ReplyVerdict);
         Assert.Equal("keeps the contract", copy.ReplyText);
     }

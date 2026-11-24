@@ -254,13 +254,13 @@ public sealed class BashPolicyTests : IDisposable
         await firstStarted.Task;
         var second = bash.InvokeAsync(Call("dotnet build second"), Context(WorkerTools, "Worker-2"), CancellationToken.None).AsTask();
 
-        await Task.Delay(150);
+        await Task.Delay(150, TestContext.Current.CancellationToken);
         Assert.False(second.IsCompleted);
         Assert.Single(runner.Requests);
 
         releaseFirst.SetResult();
         await first;
-        var secondResult = await second.WaitAsync(TimeSpan.FromSeconds(10));
+        var secondResult = await second.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         Assert.Equal(2, runner.Requests.Count);
         Assert.Contains("queued: waited", secondResult.Content);
@@ -290,7 +290,7 @@ public sealed class BashPolicyTests : IDisposable
         var build = bash.InvokeAsync(Call("dotnet build slow"), Context(WorkerTools), CancellationToken.None).AsTask();
         await firstStarted.Task;
 
-        var cheap = await bash.InvokeAsync(Call("echo hi"), Context(WorkerTools), CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        var cheap = await bash.InvokeAsync(Call("echo hi"), Context(WorkerTools), TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         Assert.False(cheap.IsError, cheap.Content);
         releaseFirst.SetResult();
@@ -321,14 +321,14 @@ public sealed class BashPolicyTests : IDisposable
         await firstStarted.Task;
         using var cancel = new CancellationTokenSource();
         var queued = bash.InvokeAsync(Call("dotnet build queued"), Context(WorkerTools), cancel.Token).AsTask();
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
         await cancel.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued);
         releaseFirst.SetResult();
         await first;
 
-        var after = await bash.InvokeAsync(Call("dotnet build after"), Context(WorkerTools), CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        var after = await bash.InvokeAsync(Call("dotnet build after"), Context(WorkerTools), TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         Assert.False(after.IsError, after.Content);
         Assert.DoesNotContain(runner.Requests, request => request.Arguments.Contains("queued"));
     }

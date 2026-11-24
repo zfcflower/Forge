@@ -13,6 +13,10 @@ namespace Forge.App.Tests;
 /// one-shot downgrade resends over the same streaming path so its answer is measured like any other - the refused
 /// attempt contributed nothing. All three adapters are driven through the same fake SSE transport (<see cref="FakeSse"/>).
 /// </summary>
+// The degradation table is process-wide: these four classes add entries and clear the whole table in Dispose, so
+// they must not run beside each other (xunit v3 interleaves them, and one class's Clear() erases another's entry
+// mid-test). The collection serialises them; nothing else touches ProviderDegradations.
+[Collection("provider-degradations")]
 public sealed class ProviderStreamElapsedTests : IDisposable
 {
     private const string BaseUrl = "https://gateway.example/v1";
@@ -74,7 +78,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
     {
         var handler = new FakeSse.Handler(_ => FakeSse.Ok(FakeSse.Body(AnthropicStream(), Pause)));
         var watch = Stopwatch.StartNew();
-        var events = await Drain(Anthropic(handler), Request());
+        var events = await Drain(Anthropic(handler), Request(), TestContext.Current.CancellationToken);
         watch.Stop();
 
         var done = Completed(events);
@@ -95,7 +99,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
         };
         var handler = new FakeSse.Handler(_ => FakeSse.Ok(FakeSse.Body(frames, Pause)));
 
-        var done = Completed(await Drain(Anthropic(handler), Request()));
+        var done = Completed(await Drain(Anthropic(handler), Request(), TestContext.Current.CancellationToken));
 
         // Usage-only events never start the clock, so a zero-output call carries zero - never an "unknown".
         Assert.Equal(TimeSpan.Zero, done.StreamElapsed);
@@ -137,7 +141,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
     {
         var handler = new FakeSse.Handler(attempt => attempt == 1 ? FakeSse.Refused("anthropic-beta") : FakeSse.Ok(FakeSse.Body(AnthropicStream(), Pause)));
         var watch = Stopwatch.StartNew();
-        var events = await Drain(Anthropic(handler), Request());
+        var events = await Drain(Anthropic(handler), Request(), TestContext.Current.CancellationToken);
         watch.Stop();
 
         Assert.Equal(2, handler.Attempts);
@@ -163,7 +167,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
     {
         var handler = new FakeSse.Handler(_ => FakeSse.Ok(FakeSse.Body(CompatibleStream(), Pause)));
         var watch = Stopwatch.StartNew();
-        var events = await Drain(Compatible(handler), Request());
+        var events = await Drain(Compatible(handler), Request(), TestContext.Current.CancellationToken);
         watch.Stop();
 
         var done = Completed(events);
@@ -181,7 +185,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
         };
         var handler = new FakeSse.Handler(_ => FakeSse.Ok(FakeSse.Body(frames, Pause)));
 
-        var done = Completed(await Drain(Compatible(handler), Request()));
+        var done = Completed(await Drain(Compatible(handler), Request(), TestContext.Current.CancellationToken));
 
         Assert.Equal(TimeSpan.Zero, done.StreamElapsed);
     }
@@ -197,7 +201,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
         };
         var handler = new FakeSse.Handler(_ => FakeSse.Ok(FakeSse.Body(frames, Pause)));
 
-        var events = await Drain(Compatible(handler), Request());
+        var events = await Drain(Compatible(handler), Request(), TestContext.Current.CancellationToken);
 
         // A tool-only answer streams its call increments: the clock starts at the first of them, not at the
         // first text delta that never comes.
@@ -238,7 +242,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
     {
         var handler = new FakeSse.Handler(attempt => attempt == 1 ? FakeSse.Refused("prompt_cache_key") : FakeSse.Ok(FakeSse.Body(CompatibleStream(), Pause)));
         var watch = Stopwatch.StartNew();
-        var events = await Drain(Compatible(handler, cacheKey: true), Request());
+        var events = await Drain(Compatible(handler, cacheKey: true), Request(), TestContext.Current.CancellationToken);
         watch.Stop();
 
         Assert.Equal(2, handler.Attempts);
@@ -261,7 +265,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
     {
         var handler = new FakeSse.Handler(_ => FakeSse.Ok(FakeSse.Body(ResponsesStream(), Pause)));
         var watch = Stopwatch.StartNew();
-        var events = await Drain(Responses(handler), Request());
+        var events = await Drain(Responses(handler), Request(), TestContext.Current.CancellationToken);
         watch.Stop();
 
         var done = Completed(events);
@@ -278,7 +282,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
         };
         var handler = new FakeSse.Handler(_ => FakeSse.Ok(FakeSse.Body(frames, Pause)));
 
-        var done = Completed(await Drain(Responses(handler), Request()));
+        var done = Completed(await Drain(Responses(handler), Request(), TestContext.Current.CancellationToken));
 
         Assert.Equal(TimeSpan.Zero, done.StreamElapsed);
     }
@@ -315,7 +319,7 @@ public sealed class ProviderStreamElapsedTests : IDisposable
     {
         var handler = new FakeSse.Handler(attempt => attempt == 1 ? FakeSse.Refused("prompt_cache_key") : FakeSse.Ok(FakeSse.Body(ResponsesStream(), Pause)));
         var watch = Stopwatch.StartNew();
-        var events = await Drain(Responses(handler, cacheKey: true), Request());
+        var events = await Drain(Responses(handler, cacheKey: true), Request(), TestContext.Current.CancellationToken);
         watch.Stop();
 
         Assert.Equal(2, handler.Attempts);

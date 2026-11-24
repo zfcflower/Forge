@@ -480,7 +480,7 @@ public sealed class SessionMessagingTests
         // heldTurn is intentionally never completed until after SendAsync has returned. WaitAsync is only a deadlock
         // watchdog: it does not coordinate the test or determine which response is expected.
         var send = harness.Host.SessionMessaging.SendAsync(ChildContext(harness, child), "Root", "please review", CancellationToken.None);
-        var result = await send.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await send.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.False(result.IsError);
         Assert.Equal("已排队 #1（未完成，你现在没有结果）", result.Text);
@@ -506,7 +506,7 @@ public sealed class SessionMessagingTests
         Assert.Equal(
             "已投递 #1（未完成，你现在没有结果）",
             (await SendAsync(harness, RootContext(harness), "Worker", "first message")).Text);
-        await inFlight.WaitAsync(Watchdog);
+        await inFlight.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
         Assert.Equal(
             "已排队 #2（未完成，你现在没有结果）",
             (await SendAsync(harness, RootContext(harness), "Worker", "second message")).Text);
@@ -529,9 +529,9 @@ public sealed class SessionMessagingTests
         // The mailbox is not wedged: the stopped turn unwinds, and a third delivery runs its own turn and reports it.
         var third = NextReceiptOf(harness, "#3");
         harness.Provider.ReleaseBlockedTurn();
-        await harness.Endpoint.TurnEnded.WaitAsync(Watchdog);
+        await harness.Endpoint.TurnEnded.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
         Assert.False((await SendAsync(harness, RootContext(harness), "Worker", "third message")).IsError);
-        var thirdReceipt = await third.WaitAsync(Watchdog);
+        var thirdReceipt = await third.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
         Assert.Equal("[会话回复 #3 · 来自 Worker · 状态:完成 · 任务:third message]", Header(thirdReceipt));
         Assert.Contains("\n改动: 2 个文件 (+5/−3)", thirdReceipt);
         Assert.Contains("报告: model turn completed", thirdReceipt);
@@ -554,7 +554,7 @@ public sealed class SessionMessagingTests
         Assert.Equal(
             "已投递 #1（未完成，你现在没有结果）",
             (await SendAsync(harness, RootContext(harness), "Worker", "first message")).Text);
-        await inFlight.WaitAsync(Watchdog);
+        await inFlight.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
         Assert.Equal(
             "已排队 #2（未完成，你现在没有结果）",
             (await SendAsync(harness, RootContext(harness), "Worker", "second message")).Text);
@@ -568,7 +568,7 @@ public sealed class SessionMessagingTests
             CancellationToken.None));
         harness.Provider.ReleaseBlockedTurn();
 
-        var refused = await queued.WaitAsync(Watchdog);
+        var refused = await queued.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
         var first = Assert.Single(
             harness.Endpoint.Receipts,
             receipt => receipt.StartsWith("[会话回复 #1 ·", StringComparison.Ordinal));
@@ -611,7 +611,7 @@ public sealed class SessionMessagingTests
             (await SendAsync(harness, RootContext(harness), "Worker")).Text);
         harness.Endpoint.CompleteTurn();
 
-        var receipt = await harness.Endpoint.FirstReceipt.WaitAsync(Watchdog);
+        var receipt = await harness.Endpoint.FirstReceipt.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
         Assert.Equal(
             "[会话回复 #1 · 来自 Worker · 状态:完成 · 任务:inspect the change]\n改动: 2 个文件 (+5/−3)\n报告: finished",
             receipt);
@@ -634,7 +634,7 @@ public sealed class SessionMessagingTests
             (await SendAsync(harness, RootContext(harness), "Worker")).Text);
         await harness.Endpoint.FirstRequest;
         harness.Endpoint.CompleteTurn(new SessionTurnOutcome("finished report", SessionReplyStatus.Completed, null, 1));
-        await readingChanges.WaitAsync(Watchdog);
+        await readingChanges.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
 
         // The user presses stop on the root inside that window: #1's turn is over, so the stop owns nothing of it.
         harness.Host.StopUserChildren(RootStopReason);
@@ -645,7 +645,7 @@ public sealed class SessionMessagingTests
         harness.Endpoint.ReleaseChanges();
         Assert.Equal(
             "[会话回复 #1 · 来自 Worker · 状态:完成 · 任务:inspect the change]\n改动: 2 个文件 (+5/−3)\n报告: finished report",
-            await receipt.WaitAsync(Watchdog));
+            await receipt.WaitAsync(Watchdog, TestContext.Current.CancellationToken));
 
         // One delivery, one receipt: the stop must not leave a second line next to the real one.
         Assert.Single(harness.Endpoint.Receipts);

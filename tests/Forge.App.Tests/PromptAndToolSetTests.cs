@@ -81,7 +81,7 @@ public sealed class PromptAndToolSetTests
         });
         var root = host.CreateRoot("session-unknown-tool", Directory.GetCurrentDirectory());
 
-        await foreach (var _ in host.RunAsync(root, "go"))
+        await foreach (var _ in host.RunAsync(root, "go", TestContext.Current.CancellationToken))
         {
         }
 

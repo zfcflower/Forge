@@ -90,7 +90,7 @@ public sealed class ReviewLedgerPersistenceTests : IDisposable
         first.Record("other", "1", ReviewVerdict.Approve, "c9", "T9");
         await first.FlushAsync();
 
-        await reviews.DeleteSessionAsync(Session);
+        await reviews.DeleteSessionAsync(Session, TestContext.Current.CancellationToken);
 
         var second = Ledger(reviews);
         await second.EnsureLoadedAsync(Session, CancellationToken.None);
@@ -165,8 +165,8 @@ public sealed class ReviewLedgerPersistenceTests : IDisposable
             var ledger = Ledger(reviews);
             var step = "r" + round;
             await Task.WhenAll(
-                Task.Run(() => ledger.Record(Session, step, ReviewVerdict.Approve, "c", "T")),
-                Task.Run(() => ledger.Forget(Session, step)));
+                Task.Run(() => ledger.Record(Session, step, ReviewVerdict.Approve, "c", "T"), TestContext.Current.CancellationToken),
+                Task.Run(() => ledger.Forget(Session, step), TestContext.Current.CancellationToken));
             await ledger.FlushAsync();
 
             var fresh = Ledger(reviews);

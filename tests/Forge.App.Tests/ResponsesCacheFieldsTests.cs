@@ -6,6 +6,10 @@ using Xunit;
 
 namespace Forge.App.Tests;
 
+// The degradation table is process-wide: these four classes add entries and clear the whole table in Dispose, so
+// they must not run beside each other (xunit v3 interleaves them, and one class's Clear() erases another's entry
+// mid-test). The collection serialises them; nothing else touches ProviderDegradations.
+[Collection("provider-degradations")]
 public sealed class ResponsesCacheFieldsTests : IDisposable
 {
     private const string Completed =

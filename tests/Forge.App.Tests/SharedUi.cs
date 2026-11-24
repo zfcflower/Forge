@@ -49,17 +49,29 @@ internal static class SharedUi
 
     internal static void Start() => session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-    internal static void Stop()
+    /// <summary>
+    /// Stops the session and waits for its dispatcher thread to finish. Must be awaited, never blocked on: xunit v3
+    /// disposes the collection fixture on a thread its own synchronization context owns, and blocking there deadlocks
+    /// the session's shutdown (the tests all pass, then the process never exits).
+    /// </summary>
+    internal static async ValueTask StopAsync()
     {
         var current = session;
         session = null;
-        current?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (current is not null)
+        {
+            await current.DisposeAsync();
+        }
     }
 }
 
-public sealed class SharedHeadlessFixture : IDisposable
+public sealed class SharedHeadlessFixture : IAsyncLifetime
 {
-    public SharedHeadlessFixture() => SharedUi.Start();
+    public ValueTask InitializeAsync()
+    {
+        SharedUi.Start();
+        return ValueTask.CompletedTask;
+    }
 
-    public void Dispose() => SharedUi.Stop();
+    public ValueTask DisposeAsync() => SharedUi.StopAsync();
 }

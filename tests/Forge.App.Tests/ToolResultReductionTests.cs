@@ -416,7 +416,7 @@ public sealed class ToolResultReductionTests
         var (host, provider, compactor, root) = Subject(10_000, [new Script(Error: overflow), new Script()], ReadTool(4_000));
 
         var events = new List<AgentEvent>();
-        await foreach (var evt in host.RunAsync(root, "go"))
+        await foreach (var evt in host.RunAsync(root, "go", TestContext.Current.CancellationToken))
         {
             events.Add(evt);
         }

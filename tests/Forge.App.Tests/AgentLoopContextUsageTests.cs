@@ -58,7 +58,7 @@ public sealed class AgentLoopContextUsageTests
         var root = host.CreateRoot("session-context-usage", Directory.GetCurrentDirectory());
 
         var events = new List<AgentEvent>();
-        await foreach (var evt in host.RunAsync(root, "go"))
+        await foreach (var evt in host.RunAsync(root, "go", TestContext.Current.CancellationToken))
         {
             events.Add(evt);
         }

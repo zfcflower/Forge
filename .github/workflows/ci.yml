@@ -17,6 +17,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Avalonia's build task reports one telemetry record per Avalonia build and prints a licence notice on every build. A
+# runner carries no Avalonia licence, which is the case where the opt-out is honoured; a Trial/Community ticket on a
+# developer machine overrides it, so the notice still shows locally (Docs/13 §13.5).
+env:
+  AVALONIA_TELEMETRY_OPTOUT: 1
+
 jobs:
   test:
     name: test (${{ matrix.os }})
@@ -37,7 +43,7 @@ jobs:
       - name: Build
         run: dotnet build Forge.slnx -v m
       - name: Test
-        run: dotnet test Forge.slnx --no-build --logger "console;verbosity=normal"
+        run: dotnet test Forge.slnx --no-build --output normal
 
   publish-aot:
     name: aot publish (windows)

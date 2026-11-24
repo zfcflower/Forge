@@ -11,6 +11,10 @@ namespace Forge.App.Tests;
 /// exactly what the request allows — and a reply that hits it stops as <see cref="StopReason.MaxTokens"/> instead of
 /// running on. These tests read the request body the adapters actually send (a local handler, no network).
 /// </summary>
+// The degradation table is process-wide: these four classes add entries and clear the whole table in Dispose, so
+// they must not run beside each other (xunit v3 interleaves them, and one class's Clear() erases another's entry
+// mid-test). The collection serialises them; nothing else touches ProviderDegradations.
+[Collection("provider-degradations")]
 public sealed class ProviderOutputCapTests : IDisposable
 {
     private const string BaseUrl = "https://gateway.example/v1";

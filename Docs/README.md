@@ -25,12 +25,12 @@ FORGE 是面向开发者的**桌面编码 Agent Harness**：把 LLM 编码 Agent
 | 方面 | 选择 | 说明 |
 |---|---|---|
 | 语言 / 运行时 | C# 15 / .NET 11 | `global.json` 固定 |
-| UI | Avalonia 12.1.6（Fluent） | 手写 INPC + ICommand，无 MVVM/DI 框架 |
+| UI | Avalonia 12.2.0（Fluent） | 手写 INPC + ICommand，无 MVVM/DI 框架 |
 | 编辑器 | AvaloniaEdit 12.0.0 + AvaloniaEdit.TextMate | 词法着色 + LSP 语义叠加 |
 | 持久化 | Microsoft.Data.Sqlite 11.*、源生成 JSON | `forge.db` / `reviews.db` / `approvals.db` |
 | 线格式 | MessagePack 4.0.0-rc.1（源生成、AOT） | 主程序 ↔ Host ↔ Worker/执行器 |
 | 扩展编译 | Roslyn 5.*（仅 JIT 侧） | 主程序依赖闭包不含 Roslyn |
-| 图表渲染 | Mermaider 0.15.1 + Svg.Skia 4.9.1 | 本地解析、布局、矢量回放，不联网 |
+| 图表渲染 | Mermaider 0.18.0 + Svg.Skia 5.2.3 | 本地解析、布局、矢量回放，不联网 |
 | 主程序发布 | Native AOT | win-x64 `Forge.App.exe` 72.92 MiB（2026-11-16 同机重测；早先记录 49.7 MiB，差值未逐项定位） |
 
 ### 进程拓扑
