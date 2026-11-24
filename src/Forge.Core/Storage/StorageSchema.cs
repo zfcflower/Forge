@@ -374,7 +374,11 @@ internal static class StorageSchema
                 await MigrateToV13Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
             case 13:
-                await MigrateToV14Async(connection, transaction, ct).ConfigureAwait(false);
+                // No structural step: v14's column went straight into the V1 base script, and no deployed database
+                // needs upgrading (the product is not in production). The case exists because a fresh database climbs
+                // the ladder one step at a time, so 13→14 is where the version catches up with the base script. A
+                // database from before the column has it missing after the climb; the metrics store's shape probe
+                // bypasses the feature there until the database is rebuilt — no ALTER, nothing carried over.
                 break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
@@ -674,25 +678,6 @@ internal static class StorageSchema
         if (tables.ContainsKey("turn_metrics"))
         {
             await AddColumnIfMissingAsync(connection, transaction, "turn_metrics", "effort", "TEXT NULL", ct)
-                .ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// The v14 step: where each turn ended in the message stream. <c>turn_metrics</c> is created by the V1 script, so a
-    /// database that never used the feature has no table and the step alters nothing — the same guard v13 uses. Every
-    /// existing row keeps NULL: a turn recorded before this column has no seq to name, and such a row pairs with nothing
-    /// on replay (its divider reads "—") rather than with a guessed match.
-    /// </summary>
-    private static async Task MigrateToV14Async(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        CancellationToken ct)
-    {
-        var tables = await ExistingColumnsAsync(connection, transaction, ct).ConfigureAwait(false);
-        if (tables.ContainsKey("turn_metrics"))
-        {
-            await AddColumnIfMissingAsync(connection, transaction, "turn_metrics", "last_seq", "INTEGER NULL", ct)
                 .ConfigureAwait(false);
         }
     }

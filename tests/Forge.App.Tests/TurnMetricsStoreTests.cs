@@ -1,3 +1,4 @@
+using Forge.Abstractions;
 using Forge.Core.Storage;
 using Microsoft.Data.Sqlite;
 using Xunit;
@@ -56,7 +57,9 @@ public sealed class TurnMetricsStoreTests : IDisposable
             CacheWriteTokens: 10,
             CacheWrite1hTokens: 5,
             ToolCalls: 3,
-            StreamElapsed: TimeSpan.FromMilliseconds(2500));
+            StreamElapsed: TimeSpan.FromMilliseconds(2500),
+            Effort: ThinkingEffort.High,
+            LastSeq: 4321);
         await store.WriteAsync(metric, CancellationToken.None);
 
         var row = Assert.Single(await store.ListAsync(Session, CancellationToken.None));
@@ -68,6 +71,8 @@ public sealed class TurnMetricsStoreTests : IDisposable
         Assert.Equal("2026-01-02T03:04:05.0000000+00:00", Text(connection, "SELECT started_at FROM turn_metrics WHERE turn = 7"));
         Assert.Equal("2026-01-02T03:04:40.0000000+00:00", Text(connection, "SELECT ended_at FROM turn_metrics WHERE turn = 7"));
         Assert.Equal(2500L, Number(connection, "SELECT stream_ms FROM turn_metrics WHERE turn = 7"));
+        Assert.Equal("high", Text(connection, "SELECT effort FROM turn_metrics WHERE turn = 7"));
+        Assert.Equal(4321L, Number(connection, "SELECT last_seq FROM turn_metrics WHERE turn = 7"));
 
         // The timestamp guards fire: a row that is not the canonical round-trip shape is refused by the database itself.
         Assert.Throws<SqliteException>(() =>
