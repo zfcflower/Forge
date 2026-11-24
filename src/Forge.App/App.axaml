@@ -482,11 +482,11 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
-        <Border Classes="user-bubble" IsVisible="{Binding HasText}">
+        <views:SelectableCard Classes="user-bubble" IsVisible="{Binding HasText}">
           <SelectableTextBlock Text="{Binding Text}"
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource TextPrimaryBrush}" />
-        </Border>
+        </views:SelectableCard>
         <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Left">
           <views:CopyTextButton Classes="ghost icon"
                                 Width="26"

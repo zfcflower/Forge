@@ -112,7 +112,7 @@ internal sealed class MarkdownCodeHeader : Grid
 /// </summary>
 internal sealed class MarkdownCodeTextView : ScrollViewer
 {
-    private readonly SelectableTextBlock text;
+    private readonly MarkdownCodeTextBlock text;
     private string value;
     private string language = string.Empty;
     private int version;
@@ -129,7 +129,7 @@ internal sealed class MarkdownCodeTextView : ScrollViewer
         this.value = value;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
         VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        text = new SelectableTextBlock { Text = value };
+        text = new MarkdownCodeTextBlock { Text = value };
         text.Classes.Add("md-code-text");
         // The code font is the user's preference (Appearance > code font, resource FontMono); bind it on the control itself so
         // no style-selector detail can leave the block on the inherited UI font.

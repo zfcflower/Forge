@@ -14,7 +14,7 @@ using ZLogger;
 namespace Forge.App.Changes.Markdown;
 
 /// <summary>A selectable text block whose links (web addresses and local files) open on a plain click.</summary>
-internal sealed class MarkdownTextBlock : SelectableTextBlock
+internal sealed class MarkdownTextBlock : SelectableTextBlock, ISelectableBlock
 {
     private static readonly Cursor HandCursor = new(StandardCursorType.Hand);
 
@@ -26,6 +26,9 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
     protected override Type StyleKeyOverride => typeof(SelectableTextBlock);
 
     internal IReadOnlyList<(int Start, int End, string Url)> Links => links;
+
+    /// <summary>The card's drag maps a point on this block to the character under it.</summary>
+    public int IndexAt(Avalonia.Point point) => SelectableTextHit.IndexAt(this, point);
 
     internal void SetInlines(IReadOnlyList<MdInline> source)
     {

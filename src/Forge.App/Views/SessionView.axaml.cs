@@ -21,6 +21,8 @@ public partial class SessionView : UserControl
         {
             // Tunnel, so Enter, Tab and the arrows reach the pickers before the text box consumes them.
             input.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
+            // A text box selects a word on a double click; the third click selects the whole draft, the way an editor does.
+            input.AddHandler(PointerPressedEvent, OnInputPointerPressed, RoutingStrategies.Tunnel);
             input.PropertyChanged += OnInputPropertyChanged;
             input.LostFocus += OnInputLostFocus;
             AttachImageInput(input);
@@ -29,6 +31,16 @@ public partial class SessionView : UserControl
         if (this.FindControl<ListBox>("Transcript") is { } transcript)
         {
             TranscriptFollower.Attach(transcript);
+        }
+    }
+
+    /// <summary>Triple click in the composer selects everything; the text box already handles one and two clicks.</summary>
+    private static void OnInputPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.ClickCount == 3 && sender is TextBox box)
+        {
+            box.SelectAll();
+            e.Handled = true;
         }
     }
 
