@@ -820,7 +820,7 @@ internal sealed record TreeNodePlan(
 internal sealed record AgentNodeSnapshot(
     string AgentId,
     string? ParentAgentId,
-    string Task,
+    string Name,
     string StatusText,
     bool IsLive,
     bool IsMain);
@@ -1966,7 +1966,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// the run state lives in the transcript, which is not read here, so these rows carry no state mark until the session is
     /// opened and the live roster replaces them.
     /// </summary>
-    private static List<TreeNodePlan> PlanStoredAgents(
+    internal static List<TreeNodePlan> PlanStoredAgents(
         ILookup<string, SessionInfo> children,
         string parentSessionId,
         string rootSessionId,
@@ -1982,10 +1982,12 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                 continue;
             }
 
+            // A stored child's live id died with the process that issued it and can never be resumed, so the kind alone names
+            // it - the same word its tab shows (SubAgentViewModel.DisplayName).
             plans.Add(new TreeNodePlan(
                 TreeNodeKind.SubAgent,
                 "agent:" + child.Id,
-                string.IsNullOrWhiteSpace(child.Task) ? child.Title : child.Task!,
+                string.IsNullOrWhiteSpace(child.AgentKind) ? SessionStrings.SubAgentsTitle : child.AgentKind,
                 string.Empty,
                 running.Contains(child.Id),
                 null,
@@ -2090,7 +2092,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         return new TreeNodePlan(
             agent.IsMain ? TreeNodeKind.MainAgent : TreeNodeKind.SubAgent,
             "agent:" + agent.AgentId,
-            agent.Task,
+            agent.Name,
             string.Empty,
             agent.IsLive,
             null,

@@ -760,10 +760,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         return snapshot;
     }
 
-    private static AgentNodeSnapshot SnapshotOf(SubAgentViewModel agent) => new(
+    internal static AgentNodeSnapshot SnapshotOf(SubAgentViewModel agent) => new(
         agent.AgentId,
         agent.ParentAgentId,
-        agent.Task,
+        agent.DisplayName,
         agent.StatusText,
         agent.IsLive,
         false);
