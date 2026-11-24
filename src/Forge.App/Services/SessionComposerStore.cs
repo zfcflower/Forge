@@ -74,5 +74,8 @@ internal sealed class SessionComposerStore
         return uiState.PutAsync(Key(sessionId), Version, json, ct);
     }
 
+    /// <summary>Drops the session's stored composer selection; part of removing the session for good (7.2).</summary>
+    public Task DeleteAsync(string sessionId, CancellationToken ct) => uiState.DeleteAsync(Key(sessionId), ct);
+
     private static string Key(string sessionId) => KeyPrefix + sessionId;
 }

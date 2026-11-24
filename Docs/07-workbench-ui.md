@@ -38,13 +38,14 @@
 ## 7.4 项目树
 
 - 行高 28 px；扁平 `RangeObservableCollection` + 虚拟化 `ListBox`；展开/折叠按路径/id 记状态，展开状态跨刷新保留。
-- 层级：项目（工作区层，Bold）→ **仓库根检出**（第一个子行；标签取真实分支名，游离显示“游离 HEAD”，非仓库不出现）→ 其它 worktree 分组 → 会话行 → 子 Agent 行（可到孙 Agent）；**Agent 会话行与根会话行同级并列**（同一分支行下、排在它的根会话之后，图标 `comment_mention`；一级子 Agent 是 `chat_arrow_back_down`，最深一级是 `chat_lock`）；归档会话收进“历史 (n)”（根会话与 Agent 会话都算）。Agent 会话的回复未读时，行与标签打未读点。项目行行尾按钮是 regular `organization_add`（新建工作区分支，16px，坐在 22px 按钮里），分支行行尾是 `chat_add`（新建会话，14px）；子 Agent 行的状态圆点/对勾坐在同一列 22px 槽里，整棵树的右侧标记对齐成一条竖线。
+- 层级：项目（工作区层，Bold）→ **仓库根检出**（第一个子行；标签取真实分支名，游离显示“游离 HEAD”，非仓库不出现）→ 其它 worktree 分组 → 会话行 → 子 Agent 行（可到孙 Agent）；**Agent 会话行与根会话行同级并列**（同一分支行下、排在它的根会话之后，图标 `comment_mention`；一级子 Agent 是 `chat_arrow_back_down`，最深一级是 `chat_lock`）；归档或已移除的会话收进“历史 (n)”（根会话与 Agent 会话都算）；没有会话的 git worktree 也有一行（裸库与锁定的除外），可新建会话、移除工作区。Agent 会话的回复未读时，行与标签打未读点。项目行行尾按钮是 regular `organization_add`（新建工作区分支，16px，坐在 22px 按钮里），分支行行尾是 `chat_add`（新建会话，14px）；子 Agent 行的状态圆点/对勾坐在同一列 22px 槽里，整棵树的右侧标记对齐成一条竖线。
 - 整行可点：会话行打开会话；有子项的行展开/折叠；没有子项的项目/worktree 行新建会话；子 Agent 行先把会话带到主区前台、再展开底部组并选中该标签（活的与已结束的都算）；Enter/空格对选中行生效；点在行内按钮只执行按钮。
 - 行尾“+”：项目行是分支加号（新建 worktree 分支，regular `organization_add` 16 px）、常规对话/worktree 行是纯加号（新建会话，`chat_add` 14 px），按钮都是 22 px，tooltip 写清是哪一种。**Agent 会话把 worktree 行（含仓库根检出行）的纯加号改为两项菜单**：“新建会话” / “新增 Agent 会话”；后者挂到该 worktree 的活动根会话，没有活动根会话、合并冲突、工作区操作中时置灰并写入 tooltip，常规对话不提供。一个根名下的 Agent 会话不设数量上限。
 - 活动会话行：名称块浅强调底色 + 会话气泡换成实心（与标签页同一对 regular/filled）。
 - 子树图标：Scout 放大镜、Worker 锤子、Plan 三行、Reviewer 对勾、未知回落会话气泡；状态：排队/运行/失败/已停止/未知是圆点，正常完成是绿色对勾，文案退到 tooltip；运行中带透明度呼吸动画（受“减少动画”闸门控制）。
 - 活动会话行浅强调底；底部组当前选中的子 Agent 标签让树里对应行拿同样的 active 底。
-- 会话行带自动化闪电标记（tooltip “由自动化任务创建”）；已删除/已移除/目录缺失/worktree prunable/未登记/状态未知的标记见 01.8。
+- 会话行带自动化闪电标记（tooltip “由自动化任务创建”）；已归档/已移除/目录缺失/worktree prunable/未登记/状态未知的标记见 01.8。
+- 历史行（归档或自愈产生的已移除）点行即打开只读标签（标签没有输入区），右键统一为“恢复会话 / 移除会话”（归档行另有“重命名”）：恢复会话先重建缺失的目录再激活，Agent 会话在分支没有活动 root 时恢复后成为该 root（原父会话转成它的 Agent 会话），有活动 root 时挂到那个 root 下；移除会话不可撤销、直接删除会话记录与附属文件，分支与工作区原样保留。
 
 ## 7.5 文件面板与预览列
 
@@ -140,7 +141,7 @@
 - Toast：最新在最上、最多 5 条；同 key 合并成一条并计数 `×N`（key 缺省是“等级 + 标题 + 正文”，重复到来重启计时）；到时先 `IsLeaving` 淡出下滑 180 ms 再移除；`IsHitTestVisible=False`，不挡点击；集合与计时只在 UI 线程动，`NotifyAsync` 可从任意线程调用。
 - 窗口在最小化或没有 Forge 窗口在前台时才算后台。释放幂等：就地停计时器与字典，只在 UI 线程清空绑定集合。
 - 通知权限引导（14f）：`INotificationPermissionGuide`（`NotApplicable`/`Unknown`/`Granted`/`Denied`）；`SendTestAsync` 真发一条测试通知并把状态落成 Granted/Denied；`OpenSettingsAsync` 打开平台页面（Windows `ms-settings:notifications`、macOS 通知偏好），Linux/NotApplicable 返回 false。设置分区 `notification-permission` 提供状态、发送测试、打开系统设置、`notificationPermissionReprompt`（再次提示）。
-- 接入点（每条都带稳定去重 key）：回合/发送失败、提供商未配置、检查点失败、子 Agent 失败或停止、附件拒绝、图片拒绝、读文件失败与文件级上限、换模型后附件阻塞、步骤提交被拒、fetch/pull/push 失败、自动评审交接失败、扩展宿主失败、MCP 服务器失败、模型列表拉取失败、`settings.json` 回落默认、启动或数据库初始化失败、项目列表读取失败、彻底删除收尾重试失败、终端非零退出、文件保存失败、LSP 应用失败、评审保存失败、审批卡开始等待用户。
+- 接入点（每条都带稳定去重 key）：回合/发送失败、提供商未配置、检查点失败、子 Agent 失败或停止、附件拒绝、图片拒绝、读文件失败与文件级上限、换模型后附件阻塞、步骤提交被拒、fetch/pull/push 失败、自动评审交接失败、扩展宿主失败、MCP 服务器失败、模型列表拉取失败、`settings.json` 回落默认、启动或数据库初始化失败、项目列表读取失败、移除会话收尾重试失败、终端非零退出、文件保存失败、LSP 应用失败、评审保存失败、审批卡开始等待用户。
 - 不接：生命周期对话框里当场可见的失败、上下文压缩、插话/排队回执、折叠与高亮降级、语言/模型切换、TODO 步骤提交成功。
 
 ## 7.12 设置窗口
@@ -196,7 +197,7 @@
 
   选档：行内/次要动作 `flat`，普通动作 `ghost`（卡片里 `outline`），品牌强调 `tinted`，一屏只有一个 `primary`（它的主操作）。图标按钮仍是现状（26 px、无边框无底色、悬停 `IconButtonHoverBrush`、按下 `IconButtonPressedBrush`）；标签、链接、面包屑与 chip 档各自几何，不套 32 px。焦点由 Fluent focus adorner 统一画在外侧。
 - **表单文字**：只有两级——分组标题 `h2`（14 px Bold，主色），字段标签 `label`（13 px Normal，次要色）；输入框里的文字同样 13 px（`ControlContentThemeFontSize`，主色），占位符 13 px 次要色，字段下的说明/错误提示 11 px（`caption`，错误时 `StatusErrorBrush`）。标签与输入同号，层级靠颜色与位置，不靠加粗；标签单行省略号，标签与字段间 4 px；三档字号都随界面字号偏好缩放。
-- **输入控件（唯一标准，细则见 `src/Forge.App/SPEC.md`「控件形态 › 输入控件」）**：TextBox / 多行 TextBox / ComboBox / NumericUpDown 的模板与几何交给 Fluent（高 28 px、内距 10,4 / 12,4,0,4、圆角 3、字号 13、底 `SurfaceInputBrush`、字 `TextPrimaryBrush`、占位 `TextMutedBrush`），**框是自有的控件主题**：`Resources/FieldStyles.axaml`（由 `ChromeStyles.axaml` 引入）给 `TextBox` / `ComboBox` / `ButtonSpinner` 各写一份 `ControlTheme`，结构与 Fluent 12.1.6 逐字一致（同名部件、同款绑定、同套状态、同样的剪贴板菜单），只把框拆成两个元素——`PART_BorderElement` 画底色与顶/侧 1px，新增 `PART_EdgeLine` 画底边（填色圆角带 `0,0,3,3`、左右各内缩 1px 收口到字段底弧，子元素末位，内容盖不住它）；一个 Border 只有一根 BorderBrush，逐边异色只能这样。配色：常态底边 `FieldEdgeBrush`（亮 `#4E5969`、暗 `#87939D`）1px、悬停加深侧线 `BorderStrongBrush`、**激活只有底边变 2px 品牌色（顶/侧保持分隔线）**、错误框与底边同取 `StatusErrorBrush`、禁用压暗底与字；ComboBox 聚焦仍是 Fluent 的整圈 1px 品牌环，此时底边收掉。无框输入（会话输入条、TODO 行、元数据表单元格）显式把 `PART_EdgeLine` 关掉。多行框用 `TextBox.multiline`（最小高 64、内距 8,10），错误态用共用的 `TextBox.invalid`（同一张表里，页面不再各抄一份）。**数字框的 stepper 换成自有主题** `ForgeNumberStepper`：Fluent 原样式是两块 34px 宽、撑满字段高、前方还有竖分隔线的按钮，且布局值是模板内部局部值、外部改不动；现在是尾端竖排两块 16×12 按钮（间距 2、圆角 `RadiusSm`、静止无边框无底色）、箭头 10×6 取次要色，悬停/按下走 `RepeatButton` 的中性档。实装是 `Tokens.axaml` 里把 Fluent 的 `TextControl*` / `ComboBox*` / `SystemControlErrorTextForegroundBrush` 用 `<StaticResource>` 别名指到这些令牌。原型图：`.thinkrail/context/mockups/input-system.html`（顶部输入框可直接点进去看真实聚焦态）。
+- **输入控件（唯一标准，细则见 `src/Forge.App/SPEC.md`「控件形态 › 输入控件」）**：TextBox / 多行 TextBox / ComboBox / NumericUpDown 的模板与几何交给 Fluent（高 28 px、内距 10,4 / 12,4,0,4、圆角 3、字号 13、底 `SurfaceInputBrush`、字 `TextPrimaryBrush`、占位 `TextMutedBrush`），**框是自有的控件主题**：`Resources/FieldStyles.axaml`（由 `ChromeStyles.axaml` 引入）给 `TextBox` / `ComboBox` / `ButtonSpinner` 各写一份 `ControlTheme`，结构与 Fluent 12.2.0 逐字一致（同名部件、同款绑定、同套状态、同样的剪贴板菜单），只把框拆成两个元素——`PART_BorderElement` 画底色与顶/侧 1px，新增 `PART_EdgeLine` 画底边（填色圆角带 `0,0,3,3`、左右各内缩 1px 收口到字段底弧，子元素末位，内容盖不住它）；一个 Border 只有一根 BorderBrush，逐边异色只能这样。配色：常态底边 `FieldEdgeBrush`（亮 `#4E5969`、暗 `#87939D`）1px、悬停加深侧线 `BorderStrongBrush`、**激活只有底边变 2px 品牌色（顶/侧保持分隔线）**、错误框与底边同取 `StatusErrorBrush`、禁用压暗底与字；ComboBox 聚焦仍是 Fluent 的整圈 1px 品牌环，此时底边收掉。无框输入（会话输入条、TODO 行、元数据表单元格）显式把 `PART_EdgeLine` 关掉。多行框用 `TextBox.multiline`（最小高 64、内距 8,10），错误态用共用的 `TextBox.invalid`（同一张表里，页面不再各抄一份）。**数字框的 stepper 换成自有主题** `ForgeNumberStepper`：Fluent 原样式是两块 34px 宽、撑满字段高、前方还有竖分隔线的按钮，且布局值是模板内部局部值、外部改不动；现在是尾端竖排两块 16×12 按钮（间距 2、圆角 `RadiusSm`、静止无边框无底色）、箭头 10×6 取次要色，悬停/按下走 `RepeatButton` 的中性档。实装是 `Tokens.axaml` 里把 Fluent 的 `TextControl*` / `ComboBox*` / `SystemControlErrorTextForegroundBrush` 用 `<StaticResource>` 别名指到这些令牌。原型图：`.thinkrail/context/mockups/input-system.html`（顶部输入框可直接点进去看真实聚焦态）。
 - 弹层：所有 flyout / 下拉 / tooltip 同一张卡片——白底、1 px `BorderBrush`、圆角 5；弹层里的可选项共用一种行，悬停底一律 `SurfaceHoverBrush`（模型行、提供商分组、Agent 与编排选择器、底部组的“已结束”菜单、范围下拉、git 出货菜单都是这一份）；行本身铺满弹层宽（`HorizontalAlignment=Stretch`），否则按钮会左对齐到内容，短标签右侧的空白既不高亮也点不到（已结束菜单与改动范围/基准分支选择器两组行已显式对齐）。
 - 主题：`appearance` 分区第一组是「主题模式」三段式分段控件（系统 / 浅色 / 深色；选中段 `BrandTintBrush` 底 + `BrandActionBrush` 字，外壳是 `SurfaceSubtleBrush` 的 28 px 轨道 + 2 px 内距），写入偏好 `theme`（默认 `system`），由 `AppearanceApplier` 映射到 `Application.RequestedThemeVariant`（`Default` = 跟随系统），启动时与改动时都即时生效。
 - 字体：界面与代码可分别设置字体族与字号（9–28 步进 1），即时生效、重启保留；字体只经资源键传递（`FontUi`/`FontMono`/`FontSizeXs…Xl`/`FontSizeCode`），默认界面字体族是 `Segoe UI, PingFang SC, Microsoft YaHei, sans-serif`；内嵌 Inter 仍注册，手输 `fonts:Inter#Inter` 可用。族名解析失败保留上一个有效值，非法文本只 Trace 一次、不抛。

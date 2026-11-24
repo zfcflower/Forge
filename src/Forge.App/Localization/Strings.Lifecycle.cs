@@ -16,16 +16,9 @@ internal static class LifecycleStrings
     public const string AlreadyRunningMessageKey = "lifecycle.alreadyRunning.message";
 
     // ---------------------------------------------------------------- read-only view
-    public const string ReadOnlyArchivedKey = "lifecycle.readOnly.archived";
-    public const string ReadOnlyDeletedKey = "lifecycle.readOnly.deleted";
-    public const string ContinueSessionKey = "lifecycle.continueSession";
-    public const string RestoreSessionKey = "lifecycle.restoreSession";
     public const string DirectoryMissingKey = "lifecycle.directoryMissing";
     public const string WorktreePrunableKey = "lifecycle.worktreePrunable";
     public const string WorktreeUnregisteredKey = "lifecycle.worktreeUnregistered";
-    public const string ContinueBlockedKey = "lifecycle.continueBlocked";
-    public const string PendingComposerKeyBase = "lifecycle.pendingComposer";
-    public const string ContinueFailedKey = "lifecycle.continueFailed";
     public const string StartupFailedKey = "lifecycle.startupFailed";
     public const string TurnCheckFailedKey = "lifecycle.turnCheckFailed";
 
@@ -48,14 +41,6 @@ internal static class LifecycleStrings
 
     public static string AlreadyRunningMessage => Loc.Instance[AlreadyRunningMessageKey];
 
-    public static string ReadOnlyArchived => Loc.Instance[ReadOnlyArchivedKey];
-
-    public static string ReadOnlyDeleted => Loc.Instance[ReadOnlyDeletedKey];
-
-    public static string ContinueSession => Loc.Instance[ContinueSessionKey];
-
-    public static string RestoreSession => Loc.Instance[RestoreSessionKey];
-
     public static string DirectoryMissing => Loc.Instance[DirectoryMissingKey];
 
     /// <summary>The directory is there but git marks its worktree prunable (its <c>.git</c> link is broken); git's reason, if any.</summary>
@@ -64,16 +49,9 @@ internal static class LifecycleStrings
     /// <summary>The directory is there but the repository's worktree list does not name it.</summary>
     public static string WorktreeUnregistered => Loc.Instance[WorktreeUnregisteredKey];
 
-    public static string ContinueBlocked(string reason) => Loc.Instance.Format(ContinueBlockedKey, reason);
-
-    /// <summary>A status-bar problem, so it re-renders on a language switch.</summary>
-    public static LocText ContinueFailed => new(ContinueFailedKey);
-
     public static LocText StartupFailed(string reason) => new(StartupFailedKey, reason);
 
     public static LocText TurnCheckFailed(string reason) => new(TurnCheckFailedKey, reason);
-
-    public static string PendingComposer(int count) => Loc.Instance.FormatPlural(PendingComposerKeyBase, count);
 
     /// <summary>Kept by the transcript, so it re-renders on a language switch.</summary>
     public static LocText TakenOver => new(TakenOverKey);
@@ -105,19 +83,11 @@ internal static class LifecycleStrings
         Loc.Register(AlreadyRunningTitleKey, "Forge", "Forge");
         Loc.Register(AlreadyRunningMessageKey, "Forge 已在运行。", "Forge is already running.");
 
-        Loc.Register(ReadOnlyArchivedKey, "只读查看:这是历史会话。", "Read-only: this is a past session.");
-        Loc.Register(ReadOnlyDeletedKey, "只读查看:这是已移除的会话。", "Read-only: this session was removed.");
-        Loc.Register(ContinueSessionKey, "继续此会话", "Continue this session");
-        Loc.Register(RestoreSessionKey, "恢复…", "Restore…");
         Loc.Register(DirectoryMissingKey, "目录缺失", "Folder missing");
         Loc.Register(WorktreePrunableKey, "git 已将此工作区标记为可清理:{0}", "Git marks this workspace prunable: {0}");
         Loc.Register(WorktreeUnregisteredKey, "git 工作区列表中没有此目录", "Git does not list this folder as a worktree");
-        Loc.Register(ContinueBlockedKey, "继续此会话〔{0}〕", "Continue this session ({0})");
-        Loc.Register(ContinueFailedKey, "无法继续此会话:它已被移除或不存在。", "This session cannot be continued: it was removed or no longer exists.");
         Loc.Register(TurnCheckFailedKey, "回合前无法确认会话状态,已照常开始:{0}", "Could not check the session's status before the turn; it started anyway: {0}");
         Loc.Register(StartupFailedKey, "启动时的会话整理未完成:{0}", "The startup session tidy-up did not finish: {0}");
-        Loc.Register(PendingComposerKeyBase + ".one", "{0} 条未发送的消息已保留,继续此会话后可发送。", "{0} unsent message is kept; continue this session to send it.");
-        Loc.Register(PendingComposerKeyBase + ".other", "{0} 条未发送的消息已保留,继续此会话后可发送。", "{0} unsent messages are kept; continue this session to send them.");
 
         Loc.Register(TakenOverKey, "该会话已被接手,已转为只读。", "This session was taken over; it is now read-only.");
         Loc.Register(MergeConflictPendingKey, "合并冲突待处理,解决后再继续。", "A merge conflict is pending; resolve it first.");

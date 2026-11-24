@@ -225,6 +225,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 StringComparer.Ordinal),
         };
         Projects.SessionArchived = OnSessionArchived;
+        Projects.SessionPromoted = OnSessionPromoted;
         Projects.ArchiveGuard = ConfirmArchiveAsync;
         Projects.HasVsCode = instruments.HasVsCode;
         Projects.OpenInVsCode = instruments.OpenInVsCode;
@@ -256,6 +257,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             AgentTrees = Projects.AgentTrees,
             OpenSubAgent = OpenSubAgentTabAsync,
             SessionArchived = OnSessionArchived,
+            SessionPromoted = OnSessionPromoted,
             ArchiveGuard = ConfirmArchiveAsync,
             HasVsCode = instruments.HasVsCode,
             OpenInVsCode = instruments.OpenInVsCode,
@@ -1063,11 +1065,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 : null,
         };
         created = session;
-        if (readOnly)
-        {
-            AttachReadOnlyCommands(session);
-        }
-        else
+        if (!readOnly)
         {
             session.TurnGate = token => CheckTurnAsync(session, token);
         }
@@ -1235,52 +1233,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         // runtime is released, while the host that holds the table is still there.
         RevokeSessionMessagesOf(session);
         composition.Runtimes.Release(session.SessionId);
-        AttachReadOnlyCommands(session);
         _ = RefreshTreesAfterLifecycleAsync();
     }
 
     /// <summary>
-    /// "Continue this session" on an archived read-only view; disabled when its workspace folder is gone (6.3). The folder
-    /// probe runs on the thread pool (a dead network drive must not stall the dispatcher); until it answers the command
-    /// stays enabled and <see cref="ContinueSessionAsync"/> checks the folder again itself.
+    /// Why an existing directory cannot be used again (6.3), or null: it is a repository worktree that git marks prunable
+    /// or does not list (a turn there would run git against a broken or an enclosing repository). A folder that is gone
+    /// blocks nothing: restore rebuilds it first. A worktree list that cannot be read is unknown and blocks nothing: it is
+    /// neither healthy nor stale, and the turn's own git calls report what is wrong. Runs off the dispatcher.
     /// </summary>
-    private void AttachReadOnlyCommands(SessionWorkspaceViewModel session)
-    {
-        var info = session.Info;
-        var directory = info.WorktreePath ?? info.WorkspacePath;
-        var command = new AsyncRelayCommand(
-            ct => ContinueSessionAsync(session.SessionId, ct),
-            () => session.ContinueBlockedReason is null,
-            exception => Status.SetWorkspaceProblem(LocText.Literal(exception.Message)));
-        session.ContinueCommand = command;
-        _ = ProbeContinueAsync(session, command, info);
-    }
-
-    private async Task ProbeContinueAsync(SessionWorkspaceViewModel session, AsyncRelayCommand command, SessionInfo info)
-    {
-        string? reason;
-        try
-        {
-            reason = await ContinueBlockAsync(info, CancellationToken.None).ConfigureAwait(true);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            // The probe only greys the button; the click checks again and reports what it finds.
-            AppLogs.Lifecycle.ZLogWarning($"could not probe whether '{info.Id}' can continue: {exception.Message}");
-            reason = null;
-        }
-
-        session.ContinueBlockedReason = reason;
-        command.NotifyCanExecuteChanged();
-    }
-
-    /// <summary>
-    /// Why a session cannot continue where it is (6.3), or null: its folder is gone, or it is a repository worktree that
-    /// git marks prunable or does not list (a turn there would run git against a broken or an enclosing repository). A
-    /// worktree list that cannot be read is unknown and blocks nothing: it is neither healthy nor stale, and the turn's own
-    /// git calls report what is wrong. Runs off the dispatcher.
-    /// </summary>
-    internal Task<string?> ContinueBlockAsync(SessionInfo info, CancellationToken ct)
+    internal Task<string?> RestoreBlockAsync(SessionInfo info, CancellationToken ct)
     {
         var git = composition.Git;
         var projects = composition.Projects;
@@ -1290,7 +1252,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 var directory = info.WorktreePath ?? info.WorkspacePath;
                 if (!Directory.Exists(directory))
                 {
-                    return LifecycleStrings.DirectoryMissing;
+                    return null;
                 }
 
                 if (info.ProjectId is not { } projectId || string.IsNullOrEmpty(info.WorktreePath))
@@ -1323,44 +1285,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 };
             },
             ct);
-    }
-
-    /// <summary>
-    /// Makes a session Active again through <see cref="ISessionCatalog.ActivateAsync"/>, the one path that honours the
-    /// one-active-session-per-workspace rule; a workspace that already has an active session ends in the occupied dialog.
-    /// </summary>
-    internal async Task ContinueSessionAsync(string sessionId, CancellationToken ct)
-    {
-        var catalog = composition.Catalog;
-        var store = composition.Sessions;
-        try
-        {
-            var info = await BackgroundRead.RunAsync(token => store.GetSessionAsync(sessionId, token), ct).ConfigureAwait(true);
-            var block = info is null ? LifecycleStrings.DirectoryMissing : await ContinueBlockAsync(info, ct).ConfigureAwait(true);
-            if (block is not null)
-            {
-                Status.SetWorkspaceProblem(LocText.Literal(LifecycleStrings.ContinueBlocked(block)));
-                return;
-            }
-
-            var activated = await BackgroundRead.RunAsync(token => catalog.ActivateAsync(sessionId, token), ct)
-                .ConfigureAwait(true);
-            if (!activated)
-            {
-                // The session is gone or no longer resumable (removed elsewhere): say so instead of doing nothing.
-                Status.SetWorkspaceProblem(LifecycleStrings.ContinueFailed);
-                await OpenSessionByIdAsync(sessionId, ct).ConfigureAwait(true);
-                return;
-            }
-        }
-        catch (WorktreeOccupiedException occupied)
-        {
-            await ShowOccupiedAsync(occupied, HandoverIntent.Resume(sessionId), ct).ConfigureAwait(true);
-            return;
-        }
-
-        await OpenSessionByIdAsync(sessionId, ct).ConfigureAwait(true);
-        await RefreshTreesAsync(ct).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -2124,7 +2048,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         if (failures.Count > 0)
         {
-            var problem = LocText.Literal(RemovalStrings.PurgeRetryFailed(string.Join("; ", failures.Distinct(StringComparer.Ordinal))));
+            var problem = LocText.Literal(RemovalStrings.RemoveRetryFailed(string.Join("; ", failures.Distinct(StringComparer.Ordinal))));
             Status.SetWorkspaceProblem(problem);
             composition.Notifications.Notify(
                 NotificationLevel.Warning,
@@ -2328,12 +2252,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         composition.Runtimes.Release(session.SessionId);
     }
 
-    /// <summary>Whether an open agent-session tab runs under this root.</summary>
+    /// <summary>
+    /// Whether an open agent-session tab <em>runs</em> under this root. A read-only history tab of one of its agent sessions
+    /// keeps no runtime: it runs nothing, and its root's runtime may go when that root's own tab closes.
+    /// </summary>
     private bool HasOpenAgentSessions(string rootSessionId)
     {
         foreach (var session in agentViews.Keys)
         {
-            if (string.Equals(session.AgentSessionRoot?.Id, rootSessionId, StringComparison.Ordinal))
+            if (!session.IsReadOnlyView
+                && string.Equals(session.AgentSessionRoot?.Id, rootSessionId, StringComparison.Ordinal))
             {
                 return true;
             }
@@ -2364,6 +2292,65 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         composition.Runtimes.Release(sessionId);
+    }
+
+    /// <summary>
+    /// An archive with a successor, or an explicit "promote to main session", handed the workspace to
+    /// <paramref name="promoted"/>: the old root's tab closes, and the agent-session tabs of the branch stay open. They are
+    /// re-homed in place (root, runtime, parent link) instead of closed and reopened - a re-open would rebuild every tab and
+    /// replay its history, and a long branch made the promotion wait for all of them. Only the promoted session's own agent
+    /// tab is rebuilt, because it changes kind; its draft is carried across.
+    /// </summary>
+    private void OnSessionPromoted(string rootId, SessionInfo promoted)
+    {
+        var runtime = composition.Runtimes.Get(promoted);
+        ComposerCarry? carried = null;
+        foreach (var view in agentViews.Keys.ToArray())
+        {
+            if (!string.Equals(view.AgentSessionRoot?.Id, rootId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.Equals(view.SessionId, promoted.Id, StringComparison.Ordinal))
+            {
+                carried = view.TakeComposerState();
+                continue;
+            }
+
+            // An archived or removed child stays a history row and its tab closes with the old root; a tab with a turn in
+            // flight keeps its runtime until that turn ends and is closed with the old root too.
+            if (view.Info.Status != SessionStatus.Active || view.IsRunning)
+            {
+                continue;
+            }
+
+            view.RehomeTo(promoted, runtime);
+            view.TurnGate = token => CheckTurnAsync(promoted.Id, token);
+        }
+
+        OnSessionArchived(rootId);
+        _ = OpenPromotedSessionAsync(promoted.Id, carried);
+    }
+
+    /// <summary>
+    /// Opens the promoted session as the branch's root (its own agent tab just closed with the old root), carrying the draft
+    /// that tab was holding. A failure only leaves the tab closed; its tree row still opens it.
+    /// </summary>
+    private async Task OpenPromotedSessionAsync(string sessionId, ComposerCarry? carried)
+    {
+        try
+        {
+            await OpenSessionByIdAsync(sessionId, CancellationToken.None).ConfigureAwait(true);
+            if (carried is { } state && sessions.TryGetValue(sessionId, out var view))
+            {
+                view.RestoreComposerState(state);
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"reopening the promoted session '{sessionId}' failed: {exception.Message}");
+        }
     }
 
     /// <summary>Closes every open agent-session tab of an archived root, so no tab outlives the runtime it runs in.</summary>

@@ -57,9 +57,6 @@ internal sealed partial class TreeNodeViewModel
     /// <summary>"Rename branch…" on a linked workspace row (7.8).</summary>
     public ICommand? RenameBranchCommand { get; private set; }
 
-    /// <summary>"Continue this session…" on an archived session row (6.2).</summary>
-    public ICommand? ContinueCommand { get; private set; }
-
     /// <summary>"Open in VS Code" of a project or workspace row; null when no VS Code executable was resolved.</summary>
     public ICommand? OpenInVsCodeCommand { get; private set; }
 
@@ -84,13 +81,11 @@ internal sealed partial class TreeNodeViewModel
         ICommand? linkWorkspace,
         ICommand? replaceSession,
         ICommand? renameBranch,
-        ICommand? continueSession,
         ICommand? openInVsCode)
     {
         LinkWorkspaceCommand = linkWorkspace;
         ReplaceSessionCommand = replaceSession;
         RenameBranchCommand = renameBranch;
-        ContinueCommand = continueSession;
         OpenInVsCodeCommand = openInVsCode;
     }
 
@@ -177,12 +172,9 @@ internal sealed partial class TreeNodeViewModel
         TreeMenuKey.AbortMerge => AbortMergeCommand,
         TreeMenuKey.RenameBranch => RenameBranchCommand,
         TreeMenuKey.RestoreWorkspace or TreeMenuKey.Restore => RestoreCommand,
-        TreeMenuKey.PurgeAll or TreeMenuKey.Purge => PurgeCommand,
         TreeMenuKey.Archive => ArchiveCommand,
         TreeMenuKey.Promote => PromoteCommand,
         TreeMenuKey.OpenInVsCode => OpenInVsCodeCommand,
-        TreeMenuKey.View => OpenCommand,
-        TreeMenuKey.Continue => ContinueCommand,
         _ => null,
     };
 
@@ -231,9 +223,6 @@ internal sealed partial class ProjectTreeViewModel
 
     /// <summary>"New session (replace X)…" (6.2): the holder and the session that would replace it; set by the shell.</summary>
     public Func<SessionInfo, SessionCreate, CancellationToken, Task>? ReplaceSession { get; set; }
-
-    /// <summary>"Continue this session…" (6.2) of an archived session row; set by the shell.</summary>
-    public Func<string, CancellationToken, Task>? ContinueSession { get; set; }
 
     /// <summary>Why a session is not idle: its open tab's busy sources plus those of the user-driven agent sessions under it
     /// (a closed root tab keeps both); in memory only, empty when idle.</summary>
@@ -321,13 +310,11 @@ internal sealed partial class ProjectTreeViewModel
             }
         }
 
-        // Workspaces and projects that left the tree take their cached reads with them.
-        foreach (var key in gitStates.Keys)
+        // Every repository is read, even with no session in it: its registered worktrees without a session get rows of
+        // their own, which is exactly what a project whose sessions were all removed needs.
+        foreach (var project in repositories.Values)
         {
-            if (!directories.Contains(key))
-            {
-                gitStates.TryRemove(key, out _);
-            }
+            _ = linked.TryAdd(project.RootPath, new HashSet<string>(PathComparer));
         }
 
         foreach (var key in defaultBranches.Keys)
@@ -350,6 +337,54 @@ internal sealed partial class ProjectTreeViewModel
         var states = new ConcurrentDictionary<string, WorkspaceGitState>(StringComparer.OrdinalIgnoreCase);
         var defaults = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var lists = new ConcurrentDictionary<string, IReadOnlyList<GitWorktree>?>(PathComparer);
+
+        // The worktree lists come first: a registered worktree with no session gets a row of its own, and that row's
+        // checkout state (HEAD kind, merge / rebase, sparse) is read below like every session workspace's - otherwise the
+        // row could never show 〔稀疏〕 or disable its entries, and the only way to reach it would be the very "+" that
+        // needs those reads to be trustworthy.
+        if (readWorktrees is not null)
+        {
+            var listWork = new List<Func<CancellationToken, Task>>(linked.Count);
+            foreach (var (root, paths) in linked)
+            {
+                listWork.Add(async token => lists[root] = await ReadWorktreeListAsync(readWorktrees, root, paths, now, token)
+                    .ConfigureAwait(false));
+            }
+
+            await RunReadsAsync(listWork, ct).ConfigureAwait(true);
+        }
+
+        if (readWorktrees is not null)
+        {
+            foreach (var (root, list) in lists)
+            {
+                if (list is null)
+                {
+                    continue;
+                }
+
+                foreach (var worktree in list)
+                {
+                    if (!worktree.IsBare
+                        && !worktree.IsLocked
+                        && !RemovalFlow.SameDirectory(worktree.Path, root)
+                        && Directory.Exists(worktree.Path))
+                    {
+                        directories.Add(worktree.Path);
+                    }
+                }
+            }
+        }
+
+        // Workspaces and projects that left the tree take their cached reads with them.
+        foreach (var key in gitStates.Keys)
+        {
+            if (!directories.Contains(key))
+            {
+                gitStates.TryRemove(key, out _);
+            }
+        }
+
         var work = new List<Func<CancellationToken, Task>>();
         if (readState is not null)
         {
@@ -428,28 +463,21 @@ internal sealed partial class ProjectTreeViewModel
             }
         }
 
-        if (readWorktrees is not null)
-        {
-            foreach (var (root, paths) in linked)
-            {
-                work.Add(async token => lists[root] = await ReadWorktreeListAsync(readWorktrees, root, paths, now, token)
-                    .ConfigureAwait(false));
-            }
-        }
-
-        if (work.Count > 0)
-        {
-            await BackgroundRead.RunAsync(
-                    token => Parallel.ForEachAsync(
-                        work,
-                        new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentHeadReads, CancellationToken = token },
-                        async (read, inner) => await read(inner).ConfigureAwait(false)),
-                    ct)
-                .ConfigureAwait(true);
-        }
+        await RunReadsAsync(work, ct).ConfigureAwait(true);
 
         return new MenuGitReads(states, defaults, lists);
     }
+
+    /// <summary>Runs the refresh's git reads off the dispatcher, at most <see cref="MaxConcurrentHeadReads"/> at a time.</summary>
+    private Task RunReadsAsync(List<Func<CancellationToken, Task>> work, CancellationToken ct) =>
+        work.Count == 0
+            ? Task.CompletedTask
+            : BackgroundRead.RunAsync(
+                token => Parallel.ForEachAsync(
+                    work,
+                    new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentHeadReads, CancellationToken = token },
+                    async (read, inner) => await read(inner).ConfigureAwait(false)),
+                ct);
 
     /// <summary>
     /// One repository's worktree list, off the dispatcher. The cached list is reused while it is fresh, unless a linked
@@ -636,7 +664,6 @@ internal sealed partial class ProjectTreeViewModel
         ICommand? link = null;
         ICommand? replace = null;
         ICommand? renameBranch = null;
-        ICommand? continueSession = null;
         ICommand? openInVsCode = null;
         switch (plan.Kind)
         {
@@ -694,16 +721,9 @@ internal sealed partial class ProjectTreeViewModel
                 }
 
                 break;
-            case TreeNodeKind.Session when plan.Session is { Status: SessionStatus.Archived, ParentSessionId: null } session:
-                var cannotContinue = plan.DirectoryMissing || StaleText(plan.WorkspaceMark, plan.PrunableReason) is not null;
-                continueSession = new AsyncRelayCommand(
-                    ct => ContinueSession?.Invoke(session.Id, ct) ?? Task.CompletedTask,
-                    () => ContinueSession is not null && !cannotContinue,
-                    OnFailed);
-                break;
         }
 
-        node.SetMenuCommands(link, replace, renameBranch, continueSession, openInVsCode);
+        node.SetMenuCommands(link, replace, renameBranch, openInVsCode);
         node.IsPlainProject = plan.Kind == TreeNodeKind.Project && !IsRepository(plan.Project);
         node.IsSparse = plan.GitState?.IsSparse == true;
         node.MenuState = MenuStateFactory(plan);
@@ -764,12 +784,14 @@ internal sealed partial class ProjectTreeViewModel
                     Conflicted = Conflicted(directory),
                 };
             case TreeNodeKind.AgentSession when plan.Session is { } agentSession:
-                // A live agent session keeps the agent-row menu (rename / promote / archive); once it is archived or removed it
-                // is a history row: read-only, renameable and removable, but neither promoted nor archived again.
+                // A live agent session keeps the agent-row menu (rename / promote / archive); once it is archived it is a
+                // history row (read-only, renameable, removable), and once it is removed it is a removed row (read-only,
+                // removable, no rename) — neither promoted nor archived again.
                 var agentKind = agentSession.Status switch
                 {
                     SessionStatus.Active => TreeRowKind.AgentSession,
-                    SessionStatus.Archived or SessionStatus.Deleted => TreeRowKind.HistorySession,
+                    SessionStatus.Archived => TreeRowKind.HistorySession,
+                    SessionStatus.Deleted => TreeRowKind.RemovedSession,
                     _ => TreeRowKind.None,
                 };
                 if (agentKind == TreeRowKind.None)
@@ -781,6 +803,7 @@ internal sealed partial class ProjectTreeViewModel
                 {
                     SessionTitle = agentSession.Title,
                     IsAgentSession = true,
+                    StaleReason = StaleText(plan.WorkspaceMark, plan.PrunableReason),
                 };
                 var agentRootId = agentSession.ParentSessionId ?? string.Empty;
                 return () => agentFacts with

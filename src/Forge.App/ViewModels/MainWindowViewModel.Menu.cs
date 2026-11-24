@@ -22,7 +22,6 @@ internal sealed partial class MainWindowViewModel
         var states = composition.WorkspaceStates;
         var git = composition.Git;
         tree.ReplaceSession = (holder, create, ct) => ReplaceSessionAsync(git, holder, create, ct);
-        tree.ContinueSession = ContinueSessionAsync;
         tree.RenameBranch = RenameBranchAsync;
         tree.LinkWorkspace = LinkWorkspaceAsync;
         tree.SessionBusyReasons = SessionBusyReasons;

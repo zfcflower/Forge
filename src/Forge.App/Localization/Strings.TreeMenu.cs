@@ -15,8 +15,6 @@ internal static class TreeMenuStrings
     public const string RenameProjectKey = "lifecycle.menu.renameProject";
     public const string ReplaceSessionKey = "lifecycle.menu.replaceSession";
     public const string RenameBranchKey = "lifecycle.menu.renameBranch";
-    public const string ViewReadOnlyKey = "lifecycle.menu.viewReadOnly";
-    public const string ContinueSessionKey = "lifecycle.menu.continueSession";
 
     // ---------------------------------------------------------------- reasons and warnings
     public const string BusyKey = "lifecycle.menu.reason.busy";
@@ -65,10 +63,6 @@ internal static class TreeMenuStrings
     public static string ReplaceSession(string holderTitle) => Loc.Instance.Format(ReplaceSessionKey, holderTitle);
 
     public static string RenameBranch => Loc.Instance[RenameBranchKey];
-
-    public static string ViewReadOnly => Loc.Instance[ViewReadOnlyKey];
-
-    public static string ContinueSession => Loc.Instance[ContinueSessionKey];
 
     /// <summary>Why an entry waits for a session: its title and its busy sources, one line.</summary>
     public static string Busy(string title, IReadOnlyList<string> reasons) =>
@@ -148,8 +142,6 @@ internal static class TreeMenuStrings
         Loc.Register(RenameProjectKey, "重命名项目", "Rename project");
         Loc.Register(ReplaceSessionKey, "新会话(替换 {0})…", "New session (replace {0})…");
         Loc.Register(RenameBranchKey, "重命名分支…", "Rename branch…");
-        Loc.Register(ViewReadOnlyKey, "查看(只读)", "View (read-only)");
-        Loc.Register(ContinueSessionKey, "继续此会话…", "Continue this session…");
 
         Loc.Register(ReasonSeparatorKey, "、", ", ");
         Loc.Register(BusyKey, "“{0}”尚未空闲:{1}", "\"{0}\" is not idle: {1}");

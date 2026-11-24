@@ -166,7 +166,7 @@ internal sealed class PurgeCleanup(
         }
         catch (Exception exception) when (unjournaled is not null && exception is not OperationCanceledException and not OutOfMemoryException)
         {
-            throw new IOException(exception.Message + "; " + RemovalStrings.PurgeNotRetried(unjournaled.Message), exception);
+            throw new IOException(exception.Message + "; " + RemovalStrings.RemoveNotRetried(unjournaled.Message), exception);
         }
 
         await ForgetAsync(sessionId).ConfigureAwait(false);

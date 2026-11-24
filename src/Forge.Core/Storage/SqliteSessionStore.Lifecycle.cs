@@ -433,8 +433,9 @@ public sealed partial class SqliteSessionStore
     {
         string status;
         string key;
+        string? parentId;
         bool root;
-        await using (var read = Command(connection, transaction, "SELECT status, occupancy_key, parent_session_id IS NULL FROM sessions WHERE id = $id"))
+        await using (var read = Command(connection, transaction, "SELECT status, occupancy_key, parent_session_id, parent_session_id IS NULL FROM sessions WHERE id = $id"))
         {
             read.Parameters.AddWithValue("$id", sessionId);
             await using var reader = await read.ExecuteReaderAsync(CancellationToken.None).ConfigureAwait(false);
@@ -445,7 +446,8 @@ public sealed partial class SqliteSessionStore
 
             status = reader.GetString(0);
             key = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-            root = reader.GetInt64(2) != 0;
+            parentId = reader.IsDBNull(2) ? null : reader.GetString(2);
+            root = reader.GetInt64(3) != 0;
         }
 
         if (status == StorageSchema.StatusActive)
@@ -455,20 +457,80 @@ public sealed partial class SqliteSessionStore
                 : throw new InvalidOperationException($"Session {sessionId} is already active.");
         }
 
-        await using (var update = Command(
-            connection,
-            transaction,
-            $"""
-            UPDATE sessions SET status = 'Active', deleted_at = NULL
-            WHERE id = $id AND status IN ('Archived', 'Deleted') {(root ? "AND " + KeyFreeSql : string.Empty)}
-            """))
+        if (root)
         {
+            // A root takes the workspace's occupancy key on its own; an existing Active root is the occupied dialog's case.
+            await using var update = Command(
+                connection,
+                transaction,
+                $"""
+                UPDATE sessions SET status = 'Active', deleted_at = NULL
+                WHERE id = $id AND status IN ('Archived', 'Deleted') AND {KeyFreeSql}
+                """);
             update.Parameters.AddWithValue("$id", sessionId);
             update.Parameters.AddWithValue("$key", key);
-            var changed = await ExecuteOccupyingAsync(update, connection, transaction, key, zeroRowsMeansOccupied: root).ConfigureAwait(false);
+            var changed = await ExecuteOccupyingAsync(update, connection, transaction, key, zeroRowsMeansOccupied: true).ConfigureAwait(false);
             if (changed != 1)
             {
                 throw new InvalidOperationException($"Session {sessionId} could not be activated.");
+            }
+        }
+        else
+        {
+            // An agent session comes back into its branch: under the branch's Active root when there is one, and as that
+            // root when there is none (the history session the user restores takes the branch over).
+            string? activeRoot = null;
+            await using (var holder = Command(
+                connection,
+                transaction,
+                "SELECT id FROM sessions WHERE occupancy_key = $key AND parent_session_id IS NULL AND status = 'Active' LIMIT 1"))
+            {
+                holder.Parameters.AddWithValue("$key", key);
+                activeRoot = await holder.ExecuteScalarAsync(CancellationToken.None).ConfigureAwait(false) as string;
+            }
+
+            await using (var update = Command(
+                connection,
+                transaction,
+                activeRoot is null
+                    ? "UPDATE sessions SET status = 'Active', deleted_at = NULL, parent_session_id = NULL, child_driver = NULL WHERE id = $id AND status IN ('Archived', 'Deleted')"
+                    : "UPDATE sessions SET status = 'Active', deleted_at = NULL, parent_session_id = $root WHERE id = $id AND status IN ('Archived', 'Deleted')"))
+            {
+                update.Parameters.AddWithValue("$id", sessionId);
+                if (activeRoot is not null)
+                {
+                    update.Parameters.AddWithValue("$root", activeRoot);
+                }
+
+                if (await update.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false) != 1)
+                {
+                    throw new InvalidOperationException($"Session {sessionId} could not be activated.");
+                }
+            }
+
+            if (activeRoot is null && parentId is not null)
+            {
+                // The row it hung under becomes an agent of it when that row is a root, and every user agent session of
+                // that row follows the branch's new root (an archived one left behind would be a row nothing can reach).
+                await using (var demote = Command(
+                    connection,
+                    transaction,
+                    $"UPDATE sessions SET parent_session_id = $id, child_driver = '{StorageSchema.ChildDriverUser}' WHERE id = $parent AND parent_session_id IS NULL"))
+                {
+                    demote.Parameters.AddWithValue("$id", sessionId);
+                    demote.Parameters.AddWithValue("$parent", parentId);
+                    await demote.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+
+                await using (var adopt = Command(
+                    connection,
+                    transaction,
+                    $"UPDATE sessions SET parent_session_id = $id WHERE parent_session_id = $parent AND child_driver = '{StorageSchema.ChildDriverUser}' AND id <> $id"))
+                {
+                    adopt.Parameters.AddWithValue("$id", sessionId);
+                    adopt.Parameters.AddWithValue("$parent", parentId);
+                    await adopt.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+                }
             }
         }
 
@@ -873,12 +935,13 @@ public sealed partial class SqliteSessionStore
                 }
             }
 
-            // 3. The root's remaining agent sessions belong to the new root from now on; leaving them parented to the archived
-            //    row would make them read-only orphans nobody can reach from the tree.
+            // 3. Every agent session of the root belongs to the new root from now on, archived ones included: leaving an
+            //    archived one parented to the demoted row would hide it from the tree (only a root expands its agent rows)
+            //    and make it a read-only orphan.
             await using (var adopt = Command(
                 connection,
                 transaction,
-                $"UPDATE sessions SET parent_session_id = $child WHERE parent_session_id = $root AND child_driver = '{StorageSchema.ChildDriverUser}' AND status = 'Active'"))
+                $"UPDATE sessions SET parent_session_id = $child WHERE parent_session_id = $root AND child_driver = '{StorageSchema.ChildDriverUser}'"))
             {
                 adopt.Parameters.AddWithValue("$child", successor);
                 adopt.Parameters.AddWithValue("$root", rootSessionId);
@@ -916,8 +979,8 @@ public sealed partial class SqliteSessionStore
                 {
                     case null:
                         return [];
-                    case string value when value != StorageSchema.StatusDeleted:
-                        throw new InvalidOperationException($"Session {sessionId} is {value}; only a Deleted session can be purged.");
+                    case string value when value is not (StorageSchema.StatusArchived or StorageSchema.StatusDeleted):
+                        throw new InvalidOperationException($"Session {sessionId} is {value}; only an archived or removed session can be purged.");
                 }
             }
 

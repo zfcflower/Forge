@@ -101,7 +101,7 @@ internal enum TreeRowMark
 {
     None,
 
-    /// <summary>A workspace row whose sessions were all removed and whose directory is gone: greyed, restore or purge only.</summary>
+    /// <summary>A workspace row whose sessions were all removed and whose directory is gone: greyed, restore workspace only.</summary>
     Recycled,
 
     /// <summary>A workspace row whose directory no longer exists while it still has sessions (5.3 "目录缺失").</summary>
@@ -129,7 +129,7 @@ internal enum TreeRowMark
     Removed,
 }
 
-/// <summary>A repository workspace row as the removal / restore / purge commands see it (7.3, 7.5).</summary>
+/// <summary>A repository workspace row as the removal and restore commands see it (7.3, 7.5).</summary>
 internal sealed record WorkspaceTarget(ProjectInfo Project, string Directory, string? Branch, string? ForkOfBranch);
 
 internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode<TreeNodeViewModel>
@@ -424,9 +424,6 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         OnPropertyChanged(nameof(SyncHeader));
         OnPropertyChanged(nameof(AbortMergeHeader));
         OnPropertyChanged(nameof(RowMarkText));
-        OnPropertyChanged(nameof(RemoveHeader));
-        OnPropertyChanged(nameof(RestoreHeader));
-        OnPropertyChanged(nameof(PurgeHeader));
     }
 
     /// <summary>The state line of the row: an agent's run state, or empty when the row has none.</summary>
@@ -621,39 +618,14 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     /// <summary>A recycled workspace row: drawn greyed (5.1).</summary>
     public bool IsRecycled => rowMark == TreeRowMark.Recycled;
 
-    /// <summary>"Restore…" on a removed session row, "restore workspace…" on a recycled workspace row (7.4, 7.5).</summary>
+    /// <summary>"Restore session" on a history session row, "restore workspace" on a recycled workspace row (7.4, 7.5).</summary>
     public ICommand? RestoreCommand { get; private set; }
 
-    /// <summary>"Delete permanently…" on a removed session row, "delete all sessions permanently…" on a recycled workspace row (7.5).</summary>
-    public ICommand? PurgeCommand { get; private set; }
-
-    public bool HasRemove => RemoveCommand is not null;
-
-    public bool HasRestore => RestoreCommand is not null;
-
-    public bool HasPurge => PurgeCommand is not null;
-
-    /// <summary>The remove entry's label by row: close the project, remove the workspace, remove the session (7.2, 7.3, 7.7).</summary>
-    public string RemoveHeader => Kind switch
-    {
-        TreeNodeKind.Project => RemovalStrings.MenuCloseProject,
-        TreeNodeKind.Worktree => RemovalStrings.MenuRemoveWorkspace,
-        _ => RemovalStrings.MenuRemoveSession,
-    };
-
-    public string RestoreHeader => Kind == TreeNodeKind.Worktree ? RemovalStrings.MenuRestoreWorkspace : RemovalStrings.MenuRestore;
-
-    public string PurgeHeader => Kind == TreeNodeKind.Worktree ? RemovalStrings.MenuPurgeAll : RemovalStrings.MenuPurge;
-
-    /// <summary>Replaces the restore / purge entries of a reused node; null hides the entry.</summary>
-    public void SetRecoveryCommands(ICommand? restore, ICommand? purge)
+    /// <summary>Replaces the restore entry of a reused node; null hides the entry.</summary>
+    public void SetRestoreCommand(ICommand? restore)
     {
         RestoreCommand = restore;
-        PurgeCommand = purge;
         OnPropertyChanged(nameof(RestoreCommand));
-        OnPropertyChanged(nameof(PurgeCommand));
-        OnPropertyChanged(nameof(HasRestore));
-        OnPropertyChanged(nameof(HasPurge));
     }
 
     /// <summary>Replaces the lifecycle commands (6.5, 6.6) of a reused node; null hides the entry.</summary>
@@ -677,7 +649,7 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     /// <summary>Re-asks every command of the row whether it can run, after an in-memory lifecycle state changed.</summary>
     public void NotifyCommandStates()
     {
-        foreach (var command in new[] { OpenCommand, NewSessionCommand, NewAgentSessionCommand, ArchiveCommand, PromoteCommand, RenameCommand, RevealCommand, RemoveCommand, ForkCommand, MergeBackCommand, SyncCommand, AbortMergeCommand, RestoreCommand, PurgeCommand, LinkWorkspaceCommand, ReplaceSessionCommand, RenameBranchCommand, ContinueCommand, OpenInVsCodeCommand })
+        foreach (var command in new[] { OpenCommand, NewSessionCommand, NewAgentSessionCommand, ArchiveCommand, PromoteCommand, RenameCommand, RevealCommand, RemoveCommand, ForkCommand, MergeBackCommand, SyncCommand, AbortMergeCommand, RestoreCommand, LinkWorkspaceCommand, ReplaceSessionCommand, RenameBranchCommand, OpenInVsCodeCommand })
         {
             (command as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         }
@@ -713,7 +685,6 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         OnPropertyChanged(nameof(RenameCommand));
         OnPropertyChanged(nameof(RevealCommand));
         OnPropertyChanged(nameof(RemoveCommand));
-        OnPropertyChanged(nameof(HasRemove));
     }
 
     public void NotifyChildrenChanged() => OnPropertyChanged(nameof(HasToggle));
@@ -823,7 +794,7 @@ internal sealed record TreeNodePlan(
     /// <summary>The workspace has the repository's default branch checked out: no "rename branch" (5.4 rule 2).</summary>
     public bool IsDefaultBranch { get; init; }
 
-    /// <summary>An archived session whose directory is gone: "continue" is disabled (6.3). Probed while planning.</summary>
+    /// <summary>An archived session whose directory is gone: the row still offers restore, which rebuilds it (6.3). Probed while planning.</summary>
     public bool DirectoryMissing { get; init; }
 
     /// <summary>Git's reason for a <see cref="TreeRowMark.Prunable"/> workspace row (or its archived sessions), from the worktree list.</summary>
@@ -831,7 +802,7 @@ internal sealed record TreeNodePlan(
 
     /// <summary>
     /// An archived session's workspace mark when git no longer treats it as a worktree (<see cref="TreeRowMark.Prunable"/>
-    /// or <see cref="TreeRowMark.Unregistered"/>): "continue" is disabled with git's reason. None otherwise.
+    /// or <see cref="TreeRowMark.Unregistered"/>): restore is disabled with git's reason. None otherwise.
     /// </summary>
     public TreeRowMark WorkspaceMark { get; init; }
 
@@ -964,6 +935,12 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
 
     /// <summary>Called after a session was archived, so the shell can drop its runtime when nothing else uses it.</summary>
     public Action<string>? SessionArchived { get; set; }
+
+    /// <summary>
+    /// Called when an archive or a promotion handed a workspace to <c>promoted</c> (the second argument) and the archived
+    /// root is the first: the shell re-homes the agent-session tabs the store moved under the new root.
+    /// </summary>
+    public Action<string, SessionInfo>? SessionPromoted { get; set; }
     public Func<string, Task<bool>>? ArchiveGuard { get; set; }
 
     /// <summary>Runs the parallel fork dialog (6.5) for a source workspace with the given default context; set by the shell.</summary>
@@ -1002,17 +979,11 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// <summary>"Remove workspace…" (7.3) of a repository workspace row other than the root checkout.</summary>
     public Func<WorkspaceTarget, CancellationToken, Task>? RemoveWorkspace { get; set; }
 
-    /// <summary>"Restore…" of a removed session row (7.4).</summary>
+    /// <summary>"Restore session…" of a history session row (7.4): archived and removed sessions take the same flow.</summary>
     public Func<SessionInfo, ProjectInfo, CancellationToken, Task>? RestoreSession { get; set; }
 
     /// <summary>"Restore workspace…" of a recycled workspace row (7.5): rebuilds the directory only.</summary>
     public Func<WorkspaceTarget, CancellationToken, Task>? RestoreWorkspace { get; set; }
-
-    /// <summary>"Delete permanently…" of a removed session row (7.5).</summary>
-    public Func<SessionInfo, CancellationToken, Task>? PurgeSession { get; set; }
-
-    /// <summary>"Delete all sessions permanently…" of a recycled workspace row (7.5).</summary>
-    public Func<WorkspaceTarget, CancellationToken, Task>? PurgeAll { get; set; }
 
     /// <summary>The project row's "pair a remote" button: asks how (a URL or a new GitHub repository), runs it and reports the outcome.</summary>
     public Func<ProjectInfo, CancellationToken, Task>? PairRemote { get; set; }
@@ -1236,7 +1207,15 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
 
         var promoted = await BackgroundRead.RunAsync(token => catalog.ArchiveAndPromoteAsync(sessionId, null, token), ct)
             .ConfigureAwait(true);
-        SessionArchived?.Invoke(sessionId);
+        if (promoted is null)
+        {
+            SessionArchived?.Invoke(sessionId);
+        }
+        else
+        {
+            SessionPromoted?.Invoke(sessionId, promoted);
+        }
+
         SetStatus(promoted is null ? default : LocText.Literal(ProjectStrings.PromotedToMain(promoted.Title)));
         await RefreshAsync(ct).ConfigureAwait(true);
     }
@@ -1269,9 +1248,17 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             return;
         }
 
-        await BackgroundRead.RunAsync(token => catalog.ArchiveAndPromoteAsync(rootSessionId, agentSessionId, token), ct)
+        var promoted = await BackgroundRead.RunAsync(token => catalog.ArchiveAndPromoteAsync(rootSessionId, agentSessionId, token), ct)
             .ConfigureAwait(true);
-        SessionArchived?.Invoke(rootSessionId);
+        if (promoted is null)
+        {
+            SessionArchived?.Invoke(rootSessionId);
+        }
+        else
+        {
+            SessionPromoted?.Invoke(rootSessionId, promoted);
+        }
+
         await RefreshAsync(ct).ConfigureAwait(true);
     }
 
@@ -1557,7 +1544,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                     worktreeChildren.Add(history with
                     {
                         Children = history.Children
-                            .Select(child => child.Session is { Status: SessionStatus.Archived }
+                            .Select(child => child.Session is { Status: SessionStatus.Archived or SessionStatus.Deleted }
                                 ? child with { WorkspaceMark = mark, PrunableReason = prunableReason }
                                 : child)
                             .ToArray(),
@@ -1592,6 +1579,14 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             });
         }
 
+        // A worktree without a session keeps its row (7.3): the directory and the branch outlive a session removal, so the
+        // tree lists every registered worktree of the project, not only the ones a session points at. Ordered after the
+        // session groups (which sort by last activity), then by path.
+        foreach (var row in PlanWorktreesWithoutSessions(project, git, groups, defaultBranch))
+        {
+            children.Add(row);
+        }
+
         return new TreeNodePlan(
             TreeNodeKind.Project,
             "project:" + project.Id,
@@ -1604,6 +1599,88 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             null,
             false,
             children);
+    }
+
+    /// <summary>
+    /// The rows of the project's git worktrees that no Forge session points at: an existing directory is planned like any
+    /// linked workspace (its read checkout state when the refresh got one, otherwise its HEAD from the worktree list), a
+    /// missing one carries 〔目录缺失〕 and only offers its removal. Bare and locked entries (Forge cannot use either) and the
+    /// root checkout (its own row) are left out, and a list git could not be read (or read empty) adds nothing: an unknown
+    /// list is not a source of rows.
+    /// </summary>
+    internal static IEnumerable<TreeNodePlan> PlanWorktreesWithoutSessions(
+        ProjectInfo project,
+        MenuGitReads git,
+        IGrouping<string, SessionInfo>[] groups,
+        string? defaultBranch)
+    {
+        if (!git.Worktrees.TryGetValue(project.RootPath, out var list) || list is null)
+        {
+            yield break;
+        }
+
+        var used = new HashSet<string>(PathComparer);
+
+        // The root checkout is never a "worktree without a session": its own row owns it, under git's spelling and Forge's.
+        used.Add(project.RootPath);
+        if (WorktreeList.Find(list, project.RootPath) is { } rootEntry)
+        {
+            used.Add(rootEntry.Path);
+        }
+
+        foreach (var group in groups)
+        {
+            used.Add(group.Key);
+
+            // The list can carry the same worktree under two spellings (git's link-resolved one and Forge's); the entry
+            // the group matches is skipped under both, so one directory never gets a second, empty row.
+            if (WorktreeList.Find(list, group.Key) is { } match)
+            {
+                used.Add(match.Path);
+            }
+        }
+
+        foreach (var worktree in list.OrderBy(static worktree => worktree.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            if (worktree.IsBare
+                || worktree.IsLocked
+                || string.Equals(worktree.Path, project.RootPath, StringComparison.OrdinalIgnoreCase)
+                || used.Contains(worktree.Path))
+            {
+                continue;
+            }
+
+            var directory = worktree.Path;
+            var branch = worktree.IsDetached ? null : worktree.Branch;
+            var (mark, prunableReason) = Directory.Exists(directory)
+                ? WorktreeMark(git, project.RootPath, directory)
+                : (TreeRowMark.Missing, (string?)null);
+            var head = worktree.IsDetached
+                ? GitHeadKind.Detached
+                : worktree.HeadCommit is { Length: > 0 } ? GitHeadKind.Branch : GitHeadKind.UnbornBranch;
+            var state = git.States.TryGetValue(directory, out var read)
+                ? read
+                : new WorkspaceGitState(head, false, false);
+
+            yield return new TreeNodePlan(
+                TreeNodeKind.Worktree,
+                "worktree:" + project.Id + "|" + directory,
+                branch ?? Path.GetFileName(directory),
+                directory,
+                false,
+                project,
+                null,
+                directory,
+                branch,
+                false,
+                [])
+            {
+                RowMark = mark,
+                PrunableReason = prunableReason,
+                GitState = state,
+                IsDefaultBranch = IsDefaultBranchName(branch, defaultBranch),
+            };
+        }
     }
 
     /// <summary>
@@ -2115,7 +2192,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                         OnFailed));
                 break;
             case TreeNodeKind.Worktree when plan.RowMark == TreeRowMark.Recycled:
-                // A recycled workspace row (5.2): restore the directory, or purge its removed sessions; nothing else.
+                // A recycled workspace row (5.2): restore its directory; its sessions are removed one by one from history.
                 node.SetCommands(open: null, newSession: null, archive: null, rename: null, reveal: null, remove: null);
                 break;
             case TreeNodeKind.Worktree when plan.Project is { } project:
@@ -2132,29 +2209,29 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                     reveal: new AsyncRelayCommand(ct => reveal(plan.WorktreePath), () => !directoryMissing, OnFailed),
                     remove: RemoveWorkspaceCommand(plan, project));
                 break;
-            case TreeNodeKind.Session when plan.Session is { Status: SessionStatus.Deleted } session:
-                // A removed session row (5.2): read-only view, restore, purge; no rename (on purpose) and no archive.
-                node.SetCommands(
-                    open: new AsyncRelayCommand(ct => OpenSessionAsync(session, ct), () => true, OnFailed),
-                    newSession: null,
-                    archive: null,
-                    rename: null,
-                    reveal: null,
-                    remove: null);
-                break;
             case TreeNodeKind.Session when plan.Session is { } session:
-                // A live or archived root session: rename it or archive it, never remove it. Removal belongs to a removed
-                // (history) session, so archiving is the one step that takes a running session out of the worktree.
+                // A live root session is renamed or archived, never removed; a history session (archived or removed) opens
+                // read-only and can be restored or removed. Removal is the irreversible direct cleanup of 7.2.
+                var isDeleted = session.Status == SessionStatus.Deleted;
                 node.SetCommands(
                     open: new AsyncRelayCommand(ct => OpenSessionAsync(session, ct), () => true, OnFailed),
                     newSession: null,
-                    archive: new AsyncRelayCommand(
-                        ct => ArchiveRootAsync(session.Id, ct),
-                        () => session.Status == SessionStatus.Active && !Blocked(DirectoryOf(session)),
-                        OnFailed),
-                    rename: new AsyncRelayCommand(ct => RenameSessionAsync(session, ct), () => !Blocked(DirectoryOf(session)), OnFailed),
-                    reveal: new AsyncRelayCommand(ct => reveal(session.WorkspacePath), () => true, OnFailed),
-                    remove: null);
+                    archive: session.Status == SessionStatus.Active
+                        ? new AsyncRelayCommand(
+                            ct => ArchiveRootAsync(session.Id, ct),
+                            () => !Blocked(DirectoryOf(session)),
+                            OnFailed)
+                        : null,
+                    rename: isDeleted
+                        ? null
+                        : new AsyncRelayCommand(ct => RenameSessionAsync(session, ct), () => !Blocked(DirectoryOf(session)), OnFailed),
+                    reveal: isDeleted ? null : new AsyncRelayCommand(ct => reveal(session.WorkspacePath), () => true, OnFailed),
+                    remove: session.Status != SessionStatus.Active && plan.Project is { } owner
+                        ? new AsyncRelayCommand(
+                            ct => RemoveSession?.Invoke(session, owner, ct) ?? Task.CompletedTask,
+                            () => RemoveSession is not null && !Blocked(DirectoryOf(session)),
+                            OnFailed)
+                        : null);
                 break;
             case TreeNodeKind.AgentSession when plan.Session is { } child:
                 // A session row of its own, standing beside its root: the click opens (or brings forward) its tab in the main
@@ -2168,7 +2245,9 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                     archive: child.Status == SessionStatus.Active
                         ? new AsyncRelayCommand(ct => ArchiveAgentSessionAsync(child.Id, ct), () => !Blocked(agentDirectory), OnFailed)
                         : null,
-                    rename: new AsyncRelayCommand(ct => RenameSessionAsync(child, ct), () => !Blocked(agentDirectory), OnFailed),
+                    rename: child.Status == SessionStatus.Deleted
+                        ? null
+                        : new AsyncRelayCommand(ct => RenameSessionAsync(child, ct), () => !Blocked(agentDirectory), OnFailed),
                     reveal: null,
                     remove: child.Status != SessionStatus.Active && plan.Project is { } agentOwner
                         ? new AsyncRelayCommand(
@@ -2219,7 +2298,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     {
         if (plan.IsMainCheckout
             || project.Kind != ProjectKind.Repository
-            || string.Equals(plan.WorktreePath, project.RootPath, StringComparison.OrdinalIgnoreCase))
+            || RemovalFlow.SameDirectory(plan.WorktreePath, project.RootPath))
         {
             return null;
         }
@@ -2234,22 +2313,23 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             OnFailed);
     }
 
-    /// <summary>The restore / purge entries (7.4, 7.5) of removed session rows and recycled workspace rows.</summary>
+    /// <summary>The restore entry (7.4, 7.5) of history session rows and recycled workspace rows.</summary>
     private void ApplyRecoveryCommands(TreeNodeViewModel node, TreeNodePlan plan)
     {
         ICommand? restore = null;
-        ICommand? purge = null;
-        if (plan.Kind == TreeNodeKind.Session
-            && plan.Session is { Status: SessionStatus.Deleted, ParentSessionId: null } session
+        if (plan.Kind is TreeNodeKind.Session or TreeNodeKind.AgentSession
+            && plan.Session is { Status: SessionStatus.Archived or SessionStatus.Deleted } session
             && plan.Project is { } owner)
         {
+            // One restore flow for archived and removed sessions, root or agent. The store puts an agent session back
+            // under the branch's active root, or makes it that root when the branch has none; a stale worktree waits for
+            // git to be fixed first. A missing folder does not disable it: restore rebuilds it.
+            var stale = plan.WorkspaceMark is TreeRowMark.Prunable or TreeRowMark.Unregistered;
             restore = new AsyncRelayCommand(
                 ct => RestoreSession?.Invoke(session, owner, ct) ?? Task.CompletedTask,
-                () => RestoreSession is not null && !Blocked(DirectoryOf(session)),
-                OnFailed);
-            purge = new AsyncRelayCommand(
-                ct => PurgeSession?.Invoke(session, ct) ?? Task.CompletedTask,
-                () => PurgeSession is not null,
+                () => RestoreSession is not null
+                      && !stale
+                      && !Blocked(DirectoryOf(session)),
                 OnFailed);
         }
         else if (plan.Kind == TreeNodeKind.Worktree && plan.RowMark == TreeRowMark.Recycled && plan.Project is { } project)
@@ -2259,13 +2339,9 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                 ct => RestoreWorkspace?.Invoke(target, ct) ?? Task.CompletedTask,
                 () => RestoreWorkspace is not null && !Blocked(target.Directory),
                 OnFailed);
-            purge = new AsyncRelayCommand(
-                ct => PurgeAll?.Invoke(target, ct) ?? Task.CompletedTask,
-                () => PurgeAll is not null,
-                OnFailed);
         }
 
-        node.SetRecoveryCommands(restore, purge);
+        node.SetRestoreCommand(restore);
     }
 
     /// <summary>

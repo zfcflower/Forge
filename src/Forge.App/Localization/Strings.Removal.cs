@@ -15,10 +15,8 @@ internal static class RemovalStrings
     public const string MenuRemoveSessionKey = "lifecycle.remove.menuSession";
     public const string MenuRemoveWorkspaceKey = "lifecycle.remove.menuWorkspace";
     public const string MenuCloseProjectKey = "lifecycle.close.menu";
-    public const string MenuRestoreKey = "lifecycle.restore.menu";
+    public const string MenuRestoreSessionKey = "lifecycle.restore.menuSession";
     public const string MenuRestoreWorkspaceKey = "lifecycle.restore.menuWorkspace";
-    public const string MenuPurgeKey = "lifecycle.purge.menu";
-    public const string MenuPurgeAllKey = "lifecycle.purge.menuAll";
 
     // ---------------------------------------------------------------- row marks
     public const string RowRecycledKey = "lifecycle.row.recycled";
@@ -39,10 +37,8 @@ internal static class RemovalStrings
     public const string RemoveWorkspaceTitleKey = "lifecycle.remove.workspaceTitle";
     public const string RemoveFailedTitleKey = "lifecycle.remove.failedTitle";
     public const string SessionQuestionKey = "lifecycle.remove.sessionQuestion";
-    public const string SessionTrashKey = "lifecycle.remove.sessionTrash";
-    public const string SessionKeptRootKey = "lifecycle.remove.sessionKeptRoot";
-    public const string SessionKeptSharedKey = "lifecycle.remove.sessionKeptShared";
-    public const string SessionMissingKey = "lifecycle.remove.sessionMissing";
+    public const string SessionRemoveBodyKey = "lifecycle.remove.sessionBody";
+    public const string ArchiveFirstKey = "lifecycle.remove.archiveFirst";
     public const string WorkspaceTrashKey = "lifecycle.remove.workspaceTrash";
     public const string WorkspaceMissingKey = "lifecycle.remove.workspaceMissing";
     public const string WorkspaceActiveKey = "lifecycle.remove.workspaceActive";
@@ -55,8 +51,6 @@ internal static class RemovalStrings
     public const string ArchiveAndRemoveAnywayKey = "lifecycle.remove.archiveAndRemoveAnyway";
     public const string BusyKey = "lifecycle.remove.busy";
     public const string TrashFailedKey = "lifecycle.remove.trashFailed";
-    public const string RecordFailedKey = "lifecycle.remove.recordFailed";
-    public const string RecordOnlyFailedKey = "lifecycle.remove.recordOnlyFailed";
     public const string ArchivedNotRemovedKey = "lifecycle.remove.archivedNotRemoved";
     public const string ArchiveFailedKey = "lifecycle.remove.archiveFailed";
     public const string ChangedKey = "lifecycle.remove.changed";
@@ -84,11 +78,7 @@ internal static class RemovalStrings
     public const string WorkspaceRestoredKey = "lifecycle.restore.workspaceRestored";
     public const string WorkspacePresentKey = "lifecycle.restore.workspacePresent";
 
-    // ---------------------------------------------------------------- purge
-    public const string PurgeTitleKey = "lifecycle.purge.title";
-    public const string PurgeQuestionKey = "lifecycle.purge.question";
-    public const string PurgeAllQuestionKeyBase = "lifecycle.purge.questionAll";
-    public const string PurgeConfirmKey = "lifecycle.purge.confirm";
+    // ---------------------------------------------------------------- files kept outside the database (removal)
     public const string PurgeRefusedKey = "lifecycle.purge.refused";
     public const string PurgePartialKey = "lifecycle.purge.partial";
     public const string PurgeNotRetriedKey = "lifecycle.purge.notRetried";
@@ -108,13 +98,9 @@ internal static class RemovalStrings
 
     public static string MenuCloseProject => Loc.Instance[MenuCloseProjectKey];
 
-    public static string MenuRestore => Loc.Instance[MenuRestoreKey];
+    public static string MenuRestoreSession => Loc.Instance[MenuRestoreSessionKey];
 
     public static string MenuRestoreWorkspace => Loc.Instance[MenuRestoreWorkspaceKey];
-
-    public static string MenuPurge => Loc.Instance[MenuPurgeKey];
-
-    public static string MenuPurgeAll => Loc.Instance[MenuPurgeAllKey];
 
     public static string RowRecycled => Loc.Instance[RowRecycledKey];
 
@@ -142,13 +128,10 @@ internal static class RemovalStrings
 
     public static string SessionQuestion(string title) => Loc.Instance.Format(SessionQuestionKey, title);
 
-    public static string SessionTrash(string directory) => Loc.Instance.Format(SessionTrashKey, directory, TrashName);
+    /// <summary>What a session removal deletes, and what it leaves alone (the branch and the workspace).</summary>
+    public static string SessionRemoveBody => Loc.Instance.Format(SessionRemoveBodyKey, TrashName);
 
-    public static string SessionKeptRoot => Loc.Instance[SessionKeptRootKey];
-
-    public static string SessionKeptShared => Loc.Instance[SessionKeptSharedKey];
-
-    public static string SessionMissing => Loc.Instance[SessionMissingKey];
+    public static string ArchiveFirst => Loc.Instance[ArchiveFirstKey];
 
     public static string WorkspaceTrash(string directory) => Loc.Instance.Format(WorkspaceTrashKey, directory, TrashName);
 
@@ -174,10 +157,6 @@ internal static class RemovalStrings
     public static string Busy(string reasons) => Loc.Instance.Format(BusyKey, reasons);
 
     public static string TrashFailed(string reason) => Loc.Instance.Format(TrashFailedKey, TrashName, reason);
-
-    public static string RecordFailed(string reason) => Loc.Instance.Format(RecordFailedKey, TrashName, reason);
-
-    public static string RecordOnlyFailed(string reason) => Loc.Instance.Format(RecordOnlyFailedKey, reason);
 
     public static string ArchivedNotRemoved(string title, string reason) => Loc.Instance.Format(ArchivedNotRemovedKey, title, reason);
 
@@ -230,24 +209,16 @@ internal static class RemovalStrings
 
     public static string WorkspacePresent(string directory) => Loc.Instance.Format(WorkspacePresentKey, directory);
 
-    public static string PurgeTitle => Loc.Instance[PurgeTitleKey];
-
-    public static string PurgeQuestion(string title) => Loc.Instance.Format(PurgeQuestionKey, title);
-
-    public static string PurgeAllQuestion(int count) => Loc.Instance.FormatPlural(PurgeAllQuestionKeyBase, count);
-
-    public static string PurgeConfirm => Loc.Instance[PurgeConfirmKey];
-
-    public static string PurgeRefused(string title, IEnumerable<string> inheriting) =>
+    public static string RemoveRefused(string title, IEnumerable<string> inheriting) =>
         Loc.Instance.Format(PurgeRefusedKey, title, string.Join(", ", inheriting));
 
-    public static string PurgePartial(string reasons) => Loc.Instance.Format(PurgePartialKey, reasons);
+    public static string RemovePartial(string reasons) => Loc.Instance.Format(PurgePartialKey, reasons);
 
-    public static string PurgeNotRetried(string reason) => Loc.Instance.Format(PurgeNotRetriedKey, reason);
+    public static string RemoveNotRetried(string reason) => Loc.Instance.Format(PurgeNotRetriedKey, reason);
 
-    public static string PurgeRetryFailed(string reasons) => Loc.Instance.Format(PurgeRetryFailedKey, reasons);
+    public static string RemoveRetryFailed(string reasons) => Loc.Instance.Format(PurgeRetryFailedKey, reasons);
 
-    public static string PurgeFailed(string title, string reason) => Loc.Instance.Format(PurgeFailedKey, title, reason);
+    public static string RemoveFailed(string title, string reason) => Loc.Instance.Format(PurgeFailedKey, title, reason);
 
     public static string CloseTitle => Loc.Instance[CloseTitleKey];
 
@@ -268,10 +239,8 @@ internal static class RemovalStrings
         Loc.Register(MenuRemoveSessionKey, "移除会话…", "Remove session…");
         Loc.Register(MenuRemoveWorkspaceKey, "移除工作区…", "Remove workspace…");
         Loc.Register(MenuCloseProjectKey, "关闭项目…", "Close project…");
-        Loc.Register(MenuRestoreKey, "恢复…", "Restore…");
+        Loc.Register(MenuRestoreSessionKey, "恢复会话", "Restore session");
         Loc.Register(MenuRestoreWorkspaceKey, "恢复工作区…", "Restore workspace…");
-        Loc.Register(MenuPurgeKey, "彻底删除…", "Delete permanently…");
-        Loc.Register(MenuPurgeAllKey, "彻底删除全部会话…", "Delete all sessions permanently…");
 
         Loc.Register(RowRecycledKey, "已回收", "recycled");
         Loc.Register(RowMissingKey, "目录缺失", "directory missing");
@@ -290,30 +259,22 @@ internal static class RemovalStrings
         Loc.Register(RemoveFailedTitleKey, "移除失败", "Removal failed");
         Loc.Register(SessionQuestionKey, "移除会话“{0}”?", "Remove the session \"{0}\"?");
         Loc.Register(
-            SessionTrashKey,
-            "这是该目录的最后一个会话,目录 {0} 将进{1}。",
-            "This is the directory's last session: {0} goes to the {1}.");
+            SessionRemoveBodyKey,
+            "此操作不可撤销:会话记录、全部历史消息、TODO/计划/检查点/指标、工件、评审数据与输入区选择会直接删除,不进{0};分支与工作区原样保留。",
+            "This cannot be undone: the session record, its whole history, todos/plans/checkpoints/metrics, artifacts, review data and the composer selection are deleted directly, not to the {0}; the branch and the workspace are left untouched.");
         Loc.Register(
-            SessionKeptRootKey,
-            "该目录不归 Forge 回收(仓库根检出或项目根):只移除会话记录,目录原样保留。",
-            "Forge does not recycle this directory (the repository checkout or the project root): only the session record is removed, the directory stays.");
-        Loc.Register(
-            SessionKeptSharedKey,
-            "该目录还有其它会话:目录原样保留,只移除此会话记录。",
-            "Other sessions still use this directory: it stays, only this session's record is removed.");
-        Loc.Register(
-            SessionMissingKey,
-            "目录已不存在:将清理 git 登记并移除会话记录。",
-            "The directory is gone: its git registration is cleaned up and the session record is removed.");
+            ArchiveFirstKey,
+            "该会话仍在活动中,请先归档再移除。",
+            "This session is still active; archive it before removing it.");
         Loc.Register(
             WorkspaceTrashKey,
-            "目录 {0} 将进{1},其上所有会话(含已归档)一并移除;分支保留。",
-            "{0} goes to the {1} and all of its sessions (archived ones included) are removed; the branch is kept.");
+            "目录 {0} 将进{1};其上所有会话(含历史)的记录与附属文件直接删除,不可恢复;分支保留。",
+            "{0} goes to the {1}; every session on it (history included) is deleted directly, with its attached files, and cannot be restored; the branch is kept.");
         Loc.Register(
             WorkspaceMissingKey,
             "目录已不存在,将清理 git 登记并移除其会话记录。",
             "The directory no longer exists: its git registration is cleaned up and its session records are removed.");
-        Loc.Register(WorkspaceActiveKey, "活动会话“{0}”会先归档。", "The active session \"{0}\" is archived first.");
+        Loc.Register(WorkspaceActiveKey, "活动会话“{0}”会先归档,再随其它会话一起删除。", "The active session \"{0}\" is archived first, then deleted with the rest.");
         Loc.Register(ReasonsKey, "移除会丢失以下内容:", "Removing it discards:");
         Loc.Register(ChildrenKeyBase + ".one", "将一并移除 {0} 个子 Agent 会话。", "{0} sub-agent session is removed with it.");
         Loc.Register(ChildrenKeyBase + ".other", "将一并移除 {0} 个子 Agent 会话。", "{0} sub-agent sessions are removed with it.");
@@ -324,11 +285,6 @@ internal static class RemovalStrings
         Loc.Register(ArchiveAndRemoveAnywayKey, "归档“{0}”并仍要移除", "Archive \"{0}\" and remove anyway");
         Loc.Register(BusyKey, "现在不能移除:{0}", "Cannot remove it now: {0}");
         Loc.Register(TrashFailedKey, "移进{0}失败,未做任何改动:{1}", "Moving it to the {0} failed; nothing was changed: {1}");
-        Loc.Register(
-            RecordFailedKey,
-            "目录已进{0},但会话记录未更新:{1}。下次启动会自动补写。",
-            "The directory is in the {0}, but the session record was not updated: {1}. The next start writes it.");
-        Loc.Register(RecordOnlyFailedKey, "会话记录未更新:{0}", "The session record was not updated: {0}");
         Loc.Register(ArchivedNotRemovedKey, "已归档“{0}”,目录未移除:{1}", "\"{0}\" was archived, but the directory was not removed: {1}");
         Loc.Register(ArchiveFailedKey, "归档失败,未移除任何东西:{0}", "Archiving failed; nothing was removed: {0}");
         Loc.Register(
@@ -376,49 +332,35 @@ internal static class RemovalStrings
             RootMissingKey,
             "目录 {0} 不归 Forge 重建(仓库根检出或项目根),请先让它重新可用。",
             "Forge does not rebuild {0} (the repository checkout or the project root); make it available again first.");
-        Loc.Register(NotActivatedKey, "目录已重建,会话未恢复:{0}。可再次“恢复…”重试。", "The directory was rebuilt, but the session was not restored: {0}. Use \"Restore…\" to try again.");
+        Loc.Register(NotActivatedKey, "目录已重建,会话未恢复:{0}。可再次“恢复会话”重试。", "The directory was rebuilt, but the session was not restored: {0}. Use \"Restore session\" to try again.");
         Loc.Register(
             NotActivatedCancelledKey,
-            "目录已重建,会话未恢复。可再次“恢复…”重试。",
-            "The directory was rebuilt, but the session was not restored. Use \"Restore…\" to try again.");
+            "目录已重建,会话未恢复。可再次“恢复会话”重试。",
+            "The directory was rebuilt, but the session was not restored. Use \"Restore session\" to try again.");
         Loc.Register(
             RebuiltWorktreeKey,
             "已按完整检出重建目录 {0};原稀疏检出配置无法恢复。",
             "{0} was rebuilt as a full checkout; its sparse checkout settings cannot be restored.");
         Loc.Register(
             WorkspaceRestoredKey,
-            "目录 {0} 已重建(完整检出,稀疏配置无法恢复);其会话仍为已移除,请逐个“恢复…”。",
+            "目录 {0} 已重建(完整检出,稀疏配置无法恢复);其会话仍为已移除,请逐个“恢复会话”。",
             "{0} was rebuilt (a full checkout; sparse settings cannot be restored). Its sessions stay removed: restore them one by one.");
         Loc.Register(
             WorkspacePresentKey,
-            "目录 {0} 已存在,无需重建;其会话请逐个“恢复…”。",
+            "目录 {0} 已存在,无需重建;其会话请逐个“恢复会话”。",
             "{0} already exists and needs no rebuild; restore its sessions one by one.");
 
-        Loc.Register(PurgeTitleKey, "彻底删除", "Delete permanently");
-        Loc.Register(
-            PurgeQuestionKey,
-            "彻底删除“{0}”及其子会话的全部记录?此操作不可撤销。分支与回收站里的目录不受影响。",
-            "Delete every record of \"{0}\" and its sub-agent sessions? This cannot be undone. Branches and directories in the trash are not touched.");
-        Loc.Register(
-            PurgeAllQuestionKeyBase + ".one",
-            "彻底删除该行下 {0} 个已移除会话的全部记录?此操作不可撤销。",
-            "Delete every record of the {0} removed session here? This cannot be undone.");
-        Loc.Register(
-            PurgeAllQuestionKeyBase + ".other",
-            "彻底删除该行下 {0} 个已移除会话的全部记录?此操作不可撤销。",
-            "Delete every record of the {0} removed sessions here? This cannot be undone.");
-        Loc.Register(PurgeConfirmKey, "彻底删除", "Delete permanently");
-        Loc.Register(PurgeRefusedKey, "“{0}”被以下会话继承,未删除:{1}", "\"{0}\" was kept: these sessions inherit from it: {1}");
+        Loc.Register(PurgeRefusedKey, "“{0}”被以下会话继承,未移除:{1}", "\"{0}\" was kept: these sessions inherit from it: {1}");
         Loc.Register(
             PurgePartialKey,
-            "记录已删除,部分附属文件未清理,下次启动会重试:{0}",
-            "The records were deleted, but some attached files were not cleaned up; the next start tries again: {0}");
+            "会话记录已删除,部分附属文件未清理,下次启动会重试:{0}",
+            "The session records were deleted, but some attached files were not cleaned up; the next start tries again: {0}");
         Loc.Register(PurgeNotRetriedKey, "无法记下待重试的清理,不会自动重试:{0}", "the cleanup could not be noted for a retry and will not be retried: {0}");
         Loc.Register(
             PurgeRetryFailedKey,
-            "此前彻底删除留下的附属文件仍未清理,下次启动再试:{0}",
-            "Files left by an earlier permanent delete are still not cleaned up; the next start tries again: {0}");
-        Loc.Register(PurgeFailedKey, "无法彻底删除“{0}”:{1}", "Could not delete \"{0}\": {1}");
+            "此前移除会话留下的附属文件仍未清理,下次启动再试:{0}",
+            "Files left by an earlier session removal are still not cleaned up; the next start tries again: {0}");
+        Loc.Register(PurgeFailedKey, "无法移除“{0}”:{1}", "Could not remove \"{0}\": {1}");
 
         Loc.Register(CloseTitleKey, "关闭项目", "Close project");
         Loc.Register(

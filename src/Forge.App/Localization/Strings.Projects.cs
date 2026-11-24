@@ -85,7 +85,7 @@ internal static class ProjectStrings
         Loc.Register(ProjectCountKeyBase + ".one", "共 {0} 个区域", "{0} area");
         Loc.Register(ProjectCountKeyBase + ".other", "共 {0} 个区域", "{0} areas");
         Loc.Register(HistoryTitleKey, "历史 ({0})", "History ({0})");
-        Loc.Register(ArchivedSubtitleKey, "已归档 · 打开即恢复", "Archived · open to restore");
+        Loc.Register(ArchivedSubtitleKey, "已归档 · 可恢复会话", "Archived · restore to continue");
         Loc.Register(RunningLabelKey, "运行中", "Running");
         Loc.Register(TreeNameKey, "项目树", "Project tree");
 

@@ -812,9 +812,10 @@ internal sealed class AppComposition : IAsyncDisposable
             (history, tree, ct) => composition.SummarizeHandoverAsync(history, tree, ct));
         composition.Merge = new MergeFlow(new MergeGit(git));
         var purgeReviews = reviews ?? new ReviewStore(paths.ReviewsDirectory);
+        var purgeComposer = new SessionComposerStore(uiState);
         composition.PurgeCleanup = new PurgeCleanup(
             new PurgeCleanupJournal(Path.Combine(paths.UserDataDirectory, "purge-pending.txt")),
-            (sessionId, ct) => PurgeSessionFilesAsync(artifacts, purgeReviews, sessionId, ct),
+            (sessionId, ct) => PurgeSessionFilesAsync(artifacts, purgeReviews, purgeComposer, sessionId, ct),
             async (sessionId, ct) => await sessions.GetSessionAsync(sessionId, ct).ConfigureAwait(false) is not null);
         composition.Removal = new RemovalFlow(
             sessions,
@@ -895,14 +896,16 @@ internal sealed class AppComposition : IAsyncDisposable
         Providers.ReloadAsync(cancellationToken);
 
     /// <summary>
-    /// What a purge removes besides the catalog rows (7.5): the session's artifacts (their <c>artifacts</c> rows and its
-    /// <c>&lt;UserData&gt;/artifacts/&lt;id&gt;</c> folder) and its review marks and comments. Each part runs even when
-    /// another failed, so one stuck file does not leave the rest behind; every failure is then reported in one exception,
-    /// which <see cref="RemovalFlow"/> shows as a partial purge. Both parts delete by session id only and are idempotent.
+    /// What a session removal deletes besides the catalog rows (7.2): the session's artifacts (their <c>artifacts</c> rows
+    /// and its <c>&lt;UserData&gt;/artifacts/&lt;id&gt;</c> folder), its review marks and comments, and its stored composer draft.
+    /// Each part runs even when another failed, so one stuck file does not leave the rest behind; every failure is then
+    /// reported in one exception, which <see cref="RemovalFlow"/> shows as a partial cleanup. Every part deletes by session
+    /// id only and is idempotent.
     /// </summary>
     internal static async Task PurgeSessionFilesAsync(
         IArtifactStore artifacts,
         ReviewStore reviews,
+        SessionComposerStore composer,
         string sessionId,
         CancellationToken ct)
     {
@@ -920,6 +923,16 @@ internal sealed class AppComposition : IAsyncDisposable
         try
         {
             await reviews.DeleteSessionAsync(sessionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            (failures ??= []).Add(exception);
+        }
+
+        ct.ThrowIfCancellationRequested();
+        try
+        {
+            await composer.DeleteAsync(sessionId, ct).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

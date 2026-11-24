@@ -25,15 +25,12 @@ internal enum TreeMenuKey
     RenameBranch,
     RemoveWorkspace,
     RestoreWorkspace,
-    PurgeAll,
     RenameSession,
     Archive,
     Promote,
     RemoveSession,
     View,
-    Continue,
     Restore,
-    Purge,
 }
 
 /// <summary>The row types of 5.2 that have a menu; <see cref="None"/> is every row that has none.</summary>
@@ -137,20 +134,20 @@ internal static class TreeMenu
             TreeRowKind.RecycledWorkspace =>
             [
                 Gate(TreeMenuKey.RestoreWorkspace, row.Operating ? HandoverStrings.BusyWorkspaceOperating : null),
-                TreeMenuEntry.Divider,
-                new(TreeMenuKey.PurgeAll),
             ],
             TreeRowKind.ActiveSession => ActiveSession(row),
             // A session the user opened under a root stands beside it: it is renamed and archived here, and promoted to the
             // workspace's root from here; removal follows its own archive, so an active row never offers it.
             TreeRowKind.AgentSession => AgentSession(row),
             TreeRowKind.HistorySession => HistorySession(row),
+            // A removed session (the startup self-heal found its directory gone) offers what an archived one does: restore
+            // it, or remove it for good. It is not renamed: a removed row never was. Opening it read-only is the row's own
+            // click, so the menu does not repeat it.
             TreeRowKind.RemovedSession =>
             [
-                new(TreeMenuKey.View, IsDefault: true),
-                Gate(TreeMenuKey.Restore, WorkspaceBlock(row)),
+                Gate(TreeMenuKey.Restore, RestoreReason(row)),
                 TreeMenuEntry.Divider,
-                new(TreeMenuKey.Purge),
+                Gate(TreeMenuKey.RemoveSession, WorkspaceBlock(row)),
             ],
             _ => (List<TreeMenuEntry>)[],
         };
@@ -248,12 +245,21 @@ internal static class TreeMenu
         var warning = row.HeadOffBranch ? TreeMenuStrings.HeadWarning : null;
         if (row.SessionTitle is null)
         {
-            return
-            [
+            var empty = new List<TreeMenuEntry>(3)
+            {
                 // An agent session hangs under an active root session; without one there is nothing to attach it to.
                 Gate(TreeMenuKey.NewAgentSession, block ?? AgentSessionStrings.NoRoot),
                 Gate(TreeMenuKey.NewSession, block, isDefault: true) with { Warning = warning },
-            ];
+            };
+
+            // A workspace without a session can still be forked: the new branch records the source branch, which is how a
+            // workspace that lost its sessions keeps its fork relation.
+            if (row.InRepository)
+            {
+                empty.Add(Gate(TreeMenuKey.Fork, block ?? (row.HeadOffBranch ? TreeMenuStrings.HeadNotOnBranch : null)));
+            }
+
+            return empty;
         }
 
         var busy = BusyReason(row);
@@ -308,18 +314,20 @@ internal static class TreeMenu
     private static List<TreeMenuEntry> HistorySession(TreeRowState row)
     {
         var block = WorkspaceBlock(row);
-        var entries = new List<TreeMenuEntry> { new(TreeMenuKey.View, IsDefault: true) };
-        if (!row.IsAgentSession)
-        {
-            // Only a root session continues (it resumes the workspace); an agent session's archived row is read-only.
-            entries.Add(Gate(TreeMenuKey.Continue, row.DirectoryMissing ? LifecycleStrings.DirectoryMissing : row.StaleReason));
-        }
-
-        entries.Add(Gate(TreeMenuKey.RenameSession, block));
-        entries.Add(TreeMenuEntry.Divider);
-        entries.Add(Gate(TreeMenuKey.RemoveSession, block));
-        return entries;
+        return
+        [
+            Gate(TreeMenuKey.Restore, RestoreReason(row)),
+            Gate(TreeMenuKey.RenameSession, block),
+            TreeMenuEntry.Divider,
+            Gate(TreeMenuKey.RemoveSession, block),
+        ];
     }
+
+    /// <summary>
+    /// Why a history session cannot be restored now: its workspace waits for an operation, or git no longer treats its
+    /// existing folder as a worktree. A missing folder does not block: restore rebuilds it first.
+    /// </summary>
+    private static string? RestoreReason(TreeRowState row) => row.StaleReason ?? WorkspaceBlock(row);
 
     /// <summary>"Abort the merge" while the workspace is conflicted (6.6 step 5); refused only while another operation runs.</summary>
     private static void AddAbort(List<TreeMenuEntry> entries, TreeRowState row)
@@ -403,15 +411,11 @@ internal static class TreeMenu
         TreeMenuKey.RenameBranch => TreeMenuStrings.RenameBranch,
         TreeMenuKey.RemoveWorkspace => RemovalStrings.MenuRemoveWorkspace,
         TreeMenuKey.RestoreWorkspace => RemovalStrings.MenuRestoreWorkspace,
-        TreeMenuKey.PurgeAll => RemovalStrings.MenuPurgeAll,
         TreeMenuKey.RenameSession => ProjectStrings.Rename,
         TreeMenuKey.Archive => ProjectStrings.Archive,
         TreeMenuKey.Promote => ProjectStrings.PromoteToMain,
         TreeMenuKey.RemoveSession => RemovalStrings.MenuRemoveSession,
-        TreeMenuKey.View => TreeMenuStrings.ViewReadOnly,
-        TreeMenuKey.Continue => TreeMenuStrings.ContinueSession,
-        TreeMenuKey.Restore => RemovalStrings.MenuRestore,
-        TreeMenuKey.Purge => RemovalStrings.MenuPurge,
+        TreeMenuKey.Restore => RemovalStrings.MenuRestoreSession,
         _ => "-",
     };
 }

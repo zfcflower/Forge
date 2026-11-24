@@ -1,0 +1,79 @@
+using Forge.Abstractions;
+using Forge.App.Providers;
+using Forge.App.ViewModels;
+using Forge.Core.Storage;
+using Microsoft.Data.Sqlite;
+using Xunit;
+
+namespace Forge.App.Tests;
+
+/// <summary>
+/// A promotion hands the workspace to another root. The agent-session tabs of the branch move under it in place: the view
+/// keeps its transcript and draft, only the root it hangs under (and the runtime it runs on) changes. A promotion used to
+/// close and reopen every one of those tabs, which rebuilt each view and re-attached every panel - the slow part of a
+/// promotion on a branch with several open agent tabs.
+/// </summary>
+public sealed class AgentSessionRehomeTests : IDisposable
+{
+    private readonly string directory = Path.Combine(Path.GetTempPath(), "forge-rehome-" + Guid.NewGuid().ToString("N"));
+    private readonly HttpClient http = new();
+
+    public void Dispose()
+    {
+        http.Dispose();
+        SqliteConnection.ClearAllPools();
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+        catch (IOException)
+        {
+            // A pooled handle can outlive the test; the temp directory is the OS's problem then.
+        }
+    }
+
+    [Fact]
+    public async Task Rehoming_an_agent_tab_moves_its_root_and_parent_link_without_replaying_it()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+        var oldRoot = await store.CreateAsync(new SessionCreate(directory, "Old Root"), CancellationToken.None);
+        var promoted = await store.CreateAsync(
+            new SessionCreate(directory, "Promoted")
+            {
+                ParentSessionId = oldRoot.Id,
+                ChildDriver = AgentSessionKinds.ChildDriverUser,
+                AgentKind = "Worker",
+            },
+            CancellationToken.None);
+        var worker = await store.CreateAsync(
+            new SessionCreate(directory, "Worker 2")
+            {
+                ParentSessionId = oldRoot.Id,
+                ChildDriver = AgentSessionKinds.ChildDriverUser,
+                AgentKind = "Worker",
+            },
+            CancellationToken.None);
+        await store.AppendAsync(worker.Id, ChatMessage.User("question"), null, CancellationToken.None);
+        await store.AppendAsync(worker.Id, ChatMessage.Assistant("answer"), null, CancellationToken.None);
+
+        var providers = new ProviderServices(Path.Combine(directory, "settings.json"), directory, http);
+        var view = new SessionWorkspaceViewModel(
+            worker,
+            runtime: null,
+            checkpoints: null,
+            store: store,
+            providers,
+            agentSession: new AgentSessionLaunch(oldRoot, Ordinal: 2, IsDraft: false));
+        await view.LoadHistoryAsync(CancellationToken.None);
+        var rounds = view.Transcript.Rounds.Count;
+
+        view.RehomeTo(promoted, runtime: null);
+
+        Assert.Equal(promoted.Id, view.AgentSessionRoot!.Id);
+        Assert.Equal(promoted.Id, view.Info.ParentSessionId);
+        Assert.StartsWith("Promoted \u203a ", view.Title, StringComparison.Ordinal);
+        // The transcript the tab already showed is the one it keeps: nothing is replayed by the move.
+        Assert.Equal(rounds, view.Transcript.Rounds.Count);
+    }
+}

@@ -9,24 +9,6 @@ using ZLogger;
 
 namespace Forge.App.Lifecycle;
 
-/// <summary>
-/// What a removal does with the session's directory (section 2, "目录归属", one decision for every flow).
-/// </summary>
-internal enum DirectoryFate
-{
-    /// <summary>Not Forge's to recycle (the repository root checkout, a non-repository project root, the general root): records only.</summary>
-    Kept,
-
-    /// <summary>Forge's to recycle, but another non-Deleted session still uses it: records only.</summary>
-    Shared,
-
-    /// <summary>Already gone: <c>git worktree prune</c>, then the records.</summary>
-    Missing,
-
-    /// <summary>The last session of a Forge-owned directory: the directory goes to the trash, then the records.</summary>
-    Trash,
-}
-
 /// <summary>The git reads and writes the removal, restore and purge flows (7.2-7.5) need; real or substituted.</summary>
 internal interface IRemovalGit
 {
@@ -164,7 +146,7 @@ internal static class WorktreeList
         return aliased ?? list;
     }
 
-    private static bool SamePathSafe(string left, string right)
+    internal static bool SamePathSafe(string left, string right)
     {
         try
         {
@@ -223,24 +205,7 @@ internal sealed record GuardReason(string Text, GuardReasonKind Kind)
 }
 
 /// <summary>
-/// "Remove session…" read off the UI thread (7.2): where the directory goes, the guard reasons (only when it goes to the
-/// trash), how many sub-agent sessions go with it, and the forks of its branch that were never merged back (6.6).
-/// </summary>
-internal sealed record SessionRemovalPlan(
-    SessionInfo Session,
-    ProjectInfo Project,
-    string Directory,
-    DirectoryFate Fate,
-    IReadOnlyList<GuardReason> Guard,
-    int ChildCount,
-    IReadOnlyList<string> UnmergedForks)
-{
-    /// <summary>The guard reasons as the dialog lists them.</summary>
-    public IReadOnlyList<string> Reasons => [.. Guard.Select(static reason => reason.Text)];
-}
-
-/// <summary>
-/// "Remove workspace…" read off the UI thread (7.3): the workspace's non-Deleted root sessions (archived included), its
+/// "Remove workspace…" read off the UI thread (7.3): the workspace's root sessions (every state, history included), its
 /// active session (archived first by "archive X and remove"), whether the directory is already gone, and the guard reasons.
 /// </summary>
 internal sealed record WorkspaceRemovalPlan(
@@ -258,29 +223,34 @@ internal sealed record WorkspaceRemovalPlan(
     public IReadOnlyList<string> Reasons => [.. Guard.Select(static reason => reason.Text)];
 }
 
-/// <summary>A removal's result: <see cref="Error"/> is the user-visible reason when it did not (fully) go through.</summary>
-internal sealed record RemovalOutcome(bool Succeeded, string? Error, IReadOnlyList<string> RemovedSessionIds)
-{
-    public static RemovalOutcome Done(IReadOnlyList<string> removed) => new(true, null, removed);
+/// <summary>A history session the inheritance guard kept: its title and the sessions that inherit from it.</summary>
+internal sealed record RemovalRefusal(string Title, IReadOnlyList<string> InheritingTitles);
 
-    public static RemovalOutcome Failed(string error) => new(false, error, []);
-}
-
-/// <summary>A purge's result: purged ids, the sessions that kept it (inheritance guard), and a cleanup warning.</summary>
-internal sealed record PurgeOutcome(
-    IReadOnlyList<string> PurgedIds,
-    IReadOnlyList<string> InheritingTitles,
+/// <summary>
+/// What a removal did: the removed ids (so the shell can close their tabs), the sessions the inheritance guard kept,
+/// a cleanup warning and a hard error. A removal that reports <see cref="Error"/> may still have removed sessions.
+/// </summary>
+internal sealed record RemovalOutcome(
+    IReadOnlyList<string> RemovedSessionIds,
+    IReadOnlyList<RemovalRefusal> Refused,
     string? Warning,
     string? Error)
 {
-    public bool Purged => PurgedIds.Count > 0;
+    /// <summary>
+    /// The workspace directory is gone (it was already missing, or the trash took it): a later failure is about the
+    /// sessions, not about a directory that stayed behind. A session removal never moves a directory and leaves this false.
+    /// </summary>
+    public bool DirectoryGone { get; init; }
+
+    public static RemovalOutcome Failed(string error) => new([], [], null, error);
 }
 
 /// <summary>
 /// Removal, restore and purge (TASK-session-worktree-lifecycle 7.2-7.5) without any dialog: the shell asks, this decides
-/// and acts. Disk first, then the record (I2): a trash failure changes nothing; a record failure after the directory went
-/// is left for the startup self-heal and never undone by moving the directory back. The trash is the only way a directory
-/// is removed (no <c>git worktree remove</c>, no forced or direct delete), and never for a repository or project root.
+/// and acts. A session removal never touches its directory or branch: it purges the session (and its descendants) and the
+/// files kept outside the database, directly. A workspace removal recycles the directory (the trash is the only way a
+/// directory is removed - no <c>git worktree remove</c>, no forced or direct delete - and never for a repository or
+/// project root) and then removes every session of it through the same purge.
 /// </summary>
 internal sealed class RemovalFlow(
     ISessionCatalog catalog,
@@ -311,54 +281,39 @@ internal sealed class RemovalFlow(
     public static bool SameDirectory(string left, string right) =>
         string.Equals(Key(left), Key(right), StringComparison.Ordinal);
 
-    public async Task<SessionRemovalPlan> PlanSessionRemovalAsync(SessionInfo session, ProjectInfo project, CancellationToken ct)
+    /// <summary>
+    /// How many sub-agent sessions removing <paramref name="session"/> takes with it, read off the UI thread (7.2) for the
+    /// dialog's "N sub-agent sessions are removed with it" line.
+    /// </summary>
+    public async Task<int> CountRemovalDescendantsAsync(SessionInfo session, ProjectInfo project, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(project);
-        var all = await catalog.QueryAsync(new SessionQuery { ProjectId = project.Id }, ct).ConfigureAwait(false);
-        var directory = DirectoryOf(session);
-        var fate = Fate(session, project, all);
-        IReadOnlyList<GuardReason> reasons = fate == DirectoryFate.Trash && IsRepositoryWorktree(session, project)
-            ? await GuardAsync(project.RootPath, directory, session.ForkOfBranch, ct).ConfigureAwait(false)
-            : [];
-        var forks = project.Kind == ProjectKind.Repository && session.Branch is { Length: > 0 } branch
-            ? await UnmergedForksAsync(project, branch, directory, all, ct).ConfigureAwait(false)
-            : [];
-        return new SessionRemovalPlan(session, project, directory, fate, reasons, Descendants(session.Id, all).Count, forks);
+        var all = await AllSessionsAsync(project.Id, ct).ConfigureAwait(false);
+        return Descendants(session.Id, all).Count;
     }
 
     /// <summary>
-    /// 7.2 steps 3-4 after the dialog. The session is re-read and the directory decision recomputed: a session that is gone
-    /// or already removed, or a directory that would now go to the trash although the dialog did not say so, removes nothing.
+    /// 7.2 after the dialog: a history session (Archived / Deleted) is purged with its descendants and every file kept
+    /// outside the database. The directory and the branch are not touched, so nothing has to be guarded or recycled; a
+    /// session that became Active again, or is gone, removes nothing.
     /// </summary>
-    public async Task<RemovalOutcome> ExecuteSessionRemovalAsync(SessionRemovalPlan plan, CancellationToken ct)
+    public async Task<RemovalOutcome> RemoveSessionAsync(SessionInfo session, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(plan);
-        var current = await store.GetSessionAsync(plan.Session.Id, ct).ConfigureAwait(false);
-        if (current is null || current.Status == SessionStatus.Deleted)
+        ArgumentNullException.ThrowIfNull(session);
+        var current = await store.GetSessionAsync(session.Id, ct).ConfigureAwait(false);
+        if (current is null)
         {
             return RemovalOutcome.Failed(RemovalStrings.Changed);
         }
 
-        var all = await catalog.QueryAsync(new SessionQuery { ProjectId = plan.Project.Id }, ct).ConfigureAwait(false);
-        var fate = Fate(current, plan.Project, all);
-        if (fate == DirectoryFate.Trash && plan.Fate != DirectoryFate.Trash)
+        if (current.Status == SessionStatus.Active)
         {
-            return RemovalOutcome.Failed(RemovalStrings.Changed);
+            return RemovalOutcome.Failed(RemovalStrings.ArchiveFirst);
         }
 
-        if (fate == DirectoryFate.Trash && IsRepositoryWorktree(current, plan.Project)
-            && await NewGuardReasonsAsync(plan.Project.RootPath, plan.Directory, current.ForkOfBranch, plan.Guard, ct).ConfigureAwait(false) is { } grown)
-        {
-            return RemovalOutcome.Failed(grown);
-        }
-
-        if (await RecycleAsync(plan.Project, current, plan.Directory, fate, ct).ConfigureAwait(false) is { } failure)
-        {
-            return RemovalOutcome.Failed(failure);
-        }
-
-        return await SoftDeleteAsync([current.Id], all, fate == DirectoryFate.Trash, ct).ConfigureAwait(false);
+        var (removed, refusal, warning, error) = await PurgeAsync(current, ct).ConfigureAwait(false);
+        return new RemovalOutcome(removed, refusal is null ? [] : [refusal], warning, error);
     }
 
     /// <param name="baseBranch">
@@ -378,7 +333,7 @@ internal sealed class RemovalFlow(
             throw new InvalidOperationException(RemovalStrings.RootRefused(directory));
         }
 
-        var all = await catalog.QueryAsync(new SessionQuery { ProjectId = project.Id }, ct).ConfigureAwait(false);
+        var all = await AllSessionsAsync(project.Id, ct).ConfigureAwait(false);
         var roots = RootsAt(directory, all);
         var missing = !System.IO.Directory.Exists(directory);
         IReadOnlyList<GuardReason> reasons = missing
@@ -401,8 +356,10 @@ internal sealed class RemovalFlow(
 
     /// <summary>
     /// 7.3 steps 2-4 after the dialog (and after "archive X" when it was chosen): recycle the directory unless it is gone,
-    /// prune, then soft-delete every non-Deleted root session of the path (their sub-agent sessions with them). An Active
-    /// session found now (one opened while the dialog was up) removes nothing.
+    /// prune, then remove every root session of the path (their sub-agent sessions with them) through the one session
+    /// cleanup. The removal order follows the inheritance guard: a session that still has an heir in the set is kept for a
+    /// later round, and rounds repeat while they make progress, so an heir is purged before the session it inherits from.
+    /// An Active session found now (one opened while the dialog was up) removes nothing.
     /// </summary>
     public async Task<RemovalOutcome> ExecuteWorkspaceRemovalAsync(WorkspaceRemovalPlan plan, CancellationToken ct)
     {
@@ -414,7 +371,7 @@ internal sealed class RemovalFlow(
             return RemovalOutcome.Failed(RemovalStrings.RootRefused(plan.Directory));
         }
 
-        var all = await catalog.QueryAsync(new SessionQuery { ProjectId = plan.Project.Id }, ct).ConfigureAwait(false);
+        var all = await AllSessionsAsync(plan.Project.Id, ct).ConfigureAwait(false);
         var roots = RootsAt(plan.Directory, all);
         if (roots.Any(static s => s.Status == SessionStatus.Active))
         {
@@ -427,24 +384,79 @@ internal sealed class RemovalFlow(
             return RemovalOutcome.Failed(RemovalStrings.Changed);
         }
 
-        var fate = missing ? DirectoryFate.Missing : DirectoryFate.Trash;
         if (!missing
             && await NewGuardReasonsAsync(plan.Project.RootPath, plan.Directory, plan.BaseBranch, plan.Guard, ct).ConfigureAwait(false) is { } grown)
         {
             return RemovalOutcome.Failed(grown);
         }
 
-        if (await RecycleWorkspaceAsync(plan.Project.RootPath, plan.Directory, fate, ct).ConfigureAwait(false) is { } failure)
+        if (await RecycleWorkspaceAsync(plan.Project.RootPath, plan.Directory, missing, ct).ConfigureAwait(false) is { } failure)
         {
             return RemovalOutcome.Failed(failure);
         }
 
+        var outcome = await RemoveWorkspaceSessionsAsync(roots, ct).ConfigureAwait(false);
+        return outcome with { DirectoryGone = true };
+    }
+
+    /// <summary>
+    /// The session half of a workspace removal: every root session of the directory, newest first, through
+    /// <see cref="PurgeAsync"/>. A session kept by the inheritance guard waits for the round that removed its heir; a store
+    /// failure is reported once and not retried. Nothing here touches the directory.
+    /// </summary>
+    private async Task<RemovalOutcome> RemoveWorkspaceSessionsAsync(IReadOnlyList<SessionInfo> roots, CancellationToken ct)
+    {
         if (roots.Count == 0)
         {
-            return RemovalOutcome.Done([]);
+            return new RemovalOutcome([], [], null, null);
         }
 
-        return await SoftDeleteAsync(roots.Select(static s => s.Id).ToArray(), all, fate == DirectoryFate.Trash, ct).ConfigureAwait(false);
+        var pending = roots.OrderByDescending(static s => s.LastActiveAt).ToList();
+        var refusals = new Dictionary<string, RemovalRefusal>(StringComparer.Ordinal);
+        var removed = new List<string>();
+        var warnings = new List<string>();
+        var errors = new List<string>();
+        bool progressed;
+        do
+        {
+            progressed = false;
+            foreach (var session in pending.ToArray())
+            {
+                var (purged, refusal, warning, failure) = await PurgeAsync(session, ct).ConfigureAwait(false);
+                if (purged.Count > 0)
+                {
+                    progressed = true;
+                    pending.Remove(session);
+                    refusals.Remove(session.Id);
+                    removed.AddRange(purged);
+                }
+                else if (refusal is not null)
+                {
+                    refusals[session.Id] = refusal;
+                }
+                else
+                {
+                    // Already gone (purged as another session's descendant) or failed: neither retries.
+                    pending.Remove(session);
+                    if (failure is not null)
+                    {
+                        errors.Add(failure);
+                    }
+                }
+
+                if (warning is not null)
+                {
+                    warnings.Add(warning);
+                }
+            }
+        }
+        while (progressed && pending.Count > 0);
+
+        return new RemovalOutcome(
+            removed,
+            [.. refusals.Values],
+            warnings.Count == 0 ? null : string.Join("\n", warnings.Distinct(StringComparer.Ordinal)),
+            errors.Count == 0 ? null : string.Join("\n", errors.Distinct(StringComparer.Ordinal)));
     }
 
     /// <summary>
@@ -499,13 +511,15 @@ internal sealed class RemovalFlow(
     }
 
     /// <summary>
-    /// 7.5 "delete permanently" of one Deleted session (and its sub-agent sessions): the store's single-transaction purge,
-    /// then the files kept outside <c>forge.db</c> (artifacts, review marks and comments). The inheritance guard keeps the
-    /// session and names who inherits from it; a cleanup failure after the purge only warns.
+    /// The one session cleanup (7.2, shared by session and workspace removal): the store's single-transaction purge of the
+    /// session and its descendants, then the files kept outside <c>forge.db</c> (artifacts, review data, the stored session
+    /// draft). The inheritance guard keeps the session and names who inherits from it; a cleanup failure after the purge
+    /// only warns.
     /// </summary>
-    public async Task<PurgeOutcome> PurgeAsync(SessionInfo session, CancellationToken ct)
+    private async Task<(IReadOnlyList<string> Removed, RemovalRefusal? Refusal, string? Warning, string? Error)> PurgeAsync(
+        SessionInfo session,
+        CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(session);
         IReadOnlyList<string> purged;
         try
         {
@@ -520,12 +534,12 @@ internal sealed class RemovalFlow(
                 titles.Add(inheriting?.Title ?? id);
             }
 
-            return new PurgeOutcome([], titles, null, null);
+            return ([], new RemovalRefusal(session.Title, titles), null, null);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             var reason = exception is OperationCanceledException ? RemovalStrings.Cancelled : exception.Message;
-            return new PurgeOutcome([], [], null, RemovalStrings.PurgeFailed(session.Title, reason));
+            return ([], null, null, RemovalStrings.RemoveFailed(session.Title, reason));
         }
 
         var failures = new List<string>();
@@ -544,39 +558,23 @@ internal sealed class RemovalFlow(
             }
         }
 
-        return new PurgeOutcome(
+        return (
             purged,
-            [],
-            failures.Count == 0 ? null : RemovalStrings.PurgePartial(string.Join("; ", failures.Distinct(StringComparer.Ordinal))),
+            null,
+            failures.Count == 0 ? null : RemovalStrings.RemovePartial(string.Join("; ", failures.Distinct(StringComparer.Ordinal))),
             null);
     }
 
-    private static DirectoryFate Fate(SessionInfo session, ProjectInfo project, IReadOnlyList<SessionInfo> all)
-    {
-        if (!IsForgeOwned(session, project))
-        {
-            return DirectoryFate.Kept;
-        }
-
-        var directory = DirectoryOf(session);
-
-        // A branch keeps its directory while any session of it is still unarchived - root or agent session, not just a second
-        // root: an agent session that runs in the workspace needs the folder even after the root it hung under was archived.
-        if (all.Any(other => !string.Equals(other.Id, session.Id, StringComparison.Ordinal)
-                             && other.Status == SessionStatus.Active
-                             && SameDirectory(DirectoryOf(other), directory)))
-        {
-            return DirectoryFate.Shared;
-        }
-
-        return System.IO.Directory.Exists(directory) ? DirectoryFate.Trash : DirectoryFate.Missing;
-    }
-
-    /// <summary>"Remove workspace" applies to a repository worktree only: never the project's root checkout.</summary>
+    /// <summary>
+    /// "Remove workspace" applies to a repository worktree only: never the project's root checkout. The root is compared
+    /// both by spelling (the occupancy key) and by link resolution, because git can print the root under another spelling
+    /// (macOS <c>/var</c> vs <c>/private/var</c>, a Windows junction) and the red line must not depend on the spelling.
+    /// </summary>
     public static bool IsRemovableWorkspace(ProjectInfo project, string directory) =>
         project.Kind == ProjectKind.Repository
         && !string.IsNullOrWhiteSpace(directory)
-        && !SameDirectory(directory, project.RootPath);
+        && !SameDirectory(directory, project.RootPath)
+        && !WorktreeList.SamePathSafe(directory, project.RootPath);
 
     /// <summary>
     /// The guard again just before the trash: reasons that appeared while the dialog was open (work added meanwhile) were
@@ -705,37 +703,9 @@ internal sealed class RemovalFlow(
             or UnauthorizedAccessException
         || exception is OperationCanceledException && !ct.IsCancellationRequested;
 
-    private static bool IsRepositoryWorktree(SessionInfo session, ProjectInfo project) =>
-        project.Kind == ProjectKind.Repository && !string.IsNullOrEmpty(session.WorktreePath);
-
-    /// <summary>Recycle step of a session removal: trash or prune by fate; a trash failure is the returned reason.</summary>
-    private async Task<string?> RecycleAsync(ProjectInfo project, SessionInfo session, string directory, DirectoryFate fate, CancellationToken ct)
+    private async Task<string?> RecycleWorkspaceAsync(string repositoryRoot, string directory, bool missing, CancellationToken ct)
     {
-        switch (fate)
-        {
-            case DirectoryFate.Trash:
-                if (await TrashAsync(directory, ct).ConfigureAwait(false) is { } failure)
-                {
-                    return failure;
-                }
-
-                if (IsRepositoryWorktree(session, project))
-                {
-                    await TryPruneAsync(project.RootPath).ConfigureAwait(false);
-                }
-
-                return null;
-            case DirectoryFate.Missing when IsRepositoryWorktree(session, project):
-                await TryPruneAsync(project.RootPath).ConfigureAwait(false);
-                return null;
-            default:
-                return null;
-        }
-    }
-
-    private async Task<string?> RecycleWorkspaceAsync(string repositoryRoot, string directory, DirectoryFate fate, CancellationToken ct)
-    {
-        if (fate == DirectoryFate.Trash && await TrashAsync(directory, ct).ConfigureAwait(false) is { } failure)
+        if (!missing && await TrashAsync(directory, ct).ConfigureAwait(false) is { } failure)
         {
             return failure;
         }
@@ -770,36 +740,35 @@ internal sealed class RemovalFlow(
         }
     }
 
-    /// <summary>Soft-deletes the roots (the store cascades); the outcome names the roots and their sub-agent sessions, so the shell can close all their tabs.</summary>
-    private async Task<RemovalOutcome> SoftDeleteAsync(IReadOnlyList<string> ids, IReadOnlyList<SessionInfo> all, bool directoryWent, CancellationToken ct)
+    /// <summary>
+    /// Every session of a project, removed ones included: a history row's descendants and a workspace's removed roots are
+    /// only in the history read, and the purge cascades over all of them.
+    /// </summary>
+    private async Task<IReadOnlyList<SessionInfo>> AllSessionsAsync(string projectId, CancellationToken ct)
     {
+        var query = new SessionQuery { ProjectId = projectId };
+        var live = await catalog.QueryAsync(query, ct).ConfigureAwait(false);
+        IReadOnlyList<SessionInfo> history;
         try
         {
-            await catalog.SoftDeleteAsync(ids, ct).ConfigureAwait(false);
-            var removed = new List<string>(ids);
-            foreach (var id in ids)
-            {
-                removed.AddRange(Descendants(id, all).Select(static s => s.Id));
-            }
-
-            return RemovalOutcome.Done(removed);
+            history = await catalog.ListHistoryAsync(query, ct).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (NotSupportedException)
         {
-            // The directory is in the trash already (or was gone); the startup self-heal writes the record later. The
-            // directory is never moved back (7.2 step 4).
-            var reason = exception is OperationCanceledException ? RemovalStrings.Cancelled : exception.Message;
-            return RemovalOutcome.Failed(directoryWent ? RemovalStrings.RecordFailed(reason) : RemovalStrings.RecordOnlyFailed(reason));
+            // A catalog without the lifecycle history (an alternate implementation) has no removed sessions to add.
+            return live;
         }
+
+        var removed = history.Where(static session => session.Status == SessionStatus.Deleted).ToArray();
+        return removed.Length == 0 ? live : [.. live, .. removed];
     }
 
-    /// <summary>The non-Deleted root sessions (archived included) whose occupancy key is <paramref name="directory"/>'s.</summary>
+    /// <summary>The root sessions of <paramref name="directory"/>, every state (history included): a workspace removal removes them all.</summary>
     private static List<SessionInfo> RootsAt(string directory, IReadOnlyList<SessionInfo> all)
     {
         var key = Key(directory);
         return all
             .Where(s => s.ParentSessionId is null
-                        && s.Status != SessionStatus.Deleted
                         && string.Equals(OccupancyKey.Compute(s.WorktreePath, s.WorkspacePath), key, StringComparison.Ordinal))
             .ToList();
     }

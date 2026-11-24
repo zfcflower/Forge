@@ -233,10 +233,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private bool hasOlderHistory;
     private bool loadingOlderHistory;
     private bool isHandingOver;
-    private AsyncRelayCommand? continueCommand;
     private AsyncRelayCommand? compactCommand;
-    private AsyncRelayCommand? restoreCommand;
-    private string? continueBlockedReason;
 
     /// <param name="runtime">The live runtime, or <see langword="null"/> for a read-only view of a session that is not
     /// <see cref="SessionStatus.Active"/>: the transcript is replayed from the store and nothing can be sent.</param>
@@ -518,43 +515,17 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     /// <summary>
     /// True for a session that is not the active session of its workspace: opened from history or the recycled rows, or
-    /// turned read-only when the turn-start check found it taken over. Nothing can be sent; the tab offers "continue"
-    /// (archived) or "restore" (deleted) instead.
+    /// turned read-only when the turn-start check found it taken over. Nothing can be sent and the tab shows no input area;
+    /// "restore session" lives in the project tree's menu.
     /// </summary>
     public bool IsReadOnlyView => isReadOnlyView;
 
-    /// <summary>The banner of the read-only view; empty for a live session.</summary>
-    public string ReadOnlyBanner => !isReadOnlyView
-        ? string.Empty
-        : Info.Status == SessionStatus.Deleted ? LifecycleStrings.ReadOnlyDeleted : LifecycleStrings.ReadOnlyArchived;
-
-    /// <summary>"Continue this session" of an archived read-only view; null (hidden) otherwise. Set by the shell.</summary>
-    public AsyncRelayCommand? ContinueCommand
-    {
-        get => continueCommand;
-        set => SetAndNotify(ref continueCommand, value, nameof(HasContinue));
-    }
-
-    public bool HasContinue => isReadOnlyView && continueCommand is not null && Info.Status != SessionStatus.Deleted;
-
-    /// <summary>"Restore…" of a removed (deleted) read-only view; null (hidden) until the restore flow exists. Set by the shell.</summary>
-    public AsyncRelayCommand? RestoreCommand
-    {
-        get => restoreCommand;
-        set => SetAndNotify(ref restoreCommand, value, nameof(HasRestore));
-    }
-
-    public bool HasRestore => isReadOnlyView && restoreCommand is not null && Info.Status == SessionStatus.Deleted;
-
     /// <summary>
-    /// A read-only view that still holds an unsent draft or queued messages (a turn rejected at its start, R6): the bar
-    /// says so, because the composer is hidden; "continue" carries them into the live view.
+    /// A read-only view that still holds an unsent draft or queued messages (a turn rejected at its start, R6): the delivery
+    /// seam treats it as busy, and a restore carries them into the live view. No text is shown for it any more - a read-only
+    /// tab has no input area.
     /// </summary>
     public bool HasPendingComposer => isReadOnlyView && (!string.IsNullOrWhiteSpace(draft) || queued.Count > 0);
-
-    public string PendingComposerNote => HasPendingComposer
-        ? LifecycleStrings.PendingComposer(queued.Count + (string.IsNullOrWhiteSpace(draft) ? 0 : 1))
-        : string.Empty;
 
     /// <summary>
     /// Takes the unsent draft and the queued (not interjected) messages out of this view, for the live view that replaces
@@ -601,27 +572,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     }
 
     /// <summary>
-    /// Set by the shell when the session cannot continue where it is (6.3): its workspace folder is gone, or git marks the
-    /// worktree prunable or does not list it. "Continue" is then disabled and its label carries this reason; null enables it.
-    /// </summary>
-    public string? ContinueBlockedReason
-    {
-        get => continueBlockedReason;
-        set
-        {
-            if (SetAndNotify(ref continueBlockedReason, value, nameof(ContinueLabel)))
-            {
-                continueCommand?.NotifyCanExecuteChanged();
-            }
-        }
-    }
-
-    /// <summary>Label of the continue button: carries the reason when it is disabled.</summary>
-    public string ContinueLabel => continueBlockedReason is { } reason
-        ? LifecycleStrings.ContinueBlocked(reason)
-        : LifecycleStrings.ContinueSession;
-
-    /// <summary>
     /// Read before every turn starts (6.3): the store still has this session as <see cref="SessionStatus.Active"/>, and its
     /// workspace is not in a merge conflict. Null (a headless host) lets every turn start.
     /// </summary>
@@ -656,12 +606,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         runtime = null;
         OnPropertyChanged(nameof(IsReadOnlyView));
-        OnPropertyChanged(nameof(ReadOnlyBanner));
-        OnPropertyChanged(nameof(HasContinue));
-        OnPropertyChanged(nameof(HasRestore));
         RefreshCanSend();
-        OnPropertyChanged(nameof(HasPendingComposer));
-        OnPropertyChanged(nameof(PendingComposerNote));
         BecameReadOnly?.Invoke(this);
     }
 
@@ -713,8 +658,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             if (Set(ref draft, value))
             {
                 RefreshCanSend();
-                OnPropertyChanged(nameof(HasPendingComposer));
-                OnPropertyChanged(nameof(PendingComposerNote));
             }
         }
     }
@@ -2032,8 +1975,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private void OnQueueChanged()
     {
         OnPropertyChanged(nameof(HasQueued));
-        OnPropertyChanged(nameof(HasPendingComposer));
-        OnPropertyChanged(nameof(PendingComposerNote));
         RefreshCanSend();
     }
 
@@ -3313,8 +3254,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return;
         }
 
-        OnPropertyChanged(nameof(ReadOnlyBanner));
-        OnPropertyChanged(nameof(ContinueLabel));
         OnPropertyChanged(nameof(SubAgentLabel));
         foreach (var mark in SessionAuthorizations)
         {

@@ -117,7 +117,10 @@ internal sealed partial class MainWindowViewModel
     /// </summary>
     internal async Task OpenAgentSessionByIdAsync(string childSessionId, CancellationToken ct)
     {
-        if (agentTabs.ContainsKey(childSessionId))
+        // A live tab is brought forward without touching the store. A read-only one is not: a restore may have made the row
+        // Active since it was opened, and that tab has to be replaced by the live view below.
+        if (agentTabs.ContainsKey(childSessionId)
+            && FindOpenAgentSessionView(childSessionId) is { IsReadOnlyView: false })
         {
             ActivateAgentSessionTab(childSessionId);
             return;
@@ -158,27 +161,68 @@ internal sealed partial class MainWindowViewModel
             return;
         }
 
-        if (root is null || root.Status != SessionStatus.Active)
+        if (root is null)
         {
-            Status.SetWorkspaceProblem(LocText.Literal(AgentSessionStrings.RootNotActive(root?.Title ?? rootId)));
+            // A child whose parent row is gone has nothing to name or replay it under.
+            Status.SetWorkspaceProblem(LocText.Literal(AgentSessionStrings.RootNotActive(rootId)));
+            return;
+        }
+
+        // A history agent session (Archived / Deleted) opens read-only, like a history root row: no runtime, no input area.
+        // Its root may be archived too - restoring the child puts it back under the branch's active root (or makes it the
+        // root itself when there is none).
+        var readOnly = child.Status != SessionStatus.Active || root.Status != SessionStatus.Active;
+
+        // A tab that was closed while its turn still ran owns the session: that live view holds the stream and the pending
+        // approval cards, and archiving the row closed its tab without ending the run. Reopening it is the only way back,
+        // whatever the stored status says - and it must come before any read-only tab or new view of the same session.
+        if (FindClosedAgentSessionView(child.Id) is { } running)
+        {
+            if (FindOpenAgentSessionView(child.Id) is { } stale)
+            {
+                if (agentViews.TryGetValue(stale, out var staleTab))
+                {
+                    Workbench.CloseTab(staleTab);
+                }
+            }
+
+            ReopenAgentSessionTab(running);
             return;
         }
 
         // A second open of this same agent session - a double-click, the row and the palette at once - may have filed its tab
-        // while this one was reading the store: that tab owns the child session now, so this one only brings it forward.
-        if (agentTabs.ContainsKey(child.Id))
+        // while this one was reading the store. A read-only tab whose session a restore has since made Active is replaced by
+        // the live view, carrying its draft: reusing it would leave the tab read-only for good.
+        if (FindOpenAgentSessionView(child.Id) is { } open)
         {
-            ActivateAgentSessionTab(child.Id);
+            if (!open.IsReadOnlyView || readOnly)
+            {
+                ActivateAgentSessionTab(child.Id);
+                return;
+            }
+
+            var carried = open.TakeComposerState();
+            if (agentViews.TryGetValue(open, out var staleTab))
+            {
+                Workbench.CloseTab(staleTab);
+            }
+
+            var liveView = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id, readOnly: false);
+            liveView.RestoreComposerState(carried);
+            OpenAgentSessionTab(liveView, activate: true);
+            try
+            {
+                await liveView.LoadHistoryAsync(ct).ConfigureAwait(true);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
+            {
+                AppLogs.Session.ZLogWarning($"agent session history not replayed: {exception.Message}");
+            }
+
             return;
         }
 
-        if (FindClosedAgentSessionView(child.Id) is { } live)
-        {
-            ReopenAgentSessionTab(live);
-            return;
-        }
-
-        var view = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id);
+        var view = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id, readOnly);
         OpenAgentSessionTab(view, activate: true);
         try
         {
@@ -190,8 +234,32 @@ internal sealed partial class MainWindowViewModel
         }
     }
 
-    /// <summary>Builds the tab's view in agent-session mode and wires what the shell owns about it.</summary>
-    private SessionWorkspaceViewModel CreateAgentSessionView(SessionInfo info, SessionInfo root, int ordinal, bool isDraft, string draftId)
+    /// <summary>The view of the tab filed under <paramref name="childSessionId"/>, if that tab is open; null otherwise.</summary>
+    private SessionWorkspaceViewModel? FindOpenAgentSessionView(string childSessionId)
+    {
+        foreach (var view in agentViews.Keys)
+        {
+            if (string.Equals(view.SessionId, childSessionId, StringComparison.Ordinal))
+            {
+                return view;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Builds the tab's view in agent-session mode and wires what the shell owns about it. <paramref name="readOnly"/> is a
+    /// history row (or a child whose root left Active): no runtime, no turn gate, and its children for the transcript come
+    /// from the store.
+    /// </summary>
+    private SessionWorkspaceViewModel CreateAgentSessionView(
+        SessionInfo info,
+        SessionInfo root,
+        int ordinal,
+        bool isDraft,
+        string draftId,
+        bool readOnly = false)
     {
         // A draft carries the parent link the store would write, so everything that reads it (the root's last activity, the
         // tree) needs no special case for "the row does not exist yet".
@@ -207,7 +275,7 @@ internal sealed partial class MainWindowViewModel
         SessionWorkspaceViewModel? created = null;
         var session = new SessionWorkspaceViewModel(
             target,
-            composition.Runtimes.Get(root),
+            readOnly ? null : composition.Runtimes.Get(root),
             composition.Checkpoints,
             composition.Sessions,
             composition.Providers,
@@ -223,14 +291,23 @@ internal sealed partial class MainWindowViewModel
             // is remembered even when no turn follows it.
             sessionComposer: composerSelections,
             // The tab's label carries the root's name as a prefix, and the launch only carries a snapshot of it: a root renamed
-            // after this tab was opened has its own tab (when it has one) answer with the title it holds now.
-            rootTitle: () => CurrentRootTitle(root.Id))
+            // after this tab was opened has its own tab (when it has one) answer with the title it holds now. Read the root
+            // off the view, not off this closure: a promotion re-homes the tab under another root (RehomeTo).
+            rootTitle: () => created is { } view ? CurrentRootTitle(view.AgentSessionRoot?.Id ?? root.Id) : null)
+        {
+            // A read-only child has no runtime to ask for its own children: the transcript replays them from the store.
+            ChildQuery = readOnly
+                ? (parent, token) => composition.Catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)
+                : null,
+        };
+        created = session;
+        if (!readOnly)
         {
             // The turn check is the root's (6.3): an agent session may not run under a root the store no longer holds as
             // active, in a workspace that is operating, or in a merge conflict.
-            TurnGate = token => CheckTurnAsync(root.Id, token),
-        };
-        created = session;
+            session.TurnGate = token => CheckTurnAsync(root.Id, token);
+        }
+
         session.TurnCompleted += OnAgentSessionViewTurnCompleted;
         AttachAgentSessionView(session);
         return session;

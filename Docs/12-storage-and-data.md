@@ -28,7 +28,7 @@
 ├── logs/forge-YYYYMMDD_N.log
 ├── usage/usage-YYYYMMDD.jsonl
 ├── updates/<version>/       # 下载暂存、app/、install.log、ok-<version>
-└── purge-pending.txt        # 彻底删除后待重试的会话 id
+└── purge-pending.txt        # 移除会话后待重试的附属文件清理 id
 ```
 
 ## 12.2 `forge.db`
@@ -55,8 +55,8 @@
 - 每轮指标（`turn_metrics`）：PK `(session_id, turn)`，一行一轮（失败/取消/超限也留行，token 列全 NULL、未上报不补 0；`stream_ms INTEGER NOT NULL` 记模型流式生成时长——首个输出增量→流结束、回合内多次调用累加，零输出为 0，非空、绝不回退墙钟，失败轮也必带；`effort TEXT NULL` 记该轮实际跑的推理档，小写 `off`…`max`，根轮取回合开始时的快照、Agent 会话轮取该轮 definition，子 Agent 轮与加列之前的旧行留 NULL 即未知，读取时行末就不写 `:级别`）；表只记转录算好的轮号、不发号（发号取 `MAX(turn_checkpoints, turn_metrics)+1`，General 会话重开不再从 1 重数）。Agent 会话按自己的会话 id 写行、轮次从 1 独立编号，指标取自己实例的累计计数。写入走 App 级后台记录器——轮末一次有界通道入队（零分配、永不抛、满则丢行），单消费者逐行 `BEGIN IMMEDIATE` upsert，短 busy timeout，失败全吞，关闭时 drain ≤2 秒后放弃；**绝不进会话历史批队列**。换手/分叉不复制（指标属于原会话）；`PurgeAsync` 对它先探表存在再删（缺表跳过，旧库删会话不受影响）。派生量（成本、缓存命中率、tok/s）不入库，读取时算。
 - 读写连接：工作台各 store 每个一条长连接 + `SemaphoreSlim` 串行 + 每写一个 `BEGIN IMMEDIATE`（deferred 读后升级会静默丢更新），读用池化短连接；`synchronous=NORMAL`（体验数据）。
 - 计划摘要修订：替换时在同一事务记被替换的旧文本（相同则不记），每会话保留最新 50 条；`ListPlanRevisionsAsync` 按 id 倒序、limit 夹到 1..50；复制会话一并复制、清理会话一并删除。
-- 会话生命周期与写入不连坐、`HandoverAsync` 单事务、`SoftDeleteAsync` 级联子会话、`PurgeAsync` 只删 `Deleted` 及其子会话在 forge.db 内的所有 `session_id` 行（见 01）。`HealMissingDirectoriesAsync` 把目录缺失而项目根仍在的根会话置 `Deleted` 并写 `heal-deleted` 通知，启动时通知一次。
-- `ui_state`：`layout`（v5）、`open-tabs`（v2）、`onboarding`（schema 版本 1）、`updates.lastCheck`。
+- 会话生命周期与写入不连坐、`HandoverAsync` 单事务、`SoftDeleteAsync` 级联子会话；`PurgeAsync` 接受 `Archived` / `Deleted`（拒绝 `Active`），删会话及其子会话在 forge.db 内的所有 `session_id` 行（见 01）。`HealMissingDirectoriesAsync` 把目录缺失而项目根仍在的根会话置 `Deleted` 并写 `heal-deleted` 通知，启动时通知一次。
+- `ui_state`：`layout`（v5）、`open-tabs`（v2）、`onboarding`（schema 版本 1）、`updates.lastCheck`，以及每个会话一条 `composer:<会话 id>`（输入区所选模型/推理档；移除会话时一并删除）。
 - 自动化：`automation_runs` 按定义保留 200 条、总 2000 条修剪；`automation_state` 存心跳、尝试预算与各 runner 的持久笔记。
 
 ## 12.3 `reviews.db`
@@ -64,10 +64,10 @@
 - 四张表：`review_comments`、`review_marks`、`review_conclusions`、`step_review_verdicts`。
 - **schema 没有版本号**：`EnsureInitializedAsync` 跑一份幂等脚本（`PRAGMA journal_mode=WAL` + `CREATE TABLE/INDEX IF NOT EXISTS`），后续波次加表只是往这份脚本里追加，已有库下次打开即补齐，任何版本都不 drop 或改写列。
 - `review_comments`：行/块评论、草稿与已发送；`sent_at` 幂等（重复标记不改写原始时间）；`reply_verdict`/`reply_text` 是 Agent 的回答（apply / push_back / clarify 与说明）。
-- `step_review_verdicts`：步骤评审台账，主键 (session, step)——verdict 整数、commit、时间、工作树指纹、非 approve 轮数；步骤离开 done 时删行，会话彻底删除时一并删。
+- `step_review_verdicts`：步骤评审台账，主键 (session, step)——verdict 整数、commit、时间、工作树指纹、非 approve 轮数；步骤离开 done 时删行，会话被移除时一并删。
 - `review_marks`：已查看按文件 diff 指纹、已保留按块内容哈希（内容相同的块按出现序号区分）。
 - `review_conclusions`：一次 `request_review` 一行——session、工作目录、`step_id` 或 `base`、HEAD、`outcome` 整数（`0 Unstructured / 1 Approve / 2 RequestChanges / 3 Stopped / 4 Failed`，只允许在末尾追加新值）、Reviewer 原文、时间。
-- 三张表都按 session 归属：`CopySessionAsync`（接管/分叉）复制且只换 `session_id`；`DeleteSessionAsync`（彻底删除）一起删。
+- 三张表都按 session 归属：`CopySessionAsync`（接管/分叉）复制且只换 `session_id`；`DeleteSessionAsync`（移除会话）一起删。
 - 不可释放：池化句柄靠 `SqliteSessionStore` 拆除时进程级 `ClearAllPools` 才释放（见 14）。
 
 ## 12.4 `approvals.db`
@@ -94,7 +94,7 @@
 | `provider-models.json` | 各提供商 `/models` 的窗口与价格 | 一次刷新只写一次（在池上写，写完才算完成） |
 | `model-catalog.json` | models.dev 紧凑快照 | 损坏或版本不同即当作没有快照；304 只更新 `checkedAt` |
 | `approvals.db` 的旧 `approvals.json` | 旧版审批记录 | 仅一次导入，导入后改名 `.migrated`（失败不影响正确性） |
-| `purge-pending.txt` | 彻底删除后待清理的会话 id | 整文件临时替换写入；只接受合法 id |
+| `purge-pending.txt` | 移除会话后待清理的附属文件所属会话 id | 整文件临时替换写入；只接受合法 id；`ui_state` 的会话草稿也在这条清理里 |
 | `builtin-skills/<hash>/<name>/SKILL.md` | 四份内置编排技能 | 启动时物化、幂等、best-effort 清旧版本；写不出只记日志 |
 | `logs/forge-YYYYMMDD_N.log` | 诊断日志 | 见 13.2 |
 | `usage/usage-YYYYMMDD.jsonl` | 逐请求用量日志（默认关，opt-in 取证：延迟、失败、请求形状指纹、限流快照） | best-effort，绝不因日志让回合失败；轮级指标已常开进 `forge.db.turn_metrics`（两种会话都有），此文件只做请求级取证，默认关是既定隐私立场 |

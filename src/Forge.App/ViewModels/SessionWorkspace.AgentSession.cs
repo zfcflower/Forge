@@ -165,6 +165,28 @@ internal sealed partial class SessionWorkspaceViewModel
     private string CurrentAgentRootTitle(AgentSessionLaunch launch) =>
         liveRootTitle?.Invoke() ?? agentRootTitle ?? launch.Root.Title;
 
+    /// <summary>
+    /// The branch's root moved to another session (an archive that promoted a successor, or "promote to main session"): this
+    /// agent-session tab now hangs under <paramref name="root"/> and runs on its runtime. Only who owns the workspace moved,
+    /// so the view keeps its transcript, draft and sub-agents - nothing is replayed, no tab is rebuilt, and a promotion costs
+    /// one open instead of one per agent tab.
+    /// </summary>
+    internal void RehomeTo(SessionInfo root, SessionRuntime? runtime)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        if (agentSession is not { } launch)
+        {
+            return;
+        }
+
+        agentSession = launch with { Root = root };
+        this.runtime = runtime;
+        Info = Info with { ParentSessionId = root.Id };
+        agentRootTitle = root.Title;
+        OnPropertyChanged(nameof(AgentSessionRoot));
+        RaiseAgentTitleChanged();
+    }
+
     /// <summary>The root session was renamed: this tab's "root › child" prefix follows it.</summary>
     internal void RenameRoot(string title)
     {

@@ -161,10 +161,14 @@ public interface ISessionCatalog
     // The defaults below exist so implementing stores compile; real stores (and decorators, which must forward) override them.
 
     /// <summary>
-    /// <see cref="SessionStatus.Archived"/> or <see cref="SessionStatus.Deleted"/> to <see cref="SessionStatus.Active"/>,
-    /// clearing <c>deleted_at</c>; a Deleted session's Deleted descendants become Archived (readable, not resumed).
-    /// Returns false when the session does not exist. Throws <see cref="WorktreeOccupiedException"/> when another Active
-    /// root session holds the same key. The only way App code may make an existing session Active again.
+    /// <see cref="SessionStatus.Archived"/> or <see cref="SessionStatus.Deleted"/> back into its workspace (the restore
+    /// flow), clearing <c>deleted_at</c>; a Deleted session's Deleted descendants become Archived (readable, not resumed).
+    /// A root session takes the workspace's occupancy key, and <see cref="WorktreeOccupiedException"/> names the Active
+    /// root that still holds it. An agent session rejoins the workspace's Active root; when the workspace has none it
+    /// becomes that root, and the parent it hung under is demoted to an agent session of it, with the parent's other agent
+    /// sessions re-parented to it too (a non-root never expands its own agent sessions in the tree). A session that is
+    /// already Active is left as it is. Returns false when the session does not exist. The only way App code may make an
+    /// existing session Active again.
     /// </summary>
     Task<bool> ActivateAsync(string sessionId, CancellationToken ct) =>
         throw new NotSupportedException(nameof(ActivateAsync));
@@ -194,11 +198,11 @@ public interface ISessionCatalog
         throw new NotSupportedException(nameof(SoftDeleteAsync));
 
     /// <summary>
-    /// Permanently deletes a Deleted session and its descendants: every <c>forge.db</c> row keyed by their session id
-    /// (messages, search rows, summaries, todos, todo groups, plan summaries, turn checkpoints, the session rows).
-    /// Throws <see cref="SessionPurgeRefusedException"/> when a session outside the purged set inherits from one of
-    /// them, and <see cref="InvalidOperationException"/> when the session is not Deleted. Returns the purged ids (self
-    /// first), so the caller can clean files kept outside the database.
+    /// Permanently deletes an Archived / Deleted session and its descendants: every <c>forge.db</c> row keyed by their
+    /// session id (messages, search rows, summaries, todos, todo groups, plan summaries, turn checkpoints, the session
+    /// rows). Throws <see cref="SessionPurgeRefusedException"/> when a session outside the purged set inherits from one of
+    /// them, and <see cref="InvalidOperationException"/> when the session is still Active (archive it first). Returns the
+    /// purged ids (self first), so the caller can clean files kept outside the database.
     /// </summary>
     Task<IReadOnlyList<string>> PurgeAsync(string sessionId, CancellationToken ct) =>
         throw new NotSupportedException(nameof(PurgeAsync));

@@ -9,9 +9,9 @@ using ZLogger;
 namespace Forge.App.ViewModels;
 
 /// <summary>
-/// Remove session / remove workspace / restore / purge / close project (TASK-session-worktree-lifecycle 7.2-7.7): the
-/// dialogs and the in-memory guards (busy, handing over, operation, conflict) live here, the decisions and the disk and
-/// store writes in <see cref="RemovalFlow"/>. Every failure ends in a notice; nothing is retried or undone silently.
+/// Remove session / remove workspace / restore / close project (TASK-session-worktree-lifecycle 7.2-7.7): the dialogs and
+/// the in-memory guards (busy, handing over, operation, conflict) live here, the decisions and the disk and store writes in
+/// <see cref="RemovalFlow"/>. Every failure ends in a notice; nothing is retried or undone silently.
 /// </summary>
 internal sealed partial class MainWindowViewModel
 {
@@ -22,8 +22,6 @@ internal sealed partial class MainWindowViewModel
         tree.RemoveWorkspace = async (target, ct) => await RemoveWorkspaceAsync(target, target.ForkOfBranch, report: true, ct).ConfigureAwait(true);
         tree.RestoreSession = RestoreSessionAsync;
         tree.RestoreWorkspace = RestoreWorkspaceAsync;
-        tree.PurgeSession = PurgeSessionAsync;
-        tree.PurgeAll = PurgeAllAsync;
         tree.CloseProject = CloseProjectAsync;
     }
 
@@ -36,9 +34,9 @@ internal sealed partial class MainWindowViewModel
             ct);
 
     /// <summary>
-    /// "Remove session…" (7.2): re-read, idle check, the plan off the UI thread (directory fate, guard reasons, sub-agent
-    /// count, unmerged forks), one dialog (its button says "remove anyway" when there are reasons), the unsaved-buffer
-    /// guard, a second idle check, then the removal with the workspace held (no turn, fork or merge starts under it).
+    /// "Remove session…" (7.2): re-read, idle check, the sub-agent count off the UI thread, one irreversible confirmation,
+    /// a second idle check, then the session and its files are purged. The directory and the branch are never touched, so
+    /// there is no guard, no trash and no workspace hold.
     /// </summary>
     internal async Task RemoveSessionAsync(SessionInfo snapshot, ProjectInfo project, CancellationToken ct)
     {
@@ -53,9 +51,9 @@ internal sealed partial class MainWindowViewModel
 
         var store = composition.Sessions;
         var current = await BackgroundRead.RunAsync(token => store.GetSessionAsync(snapshot.Id, token), ct).ConfigureAwait(true);
-        if (current is null || current.Status == SessionStatus.Deleted)
+        if (current is null || current.Status == SessionStatus.Active)
         {
-            await dialogs.NotifyAsync(title, RemovalStrings.Changed).ConfigureAwait(true);
+            await dialogs.NotifyAsync(title, current is null ? RemovalStrings.Changed : RemovalStrings.ArchiveFirst).ConfigureAwait(true);
             await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
             return;
         }
@@ -66,10 +64,10 @@ internal sealed partial class MainWindowViewModel
         }
 
         var flow = composition.Removal;
-        SessionRemovalPlan plan;
+        int childCount;
         try
         {
-            plan = await Task.Run(() => flow.PlanSessionRemovalAsync(current, project, CancellationToken.None), CancellationToken.None)
+            childCount = await Task.Run(() => flow.CountRemovalDescendantsAsync(current, project, CancellationToken.None), CancellationToken.None)
                 .ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -78,50 +76,35 @@ internal sealed partial class MainWindowViewModel
             return;
         }
 
-        var message = new List<string> { RemovalStrings.SessionQuestion(current.Title) };
-        message.Add(plan.Fate switch
+        var message = new List<string> { RemovalStrings.SessionQuestion(current.Title), RemovalStrings.SessionRemoveBody };
+        if (childCount > 0)
         {
-            DirectoryFate.Trash => RemovalStrings.SessionTrash(plan.Directory),
-            DirectoryFate.Shared => RemovalStrings.SessionKeptShared,
-            DirectoryFate.Missing => RemovalStrings.SessionMissing,
-            _ => RemovalStrings.SessionKeptRoot,
-        });
-        AppendGuardLines(message, plan.Reasons, plan.ChildCount, plan.UnmergedForks);
-        var confirm = plan.Reasons.Count > 0 ? RemovalStrings.RemoveAnyway : RemovalStrings.Remove;
-        if (await dialogs.ChooseAsync(title, string.Join("\n\n", message), [confirm, ShellStrings.Cancel]).ConfigureAwait(true) != 0)
+            message.Add(RemovalStrings.Children(childCount));
+        }
+
+        if (await dialogs.ChooseAsync(title, string.Join("\n\n", message), [RemovalStrings.Remove, ShellStrings.Cancel]).ConfigureAwait(true) != 0)
         {
             return;
         }
 
-        if (!await ConfirmArchiveAsync(current.Id).ConfigureAwait(true)
-            || await ShowRemovalBusyAsync(title, [current]).ConfigureAwait(true))
+        if (await ShowRemovalBusyAsync(title, [current]).ConfigureAwait(true))
         {
             return;
         }
 
-        RemovalOutcome outcome;
-        if (!TryHoldForRemoval(plan.Directory, out var held))
-        {
-            await dialogs.NotifyAsync(title, RemovalStrings.Busy(HandoverStrings.BusyWorkspaceOperating)).ConfigureAwait(true);
-            return;
-        }
-
-        try
-        {
-            if (plan.Fate == DirectoryFate.Trash)
-            {
-                ReleaseBeforeTrash(plan.Directory);
-            }
-
-            outcome = await Task.Run(() => flow.ExecuteSessionRemovalAsync(plan, CancellationToken.None), CancellationToken.None)
-                .ConfigureAwait(true);
-        }
-        finally
-        {
-            ReleaseAfterRemoval(plan.Directory, held);
-        }
-
+        var outcome = await Task.Run(() => flow.RemoveSessionAsync(current, CancellationToken.None), CancellationToken.None)
+            .ConfigureAwait(true);
         ReleaseRemovedSessions(outcome.RemovedSessionIds);
+        foreach (var refusal in outcome.Refused)
+        {
+            await dialogs.NotifyAsync(title, RemovalStrings.RemoveRefused(refusal.Title, refusal.InheritingTitles)).ConfigureAwait(true);
+        }
+
+        if (outcome.Warning is { } warning)
+        {
+            await dialogs.NotifyAsync(title, warning).ConfigureAwait(true);
+        }
+
         if (outcome.Error is { } error)
         {
             await dialogs.NotifyAsync(RemovalStrings.RemoveFailedTitle, error).ConfigureAwait(true);
@@ -185,7 +168,7 @@ internal sealed partial class MainWindowViewModel
             message.Add(RemovalStrings.WorkspaceActive(activeShown.Title));
         }
 
-        AppendGuardLines(message, plan.Reasons, 0, plan.UnmergedForks);
+        AppendGuardLines(message, plan.Reasons, plan.UnmergedForks);
         var anyway = plan.Reasons.Count > 0;
         var confirm = plan.Active is { } active
             ? anyway ? RemovalStrings.ArchiveAndRemoveAnyway(active.Title) : RemovalStrings.ArchiveAndRemove(active.Title)
@@ -238,11 +221,31 @@ internal sealed partial class MainWindowViewModel
         }
 
         ReleaseRemovedSessions(outcome.RemovedSessionIds);
-        string? failure = null;
+        var notes = new List<string>();
         if (outcome.Error is { } error)
         {
-            // The archive is not rolled back (7.3 step 1): say it happened and why the directory stayed.
-            failure = await FailAsync(archived.Count == 0 ? error : RemovalStrings.ArchivedNotRemoved(archived[0].Title, error)).ConfigureAwait(true);
+            // The archive is not rolled back (7.3 step 1). A failure before the directory went says so and why it stayed;
+            // one after it is about the sessions only, and the flow's own text names them.
+            notes.Add(outcome.DirectoryGone || archived.Count == 0
+                ? error
+                : RemovalStrings.ArchivedNotRemoved(archived[0].Title, error));
+        }
+
+        foreach (var refusal in outcome.Refused)
+        {
+            notes.Add(RemovalStrings.RemoveRefused(refusal.Title, refusal.InheritingTitles));
+        }
+
+        if (outcome.Warning is { } warning)
+        {
+            notes.Add(warning);
+        }
+
+        string? failure = notes.Count == 0 ? null : string.Join("\n\n", notes);
+        if (failure is not null && report)
+        {
+            await dialogs.NotifyAsync(RemovalStrings.RemoveFailedTitle, failure).ConfigureAwait(true);
+            failure = null;
         }
 
         if (report)
@@ -310,10 +313,13 @@ internal sealed partial class MainWindowViewModel
     }
 
     /// <summary>
-    /// "Restore…" (7.4): a missing directory is rebuilt first (a worktree from its branch, a scratch folder empty), then
-    /// the session goes back through the handover path: <see cref="ISessionCatalog.ActivateAsync"/>, or the occupied
-    /// dialog when the workspace has an active session. A rebuilt directory whose session stayed removed says so; the
-    /// retry finds the directory and skips the rebuild.
+    /// "Restore session…" (7.4) of a history session, archived or removed: a missing directory is rebuilt first (a worktree
+    /// from its branch, a scratch folder empty), then the session goes back through <see cref="ISessionCatalog.ActivateAsync"/>:
+    /// a root session takes the workspace, an agent session rejoins the workspace's active root, and an agent session in a
+    /// workspace without an active root becomes that root (its own parent becomes an agent of it, and the parent's other
+    /// agent sessions follow). A workspace with an active root still ends in the occupied dialog for a root. An existing
+    /// directory git no longer treats as a worktree stops the restore with git's reason. A rebuilt directory whose session
+    /// stayed read-only says so; the retry finds the directory and skips the rebuild.
     /// </summary>
     internal async Task RestoreSessionAsync(SessionInfo snapshot, ProjectInfo project, CancellationToken ct)
     {
@@ -322,18 +328,35 @@ internal sealed partial class MainWindowViewModel
         var title = RemovalStrings.RestoreTitle;
         var store = composition.Sessions;
         var current = await BackgroundRead.RunAsync(token => store.GetSessionAsync(snapshot.Id, token), ct).ConfigureAwait(true);
-        if (current is not { Status: SessionStatus.Deleted })
+        if (current is null)
         {
             await NotifyOrReportAsync(title, RemovalStrings.Changed).ConfigureAwait(true);
             await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
             return;
         }
 
+        if (current.Status == SessionStatus.Active)
+        {
+            await OpenSessionByIdAsync(current.Id, ct).ConfigureAwait(true);
+            return;
+        }
+
+        // The parent a promoted agent session leaves behind: its tab (a read-only history tab) closes with the promotion.
+        var previousParentId = current.ParentSessionId;
+
         var directory = RemovalFlow.DirectoryOf(current);
         var (rebuilt, rebuildError) = await RebuildHeldAsync(current, project, directory).ConfigureAwait(true);
         if (rebuildError is not null)
         {
             await NotifyOrReportAsync(RemovalStrings.RestoreFailedTitle, rebuildError).ConfigureAwait(true);
+            await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+            return;
+        }
+
+        // A freshly rebuilt worktree is attached to its branch already; only an existing directory can be stale.
+        if (!rebuilt && await RestoreBlockAsync(current, ct).ConfigureAwait(true) is { } block)
+        {
+            await NotifyOrReportAsync(RemovalStrings.RestoreFailedTitle, block).ConfigureAwait(true);
             await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
             return;
         }
@@ -360,6 +383,13 @@ internal sealed partial class MainWindowViewModel
         var after = await BackgroundRead.RunAsync(token => store.GetSessionAsync(current.Id, token), CancellationToken.None).ConfigureAwait(true);
         if (after is { Status: SessionStatus.Active })
         {
+            if (after.ParentSessionId is null && previousParentId is { Length: > 0 } demoted)
+            {
+                // The restore promoted an agent session: the root it hung under is now an agent of it, so its old tab (if
+                // open) is closed before the promoted session opens as the workspace's root.
+                OnSessionArchived(demoted);
+            }
+
             await OpenSessionByIdAsync(current.Id, CancellationToken.None).ConfigureAwait(true);
             if (rebuilt && project.Kind == ProjectKind.Repository)
             {
@@ -399,117 +429,6 @@ internal sealed partial class MainWindowViewModel
                 error is null ? RemovalStrings.RestoreTitle : RemovalStrings.RestoreFailedTitle,
                 error ?? (rebuilt ? RemovalStrings.WorkspaceRestored(target.Directory) : RemovalStrings.WorkspacePresent(target.Directory)))
             .ConfigureAwait(true);
-        await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
-    }
-
-    /// <summary>"Delete permanently…" (7.5): "cannot be undone", then the purge; the inheritance guard's refusal names the heirs.</summary>
-    internal async Task PurgeSessionAsync(SessionInfo snapshot, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        var title = RemovalStrings.PurgeTitle;
-        if (dialogs is null)
-        {
-            Status.SetWorkspaceProblem(LocText.Literal(RemovalStrings.Unavailable));
-            return;
-        }
-
-        if (!await dialogs.ConfirmAsync(title, RemovalStrings.PurgeQuestion(snapshot.Title), RemovalStrings.PurgeConfirm, ShellStrings.Cancel)
-                .ConfigureAwait(true))
-        {
-            return;
-        }
-
-        var flow = composition.Removal;
-        var outcome = await Task.Run(() => flow.PurgeAsync(snapshot, CancellationToken.None), CancellationToken.None).ConfigureAwait(true);
-        ReleaseRemovedSessions(outcome.PurgedIds);
-        var notes = PurgeNotes(snapshot, outcome);
-        if (notes.Count > 0)
-        {
-            await dialogs.NotifyAsync(title, string.Join("\n\n", notes)).ConfigureAwait(true);
-        }
-
-        await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
-    }
-
-    /// <summary>
-    /// "Delete all sessions permanently…" (7.5): every removed root session of the workspace, in passes until no more can
-    /// go (an heir purged later frees the one it inherited from); the ones the inheritance guard still keeps are listed.
-    /// </summary>
-    internal async Task PurgeAllAsync(WorkspaceTarget target, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(target);
-        var title = RemovalStrings.PurgeTitle;
-        if (dialogs is null)
-        {
-            Status.SetWorkspaceProblem(LocText.Literal(RemovalStrings.Unavailable));
-            return;
-        }
-
-        var pending = (await RemovedRootsAtAsync(target, ct).ConfigureAwait(true)).ToList();
-        if (pending.Count == 0)
-        {
-            await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
-            return;
-        }
-
-        if (!await dialogs.ConfirmAsync(title, RemovalStrings.PurgeAllQuestion(pending.Count), RemovalStrings.PurgeConfirm, ShellStrings.Cancel)
-                .ConfigureAwait(true))
-        {
-            return;
-        }
-
-        var flow = composition.Removal;
-        var notes = new List<string>();
-        var last = new Dictionary<string, PurgeOutcome>(StringComparer.Ordinal);
-        bool progressed;
-        do
-        {
-            progressed = false;
-            foreach (var session in pending.ToArray())
-            {
-                var outcome = await Task.Run(() => flow.PurgeAsync(session, CancellationToken.None), CancellationToken.None).ConfigureAwait(true);
-                if (outcome.Purged)
-                {
-                    progressed = true;
-                    pending.Remove(session);
-                    last.Remove(session.Id);
-                    ReleaseRemovedSessions(outcome.PurgedIds);
-                    if (outcome.Warning is { } warning)
-                    {
-                        notes.Add(warning);
-                    }
-                }
-                else
-                {
-                    last[session.Id] = outcome;
-                    if (outcome.Error is not null)
-                    {
-                        // A store failure is not an inheritance refusal: it is reported once and not retried.
-                        pending.Remove(session);
-                    }
-                }
-            }
-        }
-        while (progressed && pending.Count > 0);
-
-        foreach (var (id, outcome) in last)
-        {
-            if (outcome.Error is { } error)
-            {
-                notes.Add(error);
-            }
-            else if (outcome.InheritingTitles.Count > 0)
-            {
-                var session = pending.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal));
-                notes.Add(RemovalStrings.PurgeRefused(session?.Title ?? id, outcome.InheritingTitles));
-            }
-        }
-
-        if (notes.Count > 0)
-        {
-            await dialogs.NotifyAsync(title, string.Join("\n\n", notes.Distinct(StringComparer.Ordinal))).ConfigureAwait(true);
-        }
-
         await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
     }
 
@@ -622,17 +541,12 @@ internal sealed partial class MainWindowViewModel
         await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
     }
 
-    private static void AppendGuardLines(List<string> message, IReadOnlyList<string> reasons, int childCount, IReadOnlyList<string> unmergedForks)
+    /// <summary>The workspace removal's dialog lines: the guard's reasons verbatim, then the unmerged forks (7.3 step 2).</summary>
+    private static void AppendGuardLines(List<string> message, IReadOnlyList<string> reasons, IReadOnlyList<string> unmergedForks)
     {
         if (reasons.Count > 0)
         {
-            // The guard's reasons are shown verbatim (7.2 step 2).
             message.Add(RemovalStrings.Reasons + "\n" + string.Join("\n", reasons.Select(static r => "• " + r)));
-        }
-
-        if (childCount > 0)
-        {
-            message.Add(RemovalStrings.Children(childCount));
         }
 
         if (unmergedForks.Count > 0)
@@ -729,7 +643,7 @@ internal sealed partial class MainWindowViewModel
         }
     }
 
-    /// <summary>Removed or purged sessions (sub-agent sessions included) leave the window like archived ones: tab closed, view and runtime released.</summary>
+    /// <summary>Removed sessions (sub-agent sessions included) leave the window like archived ones: tab closed, view and runtime released.</summary>
     private void ReleaseRemovedSessions(IReadOnlyList<string> ids)
     {
         foreach (var id in ids)
@@ -781,29 +695,8 @@ internal sealed partial class MainWindowViewModel
         catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
             AppLogs.Lifecycle.ZLogWarning($"could not list the removed sessions: {exception.Message}");
-            await NotifyOrReportAsync(RemovalStrings.PurgeTitle, exception.Message).ConfigureAwait(true);
+            await NotifyOrReportAsync(RemovalStrings.RestoreTitle, exception.Message).ConfigureAwait(true);
             return [];
         }
-    }
-
-    private static List<string> PurgeNotes(SessionInfo session, PurgeOutcome outcome)
-    {
-        var notes = new List<string>();
-        if (outcome.InheritingTitles.Count > 0)
-        {
-            notes.Add(RemovalStrings.PurgeRefused(session.Title, outcome.InheritingTitles));
-        }
-
-        if (outcome.Error is { } error)
-        {
-            notes.Add(error);
-        }
-
-        if (outcome.Warning is { } warning)
-        {
-            notes.Add(warning);
-        }
-
-        return notes;
     }
 }
