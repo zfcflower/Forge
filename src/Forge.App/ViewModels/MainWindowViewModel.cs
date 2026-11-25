@@ -981,9 +981,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     // ---------------------------------------------------------------- sessions
 
     internal Task OpenSessionByIdAsync(string sessionId, CancellationToken ct) =>
-        OpenSessionByIdCoreAsync(sessionId, ct, deferHistory: false, index: null);
+        OpenSessionByIdAsync(sessionId, activate: true, ct);
 
-    private async Task OpenSessionByIdCoreAsync(string sessionId, CancellationToken ct, bool deferHistory, int? index)
+    /// <summary>
+    /// Opens the session by the role the store holds for it. <paramref name="activate"/> false brings it on screen without
+    /// taking the focus: a role that moved behind a background tab is repaired in place, not brought forward.
+    /// </summary>
+    internal Task OpenSessionByIdAsync(string sessionId, bool activate, CancellationToken ct) =>
+        OpenSessionByIdCoreAsync(sessionId, activate, ct, deferHistory: false, index: null);
+
+    private async Task OpenSessionByIdCoreAsync(string sessionId, bool activate, CancellationToken ct, bool deferHistory, int? index)
     {
         var sessions = composition.Sessions;
         var info = await BackgroundRead.RunAsync(token => sessions.GetSessionAsync(sessionId, token), ct)
@@ -997,36 +1004,65 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             // A child session the user opened under a root (an agent session) comes back as its own tab; a model-spawned
             // sub-agent has no tab of its own and is shown inside its root's bottom group instead.
-            await OpenAgentSessionByIdAsync(info.Id, ct).ConfigureAwait(true);
+            await OpenAgentSessionByIdAsync(info.Id, activate, ct).ConfigureAwait(true);
             return;
         }
 
         // Opening never changes a session's status (6.3): a session that is not Active opens as a read-only view, and
         // only "continue" (ActivateAsync, which honours the one-active-session-per-workspace rule) makes it Active again.
-        await OpenSessionAsync(info, ct, deferHistory, index).ConfigureAwait(true);
+        await OpenSessionAsync(info, activate, ct, deferHistory, index).ConfigureAwait(true);
     }
 
-    private async Task OpenSessionAsync(SessionInfo info, CancellationToken ct, bool deferHistory = false, int? index = null)
+    private async Task OpenSessionAsync(SessionInfo info, CancellationToken ct, bool deferHistory = false, int? index = null) =>
+        await OpenSessionAsync(info, activate: true, ct, deferHistory, index).ConfigureAwait(true);
+
+    private async Task OpenSessionAsync(SessionInfo info, bool activate, CancellationToken ct, bool deferHistory = false, int? index = null)
     {
         ComposerCarry? carried = null;
         if (sessions.TryGetValue(info.Id, out var existing))
         {
-            if (!(existing.IsReadOnlyView && info.Status == SessionStatus.Active) || existing.IsRunning)
+            // A view built for another role (a demoted root's root view, a promoted session's agent view) is stale from the
+            // moment the store moved the row: it runs the wrong depth, the wrong tool surface and the wrong turn gate, so it
+            // never goes back on screen as it is. A turn in flight is the one exception - it ends on the instance it started
+            // with, and the row the gate checks sends the tab read-only at its next use.
+            var action = existing.IsRunning
+                ? SessionRoleAction.Keep
+                : SessionRoleRules.ActionFor(info, existing.IsAgentSession, existing.IsReadOnlyView, existing.AgentSessionRoot?.Id);
+            if (action == SessionRoleAction.Keep)
             {
-                ShowSessionTab(existing);
+                ShowSessionTab(existing, activate);
                 openTabs.Add(info.Id);
-                ActiveSession = existing;
+                if (activate)
+                {
+                    ActiveSession = existing;
+                }
+
                 ScheduleLayoutSave();
                 return;
             }
 
-            // The read-only view of a session that became Active again ("continue"): the live view replaces it in the
-            // same tab (ShowSessionTab re-binds the tab), and takes over its unsent draft and queue (R6).
-            sessions.Remove(info.Id);
-            existing.BecameReadOnly -= OnSessionBecameReadOnly;
-            carried = existing.TakeComposerState();
-            UnhookAutomations(existing);
-            existing.Dispose();
+            if (action == SessionRoleAction.ReadOnly)
+            {
+                // The row left Active behind the tab's back: the tab becomes the read-only history view of the row it is now.
+                existing.EnterReadOnly(info);
+                ShowSessionTab(existing, activate);
+                openTabs.Add(info.Id);
+                if (activate)
+                {
+                    ActiveSession = existing;
+                }
+
+                ScheduleLayoutSave();
+                return;
+            }
+
+            if (!TryRetireView(existing, out carried))
+            {
+                ShowSessionTab(existing, activate);
+                openTabs.Add(info.Id);
+                ScheduleLayoutSave();
+                return;
+            }
         }
 
         var readOnly = info.Status != SessionStatus.Active;
@@ -1041,15 +1077,82 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             // The tab exists and is titled from its stored row; the transcript stays empty until it is first shown.
             ShowSessionTab(session, activate: false, index);
             openTabs.Add(info.Id);
+            if (activeSession is null)
+            {
+                ActiveSession = session;
+            }
+
             ScheduleLayoutSave();
             return;
         }
 
         await session.LoadHistoryAsync(ct).ConfigureAwait(true);
-        ShowSessionTab(session, index: index);
+        ShowSessionTab(session, activate, index);
         openTabs.Add(info.Id);
-        ActiveSession = session;
+        if (activate || activeSession is null)
+        {
+            ActiveSession = session;
+        }
+
         ScheduleLayoutSave();
+    }
+
+    /// <summary>
+    /// Takes an open view out of its tab and out of every table this window keeps, and hands back the draft and queue it
+    /// held so a view built for the row can take them over. A view is retired when the role, the root or the row's status
+    /// moved under it: its runtime, its turn gate and its tool surface were all chosen for the answer that no longer holds.
+    /// <para>False when a turn is still running in a root view: a closed root tab stops nothing in flight and is released at
+    /// its turn's end, so it is left where that release can find it (the tab it showed is then already showing the new
+    /// role, and the old view finishes out of sight).</para>
+    /// </summary>
+    private bool TryRetireView(SessionWorkspaceViewModel view, out ComposerCarry? carried)
+    {
+        ArgumentNullException.ThrowIfNull(view);
+        carried = null;
+        if (view.IsRunning && !view.IsAgentSession)
+        {
+            // A running root view keeps its tab: closing it is what lets its turn end release it (ReleaseClosedSession reads
+            // `openTabs`), so it is not taken out of the tables now. An agent view can move on - its turn ends in the
+            // background exactly as a closed agent tab's does (agentViewsClosing).
+            return false;
+        }
+
+        carried = view.TakeComposerState();
+        var wasActive = ReferenceEquals(activeSession, view);
+        if (view.IsAgentSession && agentViews.TryGetValue(view, out var agentTab))
+        {
+            // The tab stays; the shell's agent bookkeeping, the grants naming it and (when nothing else of that root needs
+            // it) the root's runtime all go with the view, exactly as a closed tab takes them.
+            DetachAgentSessionTab(agentTab);
+            if (wasActive)
+            {
+                ActiveSession = null;
+            }
+
+            return true;
+        }
+
+        sessions.Remove(view.SessionId);
+        openTabs.Remove(view.SessionId);
+        view.BecameReadOnly -= OnSessionBecameReadOnly;
+        view.TurnCompleted -= OnTurnCompleted;
+        view.SubAgentsChanged -= OnSubAgentsChanged;
+        view.AgentTreeChanged -= OnAgentTreeChanged;
+        view.TabTitleChanged -= OnSessionTitleChanged;
+        UnhookAutomations(view);
+        view.Dispose();
+        if (wasActive)
+        {
+            ActiveSession = null;
+        }
+        if (!HasAgentSessionsUsingRuntime(view.SessionId))
+        {
+            // A root tab runs on its session's own runtime; the role it takes next either brings a fresh host (promoted)
+            // or runs on another root's (demoted).
+            composition.Runtimes.Release(view.SessionId);
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1132,10 +1235,18 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
             if (sessions.TryGetValue(info.Id, out var existing))
             {
-                ShowSessionTab(existing, activate: false);
-                openTabs.Add(info.Id);
-                lastRestored = info.Id;
-                continue;
+                // A tab filed for this session may have been built for the other role (the layout remembered it, or a
+                // session opened during start-up): the row decides, and a view for the role it no longer has is rebuilt.
+                if (SessionRoleRules.ActionFor(info, existing.IsAgentSession, existing.IsReadOnlyView, existing.AgentSessionRoot?.Id)
+                    == SessionRoleAction.Keep)
+                {
+                    ShowSessionTab(existing, activate: false);
+                    openTabs.Add(info.Id);
+                    lastRestored = info.Id;
+                    continue;
+                }
+
+                TryRetireView(existing, out _);
             }
 
             var readOnly = info.Status != SessionStatus.Active;
@@ -1388,7 +1499,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         try
         {
-            await RunHandoverDialogAsync(holder, holderView, intent, ct).ConfigureAwait(true);
+            await RunHandoverDialogAsync(holder, intent, ct).ConfigureAwait(true);
         }
         finally
         {
@@ -1420,7 +1531,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     private async Task RunHandoverDialogAsync(
         SessionInfo holder,
-        SessionWorkspaceViewModel? holderView,
         HandoverIntent intent,
         CancellationToken ct)
     {
@@ -1473,43 +1583,38 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        // The old session: its runtime goes and an open tab stays as a read-only view (6.2, "the old session").
-        var store = composition.Sessions;
-        var oldInfo = await BackgroundRead.RunAsync(token => store.GetSessionAsync(holder.Id, token), CancellationToken.None)
+        // A takeover into a session that did not exist (or that was already the branch's root) does not change that
+        // session's role: its first turn is a plain cold start, not a rewritten prefix.
+        var promotedChangedRole = intent.ResumeSessionId is { } resumeId && await IsAgentSessionAsync(resumeId, ct).ConfigureAwait(true);
+
+        // The old session handed the workspace over: its row is an archived agent session of the taker now, so its tab takes
+        // that role (read-only) and its still-active agent sessions move under the taker - the same handover a promotion
+        // runs, so no path leaves a tab on the role it had before.
+        await HandOverBranchAsync(holder.Id, taker.Id, keepDemotedTab: true, activateId: taker.Id, promotedChangedRole, ct)
             .ConfigureAwait(true);
-        if (holderView is not null && oldInfo is not null)
-        {
-            holderView.IsHandingOver = false;
-            holderView.EnterReadOnly(oldInfo);
-        }
-        else
-        {
-            composition.Runtimes.Release(holder.Id);
-        }
-
-        // The old root's still-active agent tabs follow the workspace to the taker in place - the same re-home a promotion
-        // does. Left pointing at the archived old root, their turn gate would reject the next message as "taken over" and
-        // their in-memory root would disagree with the store the handover just re-homed them in. An archived or removed
-        // agent tab is a read-only view of a history row and stays with the old root; the taker's own tab is opened below.
-        var takerRuntime = composition.Runtimes.Get(taker);
-        foreach (var view in agentViews.Keys.ToArray())
-        {
-            if (!string.Equals(view.AgentSessionRoot?.Id, holder.Id, StringComparison.Ordinal)
-                || string.Equals(view.SessionId, taker.Id, StringComparison.Ordinal)
-                || view.Info.Status != SessionStatus.Active)
-            {
-                continue;
-            }
-
-            view.RehomeTo(taker, takerRuntime);
-            view.TurnGate = token => CheckTurnAsync(taker.Id, token);
-        }
-
-        await OpenSessionAsync(taker, CancellationToken.None).ConfigureAwait(true);
         await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
         if (done.Warning is { } warning)
         {
             await dialogs.NotifyAsync(HandoverStrings.Title, warning).ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// Whether the stored row is an agent session - what the taker of a resumed handover was before it took the branch. A read
+    /// that fails answers false: an unknown previous role must not become a claim about a cache that was never rewritten.
+    /// </summary>
+    private async Task<bool> IsAgentSessionAsync(string sessionId, CancellationToken ct)
+    {
+        try
+        {
+            var row = await BackgroundRead.RunAsync(token => composition.Sessions.GetSessionAsync(sessionId, token), ct)
+                .ConfigureAwait(true);
+            return row?.ParentSessionId is not null;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            AppLogs.Session.ZLogWarning($"the previous role of '{sessionId}' could not be read: {exception.Message}");
+            return false;
         }
     }
 
@@ -2339,26 +2444,95 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// An archive with a successor, or an explicit "promote to main session", handed the workspace to
-    /// <paramref name="promoted"/>: the old root's tab closes, and the agent-session tabs of the branch stay open. They are
-    /// re-homed in place (root, runtime, parent link) instead of closed and reopened - a re-open would rebuild every tab and
-    /// replay its history, and a long branch made the promotion wait for all of them. Only the promoted session's own agent
-    /// tab is rebuilt, because it changes kind; its draft is carried across.
+    /// An archive with a successor, or an explicit "promote to main session", handed the workspace to the promoted
+    /// session: the one routine every role change runs, so no path leaves a tab on the role it had before.
     /// </summary>
-    private void OnSessionPromoted(string rootId, SessionInfo promoted)
+    private void OnSessionPromoted(string rootId, SessionInfo promoted) =>
+        _ = HandOverAsync(rootId, promoted.Id, keepDemotedTab: false, activateId: promoted.Id, promotedChangedRole: true);
+
+    /// <summary>
+    /// Fire-and-forget wrapper: a handover that fails only leaves the tab on its old role, and the tree row still opens the
+    /// right one - it must never take the window down.
+    /// </summary>
+    private async Task HandOverAsync(
+        string demotedRootId,
+        string promotedId,
+        bool keepDemotedTab,
+        string? activateId,
+        bool promotedChangedRole)
     {
+        try
+        {
+            await HandOverBranchAsync(demotedRootId, promotedId, keepDemotedTab, activateId, promotedChangedRole, CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"the handover of '{demotedRootId}' to '{promotedId}' failed: {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The store handed the branch to <paramref name="promotedId"/>: the old root left Active as an archived agent session
+    /// of it, and the new root owns the workspace. Every open tab of the branch takes the role, root and runtime the store
+    /// now holds - the promoted session becomes the branch's root (its agent view was built for Depth 1 and with it lost the
+    /// root's tool surface), the old root's other agent tabs move under the new root in place, and the old root's own tab is
+    /// closed or kept as the read-only view of the row it is now.
+    /// </summary>
+    /// <param name="activateId">The session the caller wants on screen; the other side of the handover is repaired without
+    /// taking the focus.</param>
+    /// <param name="promotedChangedRole">Whether the promoted session existed before this action as the other role. A brand
+    /// new one (a takeover into a fresh session) or one that was already the branch's root did not change role, so its first
+    /// turn is an ordinary cold start and the cache toast would misattribute the cost.</param>
+    private async Task HandOverBranchAsync(
+        string demotedRootId,
+        string promotedId,
+        bool keepDemotedTab,
+        string? activateId,
+        bool promotedChangedRole,
+        CancellationToken ct)
+    {
+        if (string.Equals(demotedRootId, promotedId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"'{demotedRootId}' cannot hand the branch over to itself.", nameof(promotedId));
+        }
+
+        // The row after the transaction, never the caller's snapshot: the snapshot it holds was read before the store moved
+        // the parent link, and this method's whole job is the answer that link carries.
+        SessionInfo? promoted;
+        try
+        {
+            promoted = await BackgroundRead.RunAsync(token => composition.Sessions.GetSessionAsync(promotedId, token), ct)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            AppLogs.Session.ZLogWarning($"the handover of '{demotedRootId}' to '{promotedId}' failed: {exception.Message}");
+            return;
+        }
+
+        if (promoted is null || promoted.ParentSessionId is not null)
+        {
+            // The store does not hold it as this branch's root: nothing moved, and opening it must not invent a role.
+            return;
+        }
+
         var runtime = composition.Runtimes.Get(promoted);
+        var rebuildDemotedTab = false;
         ComposerCarry? carried = null;
+        ComposerCarry? demotedCarried = null;
         foreach (var view in agentViews.Keys.ToArray())
         {
-            if (!string.Equals(view.AgentSessionRoot?.Id, rootId, StringComparison.Ordinal))
+            if (!string.Equals(view.AgentSessionRoot?.Id, demotedRootId, StringComparison.Ordinal))
             {
                 continue;
             }
 
             if (string.Equals(view.SessionId, promoted.Id, StringComparison.Ordinal))
             {
-                carried = view.TakeComposerState();
+                // The promoted session's own tab was built for the role it no longer has: it is retired (its draft carried
+                // into the root view below) rather than re-homed.
+                TryRetireView(view, out carried);
                 continue;
             }
 
@@ -2373,27 +2547,151 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             view.TurnGate = token => CheckTurnAsync(promoted.Id, token);
         }
 
-        OnSessionArchived(rootId);
-        _ = OpenPromotedSessionAsync(promoted.Id, carried);
+        if (keepDemotedTab)
+        {
+            // The old root keeps its tab as the read-only view of the row it is now (an archived agent session of the new
+            // root): its grants die with the role, its runtime goes, and the view is rebuilt below.
+            sessions.TryGetValue(demotedRootId, out var demoted);
+            if (demoted is not null)
+            {
+                RevokeSessionMessagesOf(demoted);
+            }
+
+            OnMessageTargetClosed(demotedRootId);
+            terminals.OnSessionArchived(demotedRootId);
+            CloseAgentSessionTabs(demotedRootId);
+            openTabs.Remove(demotedRootId);
+
+            // A turn still running in that view finishes on the host it started on: its tab and runtime stay until it ends,
+            // and the role it kept is repaired the next time the tab is opened.
+            if (demoted is null || TryRetireView(demoted, out demotedCarried))
+            {
+                composition.Runtimes.Release(demotedRootId);
+                rebuildDemotedTab = demoted is not null;
+            }
+        }
+        else
+        {
+            OnSessionArchived(demotedRootId);
+        }
+
+        await OpenSessionByIdAsync(promoted.Id, activateId == promoted.Id, ct).ConfigureAwait(true);
+        if (carried is { } state && sessions.TryGetValue(promoted.Id, out var opened))
+        {
+            opened.RestoreComposerState(state);
+        }
+
+        if (rebuildDemotedTab)
+        {
+            await OpenSessionByIdAsync(demotedRootId, activateId == demotedRootId, ct).ConfigureAwait(true);
+            if (demotedCarried is { } kept && sessions.TryGetValue(demotedRootId, out var demotedView))
+            {
+                // The old root's draft survives the demotion: the read-only view holds it, and a later "continue" carries it
+                // on into the writable view.
+                demotedView.RestoreComposerState(kept);
+            }
+        }
+
+        if (promotedChangedRole)
+        {
+            NotifyRoleChanged(promoted.Id, promoted.Title, becameRoot: true);
+        }
     }
 
     /// <summary>
-    /// Opens the promoted session as the branch's root (its own agent tab just closed with the old root), carrying the draft
-    /// that tab was holding. A failure only leaves the tab closed; its tree row still opens it.
+    /// A session's role changed and its tool surface moved with it: one toast says what that costs - the prefix the
+    /// provider caches (system prompt + tool definitions) is written from scratch once, while the conversation and every
+    /// other tab keep theirs. Nothing is required of the user, so the level is <see cref="NotificationLevel.Info"/>; the key
+    /// is the session, so a promote-demote-promote round counts its repeats into one card instead of stacking three.
     /// </summary>
-    private async Task OpenPromotedSessionAsync(string sessionId, ComposerCarry? carried)
+    private void NotifyRoleChanged(string sessionId, string title, bool becameRoot) =>
+        composition.Notifications.Notify(
+            NotificationLevel.Info,
+            SessionStrings.RoleChangedToastTitle,
+            SessionStrings.RoleChangedToastBody(title, becameRoot),
+            "session-role:" + sessionId);
+
+    /// <summary>
+    /// The store moved agent sessions under <paramref name="rootId"/> (a restore that joined a branch, a demotion's
+    /// family): every open tab whose row now hangs under it follows - a live one in place, the same re-home a promotion
+    /// does and no replay, because only who owns the workspace moved; a read-only one takes the role its row holds now.
+    /// </summary>
+    private async Task RehomeAgentTabsAsync(string rootId, CancellationToken ct)
     {
+        if (agentViews.Count == 0)
+        {
+            return;
+        }
+
+        SessionInfo? root;
         try
         {
-            await OpenSessionByIdAsync(sessionId, CancellationToken.None).ConfigureAwait(true);
-            if (carried is { } state && sessions.TryGetValue(sessionId, out var view))
-            {
-                view.RestoreComposerState(state);
-            }
+            root = await BackgroundRead.RunAsync(token => composition.Sessions.GetSessionAsync(rootId, token), ct)
+                .ConfigureAwait(true);
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            AppLogs.Session.ZLogWarning($"reopening the promoted session '{sessionId}' failed: {exception.Message}");
+            AppLogs.Session.ZLogWarning($"the agent tabs of '{rootId}' were not re-homed: {exception.Message}");
+            return;
+        }
+
+        if (root is null || root.Status != SessionStatus.Active)
+        {
+            return;
+        }
+
+        SessionRuntime? runtime = null;
+        foreach (var view in agentViews.Keys.ToArray())
+        {
+            if (view.IsRunning)
+            {
+                continue;
+            }
+
+            SessionInfo? row;
+            try
+            {
+                row = await BackgroundRead.RunAsync(token => composition.Sessions.GetSessionAsync(view.SessionId, token), ct)
+                    .ConfigureAwait(true);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+            {
+                continue;
+            }
+
+            if (row is null || !string.Equals(row.ParentSessionId, root.Id, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (row.Status != SessionStatus.Active)
+            {
+                // Its own row is history now (an archived child that followed the family): the tab is the read-only view of it.
+                if (!view.IsReadOnlyView)
+                {
+                    view.EnterReadOnly(row);
+                }
+
+                continue;
+            }
+
+            if (view.IsReadOnlyView)
+            {
+                // A history tab of a row that is Active again (its old root was archived): re-homing it would move a read-only
+                // view onto a live root and leave it unable to run, so the guarded open replaces it with the live view.
+                await OpenAgentSessionByIdAsync(view.SessionId, activate: false, ct).ConfigureAwait(true);
+                continue;
+            }
+
+            // The role held; only the root it runs on moved, so the tab keeps its transcript and its run.
+            if (string.Equals(view.AgentSessionRoot?.Id, root.Id, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            runtime ??= composition.Runtimes.Get(root);
+            view.RehomeTo(root, runtime);
+            view.TurnGate = token => CheckTurnAsync(root.Id, token);
         }
     }
 

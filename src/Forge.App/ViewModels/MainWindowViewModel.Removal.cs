@@ -385,12 +385,28 @@ internal sealed partial class MainWindowViewModel
         {
             if (after.ParentSessionId is null && previousParentId is { Length: > 0 } demoted)
             {
-                // The restore promoted an agent session: the root it hung under is now an agent of it, so its old tab (if
-                // open) is closed before the promoted session opens as the workspace's root.
-                OnSessionArchived(demoted);
+                // The restore promoted an agent session: the root it hung under is an agent of it now, so the branch's
+                // tabs take the roles the store holds.
+                await HandOverBranchAsync(demoted, after.Id, keepDemotedTab: false, activateId: after.Id, promotedChangedRole: true, ct)
+                    .ConfigureAwait(true);
+            }
+            else
+            {
+                if (after.ParentSessionId is { } holderId)
+                {
+                    // It rejoined the branch as an agent session of the active root: the agent family the store moved with
+                    // it follows to that root, in place, and its own tab takes the role its row holds now.
+                    await RehomeAgentTabsAsync(holderId, ct).ConfigureAwait(true);
+                    if (previousParentId is null)
+                    {
+                        // It was a root and is an agent session now: the same cache cost a demotion pays.
+                        NotifyRoleChanged(after.Id, after.Title, becameRoot: false);
+                    }
+                }
+
+                await OpenSessionByIdAsync(after.Id, CancellationToken.None).ConfigureAwait(true);
             }
 
-            await OpenSessionByIdAsync(current.Id, CancellationToken.None).ConfigureAwait(true);
             if (rebuilt && project.Kind == ProjectKind.Repository)
             {
                 await NotifyOrReportAsync(title, RemovalStrings.RebuiltWorktree(directory)).ConfigureAwait(true);

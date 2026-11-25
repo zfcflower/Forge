@@ -115,14 +115,26 @@ internal sealed partial class MainWindowViewModel
     /// back as the same live view - that turn keeps streaming and its pending approval cards keep answering - never as a
     /// second view replayed from the store under the run that is still writing to it.
     /// </summary>
-    internal async Task OpenAgentSessionByIdAsync(string childSessionId, CancellationToken ct)
+    internal Task OpenAgentSessionByIdAsync(string childSessionId, CancellationToken ct) =>
+        OpenAgentSessionByIdAsync(childSessionId, activate: true, ct);
+
+    /// <summary>
+    /// <see cref="OpenAgentSessionByIdAsync(string, CancellationToken)"/>, with the focus left where it is when
+    /// <paramref name="activate"/> is false: a role that moved behind a background tab is repaired in place, not brought
+    /// forward.
+    /// </summary>
+    internal async Task OpenAgentSessionByIdAsync(string childSessionId, bool activate, CancellationToken ct)
     {
         // A live tab is brought forward without touching the store. A read-only one is not: a restore may have made the row
         // Active since it was opened, and that tab has to be replaced by the live view below.
         if (agentTabs.ContainsKey(childSessionId)
             && FindOpenAgentSessionView(childSessionId) is { IsReadOnlyView: false })
         {
-            ActivateAgentSessionTab(childSessionId);
+            if (activate)
+            {
+                ActivateAgentSessionTab(childSessionId);
+            }
+
             return;
         }
 
@@ -197,7 +209,11 @@ internal sealed partial class MainWindowViewModel
         {
             if (!open.IsReadOnlyView || readOnly)
             {
-                ActivateAgentSessionTab(child.Id);
+                if (activate)
+                {
+                    ActivateAgentSessionTab(child.Id);
+                }
+
                 return;
             }
 
@@ -209,7 +225,7 @@ internal sealed partial class MainWindowViewModel
 
             var liveView = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id, readOnly: false);
             liveView.RestoreComposerState(carried);
-            OpenAgentSessionTab(liveView, activate: true);
+            OpenAgentSessionTab(liveView, activate);
             try
             {
                 await liveView.LoadHistoryAsync(ct).ConfigureAwait(true);
@@ -223,7 +239,7 @@ internal sealed partial class MainWindowViewModel
         }
 
         var view = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id, readOnly);
-        OpenAgentSessionTab(view, activate: true);
+        OpenAgentSessionTab(view, activate);
         try
         {
             await view.LoadHistoryAsync(ct).ConfigureAwait(true);
@@ -377,6 +393,33 @@ internal sealed partial class MainWindowViewModel
         var key = AgentTabKey(session);
         var tab = Workbench.FindTab(WorkbenchIds.SessionTab(key))
                    ?? Workbench.OpenTab(Workbench.MainTabs, WorkbenchIds.SessionTab(key), TabKind.Session, session, session.TabTitle);
+        if (!ReferenceEquals(tab.Content, session))
+        {
+            // The tab still shows a view built for another role (a demoted root's root view, a promoted session's agent view,
+            // a rehearsal left by an earlier open): that role is not the row's any more, so the view leaves with everything it
+            // owns - its runtime, its subscriptions, its tables - before the new one moves in.
+            var wasActive = tab.Content is SessionWorkspaceViewModel showing && ReferenceEquals(activeSession, showing);
+            ComposerCarry? carried = null;
+            if (tab.Content is SessionWorkspaceViewModel stale)
+            {
+                TryRetireView(stale, out carried);
+            }
+
+            tab.Content = session;
+            session.TabTitleChanged += OnSessionTitleChanged;
+            if (carried is { } draft)
+            {
+                // A draft the retired view held moves with the tab rather than disappearing under it.
+                session.RestoreComposerState(draft);
+            }
+
+            if (wasActive)
+            {
+                // The tab on screen keeps the panels on the session it shows, without activating anything.
+                ActiveSession = session;
+            }
+        }
+
         // The header's double-click rename: the child's own name, written through the same store path the tree row runs.
         tab.RenameCommand = new AsyncRelayCommand(
             ct => RenameAgentSessionTabAsync(session, ct),

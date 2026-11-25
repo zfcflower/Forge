@@ -130,6 +130,9 @@ internal static class SessionStrings
     public const string ProviderNoticeTitleKey = "turn.providerNotice.title";
     public const string CacheRewriteTitleKey = "turn.cacheRewrite.title";
     public const string CacheRewriteBodyKey = "turn.cacheRewrite.body";
+    public const string RoleChangedToastTitleKey = "session.roleChanged.title";
+    public const string RoleChangedToastRootKey = "session.roleChanged.root";
+    public const string RoleChangedToastAgentKey = "session.roleChanged.agent";
     public const string CheckpointFailedKey = "turn.checkpointFailed";
     public const string SteeredNoticeKey = "turn.steeredNotice";
     public const string FollowUpNoticeKey = "turn.followUpNotice";
@@ -421,6 +424,17 @@ internal static class SessionStrings
 
     public static LocText CacheRewriteBody(long tokens) => new(CacheRewriteBodyKey, TextFormat.Number(tokens));
 
+    /// <summary>
+    /// Toast after a session's role changed (promoted to root or demoted to an agent session): the tool surface moves with
+    /// the role, so that session's own prompt-cache prefix is written from scratch once.
+    /// </summary>
+    public static LocText RoleChangedToastTitle => new(RoleChangedToastTitleKey);
+
+    /// <param name="session">The session whose role changed - the one the user acted on.</param>
+    /// <param name="becameRoot">True for a promotion, false for a demotion.</param>
+    public static LocText RoleChangedToastBody(string session, bool becameRoot) =>
+        new(becameRoot ? RoleChangedToastRootKey : RoleChangedToastAgentKey, session);
+
     /// <summary>The notice shown when the turn checkpoint could not be written.</summary>
     public static LocText CheckpointFailed(string message) => new(CheckpointFailedKey, message);
 
@@ -707,6 +721,15 @@ internal static class SessionStrings
             CacheRewriteBodyKey,
             "一小时内已有 3 次整段重写，共写入 {0} 个 token（按缓存写入价计费）。通常是工具集、模型或系统提示在这一小时内变过，而不是缓存寿命太短",
             "Three full rewrites in one hour, {0} tokens written in total at the cache-write price. Usually the tool set, the model or the system prompt changed within the hour rather than the cache lifetime being too short");
+        Loc.Register(RoleChangedToastTitleKey, "角色变了，提示词缓存会重写一次", "Role changed - the prompt cache is written once more");
+        Loc.Register(
+            RoleChangedToastRootKey,
+            "“{0}”现在是根会话，工具面换成根会话那一套（含扩展工具）。它下一轮的缓存前缀（系统提示词 + 工具定义）会整段重写一次，之后的轮次照常命中；对话历史不变，分支里其它 Agent 标签的缓存也不受影响",
+            "\"{0}\" is a root session now, with the root's tool surface (the extension tools included). Its next turn rewrites the whole cache prefix once - system prompt and tool definitions - and the turns after it hit the cache again; the conversation itself is untouched, and the other agent tabs of the branch keep theirs");
+        Loc.Register(
+            RoleChangedToastAgentKey,
+            "“{0}”现在是 Agent 会话，工具面收窄到它的 Agent 种类（扩展工具不再可见）。它下一轮的缓存前缀（系统提示词 + 工具定义）会整段重写一次，之后的轮次照常命中；对话历史不变",
+            "\"{0}\" is an agent session now, with its agent kind's tool surface (the extension tools are gone). Its next turn rewrites the whole cache prefix once - system prompt and tool definitions - and the turns after it hit the cache again; the conversation itself is untouched");
         Loc.Register(CheckpointFailedKey, "轮次检查点失败：{0}", "Turn checkpoint failed: {0}");
         Loc.Register(SteeredNoticeKey, "已转向：{0}", "Steered: {0}");
         Loc.Register(FollowUpNoticeKey, "后续指令：{0}", "Follow-up: {0}");

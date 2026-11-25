@@ -36,7 +36,7 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 
 **循环。** 流式一轮 → 审批 → 执行 → 回写。连续只读工具并发,有副作用工具依序逐个执行;结果按调用顺序写成一条 Tool 消息。取消时每个待决调用都补一条"已取消"结果,保证历史始终合法。超长工具输出(>32,000 字符)转存 Artifact,上下文里留“头+尾”预览和 id;已自限长度的工具(`IBoundedOutputTool`:read/ls/find/grep)与 `read_artifact` 不再转存。bounded 工具的输出不经 spill,由上下文裁剪级在判定线处回收:越过触发线(或回合内的紧急线)时(`AgentLoop.CompactIfNeededAsync` 的裁剪分支)把 keepRecent 窗口之外的旧 `ToolResultBlock` 换成收据(`ContextReceipt` 一行,固定部分永不截断:`read_history <seq>` 是找回入口,只缩路径/命令段;错误结果、短于 512 字符的结果、纯收据块不再动,所以投影是定点);继承前缀一条不碰,keepRecent 窗口内不碰;收据总长与留头留尾受常量对约束(96/150/150,之和加标记余量 < 512);裁剪目标取触发线与摘要目标的中点(推导值,零新参数)。裁剪零模型成本:降到判定线下即发 `AgentContextReduced`(随后的 `AgentContextMeasured` 报判定线——回合首请求为触发线、回合内为紧急线)并复位迟滞,仍超线才走摘要。
 
-**SubAgent。** `spawn_agent` 拒绝没有 `tools` 列表的 Agent(否则它会拿到全部工具):返回错误,提示模型用 `ask_user` 让用户选角色并给出推荐清单,agent 文件改动从下个会话起生效(Agent 种类是每次建 host 的快照);内置 Scout/Worker/Plan/Reviewer 自带清单。
+**SubAgent。** `spawn_agent` 拒绝没有 `tools` 列表的 Agent(否则它会拿到全部工具):返回错误,提示模型用 `ask_user` 让用户选角色并给出推荐清单,agent 文件改动从下个会话起生效(Agent 种类是每次建 host 的快照);内置 Scout/Worker/Plan/Reviewer 自带清单。Scout/Worker/Plan 的清单含 `web_search`/`web_fetch`(无可用搜索后端时 `web_search` 本就不注册;两者都是只读但逐次询问,子 Agent 的调用在根标签出审批卡),Reviewer 不含——它只判仓库内的变更,抓来的网页是不可信输入,不得进结论。
   - `spawn_agent` 按 `<kind>-<n>` 登记实例;同类型共享前缀,可按 id 续跑(同类型、且当前未在运行)。
   - **没给 `resume_id` 时自动复用**:先在同类型、模型自有、当前空闲、上次 run 结束不超过 `AgentOptions.SubAgentReuseWindow`(默认 1 小时)的子 Agent 里挑,按 `SubAgentAffinity` 打分——新任务与候选「上次任务 + 上次回答」共享的文件名各 3 分、标识符各 1 分(只读任务与回答文本,不解析工具参数;中文按连续字母算一个词,单独不足以过门槛)——取最高分、平局取更晚结束者;分数低于 `SubAgentReuseThreshold`(默认 2)就新开,无关任务绝不接到别人的对话后面。
   - 命中时回执写成 `[agent_id: X, resumed]`。

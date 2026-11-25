@@ -70,7 +70,7 @@
 
 ## 2.3 子 Agent
 
-- 内置四种：**Scout**（只读侦察，read/grep/find/ls）、**Worker**（实现一个任务，加 edit/write/copy/move/delete/bash）、**Plan**（只读产出有序计划）、**Reviewer**（只读评审，多一个只读 `git_diff`）。模型与思考强度可分别设置。
+- 内置四种：**Scout**（只读侦察，read/grep/find/ls + `web_search`/`web_fetch`）、**Worker**（实现一个任务，加 edit/write/copy/move/delete/bash + 两个 web 工具）、**Plan**（只读产出有序计划，同样带两个 web 工具）、**Reviewer**（只读评审，多一个只读 `git_diff`，**不带** web 工具——抓来的网页是不可信输入，不进结论）。模型与思考强度可分别设置。
 - 生成：`spawn_agent` 按 `<kind>-<n>` 登记实例，同类型共享稳定提示词前缀以命中缓存；同类型实例可按 id 续跑（当前未在运行）。可选 `model`/`provider`/`thinking` 只作用于这一次派生：`models` 给出确切 id 与接受档位，解析器绝不猜（多命中一律列候选），thinking 夹到模型接受档并在回执注明，覆盖不写设置、与 `resume_id` 互斥。
 - 并发与深度：嵌套深度上限 2；整棵树的活跃 Agent 数默认 4，可在 `agents` 分区调到 1–16（扩容立即唤醒排队中的 Agent，缩容不打断已在跑的一轮）；父 Agent 等子结果时交还名额，避免嵌套死锁。
 - 生命周期事件：`Started`（父发出）→ 仅在确实等名额时 `Queued` → `Running` → 每个 run 恰一次 `Finished`（含异常与父取消；父取消记 `Stopped "parent cancelled"`）。用量是本 run 增量，耗时从 spawn 起算（含排队）。

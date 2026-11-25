@@ -19,6 +19,16 @@ internal sealed class AgentRuntimeManager : IDisposable
     public SessionRuntime Get(SessionInfo session)
     {
         ArgumentNullException.ThrowIfNull(session);
+
+        // A child session never owns a runtime: an agent session runs one Depth 1 instance inside its root's host, and a
+        // runtime of its own would hand it a root agent - the Depth 0 tool surface (extension tools included), its own turn
+        // gate and its own approval handler. A demoted root must therefore lose its runtime, not keep it under the new role.
+        if (session.ParentSessionId is not null)
+        {
+            throw new InvalidOperationException(
+                $"Session {session.Id} is an agent session of {session.ParentSessionId}: its turns run on its root's runtime.");
+        }
+
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
