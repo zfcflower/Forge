@@ -34,9 +34,13 @@ internal static class HandoverStrings
     public const string CarryToNewKey = "lifecycle.handover.carryToNew";
     public const string RootCheckoutWarningKey = "lifecycle.handover.rootCheckoutWarning";
     public const string ModeLabelKey = "lifecycle.handover.mode.label";
-    public const string ModeFullKey = "lifecycle.handover.mode.full";
     public const string ModeSummaryKey = "lifecycle.handover.mode.summary";
     public const string ModeBlankKey = "lifecycle.handover.mode.blank";
+    public const string RootTitleKey = "lifecycle.handover.root.title";
+    public const string RootIntroKey = "lifecycle.handover.root.intro";
+    public const string RootUncommittedKey = "lifecycle.handover.root.uncommitted";
+    public const string RootSummarySwitchKey = "lifecycle.handover.root.summarySwitch";
+    public const string RootCreateKey = "lifecycle.handover.root.create";
     public const string RunningKey = "lifecycle.handover.running";
     public const string StopKey = "lifecycle.handover.stop";
 
@@ -91,11 +95,19 @@ internal static class HandoverStrings
 
     public static string ModeLabel => Loc.Instance[ModeLabelKey];
 
-    public static string ModeFull => Loc.Instance[ModeFullKey];
-
     public static string ModeSummary => Loc.Instance[ModeSummaryKey];
 
     public static string ModeBlank => Loc.Instance[ModeBlankKey];
+
+    public static string RootTitle => Loc.Instance[RootTitleKey];
+
+    public static string RootIntro(string oldTitle) => Loc.Instance.Format(RootIntroKey, oldTitle);
+
+    public static string RootUncommitted(int count) => Loc.Instance.FormatPlural(RootUncommittedKey, count);
+
+    public static string RootSummarySwitch(string oldTitle) => Loc.Instance.Format(RootSummarySwitchKey, oldTitle);
+
+    public static string RootCreate => Loc.Instance[RootCreateKey];
 
     public static string Running => Loc.Instance[RunningKey];
 
@@ -150,9 +162,14 @@ internal static class HandoverStrings
         Loc.Register(CarryToNewKey, "划归接手的会话:不提交,它的第一次步骤提交会把它们收进去", "Hand them to the session taking over: no commit; its first step commit picks them up");
         Loc.Register(RootCheckoutWarningKey, "这是仓库根检出:你在此手工做的改动也会一起收进去。", "This is the repository's own checkout: your manual edits here are picked up too.");
         Loc.Register(ModeLabelKey, "新会话的上下文:", "Context of the new session:");
-        Loc.Register(ModeFullKey, "完整继承(接续旧会话的上下文)", "Full inheritance (continue the old session's context)");
         Loc.Register(ModeSummaryKey, "交接摘要", "Handover summary");
         Loc.Register(ModeBlankKey, "空白", "Blank");
+        Loc.Register(RootTitleKey, "新建根会话", "New root session");
+        Loc.Register(RootIntroKey, "在“{0}”的工作区新建一个根会话；原会话归档，工作区里的未提交改动留给新会话。", "Creates a new root session in \"{0}\"'s workspace; the old session is archived and its uncommitted changes stay for the new one.");
+        Loc.Register(RootUncommittedKey + ".one", "检测到 {0} 个未提交改动(含未跟踪文件)，它们留在工作区，归新的根会话。", "{0} uncommitted change (untracked files included) stays in the workspace, for the new root session.");
+        Loc.Register(RootUncommittedKey + ".other", "检测到 {0} 个未提交改动(含未跟踪文件)，它们留在工作区，归新的根会话。", "{0} uncommitted changes (untracked files included) stay in the workspace, for the new root session.");
+        Loc.Register(RootSummarySwitchKey, "是否交接“{0}”会话的摘要", "Hand over a summary of \"{0}\"'s session");
+        Loc.Register(RootCreateKey, "创建", "Create");
         Loc.Register(RunningKey, "正在接手…", "Taking over…");
         Loc.Register(StopKey, "停止", "Stop");
 

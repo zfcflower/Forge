@@ -422,7 +422,7 @@ internal static class ShellStrings
         Loc.Register(PickRepositoryTitleKey, "添加 git 仓库", "Add a git repository");
         Loc.Register(NotRepositoryTitleKey, "不是 git 仓库", "Not a git repository");
         Loc.Register(NotRepositoryMessageKey, "{0}\n\n这个文件夹不是 git 仓库，要在这里执行 git init 吗？", "{0}\n\nThis folder is not a git repository. Run git init here?");
-        Loc.Register(NewSessionTitleKey, "新建会话", "New session");
-        Loc.Register(NewSessionQuestionKey, "要新建一个会话吗？", "Create a new session?");
+        Loc.Register(NewSessionTitleKey, "新建根会话", "New root session");
+        Loc.Register(NewSessionQuestionKey, "要在这个分支上新建一个根会话吗？", "Create a new root session on this branch?");
     }
 }

@@ -1466,7 +1466,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// executed (<see cref="HandoverFlow"/>). On success the old runtime goes, its tab turns read-only, the session that
     /// took over opens and the trees refresh. Every failure is reported in the dialog or as a notice.
     /// </summary>
-    internal async Task TakeOverAsync(SessionInfo holder, HandoverIntent intent, CancellationToken ct)
+    internal async Task TakeOverAsync(
+        SessionInfo holder,
+        HandoverIntent intent,
+        CancellationToken ct,
+        HandoverDialogStyle style = HandoverDialogStyle.TakeOver)
     {
         ArgumentNullException.ThrowIfNull(holder);
         ArgumentNullException.ThrowIfNull(intent);
@@ -1502,7 +1506,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         try
         {
-            await RunHandoverDialogAsync(holder, intent, ct).ConfigureAwait(true);
+            await RunHandoverDialogAsync(holder, intent, ct, style).ConfigureAwait(true);
         }
         finally
         {
@@ -1535,7 +1539,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private async Task RunHandoverDialogAsync(
         SessionInfo holder,
         HandoverIntent intent,
-        CancellationToken ct)
+        CancellationToken ct,
+        HandoverDialogStyle style)
     {
         var flow = composition.Handover;
         var directory = HandoverFlow.DirectoryOf(holder);
@@ -1573,7 +1578,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
                 done = attempt;
                 return null;
-            });
+            },
+            style);
         var shown = await dialogs!.RunHandoverAsync(model, ct).ConfigureAwait(true);
         if (shown is null && done is null)
         {
@@ -1742,67 +1748,17 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        var owner = source.Session;
-        SessionWorkspaceViewModel? ownerView = null;
-        if (owner is not null)
-        {
-            sessions.TryGetValue(owner.Id, out ownerView);
-        }
-
-        var sourceBusy = owner is not null && HandoverBusyReasons(owner, ownerView).Count > 0;
         ForkAttempt? done = null;
         var model = new ForkDialogModel(
             preparation.Branch!,
             preparation.StartCommit!,
-            owner?.Title,
             preparation.Uncommitted.Count,
-            sourceBusy,
             preparation.Sparse is not null,
             ForkFlow.DefaultBranchName(composition.Worktrees.Manager.Options.BranchPrefix),
-            // The fork dialog no longer offers a context mode: a forked workspace starts blank and the user decides what the
-            // new session is told once they create one there.
-            HandoverContextMode.Blank,
             async (choice, token) =>
             {
-                // "Commit first": checked and claimed on the UI thread, which owns every busy source, so nothing can start
-                // between the check and the flag; the flow's own check then only confirms it. The source workspace is
-                // also "operating" for the attempt, so no merge, sync or abort starts in it under the commit.
-                var holding = choice.CommitFirst && owner is not null;
-                if (holding)
-                {
-                    if (HandoverBusyReasons(owner!, ownerView).Count > 0 || !composition.WorkspaceStates.TryBeginOperation(source.Directory))
-                    {
-                        return ForkStrings.BusyNow(owner!.Title);
-                    }
-
-                    NotifyTreeCommandStates();
-                    handingOver.Add(owner!.Id);
-                    if (ownerView is not null)
-                    {
-                        ownerView.IsHandingOver = true;
-                    }
-                }
-
-                ForkAttempt attempt;
-                try
-                {
-                    attempt = await Task.Run(() => flow.ExecuteAsync(source, choice, static () => true, token), CancellationToken.None)
-                        .ConfigureAwait(true);
-                }
-                finally
-                {
-                    if (holding)
-                    {
-                        composition.WorkspaceStates.EndOperation(source.Directory);
-                        NotifyTreeCommandStates();
-                        handingOver.Remove(owner!.Id);
-                        if (ownerView is not null)
-                        {
-                            ownerView.IsHandingOver = false;
-                        }
-                    }
-                }
-
+                var attempt = await Task.Run(() => flow.ExecuteAsync(source, choice, token), CancellationToken.None)
+                    .ConfigureAwait(true);
                 if (!attempt.Succeeded)
                 {
                     return attempt.Error;
@@ -1818,13 +1774,17 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        if (done?.Session is not { } fork)
+        if (done is not { Succeeded: true })
         {
             return;
         }
 
-        await OpenSessionAsync(fork, CancellationToken.None).ConfigureAwait(true);
+        // The fork is the branch and its checkout: no session was created there, so the tree is all there is to refresh.
         await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+        if (done.Workspace is { } workspace)
+        {
+            Status.SetWorkspaceProblem(LocText.Literal(ForkStrings.Created(workspace)));
+        }
     }
 
     /// <summary>
@@ -3589,7 +3549,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (SessionCreateOccupiedException occupied)
         {
-            await ShowOccupiedAsync(occupied.Occupied, HandoverIntent.NewSession(occupied.Create), CancellationToken.None)
+            // "新根会话…" on a branch that already has a session: its own dialog asks the one question (hand over a summary or
+            // start blank) and takes the branch over - uncommitted changes stay in the workspace by construction.
+            await TakeOverAsync(
+                    occupied.Occupied,
+                    HandoverIntent.NewSession(occupied.Create),
+                    CancellationToken.None,
+                    HandoverDialogStyle.NewRootSession)
                 .ConfigureAwait(true);
             return false;
         }

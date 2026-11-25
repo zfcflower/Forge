@@ -463,9 +463,45 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
     public async Task<bool?> RunHandoverAsync(Lifecycle.HandoverDialogModel model, CancellationToken ct)
     {
         var body = new StackPanel { Margin = new Avalonia.Thickness(16), Spacing = 10 };
-        body.Children.Add(new TextBlock { Text = HandoverStrings.Intro(model.OldTitle), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         var controls = new List<Control>();
-        if (model.HasUncommitted)
+        if (model.Style == Lifecycle.HandoverDialogStyle.NewRootSession)
+        {
+            body.Children.Add(new TextBlock { Text = HandoverStrings.RootIntro(model.OldTitle), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+            if (model.HasUncommitted)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = HandoverStrings.RootUncommitted(model.UncommittedCount),
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                    Opacity = 0.8,
+                });
+            }
+
+            // The one question this dialog asks: blank unless the switch is on, in which case the new root starts from a
+            // summary of the session it replaces.
+            var summary = new ToggleSwitch { IsChecked = model.Mode == Lifecycle.HandoverContextMode.Summary };
+            summary.IsCheckedChanged += (_, _) =>
+                model.Mode = summary.IsChecked == true ? Lifecycle.HandoverContextMode.Summary : Lifecycle.HandoverContextMode.Blank;
+            var label = new TextBlock
+            {
+                Text = HandoverStrings.RootSummarySwitch(model.OldTitle),
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            body.Children.Add(new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                Spacing = 8,
+                Children = { summary, label },
+            });
+            controls.Add(summary);
+        }
+        else
+        {
+            body.Children.Add(new TextBlock { Text = HandoverStrings.Intro(model.OldTitle), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        }
+
+        if (model.Style == Lifecycle.HandoverDialogStyle.TakeOver && model.HasUncommitted)
         {
             body.Children.Add(new TextBlock { Text = HandoverStrings.Uncommitted(model.UncommittedCount), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
             var commit = new RadioButton { GroupName = "uncommitted", Content = HandoverStrings.CommitAsOld(model.OldTitle), IsChecked = true };
@@ -482,13 +518,12 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
             }
         }
 
-        if (model.OffersContextMode)
+        if (model.Style == Lifecycle.HandoverDialogStyle.TakeOver && model.OffersContextMode)
         {
             body.Children.Add(new TextBlock { Text = HandoverStrings.ModeLabel });
             foreach (var (mode, text) in new[]
                      {
                          (Lifecycle.HandoverContextMode.Summary, HandoverStrings.ModeSummary),
-                         (Lifecycle.HandoverContextMode.Full, HandoverStrings.ModeFull),
                          (Lifecycle.HandoverContextMode.Blank, HandoverStrings.ModeBlank),
                      })
             {
@@ -501,12 +536,14 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
 
         var error = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap, IsVisible = false, Foreground = Avalonia.Media.Brushes.IndianRed };
         var progress = new TextBlock { Text = HandoverStrings.Running, IsVisible = false };
-        var confirm = new Button { Content = HandoverStrings.Title, IsDefault = true };
+        var root = model.Style == Lifecycle.HandoverDialogStyle.NewRootSession;
+        var title = root ? HandoverStrings.RootTitle : HandoverStrings.Title;
+        var confirm = new Button { Content = root ? HandoverStrings.RootCreate : title, IsDefault = true };
         var cancel = new Button { Content = ShellStrings.Cancel, IsCancel = true };
         body.Children.Add(error);
         body.Children.Add(progress);
         body.Children.Add(ButtonRow(cancel, confirm));
-        var dialog = CreateDialogWindow(HandoverStrings.Title, 520, body);
+        var dialog = CreateDialogWindow(title, 520, body);
 
         void Sync()
         {
@@ -563,10 +600,10 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
     }
 
     /// <summary>
-    /// The parallel fork dialog (lifecycle 6.5): the new branch name, the uncommitted-changes choice ("commit first" only
-    /// while the source session is idle, else only "fork anyway"), the context mode (only with a source session), the sparse
-    /// and cold-build notes, then hosted execution like the handover dialog: it stays open with a failed attempt's error,
-    /// Stop cancels a running attempt and closing waits for it.
+    /// The parallel fork dialog (lifecycle 6.5): the new branch name, a warning-coloured line when the source has uncommitted
+    /// changes (they stay behind - nothing is committed and nothing is carried), the sparse and cold-build notes, then hosted
+    /// execution like the handover dialog: it stays open with a failed attempt's error, Stop cancels a running attempt and
+    /// closing waits for it.
     /// </summary>
     public async Task<bool?> RunForkAsync(Lifecycle.ForkDialogModel model, CancellationToken ct)
     {
@@ -580,50 +617,18 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         controls.Add(branch);
         if (model.HasUncommitted)
         {
-            body.Children.Add(new TextBlock { Text = ForkStrings.Uncommitted(model.UncommittedCount), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-            if (model.OffersCommitFirst)
+            body.Children.Add(new TextBlock
             {
-                var commit = new RadioButton { GroupName = "fork-uncommitted", Content = ForkStrings.CommitFirst(model.SourceTitle!), IsChecked = model.CommitFirst };
-                var anyway = new RadioButton { GroupName = "fork-uncommitted", Content = ForkStrings.ForkAnyway, IsChecked = !model.CommitFirst };
-                commit.IsCheckedChanged += (_, _) => { if (commit.IsChecked == true) model.CommitFirst = true; };
-                anyway.IsCheckedChanged += (_, _) => { if (anyway.IsChecked == true) model.CommitFirst = false; };
-                body.Children.Add(commit);
-                body.Children.Add(anyway);
-                controls.Add(commit);
-                controls.Add(anyway);
-            }
-            else
+                Text = ForkStrings.Uncommitted(model.UncommittedCount),
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                Foreground = Avalonia.Media.Brushes.DarkOrange,
+            });
+            body.Children.Add(new TextBlock
             {
-                if (model.SourceBusy && model.SourceTitle is { } busyTitle)
-                {
-                    body.Children.Add(new TextBlock { Text = ForkStrings.SourceBusy(busyTitle), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-                }
-
-                body.Children.Add(new RadioButton { GroupName = "fork-uncommitted", Content = ForkStrings.ForkAnyway, IsChecked = true, IsEnabled = false });
-            }
-
-            body.Children.Add(new TextBlock { Text = ForkStrings.NotCarried(model.UncommittedCount), TextWrapping = Avalonia.Media.TextWrapping.Wrap, Opacity = 0.8 });
-        }
-
-        if (model.OffersContextMode)
-        {
-            body.Children.Add(new TextBlock { Text = HandoverStrings.ModeLabel });
-            foreach (var (mode, text) in new[]
-                     {
-                         (Lifecycle.HandoverContextMode.Summary, HandoverStrings.ModeSummary),
-                         (Lifecycle.HandoverContextMode.Full, HandoverStrings.ModeFull),
-                         (Lifecycle.HandoverContextMode.Blank, HandoverStrings.ModeBlank),
-                     })
-            {
-                var radio = new RadioButton { GroupName = "fork-mode", Content = text, IsChecked = mode == model.Mode };
-                radio.IsCheckedChanged += (_, _) => { if (radio.IsChecked == true) model.Mode = mode; };
-                body.Children.Add(radio);
-                controls.Add(radio);
-            }
-        }
-        else
-        {
-            body.Children.Add(new TextBlock { Text = ForkStrings.NoSession, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+                Text = ForkStrings.NotCarried(model.UncommittedCount),
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                Opacity = 0.8,
+            });
         }
 
         if (model.IsSparse)
@@ -643,15 +648,15 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
 
         void Sync()
         {
-            var running = model.IsRunning;
-            progress.IsVisible = running;
+            var isRunning = model.IsRunning;
+            progress.IsVisible = isRunning;
             error.Text = model.Error;
-            error.IsVisible = !running && !string.IsNullOrEmpty(model.Error);
-            confirm.IsEnabled = !running;
-            cancel.Content = running ? HandoverStrings.Stop : ShellStrings.Cancel;
+            error.IsVisible = !isRunning && !string.IsNullOrEmpty(model.Error);
+            confirm.IsEnabled = !isRunning;
+            cancel.Content = isRunning ? HandoverStrings.Stop : ShellStrings.Cancel;
             foreach (var control in controls)
             {
-                control.IsEnabled = !running;
+                control.IsEnabled = !isRunning;
             }
         }
 
@@ -668,51 +673,14 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
             if (model.IsRunning)
             {
                 model.CancelRunning();
+                return;
             }
-            else
-            {
-                dialog.Close(false);
-            }
+
+            dialog.Close(false);
         };
-        dialog.Closing += (_, args) =>
-        {
-            if (model.IsRunning)
-            {
-                args.Cancel = true;
-                model.CancelRunning();
-            }
-        };
-        using var registration = ct.Register(() => Dispatcher.UIThread.Post(() =>
-        {
-            if (!model.IsRunning)
-            {
-                dialog.Close(false);
-            }
-        }));
+        dialog.Closed += (_, _) => model.CancelRunning();
         Sync();
-        var result = await dialog.ShowDialog<bool?>(owner);
-        return result == true || model.Succeeded;
-    }
-
-    public async Task<string?> PromptTextAsync(string title, string initial)
-    {
-        var input = new TextBox { Text = initial, MinWidth = 320 };
-        var ok = new Button { Content = ShellStrings.Ok, IsDefault = true };
-        var cancel = new Button { Content = ShellStrings.Cancel, IsCancel = true };
-        var dialog = CreateDialogWindow(title, 460, new StackPanel
-        {
-            Margin = new Avalonia.Thickness(16),
-            Spacing = 14,
-            Children =
-            {
-                input,
-                ButtonRow(cancel, ok),
-            },
-        });
-
-        ok.Click += (_, _) => dialog.Close(input.Text);
-        cancel.Click += (_, _) => dialog.Close(null);
-        return await dialog.ShowDialog<string?>(owner);
+        return await dialog.ShowDialog<bool?>(owner).ConfigureAwait(true);
     }
 
     /// <summary>The modal dialog frame every prompt in this window uses: a title, a fixed width, and content-sized height.</summary>

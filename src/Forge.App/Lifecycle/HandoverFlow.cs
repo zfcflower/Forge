@@ -24,9 +24,19 @@ internal enum UncommittedChoice
 /// <summary>How a new session's context begins (8.1); only a "new session" handover asks.</summary>
 internal enum HandoverContextMode
 {
-    Full,
     Summary,
     Blank,
+}
+
+/// <summary>
+/// What the handover dialog is for. <see cref="NewRootSession"/> is the branch menu's "新根会话…": the workspace's session is
+/// replaced by a new root one, the only question being whether it starts with a summary of the session it replaces -
+/// uncommitted changes stay where they are, so there is nothing to choose (and nothing to warn about beyond a note).
+/// </summary>
+internal enum HandoverDialogStyle
+{
+    TakeOver,
+    NewRootSession,
 }
 
 /// <summary>The two answers of the handover dialog.</summary>
@@ -121,9 +131,6 @@ internal sealed class HandoverFlow
     public const string CommitPrefix = "handover: ";
 
     private const int MaxListedChanges = 200;
-
-    /// <summary>The head named in the inheritance note of an unborn branch (model input, not UI text).</summary>
-    private const string UnbornHead = "(no commit yet)";
 
     private readonly ISessionCatalog catalog;
     private readonly ISessionStore store;
@@ -277,42 +284,6 @@ internal sealed class HandoverFlow
             case HandoverContextMode.Blank:
                 return (new HandoverTarget.NewSession(create with { Origin = SessionOrigin.Blank }), null);
 
-            case HandoverContextMode.Full:
-            {
-                string? head;
-                long upTo;
-                try
-                {
-                    head = await git.HeadAsync(directory, ct).ConfigureAwait(false);
-                    upTo = await store.LastSeqAsync(old.Id, ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return (null, WithCommit(HandoverStrings.Cancelled, commitSha));
-                }
-                catch (Exception exception) when (IsExpected(exception))
-                {
-                    return (null, WithCommit(HandoverStrings.ContextFailed(exception.Message), commitSha));
-                }
-
-                var note = InheritanceNote.Message(
-                    string.IsNullOrWhiteSpace(head) ? UnbornHead : head,
-                    commitSha,
-                    carriedChanges is not null);
-                return (
-                    new HandoverTarget.NewSession(create with
-                    {
-                        Origin = SessionOrigin.Full,
-                        InheritsFromSessionId = old.Id,
-                        InheritsUpToSeq = upTo,
-                    })
-                    {
-                        InitialMessages = [note],
-                        CopyTodosAndPlans = true,
-                    },
-                    null);
-            }
-
             default:
             {
                 string summary;
@@ -390,7 +361,7 @@ internal sealed class HandoverDialogModel : INotifyPropertyChanged
     private CancellationTokenSource? running;
     private string? error;
     private UncommittedChoice uncommitted = UncommittedChoice.CommitAsOld;
-    private HandoverContextMode mode = HandoverContextMode.Summary;
+    private HandoverContextMode mode;
 
     /// <param name="execute">Runs the handover; null = succeeded, otherwise the reason to show.</param>
     public HandoverDialogModel(
@@ -398,13 +369,17 @@ internal sealed class HandoverDialogModel : INotifyPropertyChanged
         int uncommittedCount,
         bool isRootCheckout,
         bool offersContextMode,
-        Func<HandoverChoice, CancellationToken, Task<string?>> execute)
+        Func<HandoverChoice, CancellationToken, Task<string?>> execute,
+        HandoverDialogStyle style = HandoverDialogStyle.TakeOver)
     {
         ArgumentNullException.ThrowIfNull(execute);
         OldTitle = oldTitle;
         UncommittedCount = uncommittedCount;
         IsRootCheckout = isRootCheckout;
         OffersContextMode = offersContextMode;
+        Style = style;
+        // A new root session starts blank unless the user turns the handover summary on; a takeover keeps the old default.
+        mode = style == HandoverDialogStyle.NewRootSession ? HandoverContextMode.Blank : HandoverContextMode.Summary;
         this.execute = execute;
     }
 
@@ -422,6 +397,9 @@ internal sealed class HandoverDialogModel : INotifyPropertyChanged
 
     /// <summary>Only a new session has a context to choose; continue / restore resume the session itself.</summary>
     public bool OffersContextMode { get; }
+
+    /// <summary>Which dialog this is: the takeover, or the branch menu's new root session (one summary switch, no commit choice).</summary>
+    public HandoverDialogStyle Style { get; }
 
     public UncommittedChoice Uncommitted
     {
@@ -459,7 +437,10 @@ internal sealed class HandoverDialogModel : INotifyPropertyChanged
         Raise(nameof(IsRunning));
         try
         {
-            var reason = await execute(new HandoverChoice(uncommitted, mode), source.Token).ConfigureAwait(true);
+            var choice = Style == HandoverDialogStyle.NewRootSession
+                ? new HandoverChoice(UncommittedChoice.CarryToNew, mode)
+                : new HandoverChoice(uncommitted, mode);
+            var reason = await execute(choice, source.Token).ConfigureAwait(true);
             Succeeded = reason is null;
             Error = reason;
             return Succeeded;
