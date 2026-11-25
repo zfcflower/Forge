@@ -1721,9 +1721,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// <summary>
     /// The parallel fork (6.5) of <paramref name="source"/>: reads the live HEAD, changes and sparse config off the UI
     /// thread (detached / unborn / not a repository refuse with a notice), then runs the fork dialog. A busy source only
-    /// allows "fork anyway"; "commit first" re-checks the source right before committing and holds it in the handing-over
-    /// state until the attempt ends, so no turn starts under the commit (its queued input waits, nothing is dropped). On
-    /// success the new session opens and the trees refresh; the source session goes on untouched.
+    /// changes are only warned about - nothing is committed and nothing is carried. A successful fork creates the branch and
+    /// its worktree only, so the trees refresh and the status bar names the new workspace; the source session goes on
+    /// untouched.
     /// </summary>
     internal async Task ForkWorkspaceAsync(ForkSource source, CancellationToken ct)
     {
@@ -3550,10 +3550,39 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         catch (SessionCreateOccupiedException occupied)
         {
             // "新根会话…" on a branch that already has a session: its own dialog asks the one question (hand over a summary or
-            // start blank) and takes the branch over - uncommitted changes stay in the workspace by construction.
+            // start blank) and takes the branch over - uncommitted changes stay in the workspace by construction. The holder's
+            // row is what the handover hands over, so it is read first; an unreadable row falls back to the occupied notice.
+            var holder = await BackgroundRead
+                .RunAsync(
+                    token => composition.Sessions.GetSessionAsync(occupied.Occupied.HolderSessionId, token),
+                    CancellationToken.None)
+                .ConfigureAwait(true);
+            if (holder is null)
+            {
+                await ShowOccupiedAsync(occupied.Occupied, null, CancellationToken.None).ConfigureAwait(true);
+                return false;
+            }
+
+            // The branch is read live, never taken from the tree's last plan: an outside checkout may have moved it since, and
+            // the new session row records whichever branch this workspace is on now.
+            var directory = occupied.Create.WorktreePath ?? occupied.Create.WorkspacePath;
+            string? branch = occupied.Create.Branch;
+            try
+            {
+                var head = await BackgroundRead
+                    .RunAsync(token => composition.Git.GetHeadAsync(directory, token), CancellationToken.None)
+                    .ConfigureAwait(true);
+                branch = head.Kind == GitHeadKind.Branch ? head.Branch : null;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException and not OperationCanceledException)
+            {
+                // The handover reads the workspace again and reports what it cannot do; the stored branch stands meanwhile.
+                AppLogs.Menu.ZLogWarning($"could not read the HEAD of '{directory}': {exception.Message}");
+            }
+
             await TakeOverAsync(
-                    occupied.Occupied,
-                    HandoverIntent.NewSession(occupied.Create),
+                    holder,
+                    HandoverIntent.NewSession(occupied.Create with { Branch = branch }),
                     CancellationToken.None,
                     HandoverDialogStyle.NewRootSession)
                 .ConfigureAwait(true);

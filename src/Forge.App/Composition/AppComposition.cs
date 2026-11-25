@@ -821,11 +821,7 @@ internal sealed class AppComposition : IAsyncDisposable
             reviews is null
                 ? null
                 : async (directory, from, to, ct) => await reviews.CopySessionAsync(directory, from, to, ct).ConfigureAwait(false));
-        composition.Fork = new ForkFlow(
-            sessions,
-            sessions,
-            new ForkGit(git, stepCommitter, worktrees),
-            (history, tree, ct) => composition.SummarizeHandoverAsync(history, tree, ct));
+        composition.Fork = new ForkFlow(sessions, new ForkGit(git, stepCommitter, worktrees));
         composition.Merge = new MergeFlow(new MergeGit(git));
         var purgeReviews = reviews ?? new ReviewStore(paths.ReviewsDirectory);
         var purgeComposer = new SessionComposerStore(uiState);

@@ -19,11 +19,8 @@ internal static class ForkStrings
     public const string IntroKey = "lifecycle.fork.intro";
     public const string BranchLabelKey = "lifecycle.fork.branchLabel";
     public const string UncommittedKeyBase = "lifecycle.fork.uncommitted";
-    public const string CommitFirstKey = "lifecycle.fork.commitFirst";
-    public const string ForkAnywayKey = "lifecycle.fork.forkAnyway";
+    public const string CreatedKey = "lifecycle.fork.created";
     public const string NotCarriedKeyBase = "lifecycle.fork.notCarried";
-    public const string SourceBusyKey = "lifecycle.fork.sourceBusy";
-    public const string NoSessionKey = "lifecycle.fork.noSession";
     public const string SparseKey = "lifecycle.fork.sparse";
     public const string ColdBuildKey = "lifecycle.fork.coldBuild";
     public const string ConfirmKey = "lifecycle.fork.confirm";
@@ -35,11 +32,8 @@ internal static class ForkStrings
     public const string UnbornKey = "lifecycle.fork.unborn";
     public const string ReadFailedKey = "lifecycle.fork.readFailed";
     public const string BranchRequiredKey = "lifecycle.fork.branchRequired";
-    public const string BusyNowKey = "lifecycle.fork.busyNow";
     public const string SourceChangedKey = "lifecycle.fork.sourceChanged";
-    public const string CommitFailedKey = "lifecycle.fork.commitFailed";
     public const string CreateFailedKey = "lifecycle.fork.createFailed";
-    public const string SessionFailedKey = "lifecycle.fork.sessionFailed";
     public const string CancelledKey = "lifecycle.fork.cancelled";
     public const string UnavailableKey = "lifecycle.fork.unavailable";
 
@@ -87,17 +81,16 @@ internal static class ForkStrings
 
     public static string BranchLabel => Loc.Instance[BranchLabelKey];
 
-    public static string Uncommitted(int count) => Loc.Instance.FormatPlural(UncommittedKeyBase, count);
-
-    public static string CommitFirst(string title) => Loc.Instance.Format(CommitFirstKey, title);
-
-    public static string ForkAnyway => Loc.Instance[ForkAnywayKey];
-
     public static string NotCarried(int count) => Loc.Instance.FormatPlural(NotCarriedKeyBase, count);
 
-    public static string SourceBusy(string title) => Loc.Instance.Format(SourceBusyKey, title);
+    public static string Created(string directory) => Loc.Instance.Format(CreatedKey, directory);
 
-    public static string NoSession => Loc.Instance[NoSessionKey];
+    public static string Uncommitted(int count) => Loc.Instance.FormatPlural(UncommittedKeyBase, count);
+
+
+
+
+
 
     public static string Sparse => Loc.Instance[SparseKey];
 
@@ -117,15 +110,12 @@ internal static class ForkStrings
 
     public static string BranchRequired => Loc.Instance[BranchRequiredKey];
 
-    public static string BusyNow(string title) => Loc.Instance.Format(BusyNowKey, title);
 
     public static string SourceChanged(string title) => Loc.Instance.Format(SourceChangedKey, title);
 
-    public static string CommitFailed(string reason) => Loc.Instance.Format(CommitFailedKey, reason);
 
     public static string CreateFailed(string reason) => Loc.Instance.Format(CreateFailedKey, reason);
 
-    public static string SessionFailed(string reason) => Loc.Instance.Format(SessionFailedKey, reason);
 
     public static string Cancelled => Loc.Instance[CancelledKey];
 
@@ -207,16 +197,13 @@ internal static class ForkStrings
         Loc.Register(ForkedFromKey, "⑂ 分叉自 {0}", "⑂ forked from {0}");
 
         Loc.Register(TitleKey, "并行分叉", "Parallel fork");
-        Loc.Register(IntroKey, "从“{0}”的提交 {1} 分叉出新的工作区与会话;源会话照常继续。", "Fork a new workspace and session from \"{0}\" at {1}; the source session goes on as before.");
+        Loc.Register(IntroKey, "从“{0}”的提交 {1} 分叉出新的工作区(新分支上不建会话);源会话照常继续。", "Fork a new workspace from \"{0}\" at {1} - no session is created on the new branch; the source session goes on as before.");
         Loc.Register(BranchLabelKey, "新分支名:", "New branch name:");
-        Loc.Register(UncommittedKeyBase + ".one", "源工作区有 {0} 个未提交的改动(含未跟踪文件):", "The source workspace has {0} uncommitted change (untracked files included):");
-        Loc.Register(UncommittedKeyBase + ".other", "源工作区有 {0} 个未提交的改动(含未跟踪文件):", "The source workspace has {0} uncommitted changes (untracked files included):");
-        Loc.Register(CommitFirstKey, "先以“{0}”的名义提交,再分叉", "Commit them in the name of \"{0}\" first, then fork");
-        Loc.Register(ForkAnywayKey, "照样分叉(基于最后一次提交)", "Fork anyway (from the last commit)");
         Loc.Register(NotCarriedKeyBase + ".one", "未提交的 {0} 个文件不会带过去。", "The {0} uncommitted file is not carried over.");
         Loc.Register(NotCarriedKeyBase + ".other", "未提交的 {0} 个文件不会带过去。", "The {0} uncommitted files are not carried over.");
-        Loc.Register(SourceBusyKey, "“{0}”正忙,只能基于最后一次提交分叉。", "\"{0}\" is busy, so the fork can only start from the last commit.");
-        Loc.Register(NoSessionKey, "此工作区没有活动会话,新会话从空白开始。", "This workspace has no active session; the new session starts blank.");
+        Loc.Register(CreatedKey, "已在新分支创建工作区:{0}", "Created the workspace on a new branch: {0}");
+        Loc.Register(UncommittedKeyBase + ".one", "源工作区有 {0} 个未提交的改动(含未跟踪文件)", "The source workspace has {0} uncommitted change (untracked files included)");
+        Loc.Register(UncommittedKeyBase + ".other", "源工作区有 {0} 个未提交的改动(含未跟踪文件)", "The source workspace has {0} uncommitted changes (untracked files included)");
         Loc.Register(SparseKey, "源工作区是稀疏检出,新工作区沿用同样的配置。", "The source workspace is a sparse checkout; the new workspace uses the same configuration.");
         Loc.Register(ColdBuildKey, "新工作区不复制 obj/,需要冷构建一次(大仓库可能要几分钟)。待办、计划与评审标记不会复制。", "The new workspace does not copy obj/ and needs one cold build (minutes for a large repository). Todos, plans and review marks are not copied.");
         Loc.Register(ConfirmKey, "分叉", "Fork");
@@ -228,10 +215,7 @@ internal static class ForkStrings
         Loc.Register(ReadFailedKey, "无法读取源工作区,未分叉:{0}", "Could not read the source workspace; nothing was forked: {0}");
         Loc.Register(BranchRequiredKey, "请填写有效的分支名。", "Enter a valid branch name.");
         Loc.Register(SourceChangedKey, "“{0}”已不是此工作区的活动会话(已被接手或归档),未分叉。请在刷新后的树上重新分叉。", "\"{0}\" is no longer the active session of this workspace (taken over or archived); nothing was forked. Fork again from the refreshed tree.");
-        Loc.Register(BusyNowKey, "“{0}”已开始忙,不能先提交;请改选“照样分叉”或稍后再试。", "\"{0}\" became busy, so nothing can be committed first; choose \"Fork anyway\" or try again later.");
-        Loc.Register(CommitFailedKey, "分叉前的提交失败,未分叉:{0}", "The commit before the fork failed; nothing was forked: {0}");
         Loc.Register(CreateFailedKey, "无法创建工作区,未分叉:{0}", "Could not create the workspace; nothing was forked: {0}");
-        Loc.Register(SessionFailedKey, "新会话未能建立,已撤回新建的工作区:{0}", "The new session could not be created, so the new workspace was taken back: {0}");
         Loc.Register(CancelledKey, "已取消,未分叉。", "Cancelled; nothing was forked.");
         Loc.Register(UnavailableKey, "此窗口无法显示分叉对话框,未分叉。", "This window cannot show the fork dialog; nothing was forked.");
 
