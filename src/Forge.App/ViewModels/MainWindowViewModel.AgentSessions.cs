@@ -1,6 +1,7 @@
 using System.Globalization;
 using Avalonia.Threading;
 using Forge.Abstractions;
+using Forge.App.Agents;
 using Forge.App.Localization;
 using Forge.App.Logging;
 using Forge.App.Workbench;
@@ -52,7 +53,7 @@ internal sealed partial class MainWindowViewModel
     /// loaded here when it is not (its host builds with the first turn), and the root's own tab is neither opened nor brought
     /// to the front.
     /// </summary>
-    internal async Task OpenAgentSessionAsync(SessionInfo root, CancellationToken ct)
+    internal async Task OpenAgentSessionAsync(SessionInfo root, AgentDefinition kind, CancellationToken ct)
     {
         SessionInfo? current;
         try
@@ -106,7 +107,7 @@ internal sealed partial class MainWindowViewModel
         var ordinal = 1 + stored + open;
         var draftId = NewAgentDraftId(current.Id, ++agentSessionSequence);
         agentDrafts[current.Id] = open + 1;
-        OpenAgentSessionTab(CreateAgentSessionView(current, current, ordinal, isDraft: true, draftId), activate: true);
+        OpenAgentSessionTab(CreateAgentSessionView(current, current, ordinal, isDraft: true, draftId, kind), activate: true);
     }
 
     /// <summary>
@@ -223,7 +224,8 @@ internal sealed partial class MainWindowViewModel
                 Workbench.CloseTab(staleTab);
             }
 
-            var liveView = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id, readOnly: false);
+            var reopened = ResolveAgentKind(root.WorkspacePath, child.AgentKind, out var reopenedMissing);
+            var liveView = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id, reopened, readOnly: false, reopenedMissing);
             liveView.RestoreComposerState(carried);
             OpenAgentSessionTab(liveView, activate);
             try
@@ -238,7 +240,8 @@ internal sealed partial class MainWindowViewModel
             return;
         }
 
-        var view = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id, readOnly);
+        var kind = ResolveAgentKind(root.WorkspacePath, child.AgentKind, out var kindMissing);
+        var view = CreateAgentSessionView(child, root, ordinal: 0, isDraft: false, draftId: child.Id, kind, readOnly, kindMissing);
         OpenAgentSessionTab(view, activate);
         try
         {
@@ -248,6 +251,40 @@ internal sealed partial class MainWindowViewModel
         {
             AppLogs.Session.ZLogWarning($"agent session history not replayed: {exception.Message}");
         }
+    }
+
+    /// <summary>
+    /// The kind an agent session runs: the one its row stored, when this build still offers it and it may drive a session; else
+    /// the default implementing kind, with <paramref name="missing"/> naming what could not be used (null when nothing was
+    /// stored). Null only when no kind of that workspace may drive an agent session at all.
+    /// </summary>
+    private AgentDefinition? ResolveAgentKind(string workspacePath, string? storedName, out string? missing)
+    {
+        missing = null;
+        var kinds = AgentCatalogue.Resolve(composition.PromptTemplates.Resolve(workspacePath), composition.AgentDefaults);
+        if (AgentCatalogue.Find(kinds, storedName) is { } stored && AgentCatalogue.CanDriveUserSession(stored))
+        {
+            return stored;
+        }
+
+        missing = string.IsNullOrWhiteSpace(storedName) ? null : storedName;
+        AgentDefinition? first = null;
+        foreach (var kind in kinds)
+        {
+            if (!AgentCatalogue.CanDriveUserSession(kind))
+            {
+                continue;
+            }
+
+            if (string.Equals(kind.Name, AgentSessionKinds.Default, StringComparison.Ordinal))
+            {
+                return kind;
+            }
+
+            first ??= kind;
+        }
+
+        return first;
     }
 
     /// <summary>The view of the tab filed under <paramref name="childSessionId"/>, if that tab is open; null otherwise.</summary>
@@ -275,7 +312,9 @@ internal sealed partial class MainWindowViewModel
         int ordinal,
         bool isDraft,
         string draftId,
-        bool readOnly = false)
+        AgentDefinition? kind,
+        bool readOnly = false,
+        string? kindFallbackFrom = null)
     {
         // A draft carries the parent link the store would write, so everything that reads it (the root's last activity, the
         // tree) needs no special case for "the row does not exist yet".
@@ -300,7 +339,7 @@ internal sealed partial class MainWindowViewModel
             preferences: composition.Preferences,
             openInspector: OpenInspector,
             openSession: () => ActivateAgentSessionTab(info.Id),
-            agentSession: new AgentSessionLaunch(root, ordinal, isDraft),
+            agentSession: new AgentSessionLaunch(root, ordinal, isDraft, kind, kindFallbackFrom),
             sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created),
             sessionReceipt: DeliverReceipt,
             // An agent session is a session like any other: its chip comes back where the user left it, and a pick made there
@@ -342,7 +381,6 @@ internal sealed partial class MainWindowViewModel
         session.AgentSessionTurnEnded += OnAgentSessionTurnEnded;
         session.TurnStarted += OnAgentSessionTurnStarted;
         session.TabTitleChanged += OnAgentSessionTitleChanged;
-        session.AgentNameFollowedKind += OnAgentNameFollowedKind;
         // An agent session's own children are its sub-agent region while its tab is on screen, so the composer's chip is
         // wired exactly like a root's: the roster sync keeps the group in step and the chip's expand opens the body.
         session.SubAgentsChanged += OnSubAgentsChanged;
@@ -355,7 +393,6 @@ internal sealed partial class MainWindowViewModel
         session.AgentSessionTurnEnded -= OnAgentSessionTurnEnded;
         session.TurnStarted -= OnAgentSessionTurnStarted;
         session.TabTitleChanged -= OnAgentSessionTitleChanged;
-        session.AgentNameFollowedKind -= OnAgentNameFollowedKind;
         session.SubAgentsChanged -= OnSubAgentsChanged;
         session.SubAgentRegionRevealRequested -= OnSubAgentRegionReveal;
     }
@@ -479,33 +516,6 @@ internal sealed partial class MainWindowViewModel
     /// keeps the title its launch carried.</summary>
     private string? CurrentRootTitle(string rootSessionId) =>
         sessions.TryGetValue(rootSessionId, out var root) ? root.Info.Title : null;
-
-    /// <summary>
-    /// The tab's name followed an agent-kind switch (forge-app "Agent 会话的界面与接线"): a stored session's row carries the new name
-    /// from now on, so it goes through the same store path a rename takes and the tree row and the <c>@</c> picker follow. A draft has
-    /// no row yet - its name becomes the row's <c>Title</c> when the first message creates it.
-    /// </summary>
-    private void OnAgentNameFollowedKind(SessionWorkspaceViewModel session, string name) => _ = WriteAgentKindNameAsync(session, name);
-
-    private async Task WriteAgentKindNameAsync(SessionWorkspaceViewModel session, string name)
-    {
-        try
-        {
-            if (session.AgentChildSessionId is { Length: > 0 } childId)
-            {
-                await Projects.RenameAsync(childId, name, CancellationToken.None).ConfigureAwait(true);
-            }
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            // The tab keeps the name on screen; the row keeps the old one until the next rename or kind switch.
-            AppLogs.Session.ZLogWarning($"agent session name not stored: {exception.GetType().Name}: {exception.Message}");
-        }
-        finally
-        {
-            session.EndAgentKindRename(name);
-        }
-    }
 
     private void ActivateAgentSessionTab(string sessionId)
     {

@@ -16,8 +16,11 @@ namespace Forge.App.ViewModels;
 /// ordinal its default name counts with, and whether it is still a draft.
 /// <para>A draft tab has no session row yet: the row appears (through <c>AgentHost.StartUserChildAsync</c>) only when the
 /// first message is sent, and its title is that message's default name. Closing a draft drops it without a trace.</para>
+/// <para>The kind is picked once, from the tree menu's "new agent session" entry, and never changes here: the tab runs the
+/// agent it was created with. <paramref name="KindFallbackFrom"/> is the stored kind when it could not be run any more
+/// (deleted file, or a whitelist that now names a root-only tool), so the tab can say why it fell back.</para>
 /// </summary>
-internal sealed record AgentSessionLaunch(SessionInfo Root, int Ordinal, bool IsDraft);
+internal sealed record AgentSessionLaunch(SessionInfo Root, int Ordinal, bool IsDraft, AgentDefinition? Kind, string? KindFallbackFrom = null);
 
 /// <summary>
 /// One reading of an agent session's child instance: the usage and model-streaming time it had when the turn began or ended.
@@ -115,18 +118,10 @@ internal sealed partial class SessionWorkspaceViewModel
     private int agentOrdinal;
 
     /// <summary>
-    /// True while <see cref="agentName"/> is still the name the agent kind and the ordinal derive, so a kind switch changes its
-    /// prefix; a name the user typed clears it for good (forge-app "Agent 会话的界面与接线": the default name is
-    /// "&lt;kind&gt; &lt;ordinal&gt;" and the prefix follows the kind, unless the user renamed it).
+    /// True while <see cref="agentName"/> is still the name the agent kind and the ordinal derive; a name the user typed clears
+    /// it for good (forge-app "Agent 会话": the default name is "&lt;kind&gt; &lt;ordinal&gt;").
     /// </summary>
     private bool agentNameIsDerived;
-
-    /// <summary>
-    /// Names this tab wrote to the store on its own account (an agent-kind switch). The store echoes a rename back through
-    /// <see cref="Rename"/>, and that echo says nothing about the user: reading it as a rename would end the follow on the very
-    /// first kind switch.
-    /// </summary>
-    private readonly HashSet<string> agentSelfRenames = new(StringComparer.Ordinal);
 
     /// <summary>The root's title as a rename pushed it here; null until one arrives.</summary>
     private string? agentRootTitle;
@@ -249,85 +244,42 @@ internal sealed partial class SessionWorkspaceViewModel
     public event Action<SessionWorkspaceViewModel>? AgentSessionTurnEnded;
 
     /// <summary>
-    /// The tab's name followed an agent-kind switch. Args are this view and the new name: the shell writes a stored session's row
-    /// through the same store path a rename takes, so the tree row and the <c>@</c> picker read the new name (a draft has no row
-    /// and keeps it here).
+    /// The agent and model this tab's child runs with right now: the kind it was created with, with the model, the effort and
+    /// the provider its model chip holds (forge-app "Agent 会话": the kind is fixed at creation, so only the model moves here,
+    /// and picking another one rebuilds the instance before the next turn).
     /// </summary>
-    public event Action<SessionWorkspaceViewModel, string>? AgentNameFollowedKind;
+    private AgentDefinition? AgentSessionDefinition() =>
+        agentSession?.Kind is { } kind ? kind with { Model = Composer.SelectedModel } : null;
 
     /// <summary>
-    /// The agent and model this tab's child runs with right now: the kind the composer's agent chip holds, with the model, the
-    /// effort and the provider its model chip holds (forge-app "Agent 会话的界面与接线": changing either rebuilds the instance
-    /// before the next turn). Recomputed on every call rather than kept: the chips are the state, and a definition cached here
-    /// would go stale the moment the user picks another kind or model. Null when no kind of this session can drive one (every
-    /// one of them may change git, which only the root may do).
-    /// </summary>
-    private AgentDefinition? AgentSessionDefinition()
-    {
-        var kind = Composer.SelectedAgent.Definition is { } selected && CanBeUserSession(selected)
-            ? selected
-            : FallbackAgentKind();
-        return kind is null ? null : kind with { Model = Composer.SelectedModel };
-    }
-
-    /// <summary>
-    /// The kind used when the chip's selection cannot drive a session: the default kind (the implementing agent), else the first
-    /// kind that may. The chip normally cannot land there - an agent-session tab lists only kinds it may run and greys the rest -
-    /// so this covers a kind file that changed after the chip was built.
-    /// </summary>
-    private AgentDefinition? FallbackAgentKind()
-    {
-        AgentDefinition? fallback = null;
-        foreach (var option in Composer.Agents)
-        {
-            if (option.Definition is not { } definition || !CanBeUserSession(definition))
-            {
-                continue;
-            }
-
-            if (string.Equals(definition.Name, AgentSessionKinds.Default, StringComparison.Ordinal))
-            {
-                return definition;
-            }
-
-            fallback ??= definition;
-        }
-
-        return fallback;
-    }
-
-    /// <summary>
-    /// Whether an instance built from <paramref name="held"/> already runs what the composer's chips now say: the kind, the
-    /// model, the reasoning effort and the provider. Only these four decide a rebuild - the advice description and the tool
-    /// list come from the same kind file and are not something the chips move (forge-app "Agent 会话的界面与接线": a change of
-    /// agent, model or effort is what rebuilds the instance before the next turn).
+    /// Whether an instance built from <paramref name="held"/> already runs what the composer's chip now says: the model, the
+    /// reasoning effort and the provider (the kind itself is fixed at creation, so it cannot move here). Those three decide a
+    /// rebuild; the advice description and the tool list come from the same kind file.
     /// </summary>
     private static bool SameAgentModel(AgentDefinition held, AgentDefinition wanted) =>
-        string.Equals(held.Name, wanted.Name, StringComparison.Ordinal)
-        && string.Equals(held.Model.Model, wanted.Model.Model, StringComparison.Ordinal)
+        string.Equals(held.Model.Model, wanted.Model.Model, StringComparison.Ordinal)
         && held.Model.Thinking == wanted.Model.Thinking
         && string.Equals(held.Model.ProviderId ?? string.Empty, wanted.Model.ProviderId ?? string.Empty, StringComparison.Ordinal);
 
     /// <summary>
-    /// Puts the agent chip on the kind this tab's stored session ran with, so a reopened tab shows the agent that wrote the
-    /// conversation instead of always the default one. A kind the session kinds no longer offer (or one that may not drive a
-    /// session any more) keeps the composer's default and says why once.
+    /// Wires the tab to the kind it was created with: the model chip starts on that kind's configured model, and a kind the
+    /// stored row named but this build can no longer run says so once.
     /// </summary>
-    private void SelectAgentSessionKind(string? kind)
+    private void ApplyLaunchKind(AgentSessionLaunch launch)
     {
-        if (string.IsNullOrWhiteSpace(kind))
+        if (launch.Kind is not { } kind)
         {
-            // A draft has no row and a row written before the kind was stored has none either: the composer's default stands.
+            // No kind of this workspace may drive an agent session any more: the tab opens, and its first message says so
+            // (see RunAgentSessionTurnAsync's NoKind branch).
             return;
         }
 
-        if (Composer.Agents.FirstOrDefault(option => string.Equals(option.Key, kind, StringComparison.Ordinal)) is { IsAvailable: true } option)
+        if (launch.KindFallbackFrom is { Length: > 0 } missing)
         {
-            Composer.SelectedAgent = option;
-            return;
+            Transcript.AddNotice(LocText.Literal(AgentSessionStrings.KindFallback(missing, kind.Name)), isError: true);
         }
 
-        Transcript.AddNotice(LocText.Literal(AgentSessionStrings.KindFallback(kind, Composer.AgentLabel)), isError: true);
+        Composer.FollowKindModel(kind);
     }
 
     /// <summary>
@@ -352,41 +304,8 @@ internal sealed partial class SessionWorkspaceViewModel
         var kind = title[..cut];
         ordinal = number;
         return string.Equals(kind, Info.AgentKind, StringComparison.Ordinal)
-            || Composer.Agents.Any(option => string.Equals(option.Key, kind, StringComparison.Ordinal));
+            || string.Equals(kind, agentSession?.Kind?.Name, StringComparison.Ordinal);
     }
-
-    /// <summary>
-    /// The composer's agent kind moved: while the name is still the one the kind and the ordinal derive, its prefix changes with
-    /// it ("Worker 1" becomes "Scout 1", forge-app "Agent 会话的界面与接线"). A name the user typed is never touched. A stored
-    /// session's new name goes to the store through the shell, so the tree row and the <c>@</c> picker follow; a draft keeps it on
-    /// this view and it becomes the row's <c>Title</c> when the first message creates the row.
-    /// </summary>
-    private void OnComposerPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (!agentNameIsDerived || !string.Equals(e.PropertyName, nameof(ComposerViewModel.SelectedAgent), StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        var name = AgentSessionLabel.Default(AgentNameKind, agentOrdinal);
-        if (string.Equals(name, AgentSessionName, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        agentName = name;
-        OnPropertyChanged(nameof(AgentSessionName));
-        RaiseAgentTitleChanged();
-        if (agentChildSessionId is { Length: > 0 })
-        {
-            // Its own write: the store's echo of this name must not be read as a rename the user made (see Rename).
-            agentSelfRenames.Add(name);
-            AgentNameFollowedKind?.Invoke(this, name);
-        }
-    }
-
-    /// <summary>The store write of a kind switch came back (or failed): its echo is no longer pending.</summary>
-    internal void EndAgentKindRename(string name) => agentSelfRenames.Remove(name);
 
     /// <summary>
     /// The instance this turn runs on: the one the host holds for this tab's session, rebuilt from the store when the composer's
@@ -419,13 +338,6 @@ internal sealed partial class SessionWorkspaceViewModel
         agentStream.Remove("root");
         return await live.ResumeUserChildAsync(agentChildSessionId!, WorkDir, definition, ct).ConfigureAwait(true);
     }
-
-    /// <summary>
-    /// Whether an agent kind may drive a user session: the kind has to name its tools (an unrestricted agent could touch git,
-    /// and only the root session changes git), and that list may hold no git write and no pull request tool.
-    /// </summary>
-    internal static bool CanBeUserSession(AgentDefinition definition) =>
-        definition.ToolNames is { Count: > 0 } tools && !tools.Any(AgentSessionKinds.IsRootOnlyTool);
 
     /// <summary>One more message of this tab: the first creates the row, every later one is a turn of the same child.</summary>
     private async Task RunAgentSessionTurnAsync(ComposerPrompt prompt)
@@ -900,7 +812,7 @@ internal sealed partial class SessionWorkspaceViewModel
             Id = childSessionId,
             ParentSessionId = launch.Root.Id,
             ChildDriver = AgentSessionKinds.ChildDriverUser,
-            AgentKind = AgentSessionDefinition()?.Name,
+            AgentKind = launch.Kind?.Name,
             Title = AgentSessionName,
         };
         // The row exists from now on, so it is the id the picker's mentions are granted under and the one the instance the
@@ -927,12 +839,4 @@ internal static class AgentSessionKinds
     /// </summary>
     public const string ChildDriverUser = "user";
 
-    /// <summary>
-    /// Tools only the root session may call: they change git (branch, sync) or publish a pull request. A kind whose whitelist
-    /// names one of them cannot drive a user session, because only the root session owns the branch and the remote.
-    /// </summary>
-    private static readonly string[] RootOnlyTools = ["git_branch", "git_sync"];
-
-    public static bool IsRootOnlyTool(string tool) =>
-        RootOnlyTools.Contains(tool, StringComparer.Ordinal) || tool.StartsWith("pr_", StringComparison.Ordinal);
 }

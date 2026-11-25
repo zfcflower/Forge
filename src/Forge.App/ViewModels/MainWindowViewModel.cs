@@ -51,8 +51,11 @@ internal interface IDialogService
     Task<Git.PullRequestMergeChoice?> ComposePullRequestMergeAsync(Git.PullRequestMergeRequest request, CancellationToken ct) =>
         Task.FromResult<Git.PullRequestMergeChoice?>(null);
 
-    /// <summary>An information message with a single OK button.</summary>
-    Task NotifyAsync(string title, string message) => ConfirmAsync(title, message, ShellStrings.Ok, ShellStrings.Ok);
+    /// <summary>
+    /// An information message with a single OK button. The host builds it itself: a notice is not a question, so it must not
+    /// borrow the confirm dialog and end up with two buttons carrying the same label.
+    /// </summary>
+    Task NotifyAsync(string title, string message);
 
     /// <summary>
     /// A question with several buttons; the last option is the cancel button. Returns the chosen index, -1 when the
@@ -242,6 +245,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Projects.HasVsCode = instruments.HasVsCode;
         Projects.OpenInVsCode = instruments.OpenInVsCode;
         Projects.NewAgentSession = OpenAgentSessionAsync;
+        // The tree menu's kinds come from the same store the session hosts read, models included, so a kind row can name the
+        // model its session will run on.
+        Projects.AgentKinds = workspacePath =>
+            AgentCatalogue.Resolve(composition.PromptTemplates.Resolve(workspacePath), composition.AgentDefaults);
         Projects.OpenAgentSession = OpenAgentSessionByIdAsync;
         Projects.IsAgentSessionUnread = IsAgentSessionUnread;
         Projects.SessionRenamed = OnSessionRenamed;

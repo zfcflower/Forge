@@ -108,6 +108,57 @@ public sealed class TreeMenuTests
         return Task.CompletedTask;
     });
 
+    /// <summary>
+    /// "New agent session" (5.3) picks the kind in a submenu: the entry itself runs nothing, it is live exactly when one of
+    /// its rows is, and a kind that may not drive a session keeps its row with the reason on it.
+    /// </summary>
+    [Fact]
+    public void The_new_agent_session_entry_opens_a_submenu_of_kinds()
+    {
+        var worker = new TestCommand();
+        var item = new TreeMenuItemViewModel(
+            new TreeMenuEntry(TreeMenuKey.NewAgentSession),
+            "New agent session",
+            command: null,
+            [
+                new AgentKindMenuItem("Worker", "Implements one task end to end.", IsEnabled: true, Reason: null, worker, IsDefault: true),
+                new AgentKindMenuItem("Scout", "Read-only reconnaissance.", IsEnabled: false, Reason: AgentSessionStrings.AgentNoTools, Command: null),
+            ]);
+
+        Assert.True(item.HasKinds);
+        Assert.True(item.IsEnabled);
+        Assert.Null(item.Command);
+        Assert.True(item.Kinds[0].IsDefault);
+        Assert.Same(worker, item.Kinds[0].Command);
+        Assert.False(item.Kinds[1].IsEnabled);
+        Assert.Equal(AgentSessionStrings.AgentNoTools, item.Kinds[1].Reason);
+    }
+
+    /// <summary>A submenu whose every row is unavailable must not read as clickable, and says why.</summary>
+    [Fact]
+    public void A_submenu_with_no_runnable_kind_is_disabled()
+    {
+        var item = new TreeMenuItemViewModel(
+            new TreeMenuEntry(TreeMenuKey.NewAgentSession),
+            "New agent session",
+            command: null,
+            [new AgentKindMenuItem("Scout", "Read-only reconnaissance.", IsEnabled: false, Reason: AgentSessionStrings.AgentNoTools, Command: null)]);
+
+        Assert.False(item.IsEnabled);
+        Assert.Equal(TreeMenuStrings.Unavailable, item.Tip);
+    }
+
+    /// <summary>Each kind row carries its own summary, and the summary stops at the menu's room (40 characters, one ellipsis).</summary>
+    [Fact]
+    public void A_kind_summary_is_cut_to_the_menu_room()
+    {
+        Assert.Equal("Read-only reconnaissance.", AgentKindMenuItem.Brief("  Read-only reconnaissance.  "));
+
+        var cut = AgentKindMenuItem.Brief(new string('x', AgentKindMenuItem.BriefLimit + 20));
+        Assert.Equal(AgentKindMenuItem.BriefLimit, cut.Length);
+        Assert.EndsWith("…", cut, StringComparison.Ordinal);
+    }
+
     private sealed class TestCommand : ICommand
     {
         public event EventHandler? CanExecuteChanged

@@ -353,6 +353,12 @@ internal sealed class AppComposition : IAsyncDisposable
     /// <summary>The prompt template store (commands, agents, slots); file IO, call it off the UI thread.</summary>
     public PromptTemplateService PromptTemplates { get; private set; } = new(AgentRuntimeServices.UserDirectory());
 
+    /// <summary>
+    /// <c>settings.json</c>'s per-agent model and effort defaults, the same resolution the session hosts use. The tree's
+    /// "new agent session" menu reads it to name each kind's model; null until <see cref="Create"/> assigns it.
+    /// </summary>
+    public Func<string, ModelSettings?>? AgentDefaults { get; private set; }
+
     public static AppComposition Create()
     {
         // 0. Preferences own the `preferences` section of the same settings.json the provider reads. Constructed
@@ -810,6 +816,7 @@ internal sealed class AppComposition : IAsyncDisposable
         composition.Updates = updates;
         composition.webServices = webServices;
         composition.PromptTemplates = promptTemplates;
+        composition.AgentDefaults = runtimeServices.AgentDefaults;
         composition.TodoStepCommitter = stepCommitter;
         composition.PullRequests = prPlatform;
         var reviews = workspace?.Reviews;

@@ -3,9 +3,9 @@ using Forge.Abstractions;
 namespace Forge.App.Providers;
 
 /// <summary>
-/// The seven reasoning-effort steps as the app stores and shows them: the lowercase names in <c>settings.json</c> and
-/// <c>composer.json</c>, and the clamp to the steps a model accepts. One place, so a provider's stored default, the
-/// composer's saved default and an agent's default can never disagree about what <c>"xhigh"</c> means.
+/// The seven reasoning-effort steps as the app stores and shows them: the lowercase names in <c>settings.json</c> (and in
+/// <c>turn_metrics</c>), and the clamp to the steps a model accepts. One place, so a provider's stored default, an agent's
+/// configured default and a recorded turn can never disagree about what <c>"xhigh"</c> means.
 /// </summary>
 internal static class ThinkingEfforts
 {

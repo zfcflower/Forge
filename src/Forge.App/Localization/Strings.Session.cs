@@ -51,10 +51,6 @@ internal static class SessionStrings
     public const string BreadcrumbBackToParentKey = "session.breadcrumb.backToParent";
 
     // ---------------------------------------------------------------- composer
-    public const string ComposerAgentKey = "session.composer.agent";
-    public const string ComposerAgentDefaultKey = "session.composer.agentDefault";
-    public const string ComposerAgentDefaultDescriptionKey = "session.composer.agentDefaultDescription";
-    public const string ComposerAgentTooltipKey = "session.composer.agentTooltip";
     public const string ComposerOrchestrationKey = "session.composer.orchestration";
     public const string ComposerOrchestrationHintKey = "session.composer.orchestrationHint";
     public const string ComposerOrchestrationAutoKey = "session.composer.orchestrationAuto";
@@ -66,7 +62,6 @@ internal static class SessionStrings
     public const string ComposerNoModelsKey = "session.composer.noModels";
     public const string ComposerPinKey = "session.composer.pin";
     public const string ComposerPinnedSectionKey = "session.composer.pinnedSection";
-    public const string ComposerDefaultModelKey = "session.composer.defaultModel";
     public const string ComposerModelPriceKey = "session.composer.modelPrice";
     public const string ComposerEffortKey = "session.composer.effort";
     public const string ComposerEffortOffKey = "session.composer.effort.off";
@@ -77,8 +72,6 @@ internal static class SessionStrings
     public const string ComposerEffortXHighKey = "session.composer.effort.xhigh";
     public const string ComposerEffortXHighCompactKey = "session.composer.effort.xhighCompact";
     public const string ComposerEffortMaxKey = "session.composer.effort.max";
-    public const string ComposerSaveDefaultsKey = "session.composer.saveDefaults";
-    public const string ComposerDefaultsSavedKey = "session.composer.defaultsSaved";
     public const string ComposerRefreshKey = "session.composer.refresh";
     public const string ComposerModelsFetchedKey = "session.composer.modelsFetched";
     public const string ComposerModelFetchFailedKey = "session.composer.modelFetchFailed";
@@ -238,10 +231,6 @@ internal static class SessionStrings
     public static LocText ProviderMissing(string status) => new(ProviderMissingKey, status);
 
     // ---------------------------------------------------------------- composer
-    public static string ComposerAgentDefault => Loc.Instance[ComposerAgentDefaultKey];
-
-    public static string ComposerAgentDefaultDescription => Loc.Instance[ComposerAgentDefaultDescriptionKey];
-
     public static string ComposerOrchestrationAuto => Loc.Instance[ComposerOrchestrationAutoKey];
 
     public static string ComposerOrchestrationAutoDescription => Loc.Instance[ComposerOrchestrationAutoDescriptionKey];
@@ -263,8 +252,6 @@ internal static class SessionStrings
 
     /// <summary>Why a waiting message with attachments stays in the queue: the composer is full.</summary>
     public static LocText ComposerWithdrawAttachmentsFull => new(ComposerWithdrawAttachmentsFullKey);
-
-    public static string ComposerDefaultsSaved => Loc.Instance[ComposerDefaultsSavedKey];
 
     public static string ComposerModelsFetched(int count) =>
         Loc.Instance.Format(ComposerModelsFetchedKey, TextFormat.Number(count));
@@ -293,9 +280,6 @@ internal static class SessionStrings
 
     /// <summary>The pinned section's caption, above the models the user pinned.</summary>
     public static string ComposerPinnedSection => Loc.Instance[ComposerPinnedSectionKey];
-
-    /// <summary>The hint behind the icon on the row a new session starts with.</summary>
-    public static string ComposerDefaultModelHint => Loc.Instance[ComposerDefaultModelKey];
 
     /// <summary>
     /// The price line on a model picker row: input and output price per million tokens, then the context window, e.g.
@@ -600,22 +584,17 @@ internal static class SessionStrings
         Loc.Register(SendTooltipKey, "发送 (Enter)", "Send (Enter)");
         Loc.Register(StopTurnKey, "停止本轮", "Stop this turn");
         Loc.Register(StopNameKey, "停止", "Stop");
-        Loc.Register(ComposerAgentKey, "代理", "Agent");
-        Loc.Register(ComposerAgentDefaultKey, "Agent", "Agent");
-        Loc.Register(ComposerAgentDefaultDescriptionKey, "主编码代理（默认）", "Main coding agent (default)");
         Loc.Register(ComposerOrchestrationKey, "编排", "Orchestration");
         Loc.Register(ComposerOrchestrationHintKey, "仅对下一条消息生效，发送后恢复为自动", "Applies to the next message only, then returns to Auto");
         Loc.Register(ComposerOrchestrationAutoKey, "自动", "Auto");
         Loc.Register(ComposerOrchestrationAutoDescriptionKey, "由代理按默认路由决定是否走工作流", "The agent routes the work as usual");
         Loc.Register(ComposerOrchestrationDirectKey, "直接执行", "Direct");
         Loc.Register(ComposerOrchestrationDirectDescriptionKey, "跳过工作流，直接处理这条消息", "Skip workflows and handle this message directly");
-        Loc.Register(ComposerAgentTooltipKey, "选择本会话后续轮次使用的代理", "Choose the agent for the next turns of this session");
         Loc.Register(ComposerModelTooltipKey, "选择模型与思考力度", "Choose the model and thinking effort");
         Loc.Register(ComposerSearchModelsKey, "搜索模型", "Search models");
         Loc.Register(ComposerNoModelsKey, "没有匹配的模型", "No matching models");
         Loc.Register(ComposerPinKey, "固定到顶部", "Pin to top");
         Loc.Register(ComposerPinnedSectionKey, "收藏", "Pinned");
-        Loc.Register(ComposerDefaultModelKey, "新会话的默认模型", "The model new sessions start with");
         Loc.Register(ComposerModelPriceKey, "每百万 ${0} / ${1}", "per 1M ${0} / ${1}");
         Loc.Register(ComposerEffortKey, "推理", "Reasoning");
         Loc.Register(ComposerEffortOffKey, "关闭", "Off");
@@ -626,8 +605,6 @@ internal static class SessionStrings
         Loc.Register(ComposerEffortXHighKey, "超高", "Extra high");
         Loc.Register(ComposerEffortXHighCompactKey, "超高", "XHigh");
         Loc.Register(ComposerEffortMaxKey, "最高", "Max");
-        Loc.Register(ComposerSaveDefaultsKey, "设为默认", "Set default");
-        Loc.Register(ComposerDefaultsSavedKey, "已保存为新会话的默认值", "Saved as defaults for new sessions");
         Loc.Register(ComposerRefreshKey, "刷新", "Refresh");
         Loc.Register(ComposerModelsFetchedKey, "已加载 {0} 个模型", "Loaded {0} models");
         Loc.Register(ComposerModelFetchFailedKey, "拉取模型失败：{0}", "Could not fetch models: {0}");
@@ -686,7 +663,6 @@ internal static class SessionStrings
         Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");
         Loc.Register(TurnExpandKey, "展开本轮", "Expand this turn");
         Loc.Register(TurnWorkingKey, "正在处理下一步…", "Working on the next step…");
-        Loc.Register(TurnCollapseKey, "折叠本轮", "Collapse this turn");
         Loc.Register(ToolArgumentsKey, "参数", "Arguments");
         Loc.Register(ToolResultKey, "结果", "Result");
         Loc.Register(ToolOpenFileKey, "打开文件", "Open file");

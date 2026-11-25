@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Forge.Abstractions;
+using Forge.App.Agents;
 using Forge.App.Lifecycle;
 using Forge.App.Localization;
 using Forge.Workspace;
@@ -31,11 +32,16 @@ internal sealed partial class TreeNodeViewModel
     /// <summary>"New agent session" on a workspace row: a draft session under the workspace's active root session.</summary>
     public ICommand? NewAgentSessionCommand { get; private set; }
 
-    /// <summary>Replaces the agent-session command of a reused node; null hides the entry.</summary>
-    public void SetNewAgentSessionCommand(ICommand? command)
+    /// <summary>The kinds the "new agent session" submenu offers; empty when the row has no such entry.</summary>
+    public IReadOnlyList<AgentKindMenuItem> NewAgentSessionKinds { get; private set; } = [];
+
+    /// <summary>Replaces the agent-session entry of a reused node (its submenu included); null hides the entry.</summary>
+    public void SetNewAgentSessionCommand(ICommand? command, IReadOnlyList<AgentKindMenuItem>? kinds = null)
     {
         NewAgentSessionCommand = command;
+        NewAgentSessionKinds = kinds ?? [];
         OnPropertyChanged(nameof(NewAgentSessionCommand));
+        OnPropertyChanged(nameof(NewAgentSessionKinds));
     }
 
     /// <summary>"Promote to main session…" of an agent-session row: it becomes the workspace's root, the root it ran under is archived.</summary>
@@ -178,7 +184,11 @@ internal sealed partial class TreeNodeViewModel
         for (var i = 0; i < entries.Count; i++)
         {
             var entry = entries[i];
-            items[i] = new TreeMenuItemViewModel(entry, TreeMenu.Header(entry.Key, state), CommandFor(entry.Key));
+            items[i] = new TreeMenuItemViewModel(
+                entry,
+                TreeMenu.Header(entry.Key, state),
+                CommandFor(entry.Key),
+                entry.Key == TreeMenuKey.NewAgentSession ? NewAgentSessionKinds : []);
         }
 
         return items;
@@ -684,6 +694,88 @@ internal sealed partial class ProjectTreeViewModel
         return slash > 0 && string.Equals(branch, defaultBranch[(slash + 1)..], StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The kinds of the last refresh, per workspace directory: what a row's submenu shows. Filled off the UI thread by
+    /// <see cref="ReadAgentKinds"/>, because resolving them reads the prompt-template files and a row's menu is built from
+    /// memory only (5.4).
+    /// </summary>
+    private IReadOnlyDictionary<string, IReadOnlyList<AgentDefinition>> agentKinds = EmptyAgentKinds;
+
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<AgentDefinition>> EmptyAgentKinds =
+        new Dictionary<string, IReadOnlyList<AgentDefinition>>(PathComparer);
+
+    /// <summary>
+    /// The agent kinds of every workspace whose row offers "new agent session", read once per refresh on the thread pool: a
+    /// workspace without an active root session, and the general-chats scope, need none. A directory whose template files
+    /// cannot be read offers no kinds.
+    /// </summary>
+    private IReadOnlyDictionary<string, IReadOnlyList<AgentDefinition>> ReadAgentKinds(IReadOnlyList<SessionInfo> roots)
+    {
+        var resolver = AgentKinds;
+        if (resolver is null)
+        {
+            return EmptyAgentKinds;
+        }
+
+        var kinds = new Dictionary<string, IReadOnlyList<AgentDefinition>>(PathComparer);
+        foreach (var root in roots)
+        {
+            if (root.Status != SessionStatus.Active
+                || root.WorktreePath is not { Length: > 0 } directory
+                || kinds.ContainsKey(directory))
+            {
+                continue;
+            }
+
+            try
+            {
+                kinds[directory] = resolver(directory);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                AppLogs.Tree.ZLogWarning($"agent kinds unreadable in '{directory}': {exception.Message}");
+            }
+        }
+
+        return kinds;
+    }
+
+    /// <summary>
+    /// The kinds a workspace's "new agent session" submenu lists: the implementing kind (Worker) first, then the template
+    /// order, so the default sits where the eye lands.
+    /// </summary>
+    private IReadOnlyList<AgentDefinition> AgentKindsFor(string directory)
+    {
+        var kinds = agentKinds.TryGetValue(directory, out var read) ? read : [];
+        if (!kinds.Any(static kind => IsDefaultKind(kind)))
+        {
+            return kinds;
+        }
+
+        var ordered = new List<AgentDefinition>(kinds.Count);
+        ordered.AddRange(kinds.Where(static kind => IsDefaultKind(kind)));
+        ordered.AddRange(kinds.Where(static kind => !IsDefaultKind(kind)));
+        return ordered;
+    }
+
+    private static bool IsDefaultKind(AgentDefinition kind) =>
+        string.Equals(kind.Name, AgentSessionKinds.Default, StringComparison.Ordinal);
+
+    /// <summary>One submenu row: the kind, its reason when it cannot drive a session, and the command that creates it.</summary>
+    private AgentKindMenuItem KindEntry(AgentDefinition kind, SessionInfo root, string directory, Func<SessionInfo, AgentDefinition, CancellationToken, Task> open)
+    {
+        var reason = AgentCatalogue.UnavailableReason(kind);
+        return new AgentKindMenuItem(
+            kind.Name,
+            AgentKindMenuItem.Brief(kind.Description),
+            reason is null,
+            reason,
+            reason is null
+                ? new AsyncRelayCommand(ct => open(root, kind, ct), () => !Blocked(directory), OnFailed)
+                : null,
+            IsDefaultKind(kind));
+    }
+
     /// <summary>The commands only the generated menu reaches (6.2, 7.8, 7.10); the rest are the row's existing commands.</summary>
     private void ApplyMenuCommands(TreeNodeViewModel node, TreeNodePlan plan)
     {
@@ -709,10 +801,10 @@ internal sealed partial class ProjectTreeViewModel
                 if (plan.ActiveSession is { } agentHolder && NewAgentSession is { } openAgent)
                 {
                     // The entry hangs under the workspace's active root session; without one it stays, greyed, and says so.
-                    node.SetNewAgentSessionCommand(new AsyncRelayCommand(
-                        ct => openAgent(agentHolder, ct),
-                        () => !Blocked(directory),
-                        OnFailed));
+                    // Its submenu is where the kind is picked - the kind is what the tab runs for its whole life.
+                    node.SetNewAgentSessionCommand(
+                        null,
+                        AgentKindsFor(directory).Select(kind => KindEntry(kind, agentHolder, directory, openAgent)).ToList());
                 }
 
                 if (IsLinkedWorkspace(plan, owner) && !string.IsNullOrEmpty(plan.Branch))

@@ -53,14 +53,14 @@ public sealed class SessionMentionRulesTests : IDisposable
             checkpoints: null,
             store: store,
             Providers(),
-            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false));
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker));
         using var archivedView = new SessionWorkspaceViewModel(
             archived,
             runtime: null,
             checkpoints: null,
             store: store,
             Providers(),
-            agentSession: new AgentSessionLaunch(root, Ordinal: 2, IsDraft: false));
+            agentSession: new AgentSessionLaunch(root, Ordinal: 2, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker));
 
         var targets = SessionMentionRules.Targets(rootView, [liveView, archivedView], stored: null);
 
@@ -86,7 +86,7 @@ public sealed class SessionMentionRulesTests : IDisposable
             checkpoints: null,
             store: store,
             Providers(),
-            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false));
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker));
 
         // The shell lists the live tab first and then the rows it read from the store; the row of the open tab repeats that tab
         // rather than becoming a second session.
@@ -115,7 +115,7 @@ public sealed class SessionMentionRulesTests : IDisposable
             checkpoints: null,
             store: store,
             Providers(),
-            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false));
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker));
 
         var target = Assert.Single(SessionMentionRules.Targets(childView, [], stored: null));
         Assert.Equal(root.Id, target.SessionId);
@@ -136,7 +136,7 @@ public sealed class SessionMentionRulesTests : IDisposable
             checkpoints: null,
             store: store,
             Providers(),
-            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false));
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker));
 
         // An agent session's pickers belong to its root's tree; a root's own (or a closed session's, whose row only the stored
         // lists carry) to itself.

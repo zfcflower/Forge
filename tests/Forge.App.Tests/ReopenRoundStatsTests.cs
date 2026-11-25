@@ -92,9 +92,9 @@ public sealed class ReopenRoundStatsTests : IDisposable
     }
 
     /// <summary>
-    /// The composer starts from <c>composer.json</c>'s default and the provider's default model, which says nothing about the
-    /// session: a reopened tab has to land on the model and the reasoning step its last recorded turn ran, provider included,
-    /// so the next turn continues the same way and the strip prices its window and spend with it.
+    /// The composer starts from the provider's own default model (these tests wire no <c>settings.json</c> agent defaults),
+    /// which says nothing about the session: a reopened tab has to land on the model and the reasoning step its last recorded
+    /// turn ran, provider included, so the next turn continues the same way and the strip prices its window and spend with it.
     /// </summary>
     [Fact]
     public async Task A_reopened_session_puts_the_composer_back_on_the_model_and_step_its_last_turn_ran()
@@ -243,7 +243,7 @@ public sealed class ReopenRoundStatsTests : IDisposable
                 Effort: ThinkingEffort.High),
             CancellationToken.None);
 
-        var session = Reopen(child, store, metrics, agentSession: new AgentSessionLaunch(root, 1, IsDraft: false));
+        var session = Reopen(child, store, metrics, agentSession: new AgentSessionLaunch(root, 1, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker));
         await session.LoadHistoryAsync(CancellationToken.None);
 
         Assert.Equal("glm-5.3", session.Composer.Model);
@@ -273,7 +273,7 @@ public sealed class ReopenRoundStatsTests : IDisposable
             new SessionComposerSelection { Model = "glm-5.3", Provider = "probe", Effort = "high" },
             CancellationToken.None);
 
-        var session = Reopen(child, store, metrics, selections, new AgentSessionLaunch(root, 1, IsDraft: false));
+        var session = Reopen(child, store, metrics, selections, new AgentSessionLaunch(root, 1, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker));
         await session.LoadHistoryAsync(CancellationToken.None);
 
         Assert.Equal("glm-5.3", session.Composer.Model);
@@ -297,7 +297,7 @@ public sealed class ReopenRoundStatsTests : IDisposable
         await using var uiState = new SqliteUiStateStore(directory);
         var selections = new SessionComposerStore(uiState);
 
-        var session = Reopen(draft, store, metrics, selections, new AgentSessionLaunch(root, 1, IsDraft: true));
+        var session = Reopen(draft, store, metrics, selections, new AgentSessionLaunch(root, 1, IsDraft: true, Forge.Core.Prompts.BuiltInAgents.Worker));
         Assert.True(session.Composer.RestoreSessionModel("glm-5.3", "probe"));
         await session.ComposerSelectionSaved;
 

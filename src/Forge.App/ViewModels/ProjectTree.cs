@@ -921,7 +921,13 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     public Func<string, string, CancellationToken, Task>? OpenSubAgent { get; set; }
 
     /// <summary>"New agent session" of a worktree row: opens a draft agent tab under the row's active root session.</summary>
-    public Func<SessionInfo, CancellationToken, Task>? NewAgentSession { get; set; }
+    public Func<SessionInfo, AgentDefinition, CancellationToken, Task>? NewAgentSession { get; set; }
+
+    /// <summary>
+    /// The agent kinds a workspace offers, with <c>settings.json</c>'s model per kind: the rows of the "new agent session"
+    /// submenu. Set by the shell; without it the submenu is empty and the entry stays closed.
+    /// </summary>
+    public Func<string, IReadOnlyList<AgentDefinition>>? AgentKinds { get; set; }
 
     /// <summary>Opens (or brings forward) the tab of an agent-session row by its child session id.</summary>
     public Func<string, CancellationToken, Task>? OpenAgentSession { get; set; }
@@ -1290,9 +1296,13 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             // The root HEADs and the menus' workspace reads are independent: they run side by side, not one after the other.
             var headsRead = ReadProjectHeadsAsync(all, ct, reuseStaleGitReads);
             var gitRead = ReadMenuGitStateAsync(all, roots, ct, reuseStaleGitReads);
-            await Task.WhenAll(headsRead, gitRead).ConfigureAwait(true);
+            // The "new agent session" submenus read the prompt-template files: on the pool, with the other reads, so that
+            // building a row's menu (below, on this thread) never touches the disk.
+            var kindsRead = BackgroundRead.RunAsync(_ => Task.FromResult(ReadAgentKinds(roots)), ct);
+            await Task.WhenAll(headsRead, gitRead, kindsRead).ConfigureAwait(true);
             var heads = await headsRead.ConfigureAwait(true);
             var git = await gitRead.ConfigureAwait(true);
+            agentKinds = await kindsRead.ConfigureAwait(true);
             plainProjects = PlainProjectsOf(all, heads.Heads);
             remotelessProjects = await RemotelessProjectsOfAsync(all, plainProjects, ct).ConfigureAwait(true);
             var planned = await Task.Run(

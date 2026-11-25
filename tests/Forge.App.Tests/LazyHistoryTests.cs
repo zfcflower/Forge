@@ -227,6 +227,6 @@ public sealed class LazyHistoryTests : IDisposable
             checkpoints: null,
             store: new SqliteSessionStore(directory),
             providers,
-            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: true));
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: true, Forge.Core.Prompts.BuiltInAgents.Worker));
     }
 }

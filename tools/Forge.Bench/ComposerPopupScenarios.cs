@@ -32,7 +32,6 @@ internal static class ComposerPopupScenarios
     {
         yield return Open(fixtures, "model", "ModelChip");
         yield return Open(fixtures, "orchestration", "OrchestrationChip");
-        yield return Open(fixtures, "agent", "AgentChip");
         yield return Filter(fixtures);
         yield return ToolbarCreate(fixtures);
         yield return EffortStep(fixtures);

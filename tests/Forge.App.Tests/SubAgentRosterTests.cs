@@ -357,7 +357,7 @@ public sealed class SubAgentRosterTests : IDisposable
             checkpoints: null,
             store: new SqliteSessionStore(directory),
             new ProviderServices(Path.Combine(directory, "settings.json"), directory, http),
-            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false))
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker))
         {
             ChildQuery = (parent, token) => Task.FromResult<IReadOnlyList<SessionInfo>>([]),
         };

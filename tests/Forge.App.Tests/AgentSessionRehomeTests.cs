@@ -65,7 +65,7 @@ public sealed class AgentSessionRehomeTests : IDisposable
             checkpoints: null,
             store: store,
             providers,
-            agentSession: new AgentSessionLaunch(oldRoot, Ordinal: 2, IsDraft: false));
+            agentSession: new AgentSessionLaunch(oldRoot, Ordinal: 2, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker));
         await view.LoadHistoryAsync(CancellationToken.None);
         var rounds = view.Transcript.Rounds.Count;
 
@@ -124,7 +124,7 @@ public sealed class AgentSessionRehomeTests : IDisposable
             store: store,
             providers,
             fileSource: _ => Task.FromResult<IReadOnlyList<string>>([]),
-            agentSession: new AgentSessionLaunch(oldRoot, Ordinal: 2, IsDraft: false),
+            agentSession: new AgentSessionLaunch(oldRoot, Ordinal: 2, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker),
             // The shell's own source in an agent-session tab's shape (MainWindowViewModel.SessionMentionTargetsFor): the
             // root the tab hangs under at the moment it is asked.
             sessionMentions: () => created?.AgentSessionRoot is { } root
@@ -180,7 +180,7 @@ public sealed class AgentSessionRehomeTests : IDisposable
             store: store,
             providers,
             fileSource: _ => Task.FromResult<IReadOnlyList<string>>([]),
-            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false),
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false, Forge.Core.Prompts.BuiltInAgents.Worker),
             sessionMentions: () => created?.AgentSessionRoot is { } current
                 ? [new SessionMentionTarget(current.Id, current.Title)]
                 : []);

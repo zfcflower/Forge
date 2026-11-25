@@ -232,8 +232,8 @@
     <Style Selector="Slider.effort:disabled /template/ Thumb#thumb">
       <Setter Property="Opacity" Value="0.5" />
     </Style>
-    <!-- The picker's two footer actions: one weight for both, since neither is the popup's primary action. A brand tint
-         under a brand outline, with the body text ink so the label stays the strongest thing in the button. -->
+    <!-- The picker's outlined action: a brand tint under a brand outline, with the body text ink so the label stays the
+         strongest thing in the button. The model picker's refresh wears it on the search row. -->
     <Style Selector="Button.composer-row.outlined">
       <Setter Property="Background" Value="{DynamicResource BrandTintBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BrandInteractiveBrush}" />
@@ -251,5 +251,12 @@
     </Style>
     <Style Selector="Button.composer-row.outlined:disabled /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Opacity" Value="0.5" />
+    </Style>
+    <!-- The refresh action on the model picker's search row: the same outlined family, sized to the field it sits beside. -->
+    <Style Selector="Button.composer-row.search-action">
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="MinHeight" Value="26" />
+      <Setter Property="Padding" Value="8,3" />
     </Style>
 </Styles>

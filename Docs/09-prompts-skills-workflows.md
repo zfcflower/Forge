@@ -14,7 +14,7 @@
 | 种类 | 触发 | frontmatter | 正文语义 |
 |---|---|---|---|
 | **命令（Command）** | 输入框 `/名称 参数`，展开后作为消息发出 | `description`、`argument-hint`、`mode` | `$ARGUMENTS`/`$@` 是整串参数，`$1`..`$9` 是第 n 个参数（空白分隔、引号成组）；都没用到而又给了参数时参数接在正文后空一行；单次从左到右替换（参数里的 `$1` 不再展开） |
-| **Agent** | `spawn_agent` 或输入框 Agent 选择 | `name`、`description`、`model`、`thinking`（off/minimal/low/medium/high/xhigh/max）、`tools`、`mode` | 角色提示词；覆盖时没写的元数据（尤其 `tools` 白名单）沿用内置值，改提示词不会悄悄放开只读 Agent 的写权限 |
+| **Agent** | `spawn_agent` 或项目树的「新建 Agent 会话」二级菜单 | `name`、`description`、`model`、`thinking`（off/minimal/low/medium/high/xhigh/max）、`tools`、`mode` | 角色提示词；覆盖时没写的元数据（尤其 `tools` 白名单）沿用内置值，改提示词不会悄悄放开只读 Agent 的写权限 |
 | **槽位（Slot）** | 由代码在固定位置取用 | 无 | 固定 id 的内置提示词，只能覆盖不能新增 |
 
 - 内置命令 4 个：`review`、`explain`、`tests`、`fix`。

@@ -6,57 +6,10 @@
              xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.ComposerToolbar"
              x:DataType="vm:ComposerViewModel">
-  <!-- The composer's three pickers, side by side: agent, model (with effort) and the per-message orchestration. Each is a chip that
+  <!-- The composer's two pickers, side by side: model (with effort) and the per-message orchestration. Each is a chip that
        opens a picker; DataContext is the session's ComposerViewModel. The Flyout elements only hold the picker content: the code-behind
        moves it into a PickerPopup that stays in the overlay layer (a real flyout re-attaches its content on every open, which was the lag). -->
   <StackPanel Orientation="Horizontal">
-    <Button x:Name="AgentChip"
-            Classes="composer-chip"
-            AutomationProperties.AutomationId="composer-agent"
-            AutomationProperties.Name="{Binding [session.composer.agent], Source={x:Static loc:Loc.Instance}}"
-            ToolTip.Tip="{Binding [session.composer.agentTooltip], Source={x:Static loc:Loc.Instance}}">
-      <StackPanel Orientation="Horizontal" Spacing="5">
-        <wc:FluentIcon Data="{StaticResource IconSparkle}" Width="14" Height="14" />
-        <TextBlock Text="{Binding AgentLabel}" VerticalAlignment="Center" />
-        <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
-      </StackPanel>
-      <Button.Flyout>
-        <Flyout Placement="TopEdgeAlignedLeft">
-          <ItemsControl ItemsSource="{Binding Agents}"
-                        MinWidth="260"
-                        AutomationProperties.AutomationId="composer-agent-list">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:ComposerAgentOption">
-                <views:PickerRow Command="{Binding SelectCommand}"
-                        Click="OnAgentPicked"
-                        IsEnabled="{Binding IsAvailable}"
-                        Opacity="{Binding Opacity}"
-                        ToolTip.ShowOnDisabled="True"
-                        ToolTip.Tip="{Binding UnavailableReason}"
-                        AutomationProperties.Name="{Binding Name}">
-                  <Grid ColumnDefinitions="18,*">
-                    <wc:FluentIcon Data="{StaticResource IconCheck}"
-                                   Width="12"
-                                   Height="12"
-                                   IsVisible="{Binding IsSelected}"
-                                   Foreground="{DynamicResource BrandActionBrush}"
-                                   VerticalAlignment="Top" />
-                    <StackPanel Grid.Column="1" Spacing="1">
-                      <TextBlock Text="{Binding Name}" FontWeight="Medium" />
-                      <TextBlock Classes="caption"
-                                 Text="{Binding Description}"
-                                 MaxWidth="300"
-                                 TextWrapping="Wrap" />
-                    </StackPanel>
-                  </Grid>
-                </views:PickerRow>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </Flyout>
-      </Button.Flyout>
-    </Button>
-
     <Button x:Name="ModelChip"
             Margin="4,0,0,0"
             Classes="composer-chip"
@@ -93,20 +46,36 @@
             <StackPanel.Styles>
               <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
             </StackPanel.Styles>
-            <TextBox x:Name="ModelSearch"
-                     Classes="menu-search"
-                     Text="{Binding ModelSearch, Mode=TwoWay}"
-                     PlaceholderText="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}"
-                     AutomationProperties.AutomationId="composer-model-search"
-                     AutomationProperties.Name="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}">
-              <TextBox.InnerLeftContent>
-                <wc:FluentIcon Data="{StaticResource IconSearch}"
-                               Width="12"
-                               Height="12"
-                               Margin="8,0,0,0"
-                               Foreground="{DynamicResource TextMutedBrush}" />
-              </TextBox.InnerLeftContent>
-            </TextBox>
+            <!-- Refresh sits on the search row: it re-reads this list, so it belongs next to the field that narrows it. An
+                 outlined (border + tint) button, the same family the picker uses elsewhere - never the popup's primary action. -->
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox x:Name="ModelSearch"
+                       Classes="menu-search"
+                       Text="{Binding ModelSearch, Mode=TwoWay}"
+                       PlaceholderText="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="composer-model-search"
+                       AutomationProperties.Name="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}">
+                <TextBox.InnerLeftContent>
+                  <wc:FluentIcon Data="{StaticResource IconSearch}"
+                                 Width="12"
+                                 Height="12"
+                                 Margin="8,0,0,0"
+                                 Foreground="{DynamicResource TextMutedBrush}" />
+                </TextBox.InnerLeftContent>
+              </TextBox>
+              <Button Grid.Column="1"
+                      Classes="composer-row outlined search-action"
+                      Margin="6,0,0,0"
+                      Command="{Binding RefreshCommand}"
+                      ToolTip.Tip="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}"
+                      AutomationProperties.AutomationId="composer-refresh"
+                      AutomationProperties.Name="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                  <wc:FluentIcon Data="{DynamicResource IconRefresh}" Width="12" Height="12" />
+                  <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
+                </StackPanel>
+              </Button>
+            </Grid>
             <!-- Virtualized: the catalogue is ~180 rows, and only the ~8 that fit are ever built. -->
             <ItemsControl ItemsSource="{Binding Models}"
                             MaxHeight="220"
@@ -159,7 +128,7 @@
                         <views:PickerRow Command="{Binding SelectCommand}"
                                 Click="OnModelPicked"
                                 AutomationProperties.Name="{Binding Label}">
-                          <Grid ColumnDefinitions="18,*,Auto,Auto">
+                          <Grid ColumnDefinitions="18,*,Auto">
                             <wc:FluentIcon Data="{StaticResource IconCheck}"
                                            Width="12"
                                            Height="12"
@@ -171,16 +140,7 @@
                                        Text="{Binding Label}"
                                        TextTrimming="CharacterEllipsis"
                                        VerticalAlignment="Center" />
-                            <wc:FluentIcon Grid.Column="2"
-                                           Data="{StaticResource IconChat}"
-                                           Margin="8,0,0,0"
-                                           Width="12"
-                                           Height="12"
-                                           IsVisible="{Binding IsDefaultModel}"
-                                           Foreground="{DynamicResource BrandActionBrush}"
-                                           VerticalAlignment="Center"
-                                           ToolTip.Tip="{Binding [session.composer.defaultModel], Source={x:Static loc:Loc.Instance}}" />
-                            <TextBlock Grid.Column="3"
+                            <TextBlock Grid.Column="2"
                                        Margin="6,0,0,0"
                                        Classes="model-price"
                                        IsVisible="{Binding HasPriceText}"
@@ -281,28 +241,6 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </StackPanel>
-            <Separator Margin="26,2" />
-            <!-- One row, two ends: refreshing the catalogue on the left, saving this pick as the new-session default on
-                 the right. Same weight for both — neither is the popup's primary action. -->
-            <Grid ColumnDefinitions="Auto,*,Auto" Margin="18,0">
-              <Button Classes="composer-row outlined"
-                      Command="{Binding RefreshCommand}"
-                      AutomationProperties.AutomationId="composer-refresh">
-                <StackPanel Orientation="Horizontal" Spacing="5">
-                  <wc:FluentIcon Data="{DynamicResource IconRefresh}" Width="12" Height="12" />
-                  <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
-                </StackPanel>
-              </Button>
-              <Button Grid.Column="2"
-                      Classes="composer-row outlined"
-                      Command="{Binding SaveDefaultsCommand}"
-                      AutomationProperties.AutomationId="composer-save-defaults">
-                <StackPanel Orientation="Horizontal" Spacing="5">
-                  <wc:FluentIcon Data="{DynamicResource IconSave}" Width="12" Height="12" />
-                  <TextBlock Text="{Binding [session.composer.saveDefaults], Source={x:Static loc:Loc.Instance}}" />
-                </StackPanel>
-              </Button>
-            </Grid>
             <TextBlock Classes="caption"
                        Margin="26,0"
                        IsVisible="{Binding HasStatus}"

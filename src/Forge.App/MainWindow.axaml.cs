@@ -353,6 +353,34 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         return folders.Count > 0 ? folders[0].Path.LocalPath : null;
     }
 
+    /// <summary>
+    /// An information message: the message and one acknowledge button. A notice is not a question, so there is no cancel
+    /// button - and never two buttons carrying the same label. Esc and the window's close box answer it like the button.
+    /// </summary>
+    public async Task NotifyAsync(string title, string message)
+    {
+        var content = NoticeContent(message, out var ok);
+        var dialog = CreateDialogWindow(title, 460, content);
+        ok.Click += (_, _) => dialog.Close(true);
+        await dialog.ShowDialog<bool?>(owner).ConfigureAwait(true);
+    }
+
+    /// <summary>The body of an information dialog: the message and its single acknowledge button.</summary>
+    internal static StackPanel NoticeContent(string message, out Button ok)
+    {
+        ok = new Button { Content = ShellStrings.Ok, IsDefault = true, IsCancel = true };
+        return new StackPanel
+        {
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 14,
+            Children =
+            {
+                new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                ButtonRow(ok),
+            },
+        };
+    }
+
     public async Task<bool> ConfirmAsync(string title, string message, string confirmText, string cancelText)
     {
         var confirm = new Button { Content = confirmText, IsDefault = true };
@@ -726,8 +754,8 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         Content = content,
     };
 
-    /// <summary>The footer row of a dialog: cancel on the left, the default action on the right.</summary>
-    private static StackPanel ButtonRow(Control cancel, Control confirm)
+    /// <summary>The footer row of a dialog: the buttons in the order given, right-aligned (a question: cancel, then confirm).</summary>
+    private static StackPanel ButtonRow(params Control[] buttons)
     {
         var row = new StackPanel
         {
@@ -735,8 +763,7 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
             Spacing = 8,
         };
-        row.Children.Add(cancel);
-        row.Children.Add(confirm);
+        row.Children.AddRange(buttons);
         return row;
     }
 }

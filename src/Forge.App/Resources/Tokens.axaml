@@ -179,6 +179,10 @@
       <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#FAFAFA" />
       <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#FBFCFD" />
       <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
+      <!-- A menu's second level (the MenuItem submenu popup) template-binds these Fluent keys; without an app value it keeps
+           Fluent's grey and reads as a different surface from the menu it grew out of. -->
+      <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#CFD7DA" />
       <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#F4F7F8" />
       <!-- A band inside a panel (the file panel's git rows and its scope row): one step lighter than the chrome above them,
            one step deeper than the panel body, so the band reads as part of the panel without disappearing into it. -->
@@ -352,6 +356,8 @@
       <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#121617" />
       <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#181E20" />
       <SolidColorBrush x:Key="CardBackgroundBrush" Color="#1C2224" />
+      <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#1C2224" />
+      <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#3A4447" />
       <SolidColorBrush x:Key="SurfaceSubtleBrush" Color="#242C2E" />
       <SolidColorBrush x:Key="PanelBandBrush" Color="#121A1B" />
       <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#293235" />

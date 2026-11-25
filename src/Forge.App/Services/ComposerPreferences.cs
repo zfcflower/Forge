@@ -1,27 +1,16 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Forge.Abstractions;
 using Forge.App.Composition;
-using Forge.App.Providers;
 using Forge.App.Logging;
 using ZLogger;
 
 namespace Forge.App.Services;
 
-/// <summary>The <c>composer.json</c> document: pinned models and the composer defaults for new sessions.</summary>
+/// <summary>The <c>composer.json</c> document: the models the user pinned in the picker.</summary>
 internal sealed class ComposerPreferencesDocument
 {
     [JsonPropertyName("pinnedModels")]
     public List<string>? PinnedModels { get; set; }
-
-    [JsonPropertyName("defaultAgent")]
-    public string? DefaultAgent { get; set; }
-
-    [JsonPropertyName("defaultModel")]
-    public string? DefaultModel { get; set; }
-
-    [JsonPropertyName("defaultEffort")]
-    public string? DefaultEffort { get; set; }
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]
@@ -31,9 +20,11 @@ internal sealed partial class ComposerPreferencesJsonContext : JsonSerializerCon
 }
 
 /// <summary>
-/// What the chat composer remembers across sessions: the pinned models and the agent, model and effort a new session
-/// starts with. Kept in <c>composer.json</c> next to <c>settings.json</c>; a store without a path lives in memory only
-/// Reads happen once, writes go to the pool, and a broken file is treated as empty.
+/// What the chat composer remembers across sessions: the models the user pinned. Where a new session starts is not stored
+/// here — <c>settings.json</c>'s per-agent rows (the provider page's "built-in agent defaults") are the one place a default
+/// model and effort live, and a new session opens on the main agent. Kept in <c>composer.json</c> next to
+/// <c>settings.json</c>; a store without a path lives in memory only. Reads happen once, writes go to the pool, and a
+/// broken file is treated as empty.
 /// </summary>
 internal sealed class ComposerPreferences
 {
@@ -42,9 +33,6 @@ internal sealed class ComposerPreferences
     private readonly Lock gate = new();
     private readonly string? path;
     private readonly List<string> pinned = [];
-    private string? defaultAgent;
-    private string? defaultModel;
-    private ThinkingEffort? defaultEffort;
 
     public ComposerPreferences(string? path = null)
     {
@@ -54,39 +42,6 @@ internal sealed class ComposerPreferences
 
     /// <summary>The store of the running app, under the data root (<c>FORGE_DATA_DIR</c> moves it with the database).</summary>
     public static ComposerPreferences Shared => SharedInstance.Value;
-
-    public string? DefaultAgent
-    {
-        get
-        {
-            lock (gate)
-            {
-                return defaultAgent;
-            }
-        }
-    }
-
-    public string? DefaultModel
-    {
-        get
-        {
-            lock (gate)
-            {
-                return defaultModel;
-            }
-        }
-    }
-
-    public ThinkingEffort? DefaultEffort
-    {
-        get
-        {
-            lock (gate)
-            {
-                return defaultEffort;
-            }
-        }
-    }
 
     public bool IsPinned(string model)
     {
@@ -131,23 +86,6 @@ internal sealed class ComposerPreferences
         Save();
     }
 
-    public void SetDefaults(string? agent, string? model, ThinkingEffort effort)
-    {
-        lock (gate)
-        {
-            defaultAgent = string.IsNullOrWhiteSpace(agent) ? null : agent;
-            defaultModel = string.IsNullOrWhiteSpace(model) ? null : model;
-            defaultEffort = effort;
-        }
-
-        Save();
-    }
-
-    internal static string EffortName(ThinkingEffort effort) => ThinkingEfforts.Name(effort);
-
-    internal static ThinkingEffort? ParseEffort(string? text) =>
-        ThinkingEfforts.TryParse(text, out var effort) ? effort : null;
-
     private static ComposerPreferences CreateShared()
     {
         try
@@ -175,6 +113,8 @@ internal sealed class ComposerPreferences
                 return;
             }
 
+            // Fields an older build wrote (defaultAgent/defaultModel/defaultEffort) are not read: settings.json owns the
+            // defaults now, and the next save drops them from the file.
             foreach (var model in document.PinnedModels ?? [])
             {
                 if (!string.IsNullOrWhiteSpace(model) && !pinned.Contains(model, StringComparer.Ordinal))
@@ -182,10 +122,6 @@ internal sealed class ComposerPreferences
                     pinned.Add(model);
                 }
             }
-
-            defaultAgent = string.IsNullOrWhiteSpace(document.DefaultAgent) ? null : document.DefaultAgent;
-            defaultModel = string.IsNullOrWhiteSpace(document.DefaultModel) ? null : document.DefaultModel;
-            defaultEffort = ParseEffort(document.DefaultEffort);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -202,13 +138,7 @@ internal sealed class ComposerPreferences
         ComposerPreferencesDocument document;
         lock (gate)
         {
-            document = new ComposerPreferencesDocument
-            {
-                PinnedModels = [.. pinned],
-                DefaultAgent = defaultAgent,
-                DefaultModel = defaultModel,
-                DefaultEffort = defaultEffort is { } effort ? EffortName(effort) : null,
-            };
+            document = new ComposerPreferencesDocument { PinnedModels = [.. pinned] };
         }
 
         var target = path;

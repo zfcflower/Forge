@@ -237,7 +237,7 @@ public sealed class SessionTitleNamingTests : IDisposable
             checkpoints: null,
             store,
             new ProviderServices(Path.Combine(directory, "settings.json"), directory, childHttp),
-            agentSession: new AgentSessionLaunch(runtime.Session, 1, IsDraft: true));
+            agentSession: new AgentSessionLaunch(runtime.Session, 1, IsDraft: true, Forge.Core.Prompts.BuiltInAgents.Worker));
 
         await RunTurnAsync(runtime);
 

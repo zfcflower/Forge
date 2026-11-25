@@ -7,20 +7,18 @@ using Forge.App.ViewModels;
 namespace Forge.App.Views;
 
 /// <summary>
-/// The composer's agent, model and orchestration chips. The <c>Flyout</c> elements in the XAML only hold each picker's content:
+/// The composer's model and orchestration chips. The <c>Flyout</c> elements in the XAML only hold each picker's content:
 /// it is moved into a <see cref="PickerPopup"/> that lives in the overlay layer, which opens several times faster than a flyout
 /// that re-attaches its content on every click.
 /// </summary>
 public partial class ComposerToolbar : UserControl
 {
-    private readonly PickerPopup agent;
     private readonly PickerPopup model;
     private readonly PickerPopup orchestration;
 
     public ComposerToolbar()
     {
         InitializeComponent();
-        agent = Take("AgentChip");
         model = Take("ModelChip");
         orchestration = Take("OrchestrationChip");
     }
@@ -28,7 +26,6 @@ public partial class ComposerToolbar : UserControl
     /// <summary>The picker behind a chip, for the benchmark to open without a pointer.</summary>
     internal PickerPopup Picker(string chipName) => chipName switch
     {
-        "AgentChip" => agent,
         "ModelChip" => model,
         _ => orchestration,
     };
@@ -36,7 +33,6 @@ public partial class ComposerToolbar : UserControl
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);
-        agent.SetDataContext(DataContext);
         model.SetDataContext(DataContext);
         orchestration.SetDataContext(DataContext);
     }
@@ -50,7 +46,6 @@ public partial class ComposerToolbar : UserControl
             {
                 if (TopLevel.GetTopLevel(this) is not null)
                 {
-                    agent.Warm();
                     model.Warm();
                     orchestration.Warm();
                 }
@@ -60,7 +55,6 @@ public partial class ComposerToolbar : UserControl
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        agent.Detach();
         model.Detach();
         orchestration.Detach();
         base.OnDetachedFromVisualTree(e);
@@ -74,17 +68,6 @@ public partial class ComposerToolbar : UserControl
         flyout.Content = null;
         chip.Flyout = null;
         return new PickerPopup(chip, content);
-    }
-
-    private void OnAgentPicked(object? sender, RoutedEventArgs e)
-    {
-        // A greyed row (a kind an agent-session tab cannot drive) is not a pick: it is there so its tooltip can say why.
-        if (sender is PickerRow { DataContext: ComposerAgentOption { IsAvailable: false } })
-        {
-            return;
-        }
-
-        agent.Close(restoreFocus: true);
     }
 
     private void OnModelPicked(object? sender, RoutedEventArgs e) => model.Close(restoreFocus: true);

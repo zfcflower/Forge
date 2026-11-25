@@ -61,7 +61,7 @@ public sealed class AgentSessionInterjectTests : IDisposable
                 checkpoints: null,
                 store,
                 new ProviderServices(Path.Combine(directory, "settings.json"), directory, http),
-                agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: true))
+                agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: true, Forge.Core.Prompts.BuiltInAgents.Worker))
             {
                 // Nothing fires behind an assertion unless the case asks for it.
                 AutoResumeDelay = TimeSpan.FromMinutes(5),

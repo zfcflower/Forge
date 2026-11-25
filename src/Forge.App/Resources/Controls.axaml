@@ -201,6 +201,15 @@
     <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
   </Style>
 
+  <!-- The submenu arrow is drawn by the item's own template as an 8x16 path: scale it to the label's size, so it reads as an
+       arrow beside the text instead of a block taller than it. -->
+  <Style Selector="MenuItem /template/ Path#PART_ChevronPath">
+    <Setter Property="Width" Value="12" />
+    <Setter Property="Height" Value="12" />
+    <Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="Margin" Value="10,0,2,0" />
+  </Style>
+
   <Style Selector="MenuFlyoutPresenter">
     <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />

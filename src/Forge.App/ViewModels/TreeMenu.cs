@@ -104,6 +104,24 @@ internal sealed record TreeRowState(TreeRowKind Kind)
 }
 
 /// <summary>One generated menu entry: the key, whether it can run, why not (or a warning when it can), the default.</summary>
+/// <summary>
+/// One kind under the tree's "new agent session" entry: the agent that entry would create, the one-line summary shown under
+/// its name, whether this build may drive a session with it, and why not. <paramref name="IsDefault"/> is the implementing
+/// kind the entry suggests, drawn first and bold.
+/// </summary>
+internal sealed record AgentKindMenuItem(string Name, string Description, bool IsEnabled, string? Reason, ICommand? Command, bool IsDefault = false)
+{
+    /// <summary>How many characters a kind's summary may take before it is cut: two lines of it are a menu row, not a paragraph.</summary>
+    public const int BriefLimit = 40;
+
+    /// <summary>The kind's own description, cut to <see cref="BriefLimit"/> characters with an ellipsis.</summary>
+    public static string Brief(string? description)
+    {
+        var text = (description ?? string.Empty).Trim();
+        return text.Length <= BriefLimit ? text : string.Concat(text.AsSpan(0, BriefLimit - 1), "…");
+    }
+}
+
 internal sealed record TreeMenuEntry(TreeMenuKey Key, bool IsEnabled = true, string? Reason = null, bool IsDefault = false)
 {
     /// <summary>A caution shown on an entry that does run (5.3: a session on a detached HEAD).</summary>
@@ -418,15 +436,19 @@ internal static class TreeMenu
 /// </summary>
 internal sealed class TreeMenuItemViewModel
 {
-    public TreeMenuItemViewModel(TreeMenuEntry entry, string header, ICommand? command)
+    public TreeMenuItemViewModel(TreeMenuEntry entry, string header, ICommand? command, IReadOnlyList<AgentKindMenuItem>? kinds = null)
     {
         Entry = entry;
         Header = entry.IsSeparator ? "-" : header;
         Command = entry.IsSeparator ? null : command;
+        Kinds = kinds ?? [];
 
         // Read once, when the menu is built: the command's own gate (in memory, e.g. already running) can still say no
         // where the generated state said yes, and such an entry must not be a disabled item without a reason (5.4 rule 2).
-        IsEnabled = !IsSeparator && entry.IsEnabled && Command is not null && Command.CanExecute(null);
+        // An entry that opens a submenu has no command of its own: it is enabled exactly when one of its rows is.
+        var runnable = Command is not null && Command.CanExecute(null);
+        IsEnabled = !IsSeparator && entry.IsEnabled
+                    && (runnable || (Kinds.Count > 0 && Kinds.Any(static kind => kind.IsEnabled && kind.Command is not null)));
         Tip = IsSeparator ? null
             : IsEnabled ? entry.Warning
             : entry.IsEnabled ? TreeMenuStrings.Unavailable
@@ -443,6 +465,12 @@ internal sealed class TreeMenuItemViewModel
 
     public bool IsSeparator => Entry.IsSeparator;
 
+    /// <summary>The submenu's rows; empty for an entry without one.</summary>
+    public IReadOnlyList<AgentKindMenuItem> Kinds { get; }
+
+    /// <summary>Whether this entry opens a submenu instead of running a command.</summary>
+    public bool HasKinds => Kinds.Count > 0;
+
     /// <summary>The generated state decides; an entry whose command the row does not have, or cannot run now, stays disabled.</summary>
     public bool IsEnabled { get; }
 
@@ -456,7 +484,8 @@ internal sealed class TreeMenuItemViewModel
     /// <summary>Runs the entry when it can run; returns false otherwise.</summary>
     public bool Run()
     {
-        if (!IsEnabled || !Command!.CanExecute(null))
+        // An entry that opens a submenu has no command of its own: there is nothing to run from the row itself.
+        if (!IsEnabled || Command?.CanExecute(null) != true)
         {
             return false;
         }
