@@ -1,6 +1,9 @@
 using System.Windows.Input;
+using Avalonia.Controls;
+using Avalonia.VisualTree;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
+using Forge.App.Views;
 using Forge.Workspace;
 using Xunit;
 
@@ -158,6 +161,35 @@ public sealed class TreeMenuTests
         Assert.Equal(AgentKindMenuItem.BriefLimit, cut.Length);
         Assert.EndsWith("…", cut, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// The submenu arrow's size is baked into the MenuItem template, where a style cannot reach it: it has to be set on the
+    /// template child (a style setter for `PART_ChevronPath` silently did nothing). This pins the real rendered size.
+    /// </summary>
+    [Fact]
+    public Task A_submenu_entry_draws_a_six_pixel_chevron() => SharedUi.RunAsync(() =>
+    {
+        var items = TreeMenuControls.Build(
+        [
+            new TreeMenuItemViewModel(
+                new TreeMenuEntry(TreeMenuKey.NewAgentSession),
+                "New agent session",
+                command: null,
+                [new AgentKindMenuItem("Worker", "Implements one task end to end.", IsEnabled: true, Reason: null, new TestCommand(), IsDefault: true)]),
+        ]);
+        var parent = Assert.IsType<MenuItem>(Assert.Single(items));
+
+        var window = new Window { Content = new StackPanel { Children = { parent } } };
+        window.Show();
+        SharedUi.Settle(window);
+
+        var chevron = parent.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single(shape => shape.Name == "PART_ChevronPath");
+        Assert.Equal(6, chevron.Width);
+        Assert.Equal(6, chevron.Height);
+
+        window.Close();
+        return Task.CompletedTask;
+    });
 
     private sealed class TestCommand : ICommand
     {
