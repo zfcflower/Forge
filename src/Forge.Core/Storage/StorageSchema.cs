@@ -314,9 +314,38 @@ internal static class StorageSchema
         await using var command = connection.CreateCommand();
         command.CommandText = SubAgentStateSql;
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        // The create is idempotent, the shape is not: a file whose table was built by an earlier build of this unreleased
+        // feature is missing the columns added since, and reading one of them fails the whole row (and the history load that
+        // reads it). Same stance as the table itself - repaired here instead of by a ladder step.
+        await EnsureColumnAsync(connection, "sub_agent_state", "max_output", "INTEGER NULL", ct).ConfigureAwait(false);
         // The table is younger than the ladder step that installs timestamp guards, so it installs its own from the same
         // registration - the way `artifacts` does (see EnsureOwnedTimestampsAsync).
         await EnsureOwnedTimestampsAsync(connection, "sub_agent_state", ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Adds a column an older build of an owner-created table did not have; a no-op once it is there.</summary>
+    private static async Task EnsureColumnAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        string definition,
+        CancellationToken ct)
+    {
+        await using (var probe = connection.CreateCommand())
+        {
+            probe.CommandText = "SELECT COUNT(*) FROM pragma_table_info($table) WHERE name = $column";
+            probe.Parameters.AddWithValue("$table", table);
+            probe.Parameters.AddWithValue("$column", column);
+            var existing = await probe.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (Convert.ToInt64(existing, CultureInfo.InvariantCulture) > 0)
+            {
+                return;
+            }
+        }
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+        await alter.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     public static void ThrowIfNewer(int version, string databasePath)

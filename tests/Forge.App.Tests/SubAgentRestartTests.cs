@@ -82,6 +82,44 @@ public sealed class SubAgentRestartTests : IDisposable
     }
 
     [Fact]
+    public async Task A_table_an_earlier_build_created_is_repaired_in_place()
+    {
+        // The state table is created by whichever build opens the file first, so a file from a build that had no `max_output`
+        // column keeps that shape: reading the missing column would fail the row and the history load that asks for it.
+        Directory.CreateDirectory(directory);
+        var seedToken = TestContext.Current.CancellationToken;
+        await using (var seed = new SqliteConnection($"Data Source={Path.Combine(directory, "forge.db")}"))
+        {
+            await seed.OpenAsync(seedToken);
+            await using var create = seed.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE sub_agent_state (
+                    session_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL,
+                    provider TEXT NULL, thinking TEXT NULL, finished_at TEXT NULL, reusable INTEGER NOT NULL DEFAULT 1);
+                """;
+            await create.ExecuteNonQueryAsync(seedToken);
+        }
+
+        await using var store = new SqliteSessionStore(directory);
+        var token = TestContext.Current.CancellationToken;
+        var root = await store.CreateAsync(new SessionCreate(directory, "old"), token);
+        var child = await store.CreateAsync(
+            new SessionCreate(directory, "Fix the badge.") { ParentSessionId = root.Id, AgentKind = "Worker", Task = "t" },
+            token);
+        await ((ISubAgentStateStore)store)
+            .SaveSubAgentStateAsync(
+                new SubAgentState(child.Id, "Worker-1", "Worker", new ModelSettings("m", ThinkingEffort.High, 2048), root.LastActiveAt),
+                token);
+
+        var rows = await ((ISubAgentStateStore)store).LoadSubAgentStatesAsync(root.Id, token);
+
+        var row = Assert.Single(rows);
+        Assert.Equal("Worker-1", row.State.AgentId);
+        Assert.Equal(2048, row.State.Model.MaxOutputTokens);
+        await store.DisposeAsync();
+    }
+
+    [Fact]
     public async Task A_child_outside_the_window_is_not_restored()
     {
         var clock = new Clock();

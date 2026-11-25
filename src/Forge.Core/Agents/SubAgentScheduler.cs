@@ -870,7 +870,19 @@ public sealed class SubAgentScheduler : ISubAgentControl
         var candidates = new List<(AgentInstance Instance, int Score, DateTimeOffset FinishedAt)>();
         foreach (var (instance, finishedAt, history) in eligible)
         {
-            var score = SubAgentAffinity.Score(task, SubAgentAffinity.ReadHistory(history));
+            int score;
+            try
+            {
+                score = SubAgentAffinity.Score(task, SubAgentAffinity.ReadHistory(history));
+            }
+            catch (Exception exception)
+            {
+                // Reading text is a heuristic over whatever a conversation happens to contain: a shape it cannot parse is one
+                // more reason not to continue that child, never a reason for the spawn of a new one to fail.
+                Trace.TraceWarning($"sub-agent '{instance.Id}' was not scored: {exception.GetType().Name}: {exception.Message}");
+                continue;
+            }
+
             if (score >= options.SubAgentReuseThreshold)
             {
                 candidates.Add((instance, score, finishedAt));

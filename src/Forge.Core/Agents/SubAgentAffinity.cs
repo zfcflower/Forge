@@ -210,7 +210,8 @@ internal static class SubAgentAffinity
         }
     }
 
-    private static bool ContainsCjk(ReadOnlySpan<char> word)    {
+    private static bool ContainsCjk(ReadOnlySpan<char> word)
+    {
         foreach (var value in word)
         {
             if (IsCjk(value))
