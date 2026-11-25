@@ -560,46 +560,25 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     // ---------------------------------------------------------------- the @ picker's session group
 
     /// <summary>
-    /// The sessions one tab may mention: an agent-session tab may mention its root; a root session may mention the agent
-    /// sessions the user opened under it and that are active right now - a history row's read-only tab is not a target.
+    /// The sessions one tab may mention (see <see cref="SessionMentionRules.Targets"/>); a root's stored rows are read once,
+    /// from the store, the first time its picker is asked for them.
     /// </summary>
     private IReadOnlyList<SessionMentionTarget> SessionMentionTargetsFor(SessionWorkspaceViewModel view)
     {
-        if (view.IsAgentSession)
+        IReadOnlyList<SessionMentionTarget>? stored = null;
+        if (!view.IsAgentSession)
         {
-            return view.AgentSessionRoot is { } root ? [new SessionMentionTarget(root.Id, root.Title)] : [];
-        }
-
-        var rootId = view.SessionId;
-        var targets = new List<SessionMentionTarget>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (session, _) in agentViews)
-        {
-            if (string.Equals(session.AgentSessionRoot?.Id, rootId, StringComparison.Ordinal)
-                && !session.IsReadOnlyView
-                && session.AgentChildSessionId is { } childId
-                && seen.Add(childId))
+            if (mentionTargets.TryGetValue(view.SessionId, out var read))
             {
-                targets.Add(new SessionMentionTarget(childId, session.AgentSessionName));
+                stored = read;
+            }
+            else if (mentionReads.Add(view.SessionId))
+            {
+                _ = ReadMentionTargetsAsync(view.SessionId);
             }
         }
 
-        if (mentionTargets.TryGetValue(rootId, out var stored))
-        {
-            foreach (var target in stored)
-            {
-                if (seen.Add(target.SessionId))
-                {
-                    targets.Add(target);
-                }
-            }
-        }
-        else if (mentionReads.Add(rootId))
-        {
-            _ = ReadMentionTargetsAsync(rootId);
-        }
-
-        return targets;
+        return SessionMentionRules.Targets(view, agentViews.Keys, stored);
     }
 
     /// <summary>Reads one root's stored agent sessions for the <c>@</c> picker, then refills every view of that root.</summary>
