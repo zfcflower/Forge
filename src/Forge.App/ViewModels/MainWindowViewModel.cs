@@ -3565,21 +3565,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
             // The branch is read live, never taken from the tree's last plan: an outside checkout may have moved it since, and
             // the new session row records whichever branch this workspace is on now.
-            var directory = occupied.Create.WorktreePath ?? occupied.Create.WorkspacePath;
-            string? branch = occupied.Create.Branch;
-            try
-            {
-                var head = await BackgroundRead
-                    .RunAsync(token => composition.Git.GetHeadAsync(directory, token), CancellationToken.None)
-                    .ConfigureAwait(true);
-                branch = head.Kind == GitHeadKind.Branch ? head.Branch : null;
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException and not OperationCanceledException)
-            {
-                // The handover reads the workspace again and reports what it cannot do; the stored branch stands meanwhile.
-                AppLogs.Menu.ZLogWarning($"could not read the HEAD of '{directory}': {exception.Message}");
-            }
-
+            var branch = await LiveBranchAsync(
+                    occupied.Create.WorktreePath ?? occupied.Create.WorkspacePath,
+                    occupied.Create.Branch)
+                .ConfigureAwait(true);
             await TakeOverAsync(
                     holder,
                     HandoverIntent.NewSession(occupied.Create with { Branch = branch }),

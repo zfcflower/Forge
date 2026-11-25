@@ -508,6 +508,13 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
 
     public ICommand? NewSessionCommand { get; private set; }
 
+    /// <summary>
+    /// "新根会话…" on a branch that already has an active session: the holder and the session that would take the branch over,
+    /// set by the shell. It goes straight to the handover dialog - a plain "create a session?" confirm in front of it would ask
+    /// the same thing twice - and the shell reads the branch live, since an outside checkout may have moved it.
+    /// </summary>
+    public Func<SessionInfo, SessionCreate, CancellationToken, Task>? NewRootSession { get; set; }
+
     public ICommand? ArchiveCommand { get; private set; }
 
     public ICommand? RenameCommand { get; private set; }
@@ -2273,7 +2280,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                 node.SetCommands(
                     open: null,
                     newSession: new AsyncRelayCommand(
-                        ct => CreateSessionInWorktreeAsync(project, plan.WorktreePath, plan.Branch, ct),
+                        ct => CreateSessionInWorktreeAsync(project, plan.WorktreePath, plan.Branch, plan.ActiveSession, ct),
                         () => !busy && !directoryMissing && !stale && !Blocked(plan.WorktreePath),
                         OnFailed),
                     archive: null,
@@ -2607,18 +2614,32 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         + "session-"
         + DateTimeOffset.Now.ToString("MMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
 
-    private Task CreateSessionInWorktreeAsync(ProjectInfo project, string worktreePath, string? branch, CancellationToken ct) =>
-        CreateAsync(
+    private Task CreateSessionInWorktreeAsync(
+        ProjectInfo project,
+        string worktreePath,
+        string? branch,
+        SessionInfo? holder,
+        CancellationToken ct)
+    {
+        var title = ProjectStrings.WorktreeSessionTitle();
+        var create = new SessionCreate(worktreePath, title)
+        {
+            ProjectId = project.Id,
+            WorktreePath = worktreePath,
+            Branch = branch,
+        };
+
+        // A branch that already has an active session: the new root session replaces it, and the handover dialog is the one
+        // place that asks about it. No store attempt first - it would only throw and bring us back here.
+        if (holder is not null)
+        {
+            return NewRootSession?.Invoke(holder, create, ct) ?? Task.CompletedTask;
+        }
+
+        return CreateAsync(
             token => BackgroundRead.RunAsync(
                 async token2 =>
                 {
-                    var title = ProjectStrings.WorktreeSessionTitle();
-                    var create = new SessionCreate(worktreePath, title)
-                    {
-                        ProjectId = project.Id,
-                        WorktreePath = worktreePath,
-                        Branch = branch,
-                    };
                     try
                     {
                         return await catalog.CreateAsync(create, token2).ConfigureAwait(false);
@@ -2631,6 +2652,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                 },
                 token),
             ct);
+    }
 
     private async Task CreateImmediatelyAsync(Func<CancellationToken, Task<SessionInfo>> factory, CancellationToken ct)
     {

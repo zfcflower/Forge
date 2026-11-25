@@ -1,12 +1,10 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using Forge.Abstractions;
 using Forge.App.Git;
 using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.Workspace;
 using Forge.App.Logging;
-using ZLogger;
 
 namespace Forge.App.Lifecycle;
 

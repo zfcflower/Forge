@@ -89,9 +89,6 @@ internal static class ForkStrings
 
 
 
-
-
-
     public static string Sparse => Loc.Instance[SparseKey];
 
     public static string ColdBuild => Loc.Instance[ColdBuildKey];

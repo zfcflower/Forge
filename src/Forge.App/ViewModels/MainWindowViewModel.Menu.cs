@@ -22,6 +22,7 @@ internal sealed partial class MainWindowViewModel
         var states = composition.WorkspaceStates;
         var git = composition.Git;
         tree.RenameBranch = RenameBranchAsync;
+        tree.NewRootSession = NewRootSessionAsync;
         tree.LinkWorkspace = LinkWorkspaceAsync;
         tree.SessionBusyReasons = SessionBusyReasons;
         tree.IsSessionHandingOver = handingOver.Contains;
@@ -31,6 +32,39 @@ internal sealed partial class MainWindowViewModel
         // The raw porcelain list (it throws when git fails): WorktreeService.ListAsync answers "none" for a root git cannot
         // resolve, which would read as "every workspace unregistered" instead of "unknown".
         tree.ReadWorktrees = (root, ct) => git.ListWorktreesAsync(root, ct);
+    }
+
+    /// <summary>
+    /// "新根会话…" on a branch that already has an active session: the branch is read live (an outside checkout may have moved
+    /// it since the tree's last plan; a failed read leaves the stored name), then the handover dialog asks the one question and
+    /// takes the branch over.
+    /// </summary>
+    private async Task NewRootSessionAsync(SessionInfo holder, SessionCreate create, CancellationToken ct)
+    {
+        var directory = create.WorktreePath ?? create.WorkspacePath;
+        await TakeOverAsync(
+                holder,
+                HandoverIntent.NewSession(create with { Branch = await LiveBranchAsync(directory, create.Branch).ConfigureAwait(true) }),
+                ct,
+                HandoverDialogStyle.NewRootSession)
+            .ConfigureAwait(true);
+    }
+
+    /// <summary>The branch a workspace is on right now; the stored name stands when git cannot be read (the flow reports it).</summary>
+    private async Task<string?> LiveBranchAsync(string directory, string? stored)
+    {
+        try
+        {
+            var head = await BackgroundRead
+                .RunAsync(token => composition.Git.GetHeadAsync(directory, token), CancellationToken.None)
+                .ConfigureAwait(true);
+            return head.Kind == GitHeadKind.Branch ? head.Branch : null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException and not OperationCanceledException)
+        {
+            AppLogs.Menu.ZLogWarning($"could not read the HEAD of '{directory}': {exception.Message}");
+            return stored;
+        }
     }
 
     /// <summary>
