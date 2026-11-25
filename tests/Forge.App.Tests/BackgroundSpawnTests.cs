@@ -13,9 +13,8 @@ using Xunit;
 namespace Forge.App.Tests;
 
 /// <summary>
-/// <c>spawn_agent</c> in background mode: the parent's turn does not wait for the child, so the session is free while the child
-/// works - the whole point being that the user can hand the parent a new task meanwhile - and the child's report comes back as a
-/// reply message when it ends.
+/// <c>spawn_agent</c> never waits for its child: the parent's turn goes on (and ends) while the child works - the whole point being
+/// that the user can hand the parent a new task meanwhile - and the child's report comes back as a reply message when it ends.
 /// <para>Driven through the real runtime, loop and scheduler with a scripted provider: what is asserted is the parent's turn
 /// finishing while the child is still gated, and the receipt text that reaches the app's delivery seam.</para>
 /// </summary>
@@ -38,7 +37,7 @@ public sealed class BackgroundSpawnTests : IDisposable
     }
 
     [Fact]
-    public Task A_background_spawn_leaves_the_parent_free_and_reports_back_as_a_message() =>
+    public Task A_spawn_leaves_the_parent_free_and_reports_back_as_a_message() =>
         SharedUi.RunAsync(async () =>
         {
             var store = new SqliteSessionStore(directory);
@@ -372,7 +371,7 @@ public sealed class BackgroundSpawnTests : IDisposable
     }
 
     /// <summary>
-    /// Answers three kinds of request: the parent's first one with the background spawn, the parent's second one with its own
+    /// Answers three kinds of request: the parent's first one with the spawn, the parent's second one with its own
     /// answer, and the child's with a report the test releases when it wants the child to end.
     /// </summary>
     private sealed class ScriptedProvider : IChatProvider
@@ -414,7 +413,7 @@ public sealed class BackgroundSpawnTests : IDisposable
                 var call = new ToolCallBlock(
                     "spawn-1",
                     "spawn_agent",
-                    """{"kind":"Worker","task":"CHILD TASK: analyse the repository","background":true}""");
+                    """{"kind":"Worker","task":"CHILD TASK: analyse the repository"}""");
                 yield return new ToolCallStarted(call.Id, call.Name);
                 yield return new ToolCallArgumentsDelta(call.Id, call.ArgumentsJson);
                 yield return new MessageCompleted(

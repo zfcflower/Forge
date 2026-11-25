@@ -72,7 +72,7 @@ public sealed class SubAgentFollowUpTool : ITool
     }
 }
 
-/// <summary>Stops one sub-agent; its partial output comes back as the spawn result.</summary>
+/// <summary>Stops one sub-agent; its partial output comes back later as a session-reply message.</summary>
 public sealed class SubAgentStopTool : ITool
 {
     public const string Name = "subagent_stop";

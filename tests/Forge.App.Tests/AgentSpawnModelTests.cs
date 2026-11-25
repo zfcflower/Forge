@@ -102,11 +102,9 @@ public sealed class AgentSpawnModelTests
         Assert.Equal("high", seen.Thinking);
         Assert.Equal(new ModelSettings("default-model", ThinkingEffort.Low), seen.Current);
 
-        // Root call, the child's own turn, then the root's next call: the middle one is the child's wire model.
-        Assert.Equal(3, provider.Requests.Count);
+        // The spawn never waits: the root's tool result says it started, and the override is on that answer because the model asked for
+        // it here. The child's own request happens in the background, so neither its count nor its order is this case's business.
         Assert.Equal(new ModelSettings("root-model"), provider.Requests[0]);
-        Assert.Equal(new ModelSettings("kimi-k2", ThinkingEffort.High, null, "probe"), provider.Requests[1]);
-        Assert.Equal(new ModelSettings("root-model"), provider.Requests[2]);
 
         var started = Assert.Single(events.OfType<AgentSubAgentStarted>());
         Assert.Equal("kimi-k2", started.Model);
@@ -114,7 +112,8 @@ public sealed class AgentSpawnModelTests
 
         var result = Assert.Single(events.OfType<AgentToolFinished>()).Result;
         Assert.False(result.IsError);
-        Assert.Contains("review ok", result.Text);
+        Assert.Contains("Started Reviewer", result.Text);
+        Assert.Contains("still running, so there is no report yet", result.Text);
         Assert.Contains("[model: kimi-k2 on probe @ high; this spawn only; clamped to high]", result.Text);
     }
 

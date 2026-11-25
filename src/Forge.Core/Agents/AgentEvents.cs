@@ -24,7 +24,7 @@ internal sealed class ChannelEventSink(ChannelWriter<AgentEvent> writer) : IAgen
 }
 
 /// <summary>
-/// The sink of a run that outlives the turn which started it (a <c>spawn_agent</c> in background mode): its events go to the run that
+/// The sink of a run that outlives the turn which started it (every <c>spawn_agent</c> does): its events go to the run that
 /// started it <b>and</b> to the session's own long-lived sink, because the starting run's channel is completed when its turn ends and
 /// everything after that would be dropped - a background child would then never be reported as started or finished to the tab that
 /// shows it.

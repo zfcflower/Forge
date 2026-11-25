@@ -6,7 +6,7 @@ namespace Forge.Core.Agents;
 
 /// <summary>
 /// Delegates one scoped task to a sub-agent. It is read-only on purpose: several spawn calls in one turn
-/// then run concurrently, and the caller gives its parallelism permit back for as long as they run.
+/// then run concurrently, and the parent keeps its own parallelism permit while the child runs.
 /// <para>
 /// The optional <c>model</c>/<c>provider</c>/<c>thinking</c> arguments apply to this one spawn only. They are
 /// resolved by the host's <see cref="AgentHostOptions.SpawnModels"/> callback (the app owns the model catalogue),
@@ -20,10 +20,10 @@ public sealed class SpawnAgentTool : ITool
     public const string Name = "spawn_agent";
 
     private const string BaseSchemaJson =
-        """{"type":"object","properties":{"kind":{"type":"string","description":"Agent kind to run, from the kinds listed in this tool's description."},"task":{"type":"string","description":"The complete, self-contained task for the sub-agent."},"resume_id":{"type":"string","description":"Id of a finished sub-agent of the same kind whose context should continue instead of starting fresh."},"background":{"type":"boolean","description":"Start it and return at once instead of waiting for the report. Use it when you have other work to do meanwhile; the report arrives later as a session-reply message."}},"required":["kind","task"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"kind":{"type":"string","description":"Agent kind to run, from the kinds listed in this tool's description."},"task":{"type":"string","description":"The complete, self-contained task for the sub-agent."},"resume_id":{"type":"string","description":"Id of a finished sub-agent of the same kind whose context should continue instead of starting fresh."}},"required":["kind","task"],"additionalProperties":false}""";
 
     private const string OverrideSchemaJson =
-        """{"type":"object","properties":{"kind":{"type":"string","description":"Agent kind to run, from the kinds listed in this tool's description."},"task":{"type":"string","description":"The complete, self-contained task for the sub-agent."},"resume_id":{"type":"string","description":"Id of a finished sub-agent of the same kind whose context should continue instead of starting fresh."},"model":{"type":"string","description":"Model id for this spawn only, exactly as the models tool lists it. Omit to run on the agent's saved default; cannot be combined with resume_id."},"provider":{"type":"string","description":"Connected provider id or display name, to disambiguate a model more than one provider lists."},"thinking":{"type":"string","description":"Reasoning step for this spawn only (off, minimal, low, medium, high, xhigh, max); clamped down to one the model accepts."},"background":{"type":"boolean","description":"Start it and return at once instead of waiting for the report. Use it when you have other work to do meanwhile; the report arrives later as a session-reply message."}},"required":["kind","task"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"kind":{"type":"string","description":"Agent kind to run, from the kinds listed in this tool's description."},"task":{"type":"string","description":"The complete, self-contained task for the sub-agent."},"resume_id":{"type":"string","description":"Id of a finished sub-agent of the same kind whose context should continue instead of starting fresh."},"model":{"type":"string","description":"Model id for this spawn only, exactly as the models tool lists it. Omit to run on the agent's saved default; cannot be combined with resume_id."},"provider":{"type":"string","description":"Connected provider id or display name, to disambiguate a model more than one provider lists."},"thinking":{"type":"string","description":"Reasoning step for this spawn only (off, minimal, low, medium, high, xhigh, max); clamped down to one the model accepts."}},"required":["kind","task"],"additionalProperties":false}""";
 
     private const string OverrideHelp =
         "\n\nModel override: pass 'model' with the exact id from the models tool to run this one spawn on a different model, "
@@ -31,10 +31,10 @@ public sealed class SpawnAgentTool : ITool
         + "(it is clamped down to one the model accepts). The override applies to this spawn only and never changes the "
         + "agent's saved default, which the user changes in Settings. It cannot be combined with resume_id: a resumed "
         + "sub-agent keeps the model it started with."
-        + "\n\nBackground mode: pass 'background: true' to start the sub-agent and return at once instead of waiting. You "
-        + "then keep working in the same turn - spawn more, do other work, or finish the turn while it runs - and its report "
-        + "arrives later as a session-reply message you read like any other user message. Prefer it for work you do not need "
-        + "before your next step; a review you must act on stays blocking.";
+        + "\n\nThe sub-agent runs in the background: this call returns as soon as it is started (there is no report yet), you "
+        + "keep working in the same turn, and its report arrives later as a session-reply message you read like any other user "
+        + "message. Until then you can redirect it with subagent_steer, queue more with subagent_followup or end it with "
+        + "subagent_stop.";
 
     private readonly SubAgentScheduler scheduler;
     private readonly AgentDefinition[] kinds;
@@ -83,7 +83,6 @@ public sealed class SpawnAgentTool : ITool
         string? model;
         string? provider;
         string? thinking;
-        bool background;
         try
         {
             using var document = JsonDocument.Parse(call.ArgumentsJson);
@@ -104,8 +103,6 @@ public sealed class SpawnAgentTool : ITool
             model = StringArgument(root, "model");
             provider = StringArgument(root, "provider");
             thinking = StringArgument(root, "thinking");
-            background = root.TryGetProperty("background", out var backgroundElement)
-                && backgroundElement.ValueKind == JsonValueKind.True;
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
@@ -166,17 +163,10 @@ public sealed class SpawnAgentTool : ITool
             }
         }
 
-        var outcome = background
-            ? await SpawnInBackgroundAsync(scope, kind, task, resumeId, context, resolved, ct).ConfigureAwait(false)
-            : await SpawnAsync(scope, kind, task, resumeId, context, resolved, ct).ConfigureAwait(false);
+        var outcome = await SpawnAsync(scope, kind, task, resumeId, context, resolved, ct).ConfigureAwait(false);
         var content = outcome.AgentId.Length == 0
             ? outcome.Text
-            : string.Concat(
-                outcome.Text,
-                "\n\n[agent_id: ",
-                outcome.AgentId,
-                outcome.Resumed ? ", resumed" : string.Empty,
-                "]");
+            : string.Concat(outcome.Text, "\n\n[agent_id: ", outcome.AgentId, outcome.Resumed ? ", resumed" : string.Empty, "]");
         if (resolved is not null && outcome.AgentId.Length > 0)
         {
             content = string.Concat(
@@ -195,27 +185,12 @@ public sealed class SpawnAgentTool : ITool
         return new ToolResult(content, outcome.IsError);
     }
 
-    private async ValueTask<SubAgentOutcome> SpawnAsync(
-        AgentScope scope,
-        string kind,
-        string task,
-        string? resumeId,
-        ToolContext context,
-        ModelSettings? model,
-        CancellationToken ct)
-    {
-        await using var detached = scope.Permit.Detach(ct);
-        return await scheduler
-            .SpawnAsync(kind, task, resumeId, context, scope.Sink, scope.AgentId, ct, model: model)
-            .ConfigureAwait(false);
-    }
-
     /// <summary>
-    /// Starts the child and answers at once, so the parent's turn goes on with the child still running. The permit is not handed
-    /// back here (the parent keeps working and therefore keeps its slot), and the run is not tied to this turn's token: its report
-    /// reaches the parent as a reply message when it ends.
+    /// Starts the child and answers at once, so the parent's turn goes on with it still running. The parent's parallelism permit is
+    /// not handed back (the parent keeps working and therefore keeps its slot), and the run is not tied to this turn's token: its
+    /// report reaches the parent as a reply message when it ends.
     /// </summary>
-    private async ValueTask<SubAgentOutcome> SpawnInBackgroundAsync(
+    private async ValueTask<SubAgentOutcome> SpawnAsync(
         AgentScope scope,
         string kind,
         string task,
@@ -243,7 +218,7 @@ public sealed class SpawnAgentTool : ITool
         return new SubAgentOutcome(
             started.AgentId,
             new StringBuilder(256)
-                .Append("Started ").Append(kind).Append(" '").Append(started.AgentId).Append("' in the background (session ")
+                .Append("Started ").Append(kind).Append(" '").Append(started.AgentId).Append("' (session ")
                 .Append(started.ChildSessionId).Append("). It is still running, so there is no report yet: it arrives later as a ")
                 .Append("session-reply message in this conversation, and you can keep working meanwhile. While it runs you can ")
                 .Append("redirect it with subagent_steer, queue more with subagent_followup, or end it with subagent_stop, ")
@@ -255,12 +230,12 @@ public sealed class SpawnAgentTool : ITool
     private static string Describe(IReadOnlyList<AgentDefinition> kinds)
     {
         var builder = new StringBuilder(256);
-        builder.Append("Delegate one self-contained task to a sub-agent and get its final report back. ")
+        builder.Append("Delegate one self-contained task to a sub-agent; it runs in the background and reports back. ")
             .Append("Parallel spawns run concurrently; nested depth is limited. An idle sub-agent of the same kind that ")
             .Append("recently worked on the same files or topic is continued automatically, so its earlier context ")
             .Append("carries over; a task about something else starts a fresh agent. Use resume_id to continue one ")
-            .Append("specific finished sub-agent of the same kind. Use background mode when you can keep working without ")
-            .Append("its report; it then arrives as a message.\n\nKinds:\n");
+            .Append("specific finished sub-agent of the same kind. A spawn never waits for its report; that arrives as a ")
+            .Append("message.\n\nKinds:\n");
         foreach (var kind in kinds)
         {
             builder.Append("- ").Append(kind.Name).Append(": ").Append(kind.Description).Append('\n');

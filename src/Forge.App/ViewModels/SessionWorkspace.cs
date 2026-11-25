@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -1382,19 +1382,19 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         CancelTurn();
         if (!disposed)
         {
-            // The stop reaches every run of this tree, background children included: a `spawn_agent` with `background: true`
-            // outlives the turn that started it, so that turn's token no longer ends it. The host's own registry is walked
+            // The stop reaches every run of this tree, spawned children included: a `spawn_agent` child outlives the turn that
+            // started it (the tool never waits), so that turn's token no longer ends it. The host's own registry is walked
             // rather than this tab's sub-agent rows, which are filled by the frame coalescer and can still be missing the child
             // that just started - the one a row-based stop would leave running. A root's stop takes the whole tree; an agent
             // session's stop takes only the children it spawned, so stopping one tab never kills a sibling's work. A draft agent
             // session has no id of its own yet and therefore no scope: it stops nothing rather than falling back to the whole tree.
-            if (agentSession is null)
-            {
-                runtime?.StopBackgroundChildren(parentSessionId: null, SessionStrings.SubAgentStoppedByUser);
-            }
-            else if (agentChildSessionId is { Length: > 0 } scope)
+            if (ScopeSessionId() is { Length: > 0 } scope)
             {
                 runtime?.StopBackgroundChildren(scope, SessionStrings.SubAgentStoppedByUser);
+            }
+            else if (agentSession is null)
+            {
+                runtime?.StopBackgroundChildren(parentSessionId: null, SessionStrings.SubAgentStoppedByUser);
             }
         }
 
@@ -1928,6 +1928,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             ScheduleNext();
         }
     }
+
+    /// <summary>The session a stop belongs to: null (the whole tree) on a root tab, this tab's child otherwise.</summary>
+    private string? ScopeSessionId() => agentSession is null ? null : agentChildSessionId;
 
     private void Redirect()
     {

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Forge.Abstractions;
@@ -152,7 +152,8 @@ public sealed record AgentHostOptions
     public Func<ISessionMessageEndpoint?>? SessionMessages { get; init; }
 
     /// <summary>
-    /// The session's own event sink for runs that outlive the turn that started them (<c>spawn_agent</c>'s background mode). The
+    /// The session's own event sink for runs that outlive the turn that started them - every <c>spawn_agent</c> does, since it never
+    /// waits. The
     /// starting turn's channel is completed when that turn ends, so without this a background child's started/finished events would
     /// never reach the tab that shows it: the roster would keep it running forever. The shell owns the session, so it hands its own
     /// long-lived sink here; null (a script, a test) just means nobody watches.
@@ -261,8 +262,8 @@ public sealed class AgentHost
             options.SessionMessages ?? (static () => null),
             RunUserChildTurnAsync);
         builtIns.Add(new MessageSessionTool(messenger));
-        // A background child (spawn_agent's background mode) ends after the turn that started it, so its report comes back as a
-        // reply message to the parent's conversation instead of as that turn's tool result (forge-core "后台子 Agent").
+        // A spawned child ends after the turn that started it (spawn_agent never waits), so its report comes back as a reply
+        // message to the parent's conversation instead of as that turn's tool result (forge-core "后台子 Agent").
         scheduler.BackgroundReports = DeliverBackgroundReportAsync;
         // A user-driven session's leftovers belong to its tab, but only when a tab exists at all.
         scheduler.ExternalHandBack = () => messenger.HasEndpoint;

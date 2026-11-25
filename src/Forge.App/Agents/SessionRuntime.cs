@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Forge.Abstractions;
 using Forge.App.Approval;
 using Forge.App.Git;
@@ -908,7 +908,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
     /// <summary>
     /// Stops the background children spawned from <paramref name="parentSessionId"/> on this host - every one of them when it is
-    /// null, which is what a root's stop means (the whole tree). A background child (<c>spawn_agent</c>'s background mode) is not
+    /// null, which is what a root's stop means (the whole tree). A spawned child (<c>spawn_agent</c> never waits) is not
     /// linked to the turn that started it, so this is the path that ends it; the count is how many runs were asked to stop. Never
     /// throws - a host that was never built holds none.
     /// </summary>
@@ -2565,7 +2565,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         ExtensionHostClient? client;
         SessionQuestionHandler? questionDisposable;
         string[] aliases;
-        // A background child outlives the turn that started it, so dropping the host is not enough to end it: it is asked to
+        // A spawned child outlives the turn that started it, so dropping the host is not enough to end it: it is asked to
         // stop here, before the store and the tool router this runtime shares are released under it.
         if (CloseBackgroundChildren("the session is closing") > 0)
         {

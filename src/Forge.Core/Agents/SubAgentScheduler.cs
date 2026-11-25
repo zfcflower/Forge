@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using Forge.Abstractions;
@@ -28,6 +28,7 @@ public sealed record SubAgentOutcome(string AgentId, string Text, bool IsError)
     /// the receipt's status line has to name it rather than say the reason is unknown.
     /// </summary>
     public string? Reason { get; init; }
+
 }
 
 /// <summary>
@@ -311,6 +312,12 @@ public sealed class SubAgentScheduler : ISubAgentControl
         }
     }
 
+    /// <summary>
+    /// Runs a sub-agent and waits for it. This is the path for work whose result the caller needs before it can go on - a step or a
+    /// change review (<see cref="Tools.RequestReviewTool"/>), a nested spawn inside another child. <c>spawn_agent</c> never uses it:
+    /// a spawn from the model is always asynchronous (see <see cref="StartBackgroundAsync"/>), so a parent's turn is never parked on
+    /// a child and the user can always hand it something else.
+    /// </summary>
     public async Task<SubAgentOutcome> SpawnAsync(
         string kind,
         string task,
@@ -329,19 +336,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
             return refusal;
         }
 
-        var instance = prepared.Instance!;
-        try
-        {
-            var outcome = await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, prepared.Watch, ct).ConfigureAwait(false);
-            return prepared.Reused ? outcome with { Resumed = true } : outcome;
-        }
-        finally
-        {
-            // A blocking run's instance is the one a background child's report may have been interjected into, and the loop may end
-            // without reaching a boundary: the leftovers go to the store before the gate opens for the next turn.
-            await PersistLeftoverInterjectionsAsync(instance).ConfigureAwait(false);
-            instance.Release();
-        }
+        return await DriveToEndAsync(prepared.Instance!, task, sink, parentId, prepared.Watch, ct, prepared.Reused)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -429,10 +425,17 @@ public sealed class SubAgentScheduler : ISubAgentControl
 
         _ = CompleteInBackgroundAsync(instance, task, sink, parentId, prepared.Watch, prepared.Reused, context);
 
-        return ct.IsCancellationRequested
-            ? new BackgroundSpawn(null, StoppedStarting(resumeId))
-            : new BackgroundSpawn(instance, Refusal: null);
+        if (!ct.IsCancellationRequested)
+        {
+            return new BackgroundSpawn(instance, Refusal: null);
+        }
+
+        // The cancellation landed after the run was registered but before this call answers: the model will never learn the child's
+        // id, so it must not keep running. The lease may have stopped it already (the run attaches synchronously); Stop is idempotent.
+        Stop(instance.Id, "the tool call that started it was cancelled");
+        return new BackgroundSpawn(null, StoppedStarting(resumeId));
     }
+
     /// <summary>
     /// The child of one <see cref="StartBackgroundAsync"/>: what the spawn's tool call names (its id and session) and nothing
     /// else - it is still running when the call returns. <see cref="Refusal"/> is set instead when the spawn never started.
@@ -516,6 +519,48 @@ public sealed class SubAgentScheduler : ISubAgentControl
         "This session stopped while the background sub-agent was starting, so it was not run.",
         IsError: true);
 
+    /// <summary>
+    /// The run itself, once an instance has been acquired: drive it, hand any leftover interjections to the store, and free the
+    /// instance for the next turn. Shared by the tool's spawn (which never waits) and by the caller that waits for its result - a
+    /// step or change review - so both drive and clean up identically.
+    /// </summary>
+    private async Task<SubAgentOutcome> DriveToEndAsync(
+        AgentInstance instance,
+        string task,
+        IAgentEventSink sink,
+        string parentId,
+        Stopwatch watch,
+        CancellationToken ct,
+        bool reused)
+    {
+        try
+        {
+            var outcome = await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, watch, ct).ConfigureAwait(false);
+            return reused ? outcome with { Resumed = true } : outcome;
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller's token was cancelled: that is not the child failing, and the tool loop turns it into the "cancelled by
+            // the user" result every other tool gets. Swallowing it would record a review as failed when the user only stopped it.
+            throw;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return new SubAgentOutcome(instance.Id, $"Sub-agent '{instance.Id}' failed: {exception.Message}", IsError: true)
+            {
+                Reason = exception.Message,
+            };
+        }
+        finally
+        {
+            // Order matters: the leftovers are taken while this run still owns the instance (a new turn cannot start under the
+            // write), and the gate is released only after they are in the history.
+            await PersistLeftoverInterjectionsAsync(instance).ConfigureAwait(false);
+            instance.Release();
+        }
+    }
+
+    /// <summary>One background child's run: drive it, then say how it ended.</summary>
     private async Task CompleteInBackgroundAsync(
         AgentInstance instance,
         string task,
@@ -527,65 +572,54 @@ public sealed class SubAgentScheduler : ISubAgentControl
     {
         try
         {
-            SubAgentOutcome outcome;
-            try
-            {
-                outcome = await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, watch, CancellationToken.None)
-                    .ConfigureAwait(false);
-                if (reused)
-                {
-                    outcome = outcome with { Resumed = true };
-                }
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                // A background run has no caller to throw to: it is reported like a failed run, which is what the receipt says.
-                outcome = new SubAgentOutcome(instance.Id, $"Sub-agent '{instance.Id}' failed: {exception.Message}", IsError: true)
-                {
-                    Reason = exception.Message,
-                };
-            }
-            finally
-            {
-                // Order matters: the leftovers are taken while this run still owns the instance (a new turn cannot start under the
-                // write), and the gate is released only after they are in the history.
-                await PersistLeftoverInterjectionsAsync(instance).ConfigureAwait(false);
-                instance.Release();
-            }
-
-            if (BackgroundReports is not { } reports)
-            {
-                return;
-            }
-
-            var report = new BackgroundChildReport(
-                context.SessionId,
-                parentId,
-                instance.Id,
-                instance.SessionId,
-                instance.Definition.Name,
-                task,
-                StatusOf(outcome),
-                outcome.Reason,
-                outcome.Text);
-            try
-            {
-                await reports(report).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                Trace.TraceWarning($"background sub-agent report failed: {exception.Message}");
-            }
+            var outcome = await DriveToEndAsync(instance, task, sink, parentId, watch, CancellationToken.None, reused)
+                .ConfigureAwait(false);
+            await ReportAsync(instance, outcome, task, parentId, context).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            Trace.TraceWarning($"background sub-agent '{instance.Id}' was cancelled while reporting");
         }
         finally
         {
-            // Only now is the run over as far as a shutdown is concerned: the report is delivered, so a teardown that waits for this
-            // task does not release anything the delivery still needs.
             lock (gate)
             {
                 backgroundRuns.Remove(instance.Id);
                 backgroundStopPending.Remove(instance.Id);
             }
+        }
+    }
+
+    /// <summary>How one finished child is reported to the session that spawned it (see <see cref="BackgroundReports"/>).</summary>
+    private async Task ReportAsync(
+        AgentInstance instance,
+        SubAgentOutcome outcome,
+        string task,
+        string parentId,
+        ToolContext context)
+    {
+        if (BackgroundReports is not { } reports)
+        {
+            return;
+        }
+
+        var report = new BackgroundChildReport(
+            context.SessionId,
+            parentId,
+            instance.Id,
+            instance.SessionId,
+            instance.Definition.Name,
+            task,
+            StatusOf(outcome),
+            outcome.Reason,
+            outcome.Text);
+        try
+        {
+            await reports(report).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.TraceWarning($"background sub-agent report failed: {exception.Message}");
         }
     }
 
@@ -792,7 +826,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
     /// <summary>
     /// The children a spawn of <paramref name="kind"/> may continue, best first: same kind, the model's own, idle, and with
     /// their last run ended inside the reuse window; ranked by <see cref="SubAgentAffinity"/> and then by how recently they
-    /// ran, then by how recently they ran, and only above the threshold - an unrelated task starts a fresh child rather
+    /// ran, and only above the threshold - an unrelated task starts a fresh child rather
     /// than joining somebody else's conversation. The gate is still taken by the caller, so two spawns racing for one child
     /// cannot both win it.
     /// </summary>
