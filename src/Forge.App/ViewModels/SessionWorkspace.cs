@@ -1547,7 +1547,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             reasons.Add(HandoverStrings.BusyTurn);
         }
 
-        if (subAgents.Any(static agent => agent.Status is SubAgentStatus.Running or SubAgentStatus.Queued))
+        if (subAgents.Any(CountsAsRunning))
         {
             reasons.Add(HandoverStrings.BusySubAgents);
         }
@@ -1569,6 +1569,15 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         return reasons;
     }
+
+    /// <summary>
+    /// A row the busy check has to wait for: a run that is really under way. A row replayed from the store whose run end the
+    /// messages cannot prove is <em>finished</em> (its unknown outcome marks it so) even though its status field never left the
+    /// queued default it starts with - counting that one made a reopened session, and every root holding it, look busy for
+    /// good, with archive and promote greyed out and nothing running.
+    /// </summary>
+    internal static bool CountsAsRunning(SubAgentViewModel agent) =>
+        !agent.IsFinished && agent.Status is SubAgentStatus.Running or SubAgentStatus.Queued;
 
     private void RefreshCanSend()
     {

@@ -350,7 +350,10 @@ internal static class RemovalStrings
             "目录 {0} 已存在,无需重建;其会话请逐个“恢复会话”。",
             "{0} already exists and needs no rebuild; restore its sessions one by one.");
 
-        Loc.Register(PurgeRefusedKey, "“{0}”被以下会话继承,未移除:{1}", "\"{0}\" was kept: these sessions inherit from it: {1}");
+        Loc.Register(
+            PurgeRefusedKey,
+            "“{0}”仍被以下会话继承——它们的前半段历史就是它的消息，删了就没有上下文了——所以保留未删:{1}。要移除它，先移除这些会话",
+            "\"{0}\" was kept: these sessions still inherit from it - their opening history is its messages, so the link cannot be cut silently: {1}. Remove those sessions first if it has to go");
         Loc.Register(
             PurgePartialKey,
             "会话记录已删除,部分附属文件未清理,下次启动会重试:{0}",
