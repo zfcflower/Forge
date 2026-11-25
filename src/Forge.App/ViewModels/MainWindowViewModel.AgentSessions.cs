@@ -324,6 +324,10 @@ internal sealed partial class MainWindowViewModel
         session.TurnStarted += OnAgentSessionTurnStarted;
         session.TabTitleChanged += OnAgentSessionTitleChanged;
         session.AgentNameFollowedKind += OnAgentNameFollowedKind;
+        // An agent session's own children are its sub-agent region while its tab is on screen, so the composer's chip is
+        // wired exactly like a root's: the roster sync keeps the group in step and the chip's expand opens the body.
+        session.SubAgentsChanged += OnSubAgentsChanged;
+        session.SubAgentRegionRevealRequested += OnSubAgentRegionReveal;
     }
 
     private void DetachAgentSessionView(SessionWorkspaceViewModel session)
@@ -333,6 +337,8 @@ internal sealed partial class MainWindowViewModel
         session.TurnStarted -= OnAgentSessionTurnStarted;
         session.TabTitleChanged -= OnAgentSessionTitleChanged;
         session.AgentNameFollowedKind -= OnAgentNameFollowedKind;
+        session.SubAgentsChanged -= OnSubAgentsChanged;
+        session.SubAgentRegionRevealRequested -= OnSubAgentRegionReveal;
     }
 
     /// <summary>

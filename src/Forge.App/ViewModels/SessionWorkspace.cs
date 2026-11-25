@@ -388,7 +388,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 }
                 else
                 {
-                    SubAgentRegionRevealRequested();
+                    SubAgentRegionRevealRequested(this);
                 }
             }
             else
@@ -719,9 +719,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>
     /// The user asked the shell to open the sub-agent region from the composer's chip (the expand half of its toggle).
     /// Writing <see cref="SubAgentsCollapsed"/> alone cannot open a group with nothing docked - its body folds on its
-    /// own - so the chip raises this instead, and the shell opens the body the way the title bar's restore button does.
+    /// own - so the chip raises this instead, carrying the asking session, and the shell opens the body the way the
+    /// title bar's restore button does.
     /// </summary>
-    public event Action? SubAgentRegionRevealRequested;
+    public event Action<SessionWorkspaceViewModel>? SubAgentRegionRevealRequested;
 
     /// <summary>Raised when the agent hierarchy or one agent's run state changed; the left panel rebuilds its agent rows.</summary>
     public event Action? AgentTreeChanged;
@@ -788,11 +789,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     }
 
     /// <summary>
-    /// Whether the composer's sub-agent chip is drawn: the bottom group belongs to a root session's conversation, so an
-    /// agent-session view never shows the toggle - a live sub-agent or a finished one in the dropdown is what it waits
-    /// for otherwise.
+    /// Whether the composer's sub-agent chip is drawn: the bottom group serves whichever session is on screen - a root
+    /// conversation or an agent session's own children - so both views draw the toggle as soon as either has a live
+    /// sub-agent or a finished one in the dropdown.
     /// </summary>
-    public bool ShowsSubAgentToggle => !IsAgentSession && (subAgents.Count > 0 || finished.Count > 0);
+    public bool ShowsSubAgentToggle => subAgents.Count > 0 || finished.Count > 0;
 
     /// <summary>
     /// The agent hierarchy of this session as flat rows with parent links: the main agent, its sub-agents and their own

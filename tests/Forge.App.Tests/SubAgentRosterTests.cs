@@ -1,4 +1,9 @@
+using Avalonia;
+using Avalonia.Automation;
+using Avalonia.Controls;
 using Avalonia.Threading;
+using Forge.App.Views;
+using Avalonia.VisualTree;
 using Forge.Abstractions;
 using Forge.App.Providers;
 using Forge.App.ViewModels;
@@ -227,7 +232,7 @@ public sealed class SubAgentRosterTests : IDisposable
         // group's body - the empty state included - the way the title bar's restore button does.
         session.SubAgentsCollapsed = true;
         var asked = 0;
-        session.SubAgentRegionRevealRequested += () => asked++;
+        session.SubAgentRegionRevealRequested += _ => asked++;
         session.ToggleSubAgentsCommand.Execute(null);
         Assert.Equal(1, asked);
         Assert.True(session.SubAgentsCollapsed);
@@ -240,6 +245,77 @@ public sealed class SubAgentRosterTests : IDisposable
 
         session.Dispose();
     });
+
+    [Fact]
+    public Task The_composer_chip_appears_when_a_child_starts() => SharedUi.RunAsync(async () =>
+    {
+        var clock = new Clock();
+        var session = await SessionAsync(clock);
+        var view = new SessionView { DataContext = session };
+        var window = new Window { Width = 900, Height = 640, Content = view };
+        window.Show();
+        SharedUi.Settle(window);
+        var chip = view.GetVisualDescendants()
+            .OfType<Button>()
+            .Single(button => button.GetValue(AutomationProperties.AutomationIdProperty) as string == "strip-subagents");
+
+        // Nothing yet: the chip is not drawn for a session without sub-agent activity.
+        Assert.False(chip.IsVisible);
+
+        Start(session, clock.GetUtcNow());
+        Pump();
+        SharedUi.Settle(window);
+        Assert.True(session.ShowsSubAgentToggle);
+        Assert.True(chip.IsVisible);
+
+        session.Dispose();
+        window.Close();
+    });
+
+    [Fact]
+    public Task The_composer_chip_appears_for_an_agent_sessions_own_children() => SharedUi.RunAsync(async () =>
+    {
+        // An agent-session tab on screen is the session the bottom group serves: its own children are the region's
+        // content, so its composer draws the same chip a root's does - hiding it there is the reported regression.
+        var clock = new Clock();
+        var root = await RootInfoAsync();
+        var view = new SessionWorkspaceViewModel(
+            root with { Id = "agent-session-1", ParentSessionId = root.Id, ChildDriver = AgentSessionKinds.ChildDriverUser },
+            runtime: null,
+            checkpoints: null,
+            store: new SqliteSessionStore(directory),
+            new ProviderServices(Path.Combine(directory, "settings.json"), directory, http),
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false))
+        {
+            ChildQuery = (parent, token) => Task.FromResult<IReadOnlyList<SessionInfo>>([]),
+        };
+        var control = new SessionView { DataContext = view };
+        var window = new Window { Width = 900, Height = 640, Content = control };
+        window.Show();
+        SharedUi.Settle(window);
+        var chip = control.GetVisualDescendants()
+            .OfType<Button>()
+            .Single(button => button.GetValue(AutomationProperties.AutomationIdProperty) as string == "strip-subagents");
+
+        Assert.True(view.IsAgentSession);
+        Assert.False(chip.IsVisible);
+
+        view.OnAgentEvent(new AgentSubAgentStarted(
+            "agent-session-1", "Scout-1", "Scout", "Look around.", "test-model", "scout-session", clock.GetUtcNow()));
+        Pump();
+        Assert.True(view.ShowsSubAgentToggle);
+        Assert.True(chip.IsVisible);
+
+        view.Dispose();
+        window.Close();
+    });
+
+    private async Task<SessionInfo> RootInfoAsync()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+        return await store.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+    }
 
     private static void Start(SessionWorkspaceViewModel session, DateTimeOffset at, string childId = "Worker-1")
     {

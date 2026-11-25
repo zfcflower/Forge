@@ -1093,17 +1093,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         session.SubAgentsChanged += OnSubAgentsChanged;
-        // The chip's expand half lands here: writing the session flag alone cannot open a group with nothing docked.
-        session.SubAgentRegionRevealRequested += () =>
-        {
-            session.SubAgentsCollapsed = false;
-            // The bottom group belongs to the session on screen: a floated view's chip records its own session's wish
-            // and leaves the region alone until that session is the one being looked at.
-            if (ReferenceEquals(activeSession, session))
-            {
-                Workbench.RevealBottomBody();
-            }
-        };
+        session.SubAgentRegionRevealRequested += OnSubAgentRegionReveal;
         session.AgentTreeChanged += OnAgentTreeChanged;
         sessions[info.Id] = session;
         if (carried is { } state)
@@ -2441,6 +2431,20 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     {
         SyncSubAgentRegion();
         RefreshTreeAgents();
+    }
+
+    /// <summary>
+    /// The composer's chip asked for the region. The session's wish is recorded first, then - only when that session is
+    /// the one on screen, since a floated view's chip is not the group's to move - the body opens the way the title bar's
+    /// own restore opens it, the empty state included.
+    /// </summary>
+    private void OnSubAgentRegionReveal(SessionWorkspaceViewModel session)
+    {
+        session.SubAgentsCollapsed = false;
+        if (ReferenceEquals(activeSession, session))
+        {
+            Workbench.RevealBottomBody();
+        }
     }
 
     /// <summary>
