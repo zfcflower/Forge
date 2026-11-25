@@ -340,6 +340,29 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         return await dialog.ShowDialog<string?>(owner).ConfigureAwait(true);
     }
 
+    /// <summary>One line of text, prefilled with <paramref name="initial"/>; null when the user cancels.</summary>
+    public async Task<string?> PromptTextAsync(string title, string initial)
+    {
+        var box = new TextBox { Text = initial };
+        var confirm = new Button { Content = ShellStrings.Ok, IsDefault = true };
+        var cancel = new Button { Content = ShellStrings.Cancel, IsCancel = true };
+        var dialog = CreateDialogWindow(title, 460, new StackPanel
+        {
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 14,
+            Children =
+            {
+                box,
+                ButtonRow(cancel, confirm),
+            },
+        });
+
+        confirm.Click += (_, _) => dialog.Close(true);
+        cancel.Click += (_, _) => dialog.Close(false);
+        var result = await dialog.ShowDialog<bool?>(owner);
+        return result == true ? box.Text : null;
+    }
+
     public async Task<string?> PickFolderAsync(string title)
     {
         var top = TopLevel.GetTopLevel(owner);
@@ -372,6 +395,38 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         cancel.Click += (_, _) => dialog.Close(false);
         var result = await dialog.ShowDialog<bool?>(owner);
         return result == true;
+    }
+
+    /// <summary>
+    /// One line of text. The answer is prefilled (a rename starts from the name it has now) and comes back untrimmed: every
+    /// caller trims it and reads empty as "keep what it was". Cancelled and closed both come back null.
+    /// </summary>
+    public async Task<string?> PromptTextAsync(string title, string initial)
+    {
+        var input = new TextBox { Text = initial, AcceptsReturn = false };
+        var confirm = new Button { Content = ShellStrings.Ok, IsDefault = true };
+        var cancel = new Button { Content = ShellStrings.Cancel, IsCancel = true };
+        var dialog = CreateDialogWindow(title, 460, new StackPanel
+        {
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 14,
+            Children =
+            {
+                input,
+                ButtonRow(cancel, confirm),
+            },
+        });
+
+        // Opened rather than constructed: the prefilled text arrives selected and focused, so typing replaces it instead of
+        // appending to it, and Enter confirms (the other dialogs' default button).
+        dialog.Opened += (_, _) =>
+        {
+            input.Focus();
+            input.SelectAll();
+        };
+        confirm.Click += (_, _) => dialog.Close(input.Text);
+        cancel.Click += (_, _) => dialog.Close(null);
+        return await dialog.ShowDialog<string?>(owner);
     }
 
     public async Task<int> ChooseAsync(string title, string message, IReadOnlyList<string> options)
