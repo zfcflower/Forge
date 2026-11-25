@@ -3,19 +3,24 @@ using Forge.Abstractions;
 namespace Forge.Core.Agents;
 
 /// <summary>
-/// Default approval rules: an explicit per-tool rule wins, read-only tools pass, tools running inside a
-/// trusted directory pass, everything else asks the user.
+/// The default approval rule, in this order: an explicit per-tool rule wins, a read-only tool passes, the user's global
+/// "all authorized" mode passes, a call whose paths stay inside the workspace passes, and everything else - a write or an
+/// execution that names a path outside the workspace, or a call whose scope could not be read - asks the user.
+/// <para>Read-only covers network tools as well (<c>web_fetch</c>, <c>web_search</c>): with the workspace as the boundary,
+/// egress is no longer a reason to interrupt. A tool that must always ask keeps that by rule.</para>
 /// </summary>
 public sealed class DefaultApprovalPolicy : IApprovalPolicy
 {
     private static readonly IReadOnlyDictionary<string, ApprovalMode> NoRules =
         new Dictionary<string, ApprovalMode>(StringComparer.Ordinal);
 
-    public bool AutoAllowReadOnly { get; init; } = true;
+    /// <summary>
+    /// The user's global permission setting, read on every evaluation rather than captured, so flipping it in the settings
+    /// reaches the next call of every running session. Null means <see cref="ToolPermissionMode.Workspace"/>.
+    /// </summary>
+    public Func<ToolPermissionMode>? Mode { get; init; }
 
     public IReadOnlyDictionary<string, ApprovalMode> ToolRules { get; init; } = NoRules;
-
-    public IReadOnlyList<string> TrustedDirectories { get; init; } = [];
 
     public ApprovalMode Evaluate(ApprovalRequest request)
     {
@@ -25,37 +30,16 @@ public sealed class DefaultApprovalPolicy : IApprovalPolicy
             return rule;
         }
 
-        if (request.SideEffect == ToolSideEffect.ReadOnly && AutoAllowReadOnly)
+        if (request.SideEffect == ToolSideEffect.ReadOnly)
         {
             return ApprovalMode.Allow;
         }
 
-        foreach (var directory in TrustedDirectories)
+        if ((Mode?.Invoke() ?? ToolPermissionMode.Workspace) == ToolPermissionMode.All)
         {
-            if (IsUnder(request.WorkingDirectory, directory))
-            {
-                return ApprovalMode.Allow;
-            }
+            return ApprovalMode.Allow;
         }
 
-        return ApprovalMode.Ask;
+        return request.Scope == ToolCallScope.OutsideWorkspace ? ApprovalMode.Ask : ApprovalMode.Allow;
     }
-
-    private static bool IsUnder(string path, string root)
-    {
-        if (string.IsNullOrWhiteSpace(root))
-        {
-            return false;
-        }
-
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var candidate = Trim(Path.GetFullPath(path));
-        var trusted = Trim(Path.GetFullPath(root));
-        return candidate.Equals(trusted, comparison)
-               || candidate.StartsWith(trusted + Path.DirectorySeparatorChar, comparison)
-               || candidate.StartsWith(trusted + Path.AltDirectorySeparatorChar, comparison);
-    }
-
-    private static string Trim(string path) =>
-        path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }

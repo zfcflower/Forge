@@ -10,12 +10,12 @@ namespace Forge.IO.Tools;
 /// Runs one command line in the workspace: as a program plus argument vector when that is what the text means, through the
 /// platform shell otherwise, and answers with the exit code, the duration, and both output streams under a byte cap.
 /// A non-zero exit code is a normal answer — compilers and tests fail on purpose — so only a command that could not start,
-/// a work directory outside the workspace, or a bad argument is an error result.
+/// a work directory the user did not allow outside the workspace, or a bad argument is an error result.
 /// </summary>
-public sealed class BashTool : ToolBase
+public sealed class BashTool : ToolBase, IToolCallScope
 {
     private const string Schema = """
-        {"type":"object","properties":{"command":{"type":"string","description":"The command line to run."},"timeout_seconds":{"type":"integer","description":"Kill the command and its children after this many seconds (1-600, default 120)."},"workdir":{"type":"string","description":"Directory to run in; defaults to the workspace root and must resolve inside it."}},"required":["command"],"additionalProperties":false}
+        {"type":"object","properties":{"command":{"type":"string","description":"The command line to run."},"timeout_seconds":{"type":"integer","description":"Kill the command and its children after this many seconds (1-600, default 120)."},"workdir":{"type":"string","description":"Directory to run in; defaults to the workspace root. A workdir outside the workspace asks the user for that call."}},"required":["command"],"additionalProperties":false}
         """;
 
     /// <summary>
@@ -57,7 +57,9 @@ public sealed class BashTool : ToolBase
     public BashTool(IProcessRunner runner, Func<ToolOptions> options, ExecutionGate executionGate)
         : base(
             "bash",
-            "Run a command line in the workspace and return its exit code, duration and output. For what the built-in tools do not cover: " +
+            "Run a command line in the workspace and return its exit code, duration and output. The text is parsed by PowerShell 7 on " +
+            "Windows (cmd.exe when it is missing) and by bash or sh on Unix — not by the shell the tool is named after: for several " +
+            "lines or nested quotes, write a script with `write` and run that file. For what the built-in tools do not cover: " +
             "building, testing, running programs, package managers; git subcommands no git_* tool covers, and 'gh pr/run/workflow/api' " +
             "(each only if you hold git_* / pr_* tools); network only to localhost. " +
             "Commands a built-in tool already does are refused and say which tool owns them: listing (ls, dir, Get-ChildItem, gci), " +
@@ -76,6 +78,8 @@ public sealed class BashTool : ToolBase
         this.executionGate = executionGate;
     }
 
+    public ToolCallScope ScopeOf(ToolCall call, string workingDirectory) => CallScope.OfCommand(workingDirectory, call);
+
     protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
     {
         var bounds = options();
@@ -89,7 +93,7 @@ public sealed class BashTool : ToolBase
         var requestedSeconds = ToolJson.OptionalInt(arguments, "timeout_seconds", bounds.ShellTimeoutSeconds, int.MinValue, int.MaxValue);
         var seconds = Math.Clamp(requestedSeconds, ToolOptions.MinShellTimeoutSeconds, ToolOptions.MaxShellTimeoutSeconds);
         var captureBytes = Math.Clamp(bounds.ShellCaptureBytes, 1, ToolOptions.MaxShellCaptureBytes);
-        var workingDirectory = ResolveWorkingDirectory(Root(context), ToolJson.OptionalString(arguments, "workdir"));
+        var workingDirectory = ResolveWorkingDirectory(Root(context), ToolJson.OptionalString(arguments, "workdir"), context.OutOfWorkspaceAllowed);
 
         var commands = BashCommandAnalyzer.Analyze(command);
         if (BashPolicy.Check(commands, context.Tools, Root(context)) is { } refusal)
@@ -227,9 +231,9 @@ public sealed class BashTool : ToolBase
         }
     }
 
-    private static string ResolveWorkingDirectory(string root, string? requested)
+    private static string ResolveWorkingDirectory(string root, string? requested, bool allowOutside)
     {
-        var path = string.IsNullOrWhiteSpace(requested) ? root : WorkspacePath.Resolve(root, requested);
+        var path = string.IsNullOrWhiteSpace(requested) ? root : WorkspacePath.Resolve(root, requested, rootIsReal: false, allowOutside);
         if (!Directory.Exists(path))
         {
             throw new ToolArgumentException($"workdir '{path}' is not an existing directory.");

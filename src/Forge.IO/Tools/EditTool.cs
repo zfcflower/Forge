@@ -11,14 +11,15 @@ namespace Forge.IO.Tools;
 /// to the overwrite check - an exact match is its own optimistic check - but it moves the agent's read record forward only
 /// when the file still matched that record (see <see cref="IFileVersionLedger"/>).
 /// </summary>
-public sealed class EditTool : ToolBase
+public sealed class EditTool : ToolBase, IToolCallScope
 {
     private const string Schema =
         """{"type":"object","properties":{"path":{"type":"string","description":"File to edit, workspace-relative or absolute."},"old_string":{"type":"string","description":"Exact text to replace; must occur once unless replace_all is true."},"new_string":{"type":"string","description":"Replacement text; an empty string deletes the match."},"replace_all":{"type":"boolean","description":"Replace every occurrence instead of requiring a unique one."}},"required":["path","old_string","new_string"],"additionalProperties":false}""";
 
     private const string Description =
-        "Replace an exact string in a workspace text file and write it back atomically. Fails without touching the file " +
-        "when old_string is missing or occurs more than once; replace_all replaces every occurrence.";
+        "Replace an exact string in a text file and write it back atomically. A path inside the workspace is edited straight " +
+        "away; a path outside it asks the user for that call. Fails without touching the file when old_string is missing or " +
+        "occurs more than once; replace_all replaces every occurrence.";
 
     private readonly Func<ToolOptions> options;
 
@@ -33,6 +34,9 @@ public sealed class EditTool : ToolBase
         ArgumentNullException.ThrowIfNull(options);
         this.options = options;
     }
+
+    public ToolCallScope ScopeOf(ToolCall call, string workingDirectory) =>
+        CallScope.Of(workingDirectory, call, "path");
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(
         JsonElement arguments,
@@ -65,8 +69,8 @@ public sealed class EditTool : ToolBase
         var replaceAll = ToolJson.OptionalBool(arguments, "replace_all", false);
         var limit = Math.Clamp(options().EditMaxFileBytes, 1, ToolOptions.MaxEditMaxFileBytes);
         var root = Root(context);
-        var path = WorkspacePath.Resolve(root, requested);
-        var display = Display(root, path);
+        var path = WorkspacePath.Resolve(root, requested, rootIsReal: false, context.OutOfWorkspaceAllowed);
+        var display = FileOps.Display(root, path);
         if (Directory.Exists(path))
         {
             return new ToolResult($"{Definition.Name}: '{display}' is a directory.", IsError: true);
@@ -341,6 +345,4 @@ public sealed class EditTool : ToolBase
     private static int CountLines(string text) =>
         text.AsSpan().Count('\n') + (text.Length > 0 && text[^1] != '\n' ? 1 : 0);
 
-    private static string Display(string root, string path) =>
-        WorkspacePath.RelativeTo(root, path) is { Length: > 0 } relative ? relative : path;
 }

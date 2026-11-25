@@ -30,9 +30,11 @@ internal static class FileOps
     /// not exist, so a file inside a directory that is about to be created would lose its tail; the deepest existing
     /// ancestor is resolved (and checked against the root) and the names below it are appended unchanged. A final
     /// component that is a link is followed, so writing through it cannot leave the workspace.
+    /// <paramref name="allowOutside"/> drops that containment requirement for the one call the user allowed across it.
     /// </summary>
-    internal static string ResolveTarget(string root, string requested)
+    internal static string ResolveTarget(string root, string requested, bool allowOutside = false)
     {
+        WorkspacePath.RejectHomeRelative(requested);
         var full = WorkspacePath.Normalize(Path.IsPathRooted(requested) ? requested : Path.Combine(root, requested));
         var existing = full;
         var missing = new List<string>();
@@ -48,7 +50,7 @@ internal static class FileOps
             existing = parent;
         }
 
-        var resolved = WorkspacePath.Resolve(root, existing, rootIsReal: true);
+        var resolved = WorkspacePath.Resolve(root, existing, rootIsReal: true, allowOutside);
         for (var index = missing.Count - 1; index >= 0; index--)
         {
             resolved = Path.Combine(resolved, missing[index]);
@@ -62,8 +64,9 @@ internal static class FileOps
     /// the link and not on what it points at. The directory holding it must be inside the workspace; the workspace root
     /// itself is refused.
     /// </summary>
-    internal static string ResolveEntry(string root, string requested)
+    internal static string ResolveEntry(string root, string requested, bool allowOutside = false)
     {
+        WorkspacePath.RejectHomeRelative(requested);
         var full = Path.TrimEndingDirectorySeparator(
             WorkspacePath.Normalize(Path.IsPathRooted(requested) ? requested : Path.Combine(root, requested)));
         if (string.Equals(full, WorkspacePath.Normalize(root), WorkspacePath.Comparison))
@@ -78,20 +81,34 @@ internal static class FileOps
             throw new ToolArgumentException($"'{requested}' is not a file or directory path.");
         }
 
-        var entry = Path.Combine(WorkspacePath.Resolve(root, parent, rootIsReal: true), name);
+        var entry = Path.Combine(WorkspacePath.Resolve(root, parent, rootIsReal: true, allowOutside), name);
         return string.Equals(entry, WorkspacePath.Normalize(root), WorkspacePath.Comparison)
             ? throw new ToolArgumentException("the workspace root itself cannot be the target.")
             : entry;
     }
 
+    /// <summary>The workspace-relative form for a message; a path outside the workspace is shown as it is, not as a failed lookup.</summary>
     internal static string Display(string root, string path) =>
-        WorkspacePath.RelativeTo(root, path) is { Length: > 0 } relative ? relative : path;
+        WorkspacePath.IsUnder(path, root) && WorkspacePath.RelativeTo(root, path) is { Length: > 0 } relative ? relative : path;
 
-    /// <summary>True when the path is the version control directory or below it; its files are the repository, not workspace content.</summary>
+    /// <summary>
+    /// Where a <b>read</b> reports its paths from: the workspace while the start lies inside it, otherwise the start itself (its
+    /// parent when it names a file). An outside search reports absolute paths (<c>Absolute</c>) because a relative spelling would
+    /// be resolved against the workspace by every other tool - <c>read</c> and <c>edit</c> could not take it back.
+    /// </summary>
+    internal static (string Anchor, bool Absolute) ReadFrame(string root, string start) =>
+        WorkspacePath.IsUnder(start, root)
+            ? (root, false)
+            : (Directory.Exists(start) ? start : Path.GetDirectoryName(start) ?? start, true);
+
+    /// <summary>
+    /// True when the path is a version control directory or below one. The guard is absolute - it holds for a path outside the
+    /// workspace too, so an approved outside delete or move still cannot take another repository's <c>.git</c>.
+    /// </summary>
     internal static bool IsInsideGit(string root, string path)
     {
-        var relative = WorkspacePath.RelativeTo(root, path);
-        foreach (var segment in relative.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        var relative = WorkspacePath.IsUnder(path, root) ? WorkspacePath.RelativeTo(root, path) : WorkspacePath.Normalize(path);
+        foreach (var segment in relative.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
         {
             if (segment.Equals(GitDirectory, WorkspacePath.Comparison))
             {

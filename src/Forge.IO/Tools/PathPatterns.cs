@@ -16,15 +16,39 @@ internal static class PathPatterns
 
     internal static bool IsPattern(string argument) => argument.AsSpan().IndexOfAny(Wildcards) >= 0;
 
+    /// <summary>
+    /// The literal part a pattern starts from: the text before its first wildcard, cut back to the last separator
+    /// (<c>src/**/*.cs</c> → <c>src</c>); empty when the pattern starts at the workspace root. Used by
+    /// <see cref="CallScope"/> to judge a pattern's directory without expanding it.
+    /// </summary>
+    internal static string LiteralPrefix(string pattern)
+    {
+        var wildcard = pattern.AsSpan().IndexOfAny(Wildcards);
+        if (wildcard < 0)
+        {
+            return pattern;
+        }
+
+        if (wildcard == 0)
+        {
+            return string.Empty;
+        }
+
+        var separator = pattern.LastIndexOfAny(['/', '\\'], wildcard - 1);
+        return separator < 0 ? pattern[..wildcard] : pattern[..separator];
+    }
+
     /// <summary>The paths the arguments name, in order, without duplicates; a pattern that matches nothing is an error.</summary>
     /// <param name="resolvePlain">Resolves a path that is not a pattern; it decides whether a final link is followed.</param>
     /// <param name="includeLinks">Whether a link found by a pattern is a match (move and delete act on the link itself; copy skips links).</param>
+    /// <param name="allowOutside">Expands patterns outside the workspace too, for the one call the user allowed across it.</param>
     internal static List<string> Expand(
         string root,
         IReadOnlyList<string> arguments,
         Func<string, string> resolvePlain,
         bool includeLinks,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool allowOutside = false)
     {
         var result = new List<string>();
         var seen = new HashSet<string>(WorkspacePath.Comparer);
@@ -41,7 +65,7 @@ internal static class PathPatterns
                 continue;
             }
 
-            var matches = Match(root, argument, includeLinks, ct);
+            var matches = Match(root, argument, includeLinks, allowOutside, ct);
             if (matches.Count == 0)
             {
                 throw new ToolArgumentException($"the pattern '{argument}' matches nothing.");
@@ -72,7 +96,7 @@ internal static class PathPatterns
         return kept;
     }
 
-    private static List<string> Match(string root, string pattern, bool includeLinks, CancellationToken ct)
+    private static List<string> Match(string root, string pattern, bool includeLinks, bool allowOutside, CancellationToken ct)
     {
         var matches = new List<string>();
         foreach (var alternative in ExpandBraces(Path.DirectorySeparatorChar == '/' ? pattern : pattern.Replace(Path.DirectorySeparatorChar, '/')))
@@ -86,7 +110,7 @@ internal static class PathPatterns
             }
 
             var prefix = anchor + string.Join('/', segments.Take(literal));
-            var baseDirectory = prefix.Length == 0 ? root : WorkspacePath.Resolve(root, prefix, rootIsReal: true);
+            var baseDirectory = prefix.Length == 0 ? root : WorkspacePath.Resolve(root, prefix, rootIsReal: true, allowOutside);
             if (!Directory.Exists(baseDirectory))
             {
                 continue;

@@ -9,16 +9,19 @@ namespace Forge.IO.Tools;
 /// file and while the file no longer matches that read (see <see cref="IFileVersionLedger"/>); the append adds text
 /// instead of replacing it and is never refused.
 /// </summary>
-public sealed class WriteTool() : ToolBase("write", Description, Schema, ToolSideEffect.Write)
+public sealed class WriteTool() : ToolBase("write", Description, Schema, ToolSideEffect.Write), IToolCallScope
 {
     private const string Schema =
         """{"type":"object","properties":{"path":{"type":"string","description":"File to write, workspace-relative or absolute."},"content":{"type":"string","description":"Text to write, UTF-8."},"append":{"type":"boolean","description":"Append instead of replacing the file."}},"required":["path","content"],"additionalProperties":false}""";
 
     private const string Description =
-        "Write a text file in the workspace as UTF-8. By default the file is replaced atomically, so it is either the old " +
-        "or the new content; with append the text is added to the end and the write is not atomic. Read an existing file " +
-        "before overwriting it: the write is refused when this agent has not read the file, or when the file changed since " +
-        "that read.";
+        "Write a text file as UTF-8. A path inside the workspace is written straight away; a path outside it asks the user " +
+        "for that call. By default the file is replaced atomically, so it is either the old or the new content; with append " +
+        "the text is added to the end and the write is not atomic. Read an existing file before overwriting it: the write is " +
+        "refused when this agent has not read the file, or when the file changed since that read.";
+
+    public ToolCallScope ScopeOf(ToolCall call, string workingDirectory) =>
+        CallScope.Of(workingDirectory, call, "path");
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(
         JsonElement arguments,
@@ -33,7 +36,7 @@ public sealed class WriteTool() : ToolBase("write", Description, Schema, ToolSid
 
         var append = ToolJson.OptionalBool(arguments, "append", false);
         var root = Root(context);
-        var path = FileOps.ResolveTarget(root, requested);
+        var path = FileOps.ResolveTarget(root, requested, context.OutOfWorkspaceAllowed);
         var display = FileOps.Display(root, path);
         if (Directory.Exists(path))
         {

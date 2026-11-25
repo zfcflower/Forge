@@ -77,6 +77,10 @@ internal static class InstrumentsStrings
     public const string SkillsSectionEmptyKey = "settings.skills.empty";
     public const string SkillsScopeProductKey = "settings.skills.scope.product";
     public const string ToolsSectionHintKey = "settings.tools.hint";
+    public const string ToolsPermissionHeadingKey = "settings.tools.permission.heading";
+    public const string ToolsPermissionWorkspaceKey = "settings.tools.permission.workspace";
+    public const string ToolsPermissionAllKey = "settings.tools.permission.all";
+    public const string ToolsPermissionHintKey = "settings.tools.permission.hint";
     public const string ToolsSectionEmptyKey = "settings.tools.empty";
     public const string ToolsSectionNoSessionKey = "settings.tools.noSession";
     public const string ToolsInventoryKey = "settings.tools.inventory";
@@ -257,6 +261,14 @@ internal static class InstrumentsStrings
 
     public static string ToolsSectionHint => Loc.Instance[ToolsSectionHintKey];
 
+    public static string ToolsPermissionHeading => Loc.Instance[ToolsPermissionHeadingKey];
+
+    public static string ToolsPermissionWorkspace => Loc.Instance[ToolsPermissionWorkspaceKey];
+
+    public static string ToolsPermissionAll => Loc.Instance[ToolsPermissionAllKey];
+
+    public static string ToolsPermissionHint => Loc.Instance[ToolsPermissionHintKey];
+
     public static string ToolsSectionEmpty => Loc.Instance[ToolsSectionEmptyKey];
 
     public static string ToolsSectionNoSession => Loc.Instance[ToolsSectionNoSessionKey];
@@ -402,6 +414,13 @@ internal static class InstrumentsStrings
         Loc.Register(ToolsGroupMcpKey, "MCP 工具", "MCP tools");
         Loc.Register(ToolsRequiredKey, "必需，不能关闭", "Required, cannot be switched off");
         Loc.Register(ToolsFollowsSourceKey, "随插件或服务器启停", "Follows its plugin or server");
+        Loc.Register(ToolsPermissionHeadingKey, "工具权限", "Tool permissions");
+        Loc.Register(ToolsPermissionWorkspaceKey, "工作区授权（默认）", "Workspace authorization (default)");
+        Loc.Register(ToolsPermissionAllKey, "全部授权", "Authorize everything");
+        Loc.Register(
+            ToolsPermissionHintKey,
+            "工作区授权：写与执行类工具在工作区内直接执行，本次调用命名了工作区外的路径时才弹一张卡，允许后真的越过边界；只读工具与网络不再询问。全部授权：任何工具调用都不弹卡，只保留插件审批与插件删除这类确认。改动从下一次工具调用起生效。",
+            "Workspace authorization: a write or execute call inside the workspace runs straight away, and one that names a path outside it shows a card that, once allowed, really crosses the boundary; read-only and network calls never ask. Authorize everything: no tool call asks at all; plugin approvals and plugin deletion confirmations stay. A change applies from the next tool call.");
 
     }
 }

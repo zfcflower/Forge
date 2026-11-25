@@ -12,10 +12,14 @@ public readonly record struct GrepLine(string Path, int LineNumber, string Text,
 /// <summary>One grep call: where to search, what for, and the bounds that keep the answer finite.</summary>
 public sealed record GrepRequest
 {
-    /// <summary>The workspace root; every reported path is relative to it.</summary>
+    /// <summary>
+    /// The anchor every reported path is relative to: the workspace root, or the directory of a start outside the workspace
+    /// (<c>GrepTool</c> passes <c>FileOps.ReadFrame</c>'s anchor and shows the paths absolute).
+    /// </summary>
     public required string Root { get; init; }
 
-    /// <summary>An absolute path inside <see cref="Root"/> to start from; a directory is walked, a file is searched alone.</summary>
+    /// <summary>An absolute path inside <see cref="Root"/> to start from; a directory is walked, a file is searched alone. The
+    /// engines reach it through <see cref="WorkspacePath.RelativeTo(string, string)"/>, so it must stay inside the anchor.</summary>
     public required string StartPath { get; init; }
 
     public required string Pattern { get; init; }

@@ -149,10 +149,10 @@ internal sealed record AgentRuntimeServices(
 
     /// <summary>
     /// The pull request tools (<c>pr_*</c>, <c>pr_screenshots</c>, <c>review_comments</c>, <c>review_comment_resolve</c>),
-    /// registered after the git tools. Stateless across sessions like <see cref="Git"/>; empty without the composition root. Read-only ones
-    /// pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones always ask, and
-    /// <c>pr_screenshots</c> – which runs a command from the repository and then pushes and edits the description – asks with
-    /// its <see cref="ToolSideEffect.Execute"/>.
+    /// registered after the git tools. Stateless across sessions like <see cref="Git"/>; empty without the composition root. The
+    /// read-only ones pass through the policy's read-only rule, and the write ones name no path either, so the workspace
+    /// boundary counts them as inside and they need no card. <c>pr_screenshots</c> – which runs a command from the repository and
+    /// then pushes and edits the description – declares <see cref="ToolSideEffect.Execute"/>.
     /// </summary>
     public IReadOnlyList<ITool> PullRequestTools { get; set; } = [];
 
@@ -166,8 +166,9 @@ internal sealed record AgentRuntimeServices(
     /// The workspace file and shell tools (<c>read</c>, <c>write</c>, <c>edit</c>, <c>ls</c>, <c>find</c>, <c>grep</c>,
     /// <c>bash</c>) from <c>Forge.IO</c>. Stateless across sessions: every call takes the session's worktree from its
     /// <see cref="ToolContext"/>. Empty without the composition root, where an agent therefore cannot touch files at all. The read-only
-    /// ones pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>; <c>write</c>/<c>edit</c> ask and
-    /// <c>bash</c> asks with <see cref="ToolSideEffect.Execute"/>. The read-only four are also the file half of a
+    /// ones pass through the policy's read-only rule; <c>write</c>/<c>edit</c>/<c>copy</c>/<c>move</c>/<c>delete</c> and <c>bash</c>
+    /// (as <see cref="ToolSideEffect.Execute"/>) answer their own scope, so a call that names a path outside the workspace asks
+    /// once and one that stays inside needs no card. The read-only four are also the file half of a
     /// <c>run_code</c> script's tool surface (wave W14: read-only is the rule, so nothing a script reaches ever needed a
     /// card the model's own call would have raised); <c>write</c>, <c>edit</c> and <c>bash</c> stay out of it entirely.
     /// </summary>
@@ -179,7 +180,7 @@ internal sealed record AgentRuntimeServices(
     /// while a backend is configured with its key or URL. Called again at the start of every turn: when the names it
     /// returns differ from what the session's host holds, the external set is republished (otherwise nothing changes,
     /// so the prompt cache stays). Should be cheap and return shared instances. Null without the composition root: no web tools. Both
-    /// always ask for approval (see <c>CreateRules</c>): network egress can carry data out.
+    /// are read-only and need no card - the workspace is the boundary, not the network.
     /// </summary>
     public Func<IReadOnlyList<ITool>>? WebTools { get; set; }
     // --- end web tools ---
@@ -210,6 +211,12 @@ internal sealed record AgentRuntimeServices(
     /// only <see cref="SubAgents"/>' switch can disable anything.
     /// </summary>
     public Func<IReadOnlyList<string>>? DisabledTools { get; set; }
+
+    /// <summary>
+    /// The user's global tool permission setting (the <c>tools</c> section's 「工作区授权 / 全部授权」); read on every approval
+    /// evaluation, so a change reaches the next call of every running session. Null = <see cref="ToolPermissionMode.Workspace"/>.
+    /// </summary>
+    public Func<ToolPermissionMode>? ToolPermissionMode { get; set; }
 
     /// <summary>
     /// The <c>agents</c> section's two dials: how many agents of a session tree may run at once, and whether a session may
@@ -1984,7 +1991,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 ToolSegments = toolSegments,
                 DisabledTools = services.DisabledTools is { } disabledTools ? ToolCatalog.EffectiveDisabled(disabledTools()) : null,
                 Layers = layers,
-                Policy = SessionPolicy,
+                Policy = Policy,
                 ApprovalHandler = handler,
                 QuestionHandler = questionHandler,
                 Store = services.Store,
@@ -2334,7 +2341,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     }
 
     // ISessionToolScope: what the router reads. The tool set is the live one (built-ins plus the current external tools).
-    IApprovalPolicy ISessionToolScope.Policy => SessionPolicy;
+    IApprovalPolicy ISessionToolScope.Policy => Policy;
 
     IApprovalHandler? ISessionToolScope.ApprovalHandler
     {
@@ -2681,15 +2688,30 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     /// Tool rules that need no approval card: the session checklist (the app's own state, not a workspace file) and the
     /// extension tools that only stage a draft or switch a plugin off - their real gate is the plugin approval card the
     /// authoring service puts in front of the user. <c>extension_delete</c> keeps asking: that card is the deletion
-    /// confirmation. Every other write or execution goes to the session's <see cref="SessionApprovalHandler"/>.
-    /// <para>The git tools are deliberately absent: the read-only ones pass through
-    /// <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones (git_branch, git_sync, pr_create, pr_sync, pr_edit, pr_comment_reply, pr_comment_resolve, review_comment_resolve) always ask, and so does
-    /// <c>pr_screenshots</c>: its side effect is <see cref="ToolSideEffect.Execute"/>, because it runs a command the repository
-    /// declares, and the push and description edit that follow are the write half of the same card.</para>
+    /// confirmation. Every other call goes through <see cref="DefaultApprovalPolicy"/>, which allows a read-only call and any
+    /// write or execution that stays inside the workspace.
+    /// <para>The git, PR and web tools are deliberately absent: they name no path, so they are inside the workspace by the
+    /// policy's reading and need no card. <c>pr_screenshots</c> declares <see cref="ToolSideEffect.Execute"/> because it runs a
+    /// command the repository declares, and that command's paths are judged like any other execution.</para>
     /// </summary>
     private static readonly Dictionary<string, ApprovalMode> SessionRules = CreateRules();
 
-    private static readonly IApprovalPolicy SessionPolicy = new DefaultApprovalPolicy { ToolRules = SessionRules };
+    /// <summary>
+    /// The policy this session's agent loop and its plugin/workflow calls evaluate: the rules above, then the workspace
+    /// boundary and the user's global mode. Built once per runtime; the mode is read from the services on every evaluation, so
+    /// the settings page reaches a running session without a restart.
+    /// </summary>
+    private IApprovalPolicy? policy;
+
+    private IApprovalPolicy Policy => policy ??= CreatePolicy(services.ToolPermissionMode);
+
+    /// <summary>
+    /// The session policy for a given mode source (null means the workspace mode). Built in one place so the rules the app
+    /// really runs are the rules a test can pin - a hand-written rule table in a test would pass while the session's own table
+    /// lost a confirmation.
+    /// </summary>
+    internal static IApprovalPolicy CreatePolicy(Func<ToolPermissionMode>? mode) =>
+        new DefaultApprovalPolicy { ToolRules = SessionRules, Mode = mode };
 
     private static Dictionary<string, ApprovalMode> CreateRules()
     {
@@ -2707,9 +2729,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             // "session messaging": the delivery itself raises no approval card).
             [SessionReplies.ToolName] = ApprovalMode.Allow,
 
-            // Read-only, but a prompt-injected URL or query can carry workspace content out, so these always ask.
-            [Forge.Core.Tools.Web.WebFetchTool.Name] = ApprovalMode.Ask,
-            [Forge.Core.Tools.Web.WebSearchTool.Name] = ApprovalMode.Ask,
+            // The deletion confirmation, and the only extension tool that keeps one: it names no path, so without this rule the
+            // workspace boundary would let it through in both modes, and a plugin version's removal is irreversible.
+            [ExtensionToolNames.Delete] = ApprovalMode.Ask,
         };
         foreach (var name in ExtensionToolNames.AllowedWithoutAsking)
         {

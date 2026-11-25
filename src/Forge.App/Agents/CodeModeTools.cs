@@ -8,16 +8,16 @@ namespace Forge.App.Agents;
 /// <see cref="SessionRuntime.CollectExternalTools"/> — which is the only caller — so the rule is readable and testable
 /// without an extension host: the caller hands in the four sources it collected, and this decides.
 /// <para>
-/// Built-in tools: only <b>read-only</b> ones, by the predicate the approval policy already uses
-/// (<c>DefaultApprovalPolicy.AutoAllowReadOnly</c>); the two web tools stay read-only by declaration but are asked about per
-/// call by the session policy. The built-in write and execute tools (<c>write</c>, <c>edit</c>, <c>bash</c>, the git and PR
+/// Built-in tools: only <b>read-only</b> ones, by the same predicate the approval policy uses. The two web tools are read-only
+/// by declaration and, since the workspace is the boundary rather than the network, they are no longer asked about per call.
+/// The built-in write and execute tools (<c>write</c>, <c>edit</c>, <c>bash</c>, the git and PR
 /// tools, the extension authoring tools) are not in the candidate set: a script cannot name, describe or call them. That is
 /// not an approval bypass (an inner call goes through <c>SessionToolCallRouter.ApproveAsync</c> like any other and would
 /// raise its card); it keeps a fan-out from raising a burst of cards.
 /// </para>
 /// <para>
 /// The plugin tools are taken wholesale, write and execute ones included, which is the behaviour scripts already had: a
-/// plugin declares the surface its callers may use, and a plugin's write tool still goes to the approval card per call. A
+/// plugin declares the surface its callers may use. A
 /// plugin tool whose name is <i>reserved</i> (a Core built-in, a name the approval policy has a rule for, or the name of
 /// another session tool) is dropped: the approval and the execution of one inner call must be about the same tool.
 /// </para>

@@ -729,7 +729,12 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                         PluginCommandApprovalName(command.PluginId, name),
                         ToolArguments.JsonString(arguments),
                         ToolSideEffect.Execute,
-                        effectiveContext.WorkingDirectory),
+                        effectiveContext.WorkingDirectory,
+                        // A command names no path and its declaration carries no side effect, so it is inside the workspace by
+                        // the only reading there is: the plugin's source approval is the user's authorization (2026-11-24), and
+                        // "authorize everything" is not needed for it. The name prefix keeps policy rules and remembered grants
+                        // from ever answering it.
+                        ToolCallScope.InsideWorkspace),
                     ct)
                 .ConfigureAwait(false);
         }
@@ -1672,6 +1677,12 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
             return;
         }
 
+        // The boundary the approval is about is this call's own, resolved from the session's tool instance before the card is
+        // built. A read-only call never has its scope consulted (the policy allows it first), so that one is not computed.
+        var toolCall = new ToolCall($"hostcall-{Interlocked.Increment(ref nextCallId)}", call.Name, call.ArgumentsJson);
+        var scope = tool.SideEffect == ToolSideEffect.ReadOnly
+            ? ToolCallScope.InsideWorkspace
+            : ToolScopes.Of(tool, toolCall, run.Context.WorkingDirectory);
         var approval = ApprovalPathFor(sessionId);
         if (approval is null)
         {
@@ -1721,7 +1732,8 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                     decision = await approval(
                             new ApprovalRequest(
                                 call.Name, call.ArgumentsJson, tool.SideEffect, run.Context.WorkingDirectory,
-                                RunKey: run.IsCode ? run.RunId : null),
+                                RunKey: run.IsCode ? run.RunId : null,
+                                Scope: scope),
                             token)
                         .ConfigureAwait(false);
                 }
@@ -1761,10 +1773,14 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                 }
 
                 // Derived from the run's own context so the nested call keeps what the calling agent holds (its tool set, its
-                // parallelism slot): bash and git decide by those, and a fresh context would make them fail closed.
-                var childContext = run.Context with { AgentDepth = run.Depth + 1, Progress = null };
-                var toolCall = new ToolCall(
-                    $"hostcall-{Interlocked.Increment(ref nextCallId)}", call.Name, call.ArgumentsJson);
+                // parallelism slot): bash and git decide by those, and a fresh context would make them fail closed. Only an
+                // outside call the user allowed may resolve paths outside the workspace.
+                var childContext = run.Context with
+                {
+                    AgentDepth = run.Depth + 1,
+                    Progress = null,
+                    OutOfWorkspaceAllowed = scope == ToolCallScope.OutsideWorkspace,
+                };
                 var previous = trustedCall.Value;
                 trustedCall.Value = new TrustedCall(run.RunId, run.Generation, run.Chain, childContext.AgentDepth);
                 ToolResult result;

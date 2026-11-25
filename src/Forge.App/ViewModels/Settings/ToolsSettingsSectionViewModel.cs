@@ -54,11 +54,12 @@ internal sealed class ToolRowViewModel : ObservableObject
 internal sealed record ToolGroupViewModel(string Title, IReadOnlyList<ToolRowViewModel> Tools);
 
 /// <summary>
-/// The <c>tools</c> section: the active session's tool catalog grouped by origin, preceded by the <c>run_code</c> script
-/// block (wave W14) and the terminal block (wave W17a). Built-in groups come first, in a fixed order, each tool with a switch
-/// unless another feature needs it; extension and MCP tools follow, read-only, because their plugin or server is where they
-/// are switched. Switches write
-/// <see cref="AppPreferences.ToolsDisabled"/>; every session applies it before its next turn. The script block edits
+/// The <c>tools</c> section: the global tool permission mode on top, then the <c>run_code</c> script block (wave W14), the
+/// context limits, the terminal block (wave W17a) and the active session's tool catalog grouped by origin. Built-in groups come
+/// first, in a fixed order, each tool with a switch unless another feature needs it; extension and MCP tools follow, read-only,
+/// because their plugin or server is where they are switched. Switches write
+/// <see cref="AppPreferences.ToolsDisabled"/>; every session applies it before its next turn. The permission radios write
+/// <see cref="AppPreferences.ToolsPermission"/>, which each approval evaluation reads live. The script block edits
 /// <see cref="AppPreferences.CodeScriptMaxConcurrentCalls"/>, <see cref="AppPreferences.CodeScriptResultChars"/>,
 /// <see cref="AppPreferences.CodeScriptInnerResultChars"/> and <see cref="AppPreferences.CodeScriptTools"/> live, and the
 /// terminal block edits the five terminal preferences (font family, font size, shell, arguments, scrollback) live, so a
@@ -283,6 +284,12 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
         EmptyText = InstrumentsStrings.ToolsSectionNoSession;
         OnPropertyChanged(nameof(Hint));
         OnPropertyChanged(nameof(HasGroups));
+        OnPropertyChanged(nameof(PermissionHeading));
+        OnPropertyChanged(nameof(PermissionWorkspaceLabel));
+        OnPropertyChanged(nameof(PermissionAllLabel));
+        OnPropertyChanged(nameof(PermissionHint));
+        OnPropertyChanged(nameof(PermissionWorkspace));
+        OnPropertyChanged(nameof(PermissionAll));
 
         // The script and terminal blocks read the live preferences, so a settings.json change picked up by the reload
         // re-fills the fields.
@@ -375,6 +382,60 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
                 AppPreferences.MaxScrollbackLines);
             OnPropertyChanged();
         }
+    }
+
+    // ---------------------------------------------------------------- tool permission: the global mode behind every approval
+
+    /// <summary>Heading of the permission block at the top of the page.</summary>
+    public string PermissionHeading => InstrumentsStrings.ToolsPermissionHeading;
+
+    public string PermissionWorkspaceLabel => InstrumentsStrings.ToolsPermissionWorkspace;
+
+    public string PermissionAllLabel => InstrumentsStrings.ToolsPermissionAll;
+
+    public string PermissionHint => InstrumentsStrings.ToolsPermissionHint;
+
+    /// <summary>
+    /// "Workspace authorization" (the default): selected while the stored token is not
+    /// <see cref="AppPreferences.ToolsPermissionAll"/>. Unchecking is ignored - the radio group always keeps one option chosen -
+    /// so only the check that turns it on writes.
+    /// </summary>
+    public bool PermissionWorkspace
+    {
+        get => composition.Preferences.ToolsPermission != AppPreferences.ToolsPermissionAll;
+        set
+        {
+            if (value)
+            {
+                SetPermission(AppPreferences.ToolsPermissionWorkspace);
+            }
+        }
+    }
+
+    /// <summary>"Authorize everything": no tool call asks. Same one-way rule as <see cref="PermissionWorkspace"/>.</summary>
+    public bool PermissionAll
+    {
+        get => composition.Preferences.ToolsPermission == AppPreferences.ToolsPermissionAll;
+        set
+        {
+            if (value)
+            {
+                SetPermission(AppPreferences.ToolsPermissionAll);
+            }
+        }
+    }
+
+    /// <summary>Writes the token and repaints both radios; every session reads it on its next approval evaluation.</summary>
+    private void SetPermission(string token)
+    {
+        if (composition.Preferences.ToolsPermission == token)
+        {
+            return;
+        }
+
+        composition.Preferences.ToolsPermission = token;
+        OnPropertyChanged(nameof(PermissionWorkspace));
+        OnPropertyChanged(nameof(PermissionAll));
     }
 
     /// <summary>Groups the catalog: built-in groups in <see cref="BuiltInOrder"/> (unknown ones after), then extension, then MCP.</summary>

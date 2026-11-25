@@ -440,7 +440,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         var dynamicText = DynamicText(instance);
         if (dynamicText.Length > 0)
         {
-            messages.Add(new ChatMessage(MessageRole.User, [new TextBlock(dynamicText)]));
+            messages.Add(new ChatMessage(MessageRole.User, [new TextBlock(MarkedContext(dynamicText))]));
         }
 
         return new ChatRequest(
@@ -455,6 +455,17 @@ public sealed class AgentLoop(AgentLoopServices services)
             IncludeToolImages = SendsToolImages(instance.Definition.Model),
         };
     }
+
+    /// <summary>
+    /// The markers around the one trailing message that carries a request's dynamic text. That message rides along
+    /// unrecorded — no part of it reaches the transcript — so whoever reads the wire (the model, an analysis cutting turns
+    /// out of a request log, a replay diff) has only the text itself to tell it from something the user typed. These two
+    /// lines are that signal, and they are a fixed contract with every such reader.
+    /// </summary>
+    private const string ContextOpen = "<forge-context>";
+    private const string ContextClose = "</forge-context>";
+
+    private static string MarkedContext(string text) => string.Concat(ContextOpen, "\n", text, "\n", ContextClose);
 
     /// <summary>
     /// Whether this turn's tool results may carry their images to the model: the user's switch, and a model whose catalogue
@@ -1232,7 +1243,18 @@ public sealed class AgentLoop(AgentLoopServices services)
             return new ToolResultBlock(call.Id, UnknownToolMessage(registry, call.Name), IsError: true);
         }
 
-        var request = new ApprovalRequest(call.Name, call.ArgumentsJson, ToolRegistry.SideEffectOf(tool, call), instance.WorkingDirectory);
+        var sideEffect = ToolRegistry.SideEffectOf(tool, call);
+        // A read-only call is allowed before its scope is ever read, so that scope is never computed: doing it would parse the
+        // arguments of every read/ls/find/grep for an answer nobody consults.
+        var scope = sideEffect == ToolSideEffect.ReadOnly
+            ? ToolCallScope.InsideWorkspace
+            : ToolScopes.Of(tool, call, instance.WorkingDirectory);
+        var request = new ApprovalRequest(
+            call.Name,
+            call.ArgumentsJson,
+            sideEffect,
+            instance.WorkingDirectory,
+            Scope: scope);
         if (!await IsApprovedAsync(request, ct).ConfigureAwait(false))
         {
             sink.Emit(new AgentApprovalDenied(instance.Id, call));
@@ -1246,7 +1268,13 @@ public sealed class AgentLoop(AgentLoopServices services)
         try
         {
             sink.Emit(new AgentToolStarted(instance.Id, call));
-            var callContext = context with { Progress = tail => sink.Emit(new AgentToolProgress(instance.Id, call, tail)) };
+            // Only a call the policy put outside the workspace and the user allowed may resolve its paths outside it; a call
+            // that stayed inside keeps the tools' own containment check as the second gate.
+            var callContext = context with
+            {
+                Progress = tail => sink.Emit(new AgentToolProgress(instance.Id, call, tail)),
+                OutOfWorkspaceAllowed = scope == ToolCallScope.OutsideWorkspace,
+            };
             result = await tool.InvokeAsync(call, callContext, callSource.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

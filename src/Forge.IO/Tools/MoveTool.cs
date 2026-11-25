@@ -11,16 +11,20 @@ namespace Forge.IO.Tools;
 /// is moved as the link. Everything is checked before anything moves. An existing destination is an error unless
 /// <c>overwrite</c> is set, which replaces an existing file only.
 /// </summary>
-public sealed class MoveTool() : ToolBase("move", Description, Schema, ToolSideEffect.Write)
+public sealed class MoveTool() : ToolBase("move", Description, Schema, ToolSideEffect.Write), IToolCallScope
 {
     private const string Schema =
         """{"type":"object","properties":{"from":{"description":"What to move: a path, a glob pattern (* ? [a-z] ** {a,b}) or an array of them; workspace-relative or absolute.","anyOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]},"to":{"type":"string","description":"The exact new path; end it with / to move into that directory instead (required for several sources or a pattern). Parent directories are created."},"overwrite":{"type":"boolean","description":"Replace an existing destination file; default false. A destination directory is never replaced."}},"required":["from","to"],"additionalProperties":false}""";
 
     private const string Description =
-        "Move or rename files and directories inside the workspace (mv). 'from' takes paths, glob patterns or an array; a single plain path " +
-        "goes to the exact path 'to', anything else goes into the directory 'to/'. Existing destinations are errors unless overwrite; " +
+        "Move or rename files and directories (mv). 'from' takes paths, glob patterns or an array; a single plain path goes to the " +
+        "exact path 'to', anything else goes into the directory 'to/'. Paths inside the workspace move straight away; a path " +
+        "outside it asks the user for that call. Existing destinations are errors unless overwrite; " +
         "an existing directory is never replaced. " +
         "A pattern skips dot-names unless its segment starts with a dot, and matching nothing is an error.";
+
+    public ToolCallScope ScopeOf(ToolCall call, string workingDirectory) =>
+        CallScope.Of(workingDirectory, call, "from", "to");
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
     {
@@ -28,7 +32,14 @@ public sealed class MoveTool() : ToolBase("move", Description, Schema, ToolSideE
         var to = ToolJson.RequiredString(arguments, "to");
         var overwrite = ToolJson.OptionalBool(arguments, "overwrite", false);
         var root = Root(context);
-        var sources = PathPatterns.Expand(root, froms, plain => FileOps.ResolveEntry(root, plain), includeLinks: true, ct);
+        var allowOutside = context.OutOfWorkspaceAllowed;
+        var sources = PathPatterns.Expand(
+            root,
+            froms,
+            plain => FileOps.ResolveEntry(root, plain, allowOutside),
+            includeLinks: true,
+            ct,
+            allowOutside);
         var into = to[^1] is '/' or '\\';
         var several = sources.Count > 1 || froms.Any(PathPatterns.IsPattern);
         if (several && !into)
@@ -36,7 +47,7 @@ public sealed class MoveTool() : ToolBase("move", Description, Schema, ToolSideE
             return new ToolResult("move: several sources or a pattern go into a directory; end 'to' with / (the directory they are moved into).", IsError: true);
         }
 
-        var destination = FileOps.ResolveTarget(root, to);
+        var destination = FileOps.ResolveTarget(root, to, allowOutside);
         var pairs = new List<(string Source, string Target)>();
         if (into)
         {

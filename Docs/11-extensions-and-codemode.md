@@ -115,11 +115,11 @@ FORGE 的扩展执行全部在进程外：主程序保持 Native AOT、不可变
 
 - 主程序为每次执行分配 `ExtensionCallContext`（`runId`、`sessionId`、`workingDirectory`、`depth`、`pluginChain`、`rootRunId`），新请求必带；Host 校验形状（runId `[A-Za-z0-9_-]`、≤128 字符；工作目录必须完全限定的绝对路径；depth 0–8；链 ≤8 环且无重复/空白；目标不在自己的链里）。
 - 回传调用 `host.tool_call` 必须绑定在途调用：`{runId, pluginId, name, args}`；缺 `runId` 由解码拒绝，空白 `runId`/`pluginId`/`name` 显式拒绝；`runId` 必须命中本连接世代仍在途的私有 pending 记录，且 plugin 身份与 `pluginId` 相等。会话、工作目录、深度、插件链**只取 pending 记录**（发起时的可信上下文），Worker 自报的一律忽略。
-- 回传按会话路由（`IHostToolCallRouter`）：工具解析与审批都走该会话的 `AgentHost.Tools` 与 `SessionPolicy`；未知/已关闭会话 fail-closed。子 Agent 的调用用子会话 id，`SessionRuntime` 在 `AgentSubAgentStarted`/`Finished` 上登记/注销根 scope 别名，所以子调用按根工具集解析、卡片显示根会话。
+- 回传按会话路由（`IHostToolCallRouter`）：工具解析与审批都走该会话的 `AgentHost.Tools` 与该会话的审批策略（`SessionRuntime.CreatePolicy`，`src/Forge.App` SPEC「审批队列与 Agent 扩展」）；未知/已关闭会话 fail-closed。子 Agent 的调用用子会话 id，`SessionRuntime` 在 `AgentSubAgentStarted`/`Finished` 上登记/注销根 scope 别名，所以子调用按根工具集解析、卡片显示根会话。
 - 插件工具/命令/提示词的三条执行路径共用同一套准入规则、在途表与根内 wait-for 图；检测到潜在环时快速拒绝一条分支（`plugin_wait_cycle`），不扩大并发也不杀持槽调用。
-- 插件命令审批名是 `plugin-command:<pluginId>:<name>`（模型侧工具名不含 `:`，永不与内置/外部工具名相等）；插件命令卡不可记住，每次单独确认。
-- `extension_*` 对插件永不可解析、永不放行；`SessionPolicy` 对 `extension_list/create/update/disable` 为 `Allow`（真正闸门是插件卡），`extension_delete` 为 `Ask`。
-- App 侧记住规则（`ApprovalRules`）：键 = 工具名 + 副作用 + 作用域（会话/项目/全局），只记“允许”；会话级只在内存，项目级与永久写 `<data>/approval-rules.json`（源生成 JSON、原子写、后台线程、写入串行）。`extension_delete`、插件审批卡、插件命令永不可记住；插件新版本获批时清除其新旧工具名下的全部记住项。
+- 插件命令审批名是 `plugin-command:<pluginId>:<name>`（模型侧工具名不含 `:`，永不与内置/外部工具名相等）；插件命令不可记住。**2026-11-24 起插件批准即授权，命令不再单独确认**（它的 `Scope` 恒为域内，两档一致）。
+- `extension_*` 对插件永不可解析、永不放行；会话策略对 `extension_list/create/update/disable` 为 `Allow`（真正闸门是插件卡），`extension_delete` 为 `Ask`（两档都问）。
+- App 侧记住规则（`ApprovalRules`）：键 = 工具名 + 副作用 + 作用域（会话/项目/全局），只记“允许”；会话级只在内存，项目级与永久写 `<data>/approval-rules.json`（源生成 JSON、原子写、后台线程、写入串行）。`extension_delete`、插件审批卡、插件命令永不可记住；**域外调用也不用记住规则与运行级许可**（规则键只有工具+副作用，记住一次就等于永久放行全域）；插件新版本获批时清除其新旧工具名下的全部记住项。
 - 审批卡额外显示 MCP 服务器段（服务器名、传输、`command` + 参数、`cwd`、`url`、`env`/`headers` 的**键名**——值永不出现在卡片上）与即时撤销（记住规则覆盖本工具名时，按钮显示条数，点击撤销全部，本卡决策不受影响）。
 - 插件卡无用户决定的撤回（会话释放、关闭、取消）产出独立 `Withdrawn`（≠ Deny）：不 Discard 暂存稿，稿件留待 `extensions.pending` 重启后出现；给 agent 的文本如实说“已撤回、草稿保留待定、不是拒绝”。工具卡的撤回仍是 Deny。
 

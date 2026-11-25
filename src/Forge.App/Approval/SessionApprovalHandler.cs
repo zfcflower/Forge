@@ -161,6 +161,16 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
             return ApprovalDecision.Deny;
         }
 
+        // An outside call is never answered by a remembered rule or by a run grant. Those keys carry the tool and its side
+        // effect only, so a remembered "write" would become a permanent licence to write anywhere - exactly what the workspace
+        // boundary exists to prevent - and the loop hands the tool its outside permission whenever the request was outside,
+        // regardless of who said Allow. Such a call therefore always asks, and its card hides the buttons that would promise
+        // otherwise.
+        if (request.Scope == ToolCallScope.OutsideWorkspace)
+        {
+            return await AskAsync(request, requesterSessionId, ct).ConfigureAwait(false);
+        }
+
         // A remembered allow is answered without a card. Rules are read after the (single, shared) file read so a rule
         // remembered in an earlier run is never missed just because startup is still reading it; once it is loaded this
         // stays synchronous, so the waiting call does not pay for an extra dispatcher hop.
@@ -218,13 +228,16 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
 
     private async Task<ApprovalDecision> AskAsync(ApprovalRequest request, string? requesterSessionId, CancellationToken ct)
     {
+        var outside = request.Scope == ToolCallScope.OutsideWorkspace;
+
         // A script run's inner calls join their (run, tool) group first: the group hands out one ask at a time, so a
-        // fanned-out call waits behind the card the fan-out's first call already showing instead of stacking its own.
+        // fanned-out call waits behind the card the fan-out's first call already showing instead of stacking its own. An
+        // outside call joins nothing: it is never batched and never inherits a grant (see RequestAsync).
         RunCallGroup? group = null;
         var held = false;
         try
         {
-            if (request.RunKey is { } runKey)
+            if (!outside && request.RunKey is { } runKey)
             {
                 group = JoinGroup(runKey, request.ToolName);
                 await group.Turn.WaitAsync(ct).ConfigureAwait(false);
@@ -254,7 +267,8 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
                     request.WorkingDirectory,
                     request.ArgumentsJson,
                     mcpToolInfo?.Invoke(request.ToolName),
-                    request.RunKey),
+                    request.RunKey,
+                    OutsideWorkspace: outside),
                 queue.Dispatcher,
                 rules);
 
@@ -272,12 +286,12 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
             try
             {
                 var outcome = await card.Decision.WaitAsync(ct).ConfigureAwait(false);
-                if (outcome.Remember is { } scope)
+                if (outcome.Remember is { } scope && !outside)
                 {
                     Remember(request, scope);
                 }
 
-                if (outcome.AllowRestOfRun && request.RunKey is { } grantedRun)
+                if (outcome.AllowRestOfRun && !outside && request.RunKey is { } grantedRun)
                 {
                     GrantRestOfRun(grantedRun, request.ToolName);
                 }

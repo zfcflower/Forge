@@ -78,6 +78,16 @@ internal sealed class AppPreferences : ObservableObject
     public const string GitPullStrategyRebase = "rebase";
     public const string GitPullStrategyMerge = "merge";
     public const string DefaultGitPullStrategy = GitPullStrategyFastForwardOnly;
+
+    /// <summary>
+    /// The tool permission tokens of the <c>preferences</c> section (<c>toolsPermission</c>); an unknown token falls back to
+    /// <see cref="ToolsPermissionWorkspace"/>. <see cref="ToolsPermissionWorkspace"/> allows every write and execution inside
+    /// the session's workspace and asks about one that names a path outside it; <see cref="ToolsPermissionAll"/> asks about no
+    /// tool call at all.
+    /// </summary>
+    public const string ToolsPermissionWorkspace = "workspace";
+    public const string ToolsPermissionAll = "all";
+    public const string DefaultToolsPermission = ToolsPermissionWorkspace;
     public const int MinGitNetworkTimeoutSeconds = 10;
     public const int MaxGitNetworkTimeoutSeconds = 600;
     public const int DefaultGitNetworkTimeoutSeconds = 120;
@@ -288,6 +298,7 @@ internal sealed class AppPreferences : ObservableObject
     private string toolsRipgrepPath = string.Empty;
     private int toolsBashTimeoutSeconds = DefaultToolBashTimeoutSeconds;
     private IReadOnlyList<string> toolsDisabled = DefaultToolsDisabled;
+    private string toolsPermission = DefaultToolsPermission;
     private bool editorShowLineNumbers = true;
     private bool editorWordWrap;
     private bool editorShowSpaces;
@@ -544,6 +555,14 @@ internal sealed class AppPreferences : ObservableObject
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ToolsDisabled = enabled ? [.. toolsDisabled.Where(n => !string.Equals(n, name, StringComparison.Ordinal))] : [.. toolsDisabled, name];
     }
+
+    /// <summary>
+    /// The global tool permission setting: <see cref="ToolsPermissionWorkspace"/> (the default - a write or execution inside the
+    /// session's workspace needs no card, one that names a path outside asks once) or <see cref="ToolsPermissionAll"/> (no tool
+    /// call asks; plugin approvals and deletion confirmations are not tool permissions and stay). Read on every approval
+    /// evaluation, so a change applies to the next call of every session.
+    /// </summary>
+    public string ToolsPermission { get => toolsPermission; set => Set(ref toolsPermission, Permission(value)); }
 
     /// <summary>How many sub-agents one turn may run at the same time (wave W1; replaces the fixed 4 of <c>AgentOptions</c>). Clamped to [<see cref="MinAgentsMaxParallelSubAgents"/>, <see cref="MaxAgentsMaxParallelSubAgents"/>].</summary>
     public int AgentsMaxParallelSubAgents
@@ -996,6 +1015,7 @@ internal sealed class AppPreferences : ObservableObject
             : DefaultToolBashTimeoutSeconds;
         // Absent means the user never touched a switch: the default-off tools apply. A saved list, even an empty one, is theirs.
         toolsDisabled = NormalizeNames(section.ToolsDisabled ?? DefaultToolsDisabled);
+        toolsPermission = Permission(section.ToolsPermission);
         editorShowLineNumbers = section.EditorShowLineNumbers ?? true;
         editorWordWrap = section.EditorWordWrap ?? false;
         editorShowSpaces = section.EditorShowSpaces ?? false;
@@ -1163,6 +1183,7 @@ internal sealed class AppPreferences : ObservableObject
             ToolsRipgrepPath = toolsRipgrepPath,
             ToolsBashTimeoutSeconds = toolsBashTimeoutSeconds,
             ToolsDisabled = [.. toolsDisabled],
+            ToolsPermission = toolsPermission,
             EditorShowLineNumbers = editorShowLineNumbers,
             EditorWordWrap = editorWordWrap,
             EditorShowSpaces = editorShowSpaces,
@@ -1453,6 +1474,14 @@ internal sealed class AppPreferences : ObservableObject
     private static double Size(double? value, double fallback) =>
         value is { } size && !double.IsNaN(size) ? Math.Clamp(size, MinFontSize, MaxFontSize) : fallback;
 
+    /// <summary>Reads a <c>toolsPermission</c> token; a missing or unknown value is the workspace default, never an error.</summary>
+    private static string Permission(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            ToolsPermissionAll => ToolsPermissionAll,
+            _ => ToolsPermissionWorkspace,
+        };
+
     /// <summary>Reads a <c>gitPullStrategy</c> token; a missing or unknown value is the default, never an error.</summary>
     private static string PullStrategy(string? value) =>
         value?.Trim().ToLowerInvariant() switch
@@ -1541,6 +1570,10 @@ internal sealed class PreferencesSection
     [JsonPropertyName("toolsDisabled")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string[]? ToolsDisabled { get; set; }
+
+    /// <summary><c>workspace</c> | <c>all</c>; absent means the workspace mode.</summary>
+    [JsonPropertyName("toolsPermission")]
+    public string? ToolsPermission { get; set; }
 
     [JsonPropertyName("editorShowLineNumbers")]
     public bool? EditorShowLineNumbers { get; set; }

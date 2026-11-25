@@ -20,15 +20,17 @@ internal sealed record ToolApprovalCardRequest(
     string WorkingDirectory,
     string ArgumentsJson,
     McpApprovalServer? McpServer = null,
-    string? RunKey = null);
+    string? RunKey = null,
+    bool OutsideWorkspace = false);
 
 /// <summary>
 /// One tool call waiting for the user: session, tool name, side effect, working directory and the arguments as indented
 /// JSON (formatted on a pool thread, collapsed when long), plus - when the tool belongs to an MCP server - the server's
 /// name, transport, command line, working directory, URL and env/header key names, and a revoke button for every
 /// remembered rule that names this tool. The buttons allow once, deny, or allow and remember the decision for this
-/// session / this project / always; <c>extension_delete</c> and plugin commands have no "remember" buttons
-/// (the first is the deletion confirmation, the second is decided per call).
+/// session / this project / always; <c>extension_delete</c> has no "remember" buttons (it is the deletion confirmation), and
+/// neither has a call that leaves the workspace (a rule names the tool, not a target, so remembering it would hand out that
+/// permission everywhere) - nor does such a card offer "allow the rest of this run".
 /// </summary>
 internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
 {
@@ -174,8 +176,12 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
     public string ArgumentsToggleText =>
         Loc.Instance[IsArgumentsExpanded ? ExtensionsStrings.ToolArgumentsCollapse : ExtensionsStrings.ToolArgumentsExpand];
 
-    /// <summary>Remembered decisions are impossible for the deletion confirmation.</summary>
-    public bool CanRemember => ApprovalRules.IsRememberable(request.ToolName);
+    /// <summary>
+    /// Remembered decisions are impossible for the deletion confirmation, and for a call that leaves the workspace: a rule
+    /// names the tool and its side effect only, so remembering one of those would turn a single approval into permission to
+    /// write anywhere.
+    /// </summary>
+    public bool CanRemember => ApprovalRules.IsRememberable(request.ToolName) && !request.OutsideWorkspace;
 
     /// <summary>A project rule needs a project id; when the session has none the button is disabled instead of guessing.</summary>
     public bool CanRememberProject => CanRemember && request.ProjectId is { Length: > 0 };
@@ -183,9 +189,12 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
     /// <summary>Explains the disabled project button.</summary>
     public string RememberProjectHint => CanRememberProject ? string.Empty : Loc.Instance[ExtensionsStrings.ToolNoProject];
 
-    /// <summary>True when the card carries a script run's key: the call is one of a script's inner tool calls, so the
-    /// "allow the rest of this run" action and the waiting count line appear.</summary>
-    public bool HasRunScope => request.RunKey is not null;
+    /// <summary>
+    /// True when the card carries a script run's key: the call is one of a script's inner tool calls, so the "allow the rest
+    /// of this run" action and the waiting count line appear. An outside call never offers that action: its card is always
+    /// asked on its own (a run grant would otherwise hand out permission for every later call of the tool, inside or not).
+    /// </summary>
+    public bool HasRunScope => request.RunKey is not null && !request.OutsideWorkspace;
 
     /// <summary>How many further calls of this tool the same script run has waiting behind this card; kept current by the
     /// session's approval handler while they arrive and leave. Not part of the decision - context for it.</summary>

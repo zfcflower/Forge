@@ -715,6 +715,11 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.FileTools = fileTools.All;
         // Switched-off built-in tools: read before every turn, so a toggle applies from the next turn of every session.
         runtimeServices.DisabledTools = () => preferences.Current.ToolsDisabled;
+        // The tools section's global permission mode: read on every approval evaluation, so a change reaches the next call of
+        // every running session (and a turn already under way) without rebuilding hosts.
+        runtimeServices.ToolPermissionMode = () => preferences.Current.ToolsPermission == AppPreferences.ToolsPermissionAll
+            ? ToolPermissionMode.All
+            : ToolPermissionMode.Workspace;
         // Artifact spill and preview sizes: read when a session host is built (both live in AgentOptions), so a change
         // applies to the next host. The preview is also capped at half the spill budget, so raising one never makes the
         // preview larger than what stays inline.

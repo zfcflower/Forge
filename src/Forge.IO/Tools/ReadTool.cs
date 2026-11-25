@@ -64,8 +64,8 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
             ToolOptions.MaxReadMaxBytes);
 
         var root = Root(context);
-        var path = Resolve(root, requested);
-        var display = Display(root, path);
+        var path = WorkspacePath.ResolveReadable(root, requested);
+        var display = FileOps.Display(root, path);
         if (Directory.Exists(path))
         {
             return new ToolResult($"{Definition.Name}: '{display}' is a directory; use `ls` to list it.", IsError: true);
@@ -187,21 +187,4 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
             .Append(last.ToString(CultureInfo.InvariantCulture)).Append('\n');
     }
 
-    /// <summary>
-    /// The absolute path to read. Inside the workspace it goes through <see cref="WorkspacePath.Resolve"/>, so the read
-    /// records the same key an <c>edit</c> later checks; outside it is taken as given (links resolved), which is the one
-    /// place the workspace bound does not apply — a read cannot change anything, and a write in that place still refuses.
-    /// </summary>
-    private static string Resolve(string root, string requested)
-    {
-        var full = Path.IsPathRooted(requested)
-            ? Path.GetFullPath(requested)
-            : Path.GetFullPath(Path.Combine(root, requested));
-        return WorkspacePath.IsUnder(full, root)
-            ? WorkspacePath.Resolve(root, requested)
-            : WorkspacePath.ResolveRealPath(full);
-    }
-
-    private static string Display(string root, string path) =>
-        WorkspacePath.IsUnder(path, root) && WorkspacePath.RelativeTo(root, path) is { Length: > 0 } relative ? relative : path;
 }

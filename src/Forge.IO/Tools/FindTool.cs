@@ -4,7 +4,8 @@ using Forge.Abstractions;
 namespace Forge.IO.Tools;
 
 /// <summary>
-/// <c>find</c>: every entry below a directory whose workspace-relative path matches a glob, in walk order (the search
+/// <c>find</c>: every entry below a directory whose path (workspace-relative, or absolute for a directory outside the workspace)
+/// matches a glob, in walk order (the search
 /// is not sorted, so it never buffers a whole tree). Ignore rules apply through <see cref="GitIgnore"/> to a search of the
 /// workspace root only — a path the caller named is searched as it is, the rule <c>ls</c> follows, and that also means an
 /// ignored directory is never entered below the root. Directories are printed with a trailing <c>/</c>. The listing stops at
@@ -15,7 +16,7 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
     private const string DefaultPattern = "*";
 
     private const string Schema =
-        """{"type":"object","properties":{"pattern":{"type":"string","description":"Path glob: `*` matches inside one path segment, `**` across segments, `?` one character, `[...]` a class. A pattern without `/` matches a name at any depth; default `*`."},"path":{"type":"string","description":"Directory to search, relative to the workspace root; default the root."},"depth":{"type":"integer","description":"Levels to descend; default 16, at most 64."},"limit":{"type":"integer","description":"Maximum entries; default 1000, at most 10000."}},"additionalProperties":false}""";
+        """{"type":"object","properties":{"pattern":{"type":"string","description":"Path glob: `*` matches inside one path segment, `**` across segments, `?` one character, `[...]` a class. A pattern without `/` matches a name at any depth; default `*`."},"path":{"type":"string","description":"Directory to search, relative to the workspace root or absolute (inside or outside it); default the root."},"depth":{"type":"integer","description":"Levels to descend; default 16, at most 64."},"limit":{"type":"integer","description":"Maximum entries; default 1000, at most 10000."}},"additionalProperties":false}""";
 
     private readonly Func<ToolOptions> options;
 
@@ -32,9 +33,10 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
     public FindTool(Func<ToolOptions> options)
         : base(
             "find",
-            "Find files and directories by path glob below a directory, one workspace-relative path per line, in walk "
+            "Find files and directories by path glob below a directory, one path per line, in walk "
             + "order. Applies .gitignore and the build-output directory list below the path it is given, never to that "
-            + "path itself: a path named in full is searched as-is, like `ls`. Directories end with `/`. Past the limit "
+            + "path itself: a path named in full is searched as-is, like `ls`. Paths are workspace-relative, and absolute for a "
+            + "directory outside the workspace (reading there needs no approval). Directories end with `/`. Past the limit "
             + "it reports the total count.",
             Schema,
             ToolSideEffect.ReadOnly)
@@ -68,7 +70,7 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
 
         var matcher = GlobMatcher.Compile(pattern);
         var root = WorkspacePath.ResolveRealPath(Root(context));
-        var start = WorkspacePath.Resolve(root, requested);
+        var start = WorkspacePath.ResolveReadable(root, requested);
         if (!Directory.Exists(start))
         {
             return new ValueTask<ToolResult>(new ToolResult(
@@ -76,13 +78,15 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
                 IsError: true));
         }
 
+        var (anchor, absolute) = FileOps.ReadFrame(root, start);
+
         // The rules apply below the path the caller named, never to it: naming `obj` still searches it, which is what
         // `grep` and `ls` do too.
-        var ignore = new SearchFilter(root, bounds.IgnoredDirectories);
+        var ignore = new SearchFilter(anchor, bounds.IgnoredDirectories);
         var lines = new List<string>(Math.Min(limit, 256));
         var walked = 0;
         var omitted = 0;
-        foreach (var entry in FileWalker.Walk(root, start, depth, ignore, ct))
+        foreach (var entry in FileWalker.Walk(anchor, start, depth, ignore, ct))
         {
             walked++;
             // A link is reported as a file by the enumeration but never searched: ripgrep does not follow links either,
@@ -104,7 +108,8 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
                 continue;
             }
 
-            lines.Add(entry.IsDirectory ? entry.RelativePath + "/" : entry.RelativePath);
+            var shown = absolute ? entry.FullPath : entry.RelativePath;
+            lines.Add(entry.IsDirectory ? shown + "/" : shown);
         }
 
         if (omitted > 0)

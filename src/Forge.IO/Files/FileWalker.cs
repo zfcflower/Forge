@@ -9,7 +9,8 @@ namespace Forge.IO;
 public readonly record struct WalkEntry(string FullPath, string RelativePath, bool IsDirectory, bool IsLink = false);
 
 /// <summary>
-/// Decides whether a walk enters an entry. The path is workspace-relative and uses forward slashes; the callback is made
+/// Decides whether a walk enters an entry. The path is relative to the walk's root (the workspace, or an outside start's own
+/// directory) and uses forward slashes; the callback is made
 /// once per entry, so an implementation that parses rules must cache the per-directory state it accumulates.
 /// </summary>
 public interface IPathFilter

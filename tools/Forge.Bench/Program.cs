@@ -110,8 +110,8 @@ internal static class Program
     }
 
     /// <summary>
-    /// Every scenario, in the order the report shows them: read, write, ledger, copy, walk, grep, process, output,
-    /// concurrency, ratelimit, usage, subagent.
+    /// Every scenario, in the order the report shows them: read, write, approval scope, ledger, copy, walk, grep, process,
+    /// output, concurrency, ratelimit, usage, subagent.
     /// </summary>
     private static IEnumerable<BenchScenario> Registry(Fixtures fixtures)
     {
@@ -121,6 +121,11 @@ internal static class Program
         }
 
         foreach (var scenario in WriteScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
+        foreach (var scenario in ScopeScenarios.Create(fixtures))
         {
             yield return scenario;
         }

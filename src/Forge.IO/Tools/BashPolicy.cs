@@ -504,7 +504,9 @@ internal static class BashPolicy
 
     /// <summary>
     /// True when the command does what the owning tool does. Not a duplicate: a caller that holds no such tool, a shell
-    /// expansion the tools do not do (<c>$VAR</c>, a command substitution), a command fed by a pipe, or a path the tool would refuse because it lies outside the workspace.
+    /// expansion the tools do not do (<c>$VAR</c>, a command substitution), a command fed by a pipe, or a path outside the
+    /// workspace - the file tools would ask for approval there (or, for a `bash` workdir, have been approved already), so this
+    /// line is not the back door around them.
     /// </summary>
     private static bool DuplicatesFileOperationTool(ShellCommand command, string owner, IToolRegistry? tools, string? workspace)
     {

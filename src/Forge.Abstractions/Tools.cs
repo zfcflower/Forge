@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Forge.Abstractions;
 
 public enum ToolSideEffect { ReadOnly, Write, Execute }
@@ -75,6 +77,13 @@ public sealed record ToolContext(string SessionId, string WorkingDirectory, int 
     /// (a script, a plugin bridge) - tools must then not check.
     /// </summary>
     public IFileVersionLedger? FileVersions { get; init; }
+
+    /// <summary>
+    /// Set on the one call the user allowed across the workspace boundary: the file and shell tools then resolve their paths
+    /// outside the workspace instead of refusing them. Never set for a call that stayed inside - their own containment check
+    /// is the second gate behind the approval policy, so a policy the caller forgot still cannot write outside.
+    /// </summary>
+    public bool OutOfWorkspaceAllowed { get; init; }
 }
 
 /// <summary>
@@ -159,21 +168,314 @@ public interface IToolRegistry
     bool TryGet(string name, out ITool tool);
 }
 
+/// <summary>
+/// Whether one call's paths all stay inside the session's workspace. It is the boundary the approval policy answers on: a
+/// read-only call is always allowed, a write or an execution inside the workspace needs no card, and one that names a path
+/// outside asks the user once.
+/// </summary>
+public enum ToolCallScope { InsideWorkspace, OutsideWorkspace }
+
+/// <summary>
+/// A tool that can say, before it runs, whether this call would touch a path outside the session's workspace. Implemented by
+/// the file and shell tools (<c>Forge.IO</c>), which resolve exactly the paths they later execute; every other tool falls back
+/// to <see cref="ToolScopes.Of"/>'s argument scan, which is a best effort at path-shaped arguments and no guess at behaviour.
+/// </summary>
+public interface IToolCallScope
+{
+    /// <summary>
+    /// The scope of one call. Must not throw and must not touch the disk more than resolving the paths costs: an argument it
+    /// cannot read is <see cref="ToolCallScope.OutsideWorkspace"/>, so the user is asked rather than silently skipped.
+    /// </summary>
+    ToolCallScope ScopeOf(ToolCall call, string workingDirectory);
+}
+
+/// <summary>
+/// How one call's scope is answered: the tool's own resolution when it has one, otherwise a scan of the arguments for path-shaped
+/// values — the only reading available for a plugin or MCP tool, whose arguments are all the main program knows about it.
+/// </summary>
+public static class ToolScopes
+{
+    /// <summary>
+    /// Key words that mark a string as a path, matched as the start of a key's word: <c>paths</c>, <c>file_path</c>,
+    /// <c>filePath</c> and <c>dirname</c> count, <c>profile</c> does not.
+    /// </summary>
+    private static readonly string[] PathKeyWords =
+    [
+        "path", "file", "dir", "folder", "cwd", "workdir", "root", "target", "source", "src", "dest", "dst", "input", "output",
+    ];
+
+    public static ToolCallScope Of(ITool tool, ToolCall call, string workingDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(tool);
+        ArgumentNullException.ThrowIfNull(call);
+        if (tool is IToolCallScope scope)
+        {
+            try
+            {
+                return scope.ScopeOf(call, workingDirectory);
+            }
+            catch (Exception)
+            {
+                return ToolCallScope.OutsideWorkspace;
+            }
+        }
+
+        return ScanArguments(call.ArgumentsJson, workingDirectory);
+    }
+
+    /// <summary>
+    /// True when the path is the root itself or below it, compared the way the platform compares paths (no volume probing:
+    /// macOS' case-insensitive default therefore counts a differently-cased spelling as outside, which asks instead of allowing).
+    /// </summary>
+    public static bool IsWithin(string path, string root)
+    {
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(root))
+        {
+            return false;
+        }
+
+        string full;
+        string fullRoot;
+        try
+        {
+            full = Trim(Path.GetFullPath(path));
+            fullRoot = Trim(Path.GetFullPath(root));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(full, fullRoot, comparison)
+               || full.StartsWith(fullRoot + Path.DirectorySeparatorChar, comparison)
+               || full.StartsWith(fullRoot + Path.AltDirectorySeparatorChar, comparison);
+    }
+
+    private static ToolCallScope ScanArguments(string json, string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return ToolCallScope.InsideWorkspace;
+        }
+
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return ToolCallScope.OutsideWorkspace;
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return ToolCallScope.OutsideWorkspace;
+        }
+
+        using (document)
+        {
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                ? Scan(document.RootElement, workingDirectory)
+                : ToolCallScope.OutsideWorkspace;
+        }
+    }
+
+    private static ToolCallScope Scan(JsonElement element, string workingDirectory)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    var scope = LooksLikePathKey(property.Name)
+                        ? ScanValue(property.Value, workingDirectory)
+                        : Scan(property.Value, workingDirectory);
+                    if (scope == ToolCallScope.OutsideWorkspace)
+                    {
+                        return scope;
+                    }
+                }
+
+                return ToolCallScope.InsideWorkspace;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (Scan(item, workingDirectory) == ToolCallScope.OutsideWorkspace)
+                    {
+                        return ToolCallScope.OutsideWorkspace;
+                    }
+                }
+
+                return ToolCallScope.InsideWorkspace;
+            default:
+                return ToolCallScope.InsideWorkspace;
+        }
+    }
+
+    /// <summary>One path-shaped value: a string, or an array of them; anything else is inspected as plain JSON.</summary>
+    private static ToolCallScope ScanValue(JsonElement value, string workingDirectory)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                return NamesOutside(value.GetString(), workingDirectory) ? ToolCallScope.OutsideWorkspace : ToolCallScope.InsideWorkspace;
+            case JsonValueKind.Array:
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String
+                        ? NamesOutside(item.GetString(), workingDirectory)
+                        : Scan(item, workingDirectory) == ToolCallScope.OutsideWorkspace)
+                    {
+                        return ToolCallScope.OutsideWorkspace;
+                    }
+                }
+
+                return ToolCallScope.InsideWorkspace;
+            default:
+                return Scan(value, workingDirectory);
+        }
+    }
+
+    /// <summary>
+    /// True when a path argument can only mean something outside the workspace: home-relative (the tools never expand <c>~</c>), or
+    /// rooted or escaping upwards by a <c>..</c> segment and resolving outside, or a path the platform refuses to parse. The test is
+    /// lexical - it reads no directory - so a plain relative name is inside; a link inside the workspace that points outside is left
+    /// to the tool's own containment check, which then answers with an error rather than a card.
+    /// </summary>
+    public static bool NamesOutside(string? value, string workingDirectory)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return false;
+        }
+
+        if (trimmed[0] == '~')
+        {
+            return true;
+        }
+
+        var rooted = Path.IsPathRooted(trimmed);
+        if (!rooted && !HasParentSegment(trimmed))
+        {
+            return false;
+        }
+
+        try
+        {
+            var full = Path.GetFullPath(rooted ? trimmed : Path.Combine(workingDirectory, trimmed));
+            return !IsWithin(full, workingDirectory);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return true;
+        }
+    }
+
+    private static bool HasParentSegment(string value)
+    {
+        var span = value.AsSpan();
+        var start = 0;
+        for (var index = 0; index <= span.Length; index++)
+        {
+            if (index < span.Length && span[index] is not ('/' or '\\'))
+            {
+                continue;
+            }
+
+            if (index - start == 2 && span[start] == '.' && span[start + 1] == '.')
+            {
+                return true;
+            }
+
+            start = index + 1;
+        }
+
+        return false;
+    }
+
+    /// <summary>True when a property name has a path word among its parts (<c>file_path</c>, <c>filePath</c>, <c>target</c>).</summary>
+    private static bool LooksLikePathKey(string name)
+    {
+        var start = 0;
+        for (var index = 0; index <= name.Length; index++)
+        {
+            var boundary = index == name.Length
+                           || name[index] is '_' or '-' or '.'
+                           || (index > start && char.IsUpper(name[index]));
+            if (!boundary)
+            {
+                continue;
+            }
+
+            if (index - start > 0 && StartsWithPathWord(name.AsSpan(start, index - start)))
+            {
+                return true;
+            }
+
+            start = index;
+            if (index < name.Length && name[index] is '_' or '-' or '.')
+            {
+                start = index + 1;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool StartsWithPathWord(ReadOnlySpan<char> word)
+    {
+        foreach (var key in PathKeyWords)
+        {
+            if (word.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string Trim(string path) =>
+        path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+}
+
 public enum ApprovalMode { Allow, Ask, Deny }
 public enum ApprovalDecision { Allow, Deny }
 
 /// <summary>
-/// One approval ask. <paramref name="RunKey"/> is the run a <c>run_code</c> script's inner tool call belongs to, or null
+/// The user's global tool permission setting (<c>settings.json</c> <c>preferences.toolsPermission</c>), read on every evaluation
+/// so a change reaches the next call of every session.
+/// </summary>
+public enum ToolPermissionMode
+{
+    /// <summary>Writes and executions are free inside the session's workspace; one that names a path outside asks once.</summary>
+    Workspace,
+
+    /// <summary>Every call runs without a card. Plugin approvals and deletion confirmations are not tool permissions and still ask.</summary>
+    All,
+}
+
+/// <summary>
+/// One approval ask. <paramref name="Scope"/> is that call's boundary, answered by <see cref="ToolScopes.Of"/> before the
+/// policy runs; it has no default so a caller cannot forget it and get a silent allow - a call whose arguments name no path but
+/// whose reach is known to be the app's own state (a plugin command, say) says <see cref="ToolCallScope.InsideWorkspace"/> out
+/// loud, next to the reason. The policy allows a call inside the workspace and asks about one outside, and only an allowed
+/// outside call carries <see cref="ToolContext.OutOfWorkspaceAllowed"/> into the tool.
+/// <para><paramref name="RunKey"/> is the run a <c>run_code</c> script's inner tool call belongs to, or null
 /// for every other caller (the agent loop, plugin commands, plugin executions): a non-null key lets the session's approval
 /// handler serialize the calls of one run for one tool and offer "allow the rest of this run". It is opaque to the
 /// contract and unique per run, so a stale grant can never match a later one, and it never crosses IPC - the request is
-/// built in the main program after the wire message was matched against the trusted run record.
+/// built in the main program after the wire message was matched against the trusted run record.</para>
 /// </summary>
 public sealed record ApprovalRequest(
     string ToolName,
     string ArgumentsJson,
     ToolSideEffect SideEffect,
     string WorkingDirectory,
+    ToolCallScope Scope,
     string? RunKey = null);
 
 /// <summary>Pure policy evaluation; configurable per tool/directory in settings.</summary>

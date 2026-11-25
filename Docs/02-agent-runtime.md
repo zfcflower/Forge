@@ -8,6 +8,7 @@
 
 - 模型输出流式增量（文本、思考、工具调用）经事件通道发往 UI；UI 侧按渲染帧合并，每帧最多更新一次。
 - 工具调用按副作用分批：连续**只读**调用并发执行，**有副作用**的调用依序逐个执行；所有结果按调用顺序写成一条 Tool 消息。
+- 审批看**本次调用的边界**加设置页 `tools` 的全局档位（「工作区授权」默认 / 「全部授权」）：只读免问；写与执行在工作区内免问，参数里点名了工作区外的路径（绝对路径、`~`、`..` 逃逸）才弹一张卡，允许后工具才真的越过边界；插件、MCP 与网络类工具按同一规则（批准即授权），只剩插件审批与删除确认仍必问。档位每次求值现读，改完从下一次调用生效。
 - 取消回合时，每个待决调用都补一条“已取消”结果，历史始终合法。
 - 超长工具输出转存 Artifact（`forge.db` 的 `artifacts` 表 + `<UserData>/artifacts/<会话 id>/`），上下文里只留预览与 id，模型用 `read_artifact` 取回。
 - 单次工具调用可被单独取消（`AgentHost.CancelToolCall`）：取消链到回合令牌、登记在整棵树共享的取消表；工具抛出的取消转成“用户取消了该调用”的错误结果写回历史，回合继续。`bash` 等进程工具会杀整棵进程树；`spawn_agent` 没有同步模式，它一律立即返回（见工具表）。**只有需要结论的内部路径**（评审工具 `request_review`、自动化）的子 run 才阻塞并链在那次调用上，停掉调用即取消它。`spawn_agent` 的子 run 刻意不链在发起它的那次调用/回合的令牌上（见下面工具表），子 run 刻意不链在发起它的那次调用/回合的令牌上（它要活过发起它的回合），只由 `subagent_stop`、所属会话的停止（按父会话取作用域，根会话停整棵树）或运行时拆除结束——拆除之后不再接受新的派生。
@@ -29,7 +30,7 @@
 | | `ls` | 只读 | 单层列目录，最多 10000 条；显式目录不套忽略规则，链接以 `l` 标记 |
 | | `find` | 只读 | 遍历 + glob，最多 1000 条（上限 10000），深度上限 64，遵循完整 gitignore 语义 |
 | | `grep` | 只读 | 托管引擎（可选 ripgrep 加速），默认 1000 条命中，单文件 8 MiB，并发 `min(核数,8)`，正则 2 秒超时 |
-| | `bash` | 执行 | 先 Direct（参数向量、不经 shell），出现 shell 语法才走解释器；每流 512 KiB、默认超时 120 s（1–600）、全局并发 8；超时/取消杀整棵树；只做没有专用工具的事：与 `read/grep/find/ls/edit/write/copy/move/delete/web_fetch` 重叠的命令被拒绝并指路，`git` / `gh pr|run|workflow|api` 只对持有 `git_*` / `pr_*` 工具的调用者开放(持有任一 `pr_*` 则整个 `gh` 放行)(git 另分只读/写两档,且不含工具已覆盖的子命令);只过滤管道输入的 `grep/head/tail` 放行；非廉价命令按工作区串行（等锁不计超时） |
+| | `bash` | 执行 | 先 Direct（参数向量、不经 shell），出现 shell 语法才走解释器；命令串的解析器是**平台的那个 shell**（Windows 上 `pwsh`，缺它时 `cmd.exe`；Unix 上 `bash`/`sh`），与工具名无关，多行或嵌套引号的命令应先写成文件；每流 512 KiB、默认超时 120 s（1–600）、全局并发 8；超时/取消杀整棵树；只做没有专用工具的事：与 `read/grep/find/ls/edit/write/copy/move/delete/web_fetch` 重叠的命令被拒绝并指路，`git` / `gh pr|run|workflow|api` 只对持有 `git_*` / `pr_*` 工具的调用者开放(持有任一 `pr_*` 则整个 `gh` 放行)(git 另分只读/写两档,且不含工具已覆盖的子命令);只过滤管道输入的 `grep/head/tail` 放行；非廉价命令按工作区串行（等锁不计超时） |
 | 会话 | `todo` | 读/写按参数 | 7 种操作：`list`/`add`/`update`/`remove`/`promote`/`plan_summary_get`/`plan_summary_set`；写操作先确认条目属于本会话 |
 | | `set_title` | 写 | 仅在会话首轮可命名；用户改名永久优先，只写 `sessions.title_source`，不动分支与目录 |
 | | `ask_user` | 只读 | 仅在宿主提供问题处理器时注册；问题卡 + 选项/自由文本；支持多选 min/max |
@@ -41,7 +42,7 @@
 | | `request_review` | 只读 | 派生 Reviewer 评审变更集，返回结论行 + 原文；结论落 `reviews.db`（见 2.7） |
 | | `models` | 只读 | 列已连接提供商的模型与各自接受的思考档位（隐藏模型不列，`provider` 可收窄，单次上限 400 行） |
 | 检索 | `search_history` | 只读 | 全文检索历史消息（FTS5，缺失时回退表） |
-| | `read_history` | 只读 | 取回被压缩的原文 |
+| | `read_history` | 只读 | 取回**已不在上下文里**的原文（被摘要压掉或被裁成收据）；近期对话直接读上下文，不要回放；输出 200k 字符封顶，超出转 Artifact 分片读 |
 | | `read_artifact` | 只读 | 读回超长输出转存的 Artifact（不可关闭） |
 | Web | `web_fetch` | 只读 | 只取 http/https；默认拒绝回环/私网/链路本地；手动跟随最多 5 跳、每跳重查；正文上限 5 MB、30 秒超时；HTML 转纯文本 |
 | | `web_search` | 只读 | 后端 Exa（无密钥走公共 MCP，默认）/ Tavily / DeepSeek（可用模型提供商的密钥）/ Brave / SearXNG；无可用后端时工具不注册；后端工厂每次调用现取 |
@@ -54,7 +55,7 @@
 | 扩展编写 | `extension_list` | 只读 | 列出已装与待决扩展 |
 | | `extension_create` `extension_update` | 写 | 同一 schema；暂存草稿并提交审批卡，阻塞到用户决定 |
 | | `extension_disable` `extension_delete` | 写 | 禁用 / 永久封锁（同 id+version 删除后不可恢复） |
-| codemode | `run_code` | 执行 | 只列出可调用名字，不逐工具列 schema；每次调用逐次审批；见 11 |
+| codemode | `run_code` | 执行 | 只列出可调用名字，不逐工具列 schema；脚本面只有白名单引用（无 `System.IO`/`System.Net`），作用面就是那些内层调用，它们逐次按边界判定；见 11 |
 | MCP | `<server>__<tool>` | 默认执行，`readOnlyTools` 可标只读 | 服务器工具适配器，审批卡显示服务器段 |
 | | `mcp_tool_search` | 只读 | 选面上限隐藏工具时的回取入口，命中即 pin 并当场重发工具面 |
 
@@ -102,7 +103,7 @@
 - **溢出兜底**：流里还没收到任何内容时，强制压缩一次再重发一次；第二次仍溢出或没腾出空间就以原错误失败。
 - **手动压缩**：`/compact [关注点]` 或点击上下文量规，目标 1、无视触发线与开关，保留 keepRecent 近期原文，并重置迟滞；关注点作为 `Additional focus` 追加到摘要指令；回合进行中拒绝，压缩期间禁止发送。
 - 每次模型请求后与每次压缩后发 `AgentContextMeasured(AgentId, ContextTokens, UsableTokens, TriggerTokens, CacheTtl, Usage)`；composer 的量规、缓存小片与用量读数读它（根 Agent 计数，子 Agent 忽略）。`Usage` 是该实例的累计用量，取值在该请求的用量加到计数器之后，所以外壳只做差分就能每请求更新一次统计（裁剪与自动压缩这类不新增开销的测量报当时已有的数，差分即为零）。
-- **模型自己也能读到这条读数**：`preferences.chatContextBudget` 默认开，App 把量规的一行文本（`Context 62k/170k (36%); auto-compaction at 145k.`，窗口未知时只报 C）经 `AgentHostOptions.DynamicContext` 作为**尾部动态后缀**追加到每次请求——不进存储、不进历史、不改变稳定前缀（缓存断点落在倒数第二条消息，动态尾不入缓存）。关掉后模型只能从工具输出的截断推断剩余空间。
+- **模型自己也能读到这条读数**：`preferences.chatContextBudget` 默认开，App 把量规的一行文本（`Context 62k/170k (36%); auto-compaction at 145k.`，窗口未知时只报 C）经 `AgentHostOptions.DynamicContext` 作为**尾部动态后缀**追加到每次请求——不进存储、不进历史、不改变稳定前缀（缓存断点落在倒数第二条消息，动态尾不入缓存）。正文两端带 `<forge-context>` / `</forge-context>` 标记：那条消息不落库，读 `.log/` 原始请求的人（和模型）只有这对标记能把 harness 文本与用户输入分开——按“最后一条非该标记的 user 消息”定轮次边界。关掉后模型只能从工具输出的截断推断剩余空间。
 - 计划摘要（`plan_summaries`）另存：每次替换把旧文本记一条修订，每会话保留最新 50 条，`ListPlanRevisionsAsync` 按 id 倒序；复制会话一并复制、清理会话一并删除。
 
 ## 2.6 计划与 TODO

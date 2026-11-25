@@ -16,7 +16,7 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
     private const int MaxContextLines = ToolOptions.MaxGrepContextLines;
 
     private const string Schema =
-        """{"type":"object","properties":{"pattern":{"type":"string","description":"Text to find, or a .NET regular expression when `regex` is true."},"path":{"type":"string","description":"Directory or file to search, relative to the workspace root; default the root."},"glob":{"type":"string","description":"Only search files whose workspace-relative path matches this glob: `*` inside one segment, `**` across segments, `?`, `[...]`. A glob without `/` matches a name at any depth."},"regex":{"type":"boolean","description":"Treat `pattern` as a .NET regular expression; default false."},"case_sensitive":{"type":"boolean","description":"Case-sensitive matching; default true."},"context":{"type":"integer","description":"Context lines before and after each match; default 0, at most 5 (a larger value is capped, and the result says so)."},"limit":{"type":"integer","description":"Maximum matching lines; default 1000, at most 10000. Past it the output says how many lines matched in all."}},"required":["pattern"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"pattern":{"type":"string","description":"Text to find, or a .NET regular expression when `regex` is true."},"path":{"type":"string","description":"Directory or file to search, relative to the workspace root or absolute (inside or outside it); default the root."},"glob":{"type":"string","description":"Only search files whose path matches this glob (relative to the workspace root, or to the searched directory when `path` lies outside it): `*` inside one segment, `**` across segments, `?`, `[...]`. A glob without `/` matches a name at any depth."},"regex":{"type":"boolean","description":"Treat `pattern` as a .NET regular expression; default false."},"case_sensitive":{"type":"boolean","description":"Case-sensitive matching; default true."},"context":{"type":"integer","description":"Context lines before and after each match; default 0, at most 5 (a larger value is capped, and the result says so)."},"limit":{"type":"integer","description":"Maximum matching lines; default 1000, at most 10000. Past it the output says how many lines matched in all."}},"required":["pattern"],"additionalProperties":false}""";
 
     private readonly Func<ToolOptions> options;
     private readonly IProcessRunner? runner;
@@ -36,7 +36,8 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
             "grep",
             "Search files for a literal string or a regular expression, one `path:line:text` line per matching line and "
             + "`path-line-text` for context lines. Applies .gitignore and the build-output directory list to what lies below "
-            + "the path it searches, never to that path itself, so `path=obj` still searches obj. Skips binary and oversized "
+            + "the path it searches, never to that path itself, so `path=obj` still searches obj. A path outside the workspace "
+            + "is searched too (reading there needs no approval) and its files are reported by absolute path. Skips binary and oversized "
             + "files and reports how "
             + "many. A query with no hit says how many files it scanned (not an error), and warns when a pattern carrying "
             + "regular-expression syntax was searched literally.",
@@ -68,15 +69,20 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
             ToolOptions.MaxGrepMaxResults);
 
         var root = WorkspacePath.ResolveRealPath(Root(context));
-        var start = WorkspacePath.Resolve(root, requested);
+        var start = WorkspacePath.ResolveReadable(root, requested);
         if (!Directory.Exists(start) && !File.Exists(start))
         {
             return new ToolResult($"grep: '{requested}' does not exist.", IsError: true);
         }
 
+        // A read is not bounded by the workspace: a start inside it reports workspace-relative paths (as before), an outside
+        // start is searched under its own directory and reports absolute paths, which is the only form `read` and `edit` can
+        // take back.
+        var (anchor, absolute) = FileOps.ReadFrame(root, start);
+
         var request = new GrepRequest
         {
-            Root = root,
+            Root = anchor,
             StartPath = start,
             Pattern = pattern,
             Glob = glob,
@@ -113,7 +119,7 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
             result = await GrepEngine.SearchAsync(request, ct).ConfigureAwait(false);
         }
 
-        return new ToolResult(Format(result, request, fallback, contextNote));
+        return new ToolResult(Format(result, request, fallback, contextNote, absolute ? anchor : null));
     }
 
     /// <summary>
@@ -138,14 +144,15 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
     /// answer over a hundred files arrived as a shuffle, and a model that could not see which file held what simply called
     /// grep again. Sorting costs one pass over at most <c>limit</c> lines.</para>
     /// </summary>
-    private static string Format(GrepResult result, GrepRequest request, string? fallback, string? contextNote)
+    private static string Format(GrepResult result, GrepRequest request, string? fallback, string? contextNote, string? absoluteRoot)
     {
         var lines = new List<string>(result.Lines.Count + 4);
         foreach (var line in Ordered(result.Lines))
         {
             var separator = line.IsMatch ? ':' : '-';
-            var builder = new StringBuilder(line.Path.Length + line.Text.Length + 16);
-            builder.Append(line.Path).Append(separator).Append(line.LineNumber).Append(separator).Append(line.Text);
+            var path = absoluteRoot is null ? line.Path : Shown(absoluteRoot, line.Path);
+            var builder = new StringBuilder(path.Length + line.Text.Length + 16);
+            builder.Append(path).Append(separator).Append(line.LineNumber).Append(separator).Append(line.Text);
             lines.Add(builder.ToString());
         }
 
@@ -192,7 +199,7 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
 
         foreach (var file in result.RegexTimeoutFiles)
         {
-            lines.Add($"regex match timeout: {file}");
+            lines.Add($"regex match timeout: {(absoluteRoot is null ? file : Shown(absoluteRoot, file))}");
         }
 
         if (fallback is not null)
@@ -202,6 +209,10 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
 
         return BoundedOutput.Join(lines, "Narrow with `path`, `glob` or a more specific `pattern`.");
     }
+
+    /// <summary>An outside search's own directory put back in front of the relative path the engine reported.</summary>
+    private static string Shown(string root, string relative) =>
+        Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>
     /// The matches in path order, each file's lines ascending: one call's answer becomes something that can be read from the

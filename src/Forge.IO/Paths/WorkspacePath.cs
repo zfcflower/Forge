@@ -117,10 +117,15 @@ public static class WorkspacePath
     /// <c>Root(context)</c>): the root's components are not walked again, and a path lexically below it only has the
     /// components under the root resolved. A path that is not below the root is resolved in full.
     /// </summary>
-    public static string Resolve(string root, string requested, bool rootIsReal)
+    /// <param name="allowOutside">
+    /// Resolve links but drop the containment requirement: set by a tool for the one call the user allowed across the workspace
+    /// boundary (<see cref="Forge.Abstractions.ToolContext.OutOfWorkspaceAllowed"/>). Everything else keeps the workspace as the bound.
+    /// </param>
+    public static string Resolve(string root, string requested, bool rootIsReal, bool allowOutside = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(requested);
+        RejectHomeRelative(requested);
 
         string realRoot;
         string real;
@@ -137,13 +142,64 @@ public static class WorkspacePath
             throw new WorkspacePathException($"'{requested}' is not a usable path: {exception.Message}");
         }
 
-        if (!string.Equals(real, realRoot, Comparison) && !IsUnder(real, realRoot))
+        if (!allowOutside && !string.Equals(real, realRoot, Comparison) && !IsUnder(real, realRoot))
         {
             throw new WorkspacePathException(
                 $"'{requested}' resolves to '{real}', which is outside the workspace '{realRoot}'.");
         }
 
         return real;
+    }
+
+    /// <summary>
+    /// <see cref="Resolve(string, string)"/> for a **read**: the workspace is not a bound here. Inside it the path goes through
+    /// <see cref="Resolve(string, string)"/>, so a read records the same key an <c>edit</c> later checks; outside it is taken as given
+    /// (links resolved). Reading cannot change anything, and a write in that place still refuses or asks.
+    /// </summary>
+    public static string ResolveReadable(string root, string requested)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentException.ThrowIfNullOrWhiteSpace(requested);
+        RejectHomeRelative(requested);
+        string full;
+        try
+        {
+            full = Path.GetFullPath(Path.IsPathRooted(requested) ? requested : Path.Combine(root, requested));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new WorkspacePathException($"'{requested}' is not a usable path: {exception.Message}");
+        }
+
+        if (!IsUnder(full, root))
+        {
+            return ResolveRealPath(full);
+        }
+
+        try
+        {
+            return Resolve(root, requested);
+        }
+        catch (WorkspacePathException)
+        {
+            // A link inside the workspace that points outside it: a read follows it, because the workspace is not a bound for
+            // reads. A write through the same link still refuses (it goes through Resolve alone).
+            return ResolveRealPath(full);
+        }
+    }
+
+    /// <summary>
+    /// <c>~</c> is not expanded anywhere: the file tools would write or read a literal <c>~</c> directory inside the workspace,
+    /// and a shell expands it on its own before the tool sees it. Answering with an error keeps a card's promise ("this crosses
+    /// the boundary") and the call's real effect the same thing.
+    /// </summary>
+    internal static void RejectHomeRelative(string requested)
+    {
+        if (requested.AsSpan().TrimStart()[0] == '~')
+        {
+            throw new WorkspacePathException(
+                $"'{requested}' starts with '~', which is not expanded: pass an absolute path or one relative to the workspace.");
+        }
     }
 
     /// <summary>The workspace-relative form of <paramref name="path"/>, with forward slashes; empty for the root itself.</summary>

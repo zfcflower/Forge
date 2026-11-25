@@ -9,23 +9,33 @@ namespace Forge.IO.Tools;
 /// directory that is not empty needs <c>recursive</c>, so a wrong path costs an error and not a tree. The workspace root and
 /// the .git directory are never deleted.
 /// </summary>
-public sealed class DeleteTool() : ToolBase("delete", Description, Schema, ToolSideEffect.Write)
+public sealed class DeleteTool() : ToolBase("delete", Description, Schema, ToolSideEffect.Write), IToolCallScope
 {
     private const string Schema =
         """{"type":"object","properties":{"path":{"description":"What to delete: a path, a glob pattern (* ? [a-z] ** {a,b}) or an array of them; workspace-relative or absolute.","anyOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]},"recursive":{"type":"boolean","description":"Delete non-empty directories with everything below them; default false."}},"required":["path"],"additionalProperties":false}""";
 
     private const string Description =
-        "Delete files and directories inside the workspace (rm -r). 'path' takes paths, glob patterns or an array. A non-empty directory " +
-        "needs recursive. A symbolic link is removed without touching its target. The workspace root and .git cannot be deleted. " +
-        "Deleted files are not recoverable. " +
+        "Delete files and directories (rm -r). 'path' takes paths, glob patterns or an array. Paths inside the workspace are deleted " +
+        "straight away; a path outside it asks the user for that call. A non-empty directory needs recursive. A symbolic link is " +
+        "removed without touching its target. The workspace root and .git cannot be deleted. Deleted files are not recoverable. " +
         "A pattern skips dot-names unless its segment starts with a dot, and matching nothing is an error.";
+
+    public ToolCallScope ScopeOf(ToolCall call, string workingDirectory) =>
+        CallScope.Of(workingDirectory, call, "path");
 
     protected override async ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
     {
         var requested = ToolJson.RequiredStrings(arguments, "path");
         var recursive = ToolJson.OptionalBool(arguments, "recursive", false);
         var root = Root(context);
-        var paths = PathPatterns.Expand(root, requested, plain => FileOps.ResolveEntry(root, plain), includeLinks: true, ct);
+        var allowOutside = context.OutOfWorkspaceAllowed;
+        var paths = PathPatterns.Expand(
+            root,
+            requested,
+            plain => FileOps.ResolveEntry(root, plain, allowOutside),
+            includeLinks: true,
+            ct,
+            allowOutside);
         foreach (var path in paths)
         {
             var display = FileOps.Display(root, path);

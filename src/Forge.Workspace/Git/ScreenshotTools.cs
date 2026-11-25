@@ -7,7 +7,8 @@ namespace Forge.Workspace;
 
 /// <summary>
 /// The agent's screenshot tool: <c>pr_screenshots</c>. One tool, side effect <see cref="ToolSideEffect.Execute"/> – it runs a
-/// command from the repository, pushes a branch and edits the pull request – so the approval policy asks the user. It is
+/// command from the repository, pushes a branch and edits the pull request. Its <c>files</c> and <c>cleanup_paths</c> arguments
+/// are path keys, so the approval policy asks once when they name a path outside the workspace, and not otherwise. It is
 /// registered next to <see cref="PrTools"/> and works in <see cref="ToolContext.WorkingDirectory"/>, the session's worktree.
 /// The work itself is <see cref="ScreenshotRunner"/>, which the Git panel's screenshot button uses too; this class is the
 /// agent-facing surface: argument validation, the pull request preconditions and a "next step" for every failure.

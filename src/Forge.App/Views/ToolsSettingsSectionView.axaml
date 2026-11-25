@@ -12,6 +12,25 @@
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <StackPanel Spacing="10">
       <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
+      <!-- The global permission mode: read by every session's approval policy on each evaluation, so a change reaches the next
+           tool call without a restart. Two radios rather than a combo box because the choice decides what the product asks about. -->
+      <StackPanel Spacing="6">
+        <TextBlock Classes="h2" Text="{Binding PermissionHeading}" />
+        <StackPanel Orientation="Horizontal" Spacing="18">
+          <RadioButton GroupName="tools-permission"
+                       IsChecked="{Binding PermissionWorkspace, Mode=TwoWay}"
+                       Content="{Binding PermissionWorkspaceLabel}"
+                       AutomationProperties.AutomationId="settings-tools-permission-workspace"
+                       AutomationProperties.Name="{Binding PermissionWorkspaceLabel}" />
+          <RadioButton GroupName="tools-permission"
+                       IsChecked="{Binding PermissionAll, Mode=TwoWay}"
+                       Content="{Binding PermissionAllLabel}"
+                       AutomationProperties.AutomationId="settings-tools-permission-all"
+                       AutomationProperties.Name="{Binding PermissionAllLabel}" />
+        </StackPanel>
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding PermissionHint}" />
+      </StackPanel>
+      <Separator Margin="0,4,0,0" />
       <!-- Wave W14: what a run_code script may call, how many calls it keeps in flight and how much text comes back. -->
       <StackPanel Spacing="6">
         <TextBlock Classes="h2"
