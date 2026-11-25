@@ -216,6 +216,13 @@ internal sealed partial class ProjectTreeViewModel
     /// <summary>"Rename branch…" (7.8) of a linked workspace row; set by the shell.</summary>
     public Func<WorkspaceTarget, CancellationToken, Task>? RenameBranch { get; set; }
 
+    /// <summary>
+    /// "新根会话…" on a branch that already has an active session: the holder and the session that would take the branch over,
+    /// set by the shell. It goes straight to the handover dialog - a plain "create a session?" confirm in front of it would ask
+    /// the same thing twice - and the shell reads the branch live, since an outside checkout may have moved it.
+    /// </summary>
+    public Func<SessionInfo, SessionCreate, CancellationToken, Task>? NewRootSession { get; set; }
+
     /// <summary>Why a session is not idle: its open tab's busy sources plus those of the user-driven agent sessions under it
     /// (a closed root tab keeps both); in memory only, empty when idle.</summary>
     public Func<string, IReadOnlyList<string>>? SessionBusyReasons { get; set; }

@@ -508,13 +508,6 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
 
     public ICommand? NewSessionCommand { get; private set; }
 
-    /// <summary>
-    /// "新根会话…" on a branch that already has an active session: the holder and the session that would take the branch over,
-    /// set by the shell. It goes straight to the handover dialog - a plain "create a session?" confirm in front of it would ask
-    /// the same thing twice - and the shell reads the branch live, since an outside checkout may have moved it.
-    /// </summary>
-    public Func<SessionInfo, SessionCreate, CancellationToken, Task>? NewRootSession { get; set; }
-
     public ICommand? ArchiveCommand { get; private set; }
 
     public ICommand? RenameCommand { get; private set; }
