@@ -382,7 +382,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 - Artifact 转存阈值、keepRecent 默认值与摘要文件清单的两个字符预算(4000/8000)都未经使用验证(前两项现分别由 `preferences.chatArtifactSpillChars`/`ChatArtifactPreviewChars` 与 `compaction.keepRecentTokens` 覆盖);清单预算没有设置项,按长会话实测再调。
 - 文件追踪只认 `read`/`edit`/`write`/`delete`/`copy`/`move` 的工具参数；`grep`/`ls`/`find` 与插件工具不产生条目。
 - 分批预算按 4 字符/token 折算,对中文等高密度文本偏乐观,0.6 的窗口份额是余量;旧 Turn Context 的合并依赖摘要模型遵从指令,代码只保证正式标题不叠加。
-- `search_history`/`read_history` 只看本会话自己的消息。
+- `search_history`/`read_history` 只看本会话自己的消息。`read_history` 的单条消息超过 200,000 字符时被截断,而提示的 "narrow the range" 切不开单条消息——越出的尾部只能靠 Spill 后的 Artifact 分片读,(未修)。
 - Tavily 的 Bearer 认证方式未经实测。
 - Exa 公共 MCP 的匿名限额与可用性未量化实测(2026-11-21 实调成功);其文本区块格式与 DeepSeek Search 的字段映射未经长期验证,DeepSeek 的 Bearer 鉴权也未实测(无密钥)。
 - 网络栈:socks4(非 4a)代理由 .NET 在本机用系统 DNS 解析目标;DoH 服务器自身的主机名用系统解析器解析(写 IP 形式的 URL 可避免)——两者是平台/协议限制,不在 Core 修,App 的网络设置页对这两种输入给出内联提示;代理服务器地址本身不过地址过滤。

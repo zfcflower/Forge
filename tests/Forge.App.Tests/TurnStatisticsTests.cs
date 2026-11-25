@@ -7,8 +7,10 @@ namespace Forge.App.Tests;
 
 /// <summary>
 /// The transcript's per-turn statistics are the provider's numbers, so nothing the harness adds around a request may reach
-/// them. The budget line rides along as a trailing user message: it must go out with every request, must never be persisted
-/// (a replay would otherwise show a message no user typed), and must not change the usage a turn card reports.
+/// them. The budget line rides along as a trailing user message, marked with the <c>forge-context</c> pair that tells it —
+/// to the model and to a log analysis alike — apart from anything the user typed: it must go out with every request, must
+/// never be persisted (a replay would otherwise show a message no user typed), and must not change the usage a turn card
+/// reports.
 /// </summary>
 public sealed class TurnStatisticsTests
 {
@@ -57,6 +59,9 @@ public sealed class TurnStatisticsTests
 
     private const string BudgetLine = "Context 1k/2k (50%); auto-compaction at 1.7k.";
 
+    /// <summary>The text the request's last message carries for a budget line: the line itself between the context markers.</summary>
+    private static string Marked(string line) => $"<forge-context>\n{line}\n</forge-context>";
+
     /// <summary>Both requests report these; a turn card shows their sum, whatever else the harness appends.</summary>
     private static readonly TokenUsage TurnUsage = new(3_579, 30, 300, 110);
 
@@ -95,8 +100,8 @@ public sealed class TurnStatisticsTests
 
         var completed = await RunTurnAsync(host, root);
 
-        // The line went out with both requests of the turn, appended after the persisted history.
-        Assert.Equal([BudgetLine, BudgetLine], provider.TrailingLines);
+        // The line went out with both requests of the turn, appended after the persisted history, marked as harness text.
+        Assert.Equal([Marked(BudgetLine), Marked(BudgetLine)], provider.TrailingLines);
 
         // It is not history: neither the replay nor the next request's cached prefix can hold it.
         Assert.DoesNotContain(

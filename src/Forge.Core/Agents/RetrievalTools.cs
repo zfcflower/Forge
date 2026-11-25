@@ -178,7 +178,12 @@ public sealed class ReadHistoryTool : ITool
         this.store = store;
     }
 
-    public ToolDefinition Definition { get; } = new(Name, "Read stored messages by sequence range; use the sequence numbers from search_history.", SchemaJson);
+    public ToolDefinition Definition { get; } = new(
+        Name,
+        "Read earlier messages back by sequence range: the ones no longer in the context, compressed into a summary or cut down " +
+        "to a receipt. Sequence numbers come from search_history or from a receipt line. The recent conversation is already in " +
+        "the context - do not replay it.",
+        SchemaJson);
 
     public ToolSideEffect SideEffect => ToolSideEffect.ReadOnly;
 
