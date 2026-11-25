@@ -365,9 +365,12 @@ public sealed class SessionMessenger
     }
 
     /// <summary>
-    /// <c>message_session</c>'s body: resolve the target by name within this root, check the user's grant, make sure the
-    /// target can run a turn, then enqueue. Never waits for the target: the answer says "已投递" (it starts now) or
-    /// "已排队" (it waits behind work the target already has), and in both cases that there is no result yet.
+    /// <c>message_session</c>'s body: resolve the target by name within this root, check the user's grant, make sure the target
+    /// is still there, then enqueue. Never waits for the target: the answer says "已投递" (it starts now) or "已排队" (it waits
+    /// behind work the target already has), and in both cases that there is no result yet.
+    /// <para>An active user session takes the message whether or not this process has run a turn for it: the app opens the
+    /// session's own tab and runs it there (<see cref="ISessionMessageEndpoint.RunSessionTurnAsync"/>), and only a host without
+    /// that seam falls back to the instance this scheduler holds - which is why "not loaded" is not a reason to refuse.</para>
     /// </summary>
     public async Task<ToolResult> SendAsync(ToolContext context, string? targetName, string? message, CancellationToken ct)
     {
@@ -435,11 +438,6 @@ public sealed class SessionMessenger
             {
                 grants.RevokeTarget(target.SessionId);
                 return Error($"The session '{target.Name}' no longer exists, so it cannot take a message.");
-            }
-
-            if (!scheduler.TryGetUserSession(target.SessionId, out _))
-            {
-                return Error($"The session '{target.Name}' is not loaded in this process, so it cannot run a turn right now.");
             }
         }
 

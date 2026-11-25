@@ -199,6 +199,9 @@ internal sealed partial class SessionWorkspaceViewModel
         }
 
         agentRootTitle = title;
+        // The launch is this tab's copy of the root it hangs under, and its title is what the @ picker offers: the store's new
+        // name goes into it too, or the tab keeps naming its root by the name it was opened with.
+        agentSession = agentSession with { Root = agentSession.Root with { Title = title } };
         RaiseAgentTitleChanged();
     }
 

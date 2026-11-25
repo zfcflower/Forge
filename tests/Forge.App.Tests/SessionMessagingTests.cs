@@ -689,6 +689,36 @@ public sealed class SessionMessagingTests
     }
 
     [Fact]
+    public async Task A_user_session_that_has_not_run_a_turn_takes_the_delivery_through_its_tab()
+    {
+        await using var harness = await Harness.CreateAsync();
+
+        // A session of the branch that this process has never run - the state every Agent session is in right after a restart.
+        var child = await ((ISessionCatalog)harness.Store).CreateAsync(
+            new SessionCreate(harness.WorkDirectory, "say hi")
+            {
+                ParentSessionId = harness.Root.SessionId,
+                AgentKind = UserAgent.Name,
+                Task = "task",
+                ChildDriver = "user",
+            },
+            CancellationToken.None);
+        harness.Host.SessionMessaging.Grant(harness.Root.SessionId, child.Id, child.Title);
+
+        var result = await SendAsync(harness, RootContext(harness), "say hi", "say hi");
+
+        Assert.False(result.IsError);
+        Assert.Equal("已投递 #1（未完成，你现在没有结果）", result.Text);
+        // The app's seam runs the target's turn in its own tab; this host holds no instance of that session at all.
+        var request = await harness.Endpoint.FirstRequest;
+        Assert.Equal(child.Id, request.SessionId);
+        Assert.Equal("say hi", request.Message);
+
+        harness.Endpoint.CompleteTurn();
+        Assert.StartsWith("[会话回复 #1 · 来自 say hi · 状态:完成", await harness.Endpoint.FirstReceipt);
+    }
+
+    [Fact]
     public void Root_and_user_session_tool_selections_include_message_session_but_model_child_does_not()
     {
         var messageTool = new NamedTool(SessionReplies.ToolName);

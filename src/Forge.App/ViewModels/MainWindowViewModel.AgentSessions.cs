@@ -820,6 +820,21 @@ internal sealed partial class MainWindowViewModel
         // The @ picker keeps the names it read from the store: an agent session renamed while its tab is closed would still
         // be offered under its old name there, and an open popup would keep showing it.
         RenameMentionTarget(sessionId, title);
+
+        // The pickers of this session's own tree re-read their names as well: a tab offers its root from the launch's title, and
+        // a root offers its agent sessions from the open views' live names - neither half lives in the stored list above, so a
+        // rename that only touched those would leave an open popup on the old name.
+        var rootId = sessionId;
+        foreach (var agent in agentViews.Keys)
+        {
+            if (string.Equals(agent.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                rootId = agent.AgentSessionRoot?.Id ?? sessionId;
+                break;
+            }
+        }
+
+        RefreshSessionMentionsOf(rootId);
     }
 
     /// <summary>

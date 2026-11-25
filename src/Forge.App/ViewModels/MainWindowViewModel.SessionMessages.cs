@@ -561,7 +561,7 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
 
     /// <summary>
     /// The sessions one tab may mention: an agent-session tab may mention its root; a root session may mention the agent
-    /// sessions the user opened under it (open tabs and stored rows).
+    /// sessions the user opened under it and that are active right now - a history row's read-only tab is not a target.
     /// </summary>
     private IReadOnlyList<SessionMentionTarget> SessionMentionTargetsFor(SessionWorkspaceViewModel view)
     {
@@ -576,6 +576,7 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
         foreach (var (session, _) in agentViews)
         {
             if (string.Equals(session.AgentSessionRoot?.Id, rootId, StringComparison.Ordinal)
+                && !session.IsReadOnlyView
                 && session.AgentChildSessionId is { } childId
                 && seen.Add(childId))
             {

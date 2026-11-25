@@ -143,4 +143,58 @@ public sealed class AgentSessionRehomeTests : IDisposable
         Assert.Equal(promoted.Id, row.SessionId);
         Assert.Equal("Promoted", row.Title);
     }
+
+    /// <summary>
+    /// A renamed root is offered under its new name. The tab's only copy of the root is the one it was opened with, and the
+    /// <c>@</c> picker reads that copy - so a rename that only re-prefixed the tab's own label kept the old name in the list.
+    /// </summary>
+    [Fact]
+    public async Task A_renamed_root_is_offered_under_its_new_name_in_the_at_picker()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+        var root = await store.CreateAsync(new SessionCreate(directory, "Old Root"), CancellationToken.None);
+        var worker = await store.CreateAsync(
+            new SessionCreate(directory, "Worker 1")
+            {
+                ParentSessionId = root.Id,
+                ChildDriver = AgentSessionKinds.ChildDriverUser,
+                AgentKind = "Worker",
+            },
+            CancellationToken.None);
+
+        var services = new AgentRuntimeServices(
+            ProviderFactory: _ => throw new InvalidOperationException("this test never runs a turn"),
+            HostClient: null,
+            Store: store,
+            Catalog: store,
+            Todos: new SqliteTodoStore(directory),
+            Model: new ModelSettings("test-model"));
+        using var runtime = new SessionRuntime(services, root);
+        var providers = new ProviderServices(Path.Combine(directory, "settings.json"), directory, http);
+        SessionWorkspaceViewModel? created = null;
+        using var view = new SessionWorkspaceViewModel(
+            worker,
+            runtime,
+            checkpoints: null,
+            store: store,
+            providers,
+            fileSource: _ => Task.FromResult<IReadOnlyList<string>>([]),
+            agentSession: new AgentSessionLaunch(root, Ordinal: 1, IsDraft: false),
+            sessionMentions: () => created?.AgentSessionRoot is { } current
+                ? [new SessionMentionTarget(current.Id, current.Title)]
+                : []);
+        created = view;
+        view.RefreshSessionMentions();
+        view.Composer.UpdateSuggestions("@", 1);
+        Assert.Equal("Old Root", Assert.Single(view.Composer.Suggestions).Title);
+
+        // What the shell does when the store holds a new title for the root: push it to the tabs, then re-read their pickers.
+        view.RenameRoot("Renamed Root");
+        view.RefreshSessionMentions();
+
+        var row = Assert.Single(view.Composer.Suggestions);
+        Assert.Equal(root.Id, row.SessionId);
+        Assert.Equal("Renamed Root", row.Title);
+    }
 }
