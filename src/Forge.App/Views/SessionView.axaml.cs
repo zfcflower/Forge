@@ -12,6 +12,7 @@ public partial class SessionView : UserControl
 {
     private SessionWorkspaceViewModel? viewModel;
     private INotifyCollectionChanged? items;
+    private TranscriptFollower? follower;
 
     public SessionView()
     {
@@ -30,7 +31,7 @@ public partial class SessionView : UserControl
 
         if (this.FindControl<ListBox>("Transcript") is { } transcript)
         {
-            TranscriptFollower.Attach(transcript);
+            follower = TranscriptFollower.Attach(transcript, LoadOlderAsync);
         }
     }
 
@@ -44,23 +45,29 @@ public partial class SessionView : UserControl
         }
     }
 
-    /// <summary>
-    /// Reads the page of turns older than the one on screen and keeps the reader's place: the page lands above, so the round
-    /// that was first is brought back to the top of the viewport instead of letting the list jump.
-    /// </summary>
+    /// <summary>The red strip's click: the same read the prefetch asks for, retried by the reader after a failure.</summary>
     private async void OnLoadOlderClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is SessionWorkspaceViewModel model)
+        {
+            await model.LoadOlderHistoryAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// The prefetch: reads the page above and keeps the reader's place. The page lands in front of the transcript and both
+    /// the panel (it arranges from the first visible round) and the content anchor hold what the reader was looking at, so
+    /// there is nothing to scroll back afterwards. Answers whether the behaviour may ask again on a later scroll.
+    /// </summary>
+    private async Task<bool> LoadOlderAsync()
     {
         if (DataContext is not SessionWorkspaceViewModel model)
         {
-            return;
+            return false;
         }
 
-        var first = model.Transcript.Rounds.Count > 0 ? model.Transcript.Rounds[0] : null;
-        await model.LoadOlderHistoryAsync(CancellationToken.None);
-        if (first is not null)
-        {
-            Transcript.ScrollIntoView(model.Transcript.Rounds.IndexOf(first));
-        }
+        var outcome = await model.LoadOlderHistoryAsync(CancellationToken.None);
+        return outcome is SessionWorkspaceViewModel.OlderPageLoad.Loaded or SessionWorkspaceViewModel.OlderPageLoad.NotReady;
     }
 
     protected override void OnDataContextChanged(EventArgs e)

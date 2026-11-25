@@ -177,6 +177,16 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// call.</summary>
     private int turnToolCalls;
 
+    /// <summary>Characters of tool result text the root agent's calls returned this turn: what entered the conversation.
+    /// Kept apart from <see cref="turnToolCalls"/> because the two answer different questions — a turn with two calls that
+    /// returned 30 000 characters each cost far more context than five that returned 200 — and because shaping in the file
+    /// tools is judged on characters, not on call counts.</summary>
+    private long turnResultChars;
+
+    /// <summary>This turn's <c>run_code</c> calls. The point of the count is the ratio to <see cref="turnToolCalls"/>: a
+    /// session that investigates with scripts and one that investigates with typed calls look identical in a total.</summary>
+    private int turnScriptCalls;
+
     /// <summary>Requests of the naming turn that carried the naming line: incremented from the agent loop's thread, so the cap
     /// holds without a lock. The window never reopens, so the counter never has to be reset.</summary>
     private int namingRequests;
@@ -266,8 +276,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private bool historyLoaded;
     private bool isHistoryLoading;
     private long historyBeforeSeq = long.MaxValue;
+    /// <summary>Turns the store holds above the oldest loaded round: the count the next page is numbered from.</summary>
+    private long historyTurnsBefore;
+    /// <summary>The metrics rows read when the tab opened; older pages reuse them instead of re-reading the table.</summary>
+    private IReadOnlyList<TurnMetric> historyMetrics = [];
     private bool hasOlderHistory;
     private bool loadingOlderHistory;
+    private bool olderLoadFailed;
     private bool isHandingOver;
     private AsyncRelayCommand? compactCommand;
 
@@ -937,7 +952,24 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         private set => Set(ref isHistoryLoading, value);
     }
 
-    /// <summary>Whether the store still holds turns older than the page on screen (the transcript's 「载入更早」 strip).</summary>
+    /// <summary>What a request for the older page did, so the reader's scroll behaviour can tell "nothing more" (stop asking)
+    /// from "not now" (ask again later).</summary>
+    internal enum OlderPageLoad
+    {
+        /// <summary>A page was read and put in front of the transcript.</summary>
+        Loaded,
+
+        /// <summary>The store holds nothing older: never ask again for this tab.</summary>
+        Exhausted,
+
+        /// <summary>The history has not been replayed yet, or a read is already in flight.</summary>
+        NotReady,
+
+        /// <summary>The read failed; the transcript shows the retry line and the scroll behaviour stops asking.</summary>
+        Failed,
+    }
+
+    /// <summary>Whether the store still holds turns older than the page on screen.</summary>
     public bool HasOlderHistory
     {
         get => hasOlderHistory;
@@ -945,26 +977,57 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     }
 
     /// <summary>
-    /// Reads the page before the oldest round on screen and puts it in front of the transcript. The caller scrolls the round
-    /// that was first back to the top afterwards, so reading continues where it was.
+    /// Whether the last read of an older page failed. The transcript shows a red line at the top while it is set and does
+    /// not retry on its own: a wedged store must not be hammered by a prefetch loop. A successful read clears it.
     /// </summary>
-    public async Task LoadOlderHistoryAsync(CancellationToken ct)
+    public bool OlderLoadFailed
     {
-        if (store is null || !HasOlderHistory || loadingOlderHistory)
+        get => olderLoadFailed;
+        private set => Set(ref olderLoadFailed, value);
+    }
+
+    /// <summary>
+    /// Reads the page before the oldest round on screen and puts it in front of the transcript, which holds the reader's
+    /// place (the panel arranges from the first visible round; the content anchor restores it if the panel had to guess).
+    /// The page is numbered from the turns already counted above it and reuses the metrics rows read at open, so paging back
+    /// costs a page rather than a pass over the session.
+    /// </summary>
+    public async Task<OlderPageLoad> LoadOlderHistoryAsync(CancellationToken ct)
+    {
+        if (!historyLoaded)
         {
-            return;
+            return OlderPageLoad.NotReady;
+        }
+
+        if (store is null || !HasOlderHistory)
+        {
+            return OlderPageLoad.Exhausted;
+        }
+
+        if (loadingOlderHistory)
+        {
+            return OlderPageLoad.NotReady;
         }
 
         loadingOlderHistory = true;
         try
         {
             var load = await TranscriptReplay
-                .ReadPageAsync(store, instrumentSources.TurnMetrics, SessionId, historyBeforeSeq, HistoryPageMessages, ct)
+                .ReadPageAsync(
+                    store,
+                    null,
+                    SessionId,
+                    historyBeforeSeq,
+                    HistoryPageMessages,
+                    ct,
+                    historyMetrics,
+                    historyTurnsBefore)
                 .ConfigureAwait(true);
+            OlderLoadFailed = false;
             if (load.Page.Messages.Count == 0)
             {
                 HasOlderHistory = false;
-                return;
+                return OlderPageLoad.Exhausted;
             }
 
             // The older page pairs its own rows inside the replay, before it joins the transcript: pairing through the
@@ -972,11 +1035,15 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             var (older, _) = TranscriptReplay.ReplayPage(load);
             Transcript.PrependRounds(older);
             historyBeforeSeq = load.Page.Messages[0].Seq;
+            historyTurnsBefore = load.Page.TurnsBefore;
             HasOlderHistory = load.Page.HasMore;
+            return OlderPageLoad.Loaded;
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
-            Transcript.AddNotice(SessionStrings.ReadFailed(exception.Message), isError: true);
+            AppLogs.Session.ZLogWarning($"older history read failed: {exception.Message}");
+            OlderLoadFailed = true;
+            return OlderPageLoad.Failed;
         }
         finally
         {
@@ -1037,6 +1104,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             // loading path shares. The same rows also restore the composer's last model below.
             await RestoreComposerSelectionAsync(load.Metrics, ct).ConfigureAwait(true);
             historyBeforeSeq = load.Page.Messages.Count > 0 ? load.Page.Messages[0].Seq : 1;
+            historyTurnsBefore = load.Page.TurnsBefore;
+            historyMetrics = load.Metrics;
             HasOlderHistory = load.Page.HasMore;
 
             // The divider tooltips price with the composer's current choice when a replayed row names no model;
@@ -2286,6 +2355,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Interlocked.Exchange(ref runningTools, 0);
         turnStartCounters = live.ReadRootCounters();
         turnToolCalls = 0;
+        Interlocked.Exchange(ref turnScriptCalls, 0);
+        Interlocked.Exchange(ref turnResultChars, 0);
         turnRetryReason = null;
         Interlocked.Exchange(ref turnRetries, 0);
         Interlocked.Exchange(ref turnRetryWaitMs, 0);
@@ -2713,9 +2784,21 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 Interlocked.Increment(ref turnToolCalls);
             }
         }
-        else if (value is AgentToolFinished && Interlocked.Decrement(ref runningTools) < 0)
+        else if (value is AgentToolFinished finished)
         {
-            Interlocked.Exchange(ref runningTools, 0);
+            if (string.Equals(finished.AgentId, "root", StringComparison.Ordinal))
+            {
+                Interlocked.Add(ref turnResultChars, ResultChars(finished.Result));
+                if (string.Equals(finished.Call.Name, "run_code", StringComparison.Ordinal))
+                {
+                    Interlocked.Increment(ref turnScriptCalls);
+                }
+            }
+
+            if (Interlocked.Decrement(ref runningTools) < 0)
+            {
+                Interlocked.Exchange(ref runningTools, 0);
+            }
         }
 
         switch (value)
@@ -3299,12 +3382,41 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 turnModel.Model is { Length: > 0 } model ? model : null,
                 turnModel.Thinking,
                 TurnMetricsRowFactory.TurnLastSeq(end.LastSeq, start.LastSeq, ReferenceEquals(end.Instance, start.Instance))));
+            LogTurnToolUsage(turn);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // The writer promises never to throw, but a row is never worth a turn: this is the belt to that suspender.
             AppLogs.Usage.ZLogWarning($"turn metrics row not queued: {exception.GetType().Name}: {exception.Message}");
         }
+    }
+
+    /// <summary>
+    /// One line per root turn with the three numbers that answer "did the shaping help, and is codemode used": how many
+    /// tool calls, how many of them were scripts, and how many characters of result text they put into the conversation. It
+    /// is a log line rather than a <c>turn_metrics</c> column on purpose: the columns need a schema migration and the
+    /// contract around them, and the number is useful today without either. <c>scripts</c> is also the adoption signal the
+    /// CodeMode question was missing — a ratio, not a total.
+    /// </summary>
+    private void LogTurnToolUsage(int turn) =>
+        AppLogs.Usage.ZLogInformation(
+            $"turn tools session={SessionId} turn={turn} calls={turnToolCalls} "
+            + $"scripts={Volatile.Read(ref turnScriptCalls)} result_chars={Interlocked.Read(ref turnResultChars)}");
+
+    /// <summary>The characters of text a tool result carried into the conversation, without flattening images into
+    /// placeholders first: this runs on the event thread for every finished call.</summary>
+    private static int ResultChars(ToolResult result)
+    {
+        var chars = 0;
+        foreach (var block in result.Blocks)
+        {
+            if (block is TextBlock text)
+            {
+                chars += text.Text.Length;
+            }
+        }
+
+        return chars;
     }
 
     /// <summary>

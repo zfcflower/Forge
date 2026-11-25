@@ -287,6 +287,36 @@ public interface ISessionStore
         return new SessionPage(page, turnsBefore, from > 0);
     }
 
+    /// <summary>
+    /// The same page, for a reader that already counted the turns above the page boundary
+    /// (<paramref name="turnsAboveBeforeSeq"/> = user messages stored below <paramref name="beforeSeq"/>, which is the
+    /// previous page's <see cref="SessionPage.TurnsBefore"/>): the page is numbered from that count minus the user messages
+    /// inside it, so the store need not walk the whole prefix again for a number the reader can derive (10k messages: the
+    /// walk is 21-45 ms of every page, measured). Null asks the store to count, exactly like the overload above.
+    /// <para>A store that cannot skip the walk keeps this default: the page is read the ordinary way and renumbered, which
+    /// is correct but no faster.</para>
+    /// </summary>
+    async Task<SessionPage> ReadTailAsync(
+        string sessionId, long beforeSeq, int maxMessages, long? turnsAboveBeforeSeq, CancellationToken ct)
+    {
+        var page = await ReadTailAsync(sessionId, beforeSeq, maxMessages, ct).ConfigureAwait(false);
+        if (turnsAboveBeforeSeq is not { } above || page.Messages.Count == 0)
+        {
+            return page;
+        }
+
+        var inside = 0L;
+        foreach (var message in page.Messages)
+        {
+            if (message.Message.Role == MessageRole.User)
+            {
+                inside++;
+            }
+        }
+
+        return page with { TurnsBefore = above - inside };
+    }
+
     Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct);
     Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct);
 

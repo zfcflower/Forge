@@ -68,6 +68,10 @@ public sealed class LoggingSessionStore(ISessionStore inner, JsonlEventLog log) 
     public Task<SessionPage> ReadTailAsync(string sessionId, long beforeSeq, int maxMessages, CancellationToken ct) =>
         Inner.ReadTailAsync(sessionId, beforeSeq, maxMessages, ct);
 
+    public Task<SessionPage> ReadTailAsync(
+        string sessionId, long beforeSeq, int maxMessages, long? turnsBefore, CancellationToken ct) =>
+        Inner.ReadTailAsync(sessionId, beforeSeq, maxMessages, turnsBefore, ct);
+
     public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Inner.PutSummaryAsync(summary, ct);
 
     Task<SessionInfo> ISessionCatalog.CreateAsync(SessionCreate request, CancellationToken ct) =>

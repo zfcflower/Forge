@@ -26,22 +26,33 @@ internal sealed class TranscriptFollower
 {
     private const double BottomSlack = 2;
 
+    /// <summary>How far above the viewport the reader must be from the top before the next page is asked for: a few screens
+    /// of runway, so the page lands while the reader is still scrolling into the old one.</summary>
+    private const double PrefetchRunway = 4;
+
     private readonly ListBox list;
     private readonly Border sticky;
     private readonly TextBlock stickyText;
     private readonly TextBlock stickyTip;
     private readonly Button follow;
     private readonly TranscriptScrollAnchor anchor;
+    private readonly Func<Task<bool>>? loadOlder;
     private INotifyCollectionChanged? items;
     private ScrollViewer? scroller;
     private ScrollThumbDrag? thumbDrag;
+    private TranscriptViewModel? transcript;
     private bool following = true;
     private bool scrollPending;
+    private bool prefetchArmed = true;
+    private bool prefetchStopped;
+    private double prefetchOffset;
+    private double prefetchExtent;
     private int stickyIndex = -1;
 
-    private TranscriptFollower(ListBox list, Panel host)
+    private TranscriptFollower(ListBox list, Panel host, Func<Task<bool>>? loadOlder)
     {
         this.list = list;
+        this.loadOlder = loadOlder;
         // One line, one panel-title-bar height: the floating row stands in for the user message and must not push the
         // transcript down by growing with it, so it reads as chrome (28 px, like the title bars above and beside it) and
         // shows the message's first line; the click takes the reader to the whole of it.
@@ -107,6 +118,7 @@ internal sealed class TranscriptFollower
 
         anchor = new TranscriptScrollAnchor(list, () => following);
         list.TemplateApplied += OnTemplateApplied;
+        AttachScroller(list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault());
         list.AddHandler(InputElement.PointerWheelChangedEvent, OnWheel, RoutingStrategies.Tunnel);
         list.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         list.PropertyChanged += OnListPropertyChanged;
@@ -120,9 +132,33 @@ internal sealed class TranscriptFollower
         Hook(list.ItemsSource as INotifyCollectionChanged);
     }
 
-    /// <summary>Installs the behaviour on <paramref name="list"/>, whose parent must be a panel (the overlays join it).</summary>
-    public static TranscriptFollower? Attach(ListBox list) =>
-        list.Parent is Panel host ? new TranscriptFollower(list, host) : null;
+    /// <summary>
+    /// Installs the behaviour on <paramref name="list"/>, whose parent must be a panel (the overlays join it).
+    /// <paramref name="loadOlder"/> asks for the page above when the reader gets close to the top; it answers whether the
+    /// behaviour may ask again on a later scroll. A transcript without paging (a sub-agent's) passes none.
+    /// </summary>
+    public static TranscriptFollower? Attach(ListBox list, Func<Task<bool>>? loadOlder = null) =>
+        list.Parent is Panel host ? new TranscriptFollower(list, host, loadOlder) : null;
+
+    /// <summary>
+    /// Points the behaviour at the transcript it scrolls: a prepend must not be read as the user sending a message, and the
+    /// prefetch resumes after a page lands.
+    /// </summary>
+    public void BindTranscript(TranscriptViewModel? value)
+    {
+        if (transcript is not null)
+        {
+            transcript.Prepended -= OnPrepended;
+        }
+
+        transcript = value;
+        prefetchArmed = true;
+        prefetchStopped = false;
+        if (transcript is not null)
+        {
+            transcript.Prepended += OnPrepended;
+        }
+    }
 
     /// <summary>Whether the list is following the reply (kept at the bottom as it grows).</summary>
     internal bool IsFollowing => following;
@@ -153,7 +189,17 @@ internal sealed class TranscriptFollower
         }
     }
 
-    private void OnTemplateApplied(object? sender, TemplateAppliedEventArgs e)
+    private void OnTemplateApplied(object? sender, TemplateAppliedEventArgs e) =>
+        AttachScroller(
+            e.NameScope.Find<ScrollViewer>("PART_ScrollViewer")
+            ?? list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault());
+
+    /// <summary>
+    /// Points the behaviour at the list's scroll viewer. A list that was already templated when the behaviour attached
+    /// (a test mounting a shown list, a view re-attaching) never raises <see cref="TemplateAppliedEventArgs"/> again, so
+    /// this is also called with whatever the list already has.
+    /// </summary>
+    private void AttachScroller(ScrollViewer? next)
     {
         thumbDrag?.Detach();
         thumbDrag = null;
@@ -165,8 +211,7 @@ internal sealed class TranscriptFollower
             scroller.RemoveHandler(InputElement.PointerCaptureLostEvent, OnScrollerCaptureLost);
         }
 
-        scroller = e.NameScope.Find<ScrollViewer>("PART_ScrollViewer")
-            ?? list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        scroller = next;
         anchor.SetScroller(scroller);
         if (scroller is null)
         {
@@ -267,13 +312,12 @@ internal sealed class TranscriptFollower
             following = true;
         }
 
+        // The anchor hears about every change, following or not: a prepend turns following back off in the same turn (see
+        // BindTranscript), and the anchor then has to know the rows moved around the one it holds.
+        anchor.ItemsChanged(e);
         if (following)
         {
             PostScrollToEnd();
-        }
-        else
-        {
-            anchor.ItemsChanged(e);
         }
     }
 
@@ -300,6 +344,86 @@ internal sealed class TranscriptFollower
         }
 
         UpdateOverlays();
+        TryPrefetch();
+    }
+
+    /// <summary>
+    /// Asks for the page above once the reader is within <see cref="PrefetchRunway"/> screens of the top. One page per ask,
+    /// and a landing does not re-arm it: on this panel the prepend leaves both the offset and the extent alone (measured),
+    /// so re-arming has to wait until the reader moved a screen or the landed page reached the extent, or a burst of pages
+    /// would arrive one per layout pass.
+    /// </summary>
+    private void TryPrefetch()
+    {
+        if (loadOlder is null || prefetchStopped || following || scroller is not { } sv)
+        {
+            return;
+        }
+
+        if (!prefetchArmed)
+        {
+            // A short transcript asks again as soon as the page is laid out: opening a tab whose first page does not fill
+            // the window keeps reading until it does (or the store runs out).
+            var shortTranscript = sv.Extent.Height <= sv.Viewport.Height;
+            var moved = Math.Abs(sv.Offset.Y - prefetchOffset) >= sv.Viewport.Height;
+            var grew = sv.Extent.Height - prefetchExtent >= sv.Viewport.Height;
+            if (!shortTranscript && !moved && !grew)
+            {
+                return;
+            }
+
+            prefetchArmed = true;
+        }
+
+        if (sv.Offset.Y > PrefetchRunway * sv.Viewport.Height)
+        {
+            return;
+        }
+
+        prefetchArmed = false;
+        prefetchOffset = sv.Offset.Y;
+        prefetchExtent = sv.Extent.Height;
+        _ = AskAsync(loadOlder);
+    }
+
+    private async Task AskAsync(Func<Task<bool>> load)
+    {
+        bool again;
+        try
+        {
+            again = await load().ConfigureAwait(true);
+        }
+        catch (Exception)
+        {
+            // The view model owns its failures (the red line is its retry); a probe that threw must not take the
+            // transcript's scroll behaviour down with it.
+            again = false;
+        }
+
+        if (!again)
+        {
+            prefetchStopped = true;
+        }
+    }
+
+    /// <summary>An older page landed in front of the transcript: it is not the user sending a message.</summary>
+    private void OnPrepended(object? sender, EventArgs e)
+    {
+        following = false;
+        prefetchStopped = false;
+        prefetchOffset = scroller?.Offset.Y ?? 0;
+        prefetchExtent = scroller?.Extent.Height ?? 0;
+
+        // A transcript that still does not fill the window keeps reading - opening a tab whose first page leaves the
+        // screen half empty must not stop at one page. Nothing else re-arms there: a page that fits under the viewport
+        // changes neither the offset nor the extent, so no scroll is reported and nothing would ask again.
+        var shortTranscript = scroller is { } sv && sv.Extent.Height <= sv.Viewport.Height;
+        prefetchArmed = shortTranscript;
+        UpdateOverlays();
+        if (shortTranscript)
+        {
+            Dispatcher.UIThread.Post(TryPrefetch, DispatcherPriority.Background);
+        }
     }
 
     private void PostScrollToEnd()

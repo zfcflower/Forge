@@ -1304,6 +1304,13 @@ internal sealed class TranscriptViewModel : ObservableObject
     /// Puts an older page in front of what is already here. The page comes from a transcript of its own (numbered by
     /// <see cref="SeedRoundCounter"/>), so its rounds keep the numbers they were built with and nothing already read is renumbered.
     /// </summary>
+    /// <summary>
+    /// Raised after an older page landed in front of the transcript. A prepend is a collection of rounds whose first row is
+    /// a user message - the same shape as the user sending one - so the scroll behaviour must be told which it was instead
+    /// of guessing from the items.
+    /// </summary>
+    public event EventHandler? Prepended;
+
     internal void PrependRounds(TranscriptViewModel older)
     {
         ArgumentNullException.ThrowIfNull(older);
@@ -1318,6 +1325,7 @@ internal sealed class TranscriptViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(IsEmpty));
+        Prepended?.Invoke(this, EventArgs.Empty);
     }
 
     public TranscriptViewModel(bool collapseOlderTurns)

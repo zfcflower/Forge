@@ -66,17 +66,18 @@
   <Grid RowDefinitions="*,Auto,Auto" Background="{DynamicResource CardBackgroundBrush}">
     <Panel Grid.Row="0">
       <Grid RowDefinitions="Auto,*">
-      <!-- A restored tab reads one page of its history, so the store may still hold older turns: this strip is the way back
-           to them. It sits above the list (not in it), so prepending a page cannot move the reader's own rows around. -->
+      <!-- The page above is read ahead as the reader nears the top, so a healthy transcript says nothing here. The strip
+           only ever shows a failed read, which is also the way to retry it: a wedged store is not polled. -->
       <Button Grid.Row="0"
               Classes="link"
               Margin="0,6,0,2"
               HorizontalAlignment="Center"
-              IsVisible="{Binding HasOlderHistory}"
+              Foreground="{DynamicResource StatusErrorBrush}"
+              IsVisible="{Binding OlderLoadFailed}"
               Click="OnLoadOlderClick"
-              Content="{Binding [session.loadOlder], Source={x:Static loc:Loc.Instance}}"
+              Content="{Binding [session.loadOlderFailed], Source={x:Static loc:Loc.Instance}}"
               AutomationProperties.AutomationId="transcript-load-older"
-              AutomationProperties.Name="{Binding [session.loadOlder], Source={x:Static loc:Loc.Instance}}" />
+              AutomationProperties.Name="{Binding [session.loadOlderFailed], Source={x:Static loc:Loc.Instance}}" />
       <Panel Grid.Row="1">
       <views:TranscriptListBox x:Name="Transcript"
                ItemsSource="{Binding Transcript.Rounds}"

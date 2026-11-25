@@ -50,6 +50,11 @@ internal static partial class TranscriptScenarios
         {
             yield return scenario;
         }
+
+        foreach (var scenario in PrefetchScenarios(fixtures))
+        {
+            yield return scenario;
+        }
     }
 
     /// <summary>Fails when an Avalonia upgrade has taken away the private fields <see cref="TranscriptStackPanel"/> steers by.</summary>
