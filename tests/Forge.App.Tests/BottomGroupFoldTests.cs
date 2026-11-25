@@ -126,24 +126,78 @@ public sealed class BottomGroupFoldTests
         Assert.False(layout.MainTabs.CanMinimize);
     }
 
+    /// <summary>
+    /// The composer's chip opens the region through the same door the title bar's own restore uses: an empty group opens
+    /// onto its empty state instead of folding straight back - a chip that could not reach the body would be a dead
+    /// button, and it is drawn whenever the session has sub-agent activity.
+    /// </summary>
     [Fact]
-    public void The_toggle_flag_follows_the_docked_tabs_and_is_announced()
+    public void A_reveal_from_the_chip_opens_an_empty_group_onto_its_empty_state()
     {
         using var layout = NewLayout();
         layout.BottomTabs.KeepsVisibleWhenEmpty = true;
-        var announced = new List<string?>();
-        layout.PropertyChanged += (_, e) => announced.Add(e.PropertyName);
-        Assert.False(layout.HasBottomTab);
+        Assert.True(layout.BottomTabs.IsMinimized);
+        Assert.False(layout.IsBottomBodyOpen);
 
-        var tab = layout.OpenTab(layout.BottomTabs, "subagent:a1", TabKind.SubAgent, new object(), "Worker");
-        Assert.True(layout.HasBottomTab);
-        Assert.Contains(nameof(WorkbenchLayout.HasBottomTab), announced);
+        layout.RevealBottomBody();
+        Assert.False(layout.BottomTabs.IsMinimized);
+        Assert.True(layout.IsBottomBodyOpen);
 
-        announced.Clear();
-        layout.CloseTab(tab);
-        Assert.False(layout.HasBottomTab);
-        Assert.Contains(nameof(WorkbenchLayout.HasBottomTab), announced);
-        Assert.True(layout.BottomTabs.IsVisible);
+        // And the user's own button folds it back; the wish was not recorded, so the next tab still opens by itself.
+        layout.ToggleMinimize(layout.BottomTabs);
+        Assert.True(layout.BottomTabs.IsMinimized);
+        Assert.False(layout.IsBottomMinimized);
+    }
+
+    /// <summary>
+    /// The shell re-writes the session's wish on every roster event, value unchanged: that idempotent sync must not end a
+    /// hand-opened empty body - a child finishing while the user reads the empty state would otherwise fold it under
+    /// them - while a real change of the wish is a choice and folds it.
+    /// </summary>
+    [Fact]
+    public void An_unchanged_wish_keeps_a_hand_opened_empty_body()
+    {
+        using var layout = NewLayout();
+        layout.BottomTabs.KeepsVisibleWhenEmpty = true;
+        layout.RevealBottomBody();
+        Assert.True(layout.IsBottomBodyOpen);
+
+        // The shell's idempotent sync write: same value, nothing happens.
+        layout.IsBottomMinimized = false;
+        Assert.True(layout.IsBottomBodyOpen);
+
+        // The group being pointed at another session's world ends the moment without touching the wish.
+        layout.DropBottomHandOpen();
+        Assert.True(layout.BottomTabs.IsMinimized);
+        Assert.False(layout.IsBottomMinimized);
+
+        // A changed write is the session's own choice: it folds and records the wish.
+        layout.RevealBottomBody();
+        layout.IsBottomMinimized = true;
+        Assert.False(layout.IsBottomBodyOpen);
+    }
+
+    [Fact]
+    public void A_reveal_from_the_chip_opens_a_collapsed_group_with_tabs()
+    {
+        using var layout = NewLayout();
+        layout.OpenTab(layout.BottomTabs, "subagent:a1", TabKind.SubAgent, new object(), "Worker");
+        layout.IsBottomMinimized = true;
+        Assert.True(layout.BottomTabs.IsMinimized);
+
+        // The wish is what a group with tabs needs; the reveal records it and the body comes back.
+        layout.RevealBottomBody();
+        Assert.False(layout.IsBottomMinimized);
+        Assert.True(layout.IsBottomBodyOpen);
+    }
+
+    [Fact]
+    public void A_reveal_from_the_chip_does_nothing_without_a_group_to_open()
+    {
+        using var layout = NewLayout();
+        layout.RevealBottomBody();
+        Assert.False(layout.BottomTabs.IsVisible);
+        Assert.False(layout.IsBottomMinimized);
     }
 
     private static WorkbenchLayout NewLayout() => new(new object(), new object(), new object(), new object(), new object());

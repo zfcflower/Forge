@@ -342,6 +342,9 @@ internal sealed partial class PanelTabStrip : TemplatedControl
 
         var close = new MenuItem { Header = ShellStrings.CloseTab };
         close.Click += (_, _) => CloseTab(tab);
+        // The tab's live state flips while this menu sits on its header (a run ends, a history tab is resumed), so
+        // the close offer follows the state at the moment the menu opens, not the moment the strip built it.
+        menu.Opening += (_, _) => close.IsVisible = !TabModel.BlocksUserClose(tab);
         menu.Items.Add(close);
 
         var closeOthers = new MenuItem { Header = ShellStrings.CloseOtherTabs };
@@ -362,10 +365,14 @@ internal sealed partial class PanelTabStrip : TemplatedControl
             var tabs = group.Tabs.ToArray();
             for (var i = 0; i < tabs.Length; i++)
             {
-                if (!ReferenceEquals(tabs[i], tab) && tabs[i].IsClosable
-                    && !await layout.TryCloseTabAsync(tabs[i]).ConfigureAwait(true))
+                // A live sub-agent's tab is not closable by the user, but it must not stop the sweep either - the
+                // tabs after it still get their close.
+                if (!ReferenceEquals(tabs[i], tab) && tabs[i].IsClosable && !TabModel.BlocksUserClose(tabs[i]))
                 {
-                    return;
+                    if (!await layout.TryCloseTabAsync(tabs[i]).ConfigureAwait(true))
+                    {
+                        return;
+                    }
                 }
             }
         }

@@ -78,6 +78,10 @@ internal sealed partial class TabHeaderView : TemplatedControl
     [GeneratedStyledProperty]
     public partial string? TabTitle { get; set; }
 
+    /// <summary>
+    /// The close box's offer, as the user sees it: the tab's own <see cref="TabModel.IsClosable"/>, minus the rule that a
+    /// live sub-agent's tab - the window onto a run in progress - is closed by no user gesture until its run ends.
+    /// </summary>
     [GeneratedStyledProperty]
     public partial bool IsClosable { get; set; }
 
@@ -124,7 +128,7 @@ internal sealed partial class TabHeaderView : TemplatedControl
         // A tab's content can be re-bound in place (OpenTab does that); the tone follows the content, so it follows the swap.
         WatchContent(tab.Content);
         TabTitle = tab.Title;
-        IsClosable = tab.IsClosable;
+        ApplyClosable();
         IsActive = ReferenceEquals(tab, tab.Group?.ActiveTab);
         ApplyIcon();
         AutomationProperties.SetName(this, tab.Title);
@@ -468,6 +472,11 @@ internal sealed partial class TabHeaderView : TemplatedControl
             or nameof(SubAgentViewModel.IsReadOnly))
         {
             ApplyIconTone();
+            // The run ending is also the close box coming back: the closable the user sees is a state of the content.
+            ApplyClosable();
         }
     }
+
+    /// <summary>The close box's offer for the watched tab; see <see cref="IsClosable"/>.</summary>
+    private void ApplyClosable() => IsClosable = Model is { } tab && tab.IsClosable && !TabModel.BlocksUserClose(tab);
 }

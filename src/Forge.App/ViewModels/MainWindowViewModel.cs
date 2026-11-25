@@ -189,10 +189,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private PanelToolButton? newGeneralSessionTool;
     private SessionWorkspaceViewModel? activeSession;
     private FinishedSubAgentsViewModel? watchedFinishedMenu;
+
+    /// <summary>The session whose menu <see cref="watchedFinishedMenu"/> is; its live roster keeps the group's title bar alive.</summary>
+    private SessionWorkspaceViewModel? watchedMenuSession;
     private IDialogService? dialogs;
 
     /// <summary>Set once the restored layout's bottom-group state has been handed to the first attached session.</summary>
     private bool bottomMinimizeAdopted;
+
+    /// <summary>The session whose wish the bottom group currently serves; a change of it ends a hand-opened empty body.</summary>
+    private SessionWorkspaceViewModel? bottomPointedAt;
     private bool disposed;
     private SettingsWindow? settingsWindow;
     private bool closing;
@@ -1087,6 +1093,17 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         session.SubAgentsChanged += OnSubAgentsChanged;
+        // The chip's expand half lands here: writing the session flag alone cannot open a group with nothing docked.
+        session.SubAgentRegionRevealRequested += () =>
+        {
+            session.SubAgentsCollapsed = false;
+            // The bottom group belongs to the session on screen: a floated view's chip records its own session's wish
+            // and leaves the region alone until that session is the one being looked at.
+            if (ReferenceEquals(activeSession, session))
+            {
+                Workbench.RevealBottomBody();
+            }
+        };
         session.AgentTreeChanged += OnAgentTreeChanged;
         sessions[info.Id] = session;
         if (carried is { } state)
@@ -2465,6 +2482,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private void SyncSubAgentRegion()
     {
         var session = activeSession;
+        if (!ReferenceEquals(bottomPointedAt, session))
+        {
+            // The group is being pointed at a (possibly another) session: its wish takes over, and a hand-opened empty
+            // body from the session before is a moment that does not travel along.
+            bottomPointedAt = session;
+            Workbench.DropBottomHandOpen();
+        }
+
         SyncFinishedMenu(session);
         if (session is null)
         {
@@ -2500,11 +2525,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             OpenSubAgentTab(agent, activate: false);
         }
 
-        // The chip reads the real thing, not the wish: a session whose sub-agents have all left the roster docks no tab, so
-        // the group folds to its title bar (its finished menu stays) and the chip rests - disabled - until a tab lands
-        // again. A child that finished a moment ago is still on the roster, so its tab is still there.
+        // The chip's accent reads the real thing, not the wish: a session whose sub-agents have all left the roster docks
+        // no tab, so the group folds to its title bar (its finished menu stays) and the accent rests until a tab lands
+        // again - while the click stays live either way. A child that finished a moment ago is still on the roster, so
+        // its tab is still there.
         session.SubAgentRegionOpen = Workbench.IsBottomBodyOpen;
-        session.CanToggleSubAgents = Workbench.HasBottomTab;
         SyncTreeActiveAgent();
     }
 
@@ -2550,7 +2575,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             tools.Add(newTerminalButton);
         }
 
-        WatchFinishedMenu(menu);
+        WatchFinishedMenu(session, menu);
     }
 
     /// <summary>The bottom group's "new terminal" tool; rebuilt on a language switch so its tooltip follows.</summary>
@@ -2626,10 +2651,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// Follows the menu's item count into <see cref="TabGroupModel.KeepsVisibleWhenEmpty"/>: the bottom group stays in the
-    /// layout while any finished sub-agent can still be opened from its title bar.
+    /// Follows the watched menu and its session into <see cref="TabGroupModel.KeepsVisibleWhenEmpty"/>: the bottom group
+    /// stays in the layout while the session has any sub-agent activity at all, so its title bar - with the restore button
+    /// that opens even an empty body - never leaves with it.
     /// </summary>
-    private void WatchFinishedMenu(FinishedSubAgentsViewModel menu)
+    private void WatchFinishedMenu(SessionWorkspaceViewModel? session, FinishedSubAgentsViewModel menu)
     {
         if (!ReferenceEquals(watchedFinishedMenu, menu))
         {
@@ -2642,33 +2668,36 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             menu.Items.CollectionChanged += OnFinishedItemsChanged;
         }
 
-        UpdateBottomGroupContent(menu);
+        watchedMenuSession = session;
+        UpdateBottomGroupContent();
     }
 
-    private void OnFinishedItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        if (watchedFinishedMenu is { } menu)
-        {
-            UpdateBottomGroupContent(menu);
-        }
-    }
+    private void OnFinishedItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateBottomGroupContent();
 
-    private void UpdateBottomGroupContent(FinishedSubAgentsViewModel menu) =>
-        Workbench.BottomTabs.KeepsVisibleWhenEmpty = menu.Items.Count > 0;
+    private void UpdateBottomGroupContent() =>
+        Workbench.BottomTabs.KeepsVisibleWhenEmpty = KeepsBottomGroupVisible(watchedFinishedMenu, watchedMenuSession);
+
+    /// <summary>
+    /// Whether the bottom group must stay in the layout with no tab docked: a finished sub-agent the title bar can still
+    /// open, or a live-roster child whose tab the user closed or floated while it runs - its tab comes back when the run
+    /// ends, and until then the group folds to its title bar instead of taking the restore button with it. A session
+    /// without any sub-agent activity gives the group nothing to carry, so it leaves the layout as before.
+    /// </summary>
+    internal static bool KeepsBottomGroupVisible(FinishedSubAgentsViewModel? menu, SessionWorkspaceViewModel? session) =>
+        menu is { Items.Count: > 0 } || session is { HasSubAgents: true };
 
     /// <summary>
     /// The bottom group's own restore button minimizes it; the session keeps that state so it is not popped up again. Its
     /// body coming and going (a tab docks, the last one leaves) is mirrored too, for the composer's chip: the accent follows
-    /// whether the body is on screen, the click's availability follows whether there is a tab to show at all.
+    /// whether the body is on screen - the click itself is always live, so it needs no gate.
     /// </summary>
     private void OnWorkbenchPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(WorkbenchLayout.IsBottomBodyOpen) or nameof(WorkbenchLayout.HasBottomTab))
+        if (e.PropertyName is nameof(WorkbenchLayout.IsBottomBodyOpen))
         {
             if (activeSession is { } open)
             {
                 open.SubAgentRegionOpen = Workbench.IsBottomBodyOpen;
-                open.CanToggleSubAgents = Workbench.HasBottomTab;
             }
 
             return;
@@ -3134,6 +3163,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     private async Task<bool> ConfirmCloseTabAsync(TabModel tab)
     {
+        // The one unconditional refusal: a live sub-agent's tab is the window onto a run, so no user gesture closes it
+        // (the strip hides its close box; this stands in for the middle click and whatever else reaches the guard).
+        if (TabModel.BlocksUserClose(tab))
+        {
+            return false;
+        }
+
         return tab.Content is not FileDocumentViewModel { IsDirty: true } file
             || await ConfirmDiscardManyAsync(() => [file]).ConfigureAwait(true);
     }
@@ -3528,6 +3564,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             watchedFinishedMenu.Items.CollectionChanged -= OnFinishedItemsChanged;
             watchedFinishedMenu = null;
         }
+
+        watchedMenuSession = null;
 
         // Every runtime is released before the composition root tears its stores down.
         composition.Runtimes.Dispose();

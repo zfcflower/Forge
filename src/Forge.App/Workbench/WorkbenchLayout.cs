@@ -60,8 +60,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <summary>The bottom group's intent to sit at title-bar height; held while the group has nothing to show.</summary>
     private bool bottomMinimized;
 
-    /// <summary>Mirror of <see cref="TabGroupModel.HasDockedTab"/> for the bottom group; see <see cref="HasBottomTab"/>.</summary>
-    private bool hasBottomTab;
 
     /// <summary>
     /// Set while the user has opened the bottom group by hand although it holds no tab: the fold rule below would otherwise
@@ -732,18 +730,35 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         get => bottomMinimized;
         set
         {
-            // Every write comes from the shell pointing the group at a session, so a hand-opened empty group is a moment rather
-            // than a wish and never travels along.
-            var handOpened = bottomOpenWhileEmpty;
-            bottomOpenWhileEmpty = false;
-            if (!Set(ref bottomMinimized, value) && !handOpened)
+            // An unchanged write is the shell's idempotent sync, not a session's choice: it must not end the hand-opened
+            // empty state. A changed write IS the shell pointing the group at a wish, so that state is a moment and
+            // does not travel along - the switch itself ends it (<see cref="DropBottomHandOpen"/>).
+            if (bottomMinimized == value)
             {
                 return;
             }
 
+            bottomOpenWhileEmpty = false;
+            Set(ref bottomMinimized, value);
             ApplyBottomMinimize();
             OnLayoutChanged();
         }
+    }
+
+    /// <summary>
+    /// Ends a hand-opened empty body without touching the wish: the group is being pointed at another session's sub-agent
+    /// world, and the empty state the session before had opened by hand is not that session's to inherit.
+    /// </summary>
+    public void DropBottomHandOpen()
+    {
+        if (!bottomOpenWhileEmpty)
+        {
+            return;
+        }
+
+        bottomOpenWhileEmpty = false;
+        ApplyBottomMinimize();
+        OnLayoutChanged();
     }
 
     /// <summary>
@@ -753,10 +768,25 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     public bool IsBottomBodyOpen => bottomTabs.IsVisible && !bottomTabs.IsMinimized;
 
     /// <summary>
-    /// True while the bottom group holds a docked tab. Only then has its body something to show or hide, so this is what the
-    /// composer's chip reads to decide whether its click can do anything at all.
+    /// Opens the bottom group's body from outside its own title bar - the composer's sub-agent chip. The session's wish
+    /// is recorded the way the shell records every reveal, and a group with nothing docked opens onto its empty state
+    /// (what its own restore button does) instead of folding straight back: the chip is drawn whenever the session has
+    /// sub-agent activity, so a click that could not reach the body would be a dead button.
     /// </summary>
-    public bool HasBottomTab => hasBottomTab;
+    public void RevealBottomBody()
+    {
+        if (!bottomTabs.IsVisible)
+        {
+            return;
+        }
+
+        // The wish first, exactly as the shell records it - the setter clears any earlier hand-open, so the mark that
+        // keeps an empty body up has to land after it.
+        IsBottomMinimized = false;
+        bottomOpenWhileEmpty = !bottomTabs.HasDockedTab;
+        ApplyBottomMinimize();
+        OnLayoutChanged();
+    }
 
     /// <summary>
     /// The bottom group's minimize state, and its only writer. The body shows while a tab is docked in the group and the
@@ -769,9 +799,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// </summary>
     private void ApplyBottomMinimize()
     {
-        // Cached for the chip: HasDockedTab is derived from the tab list, so the notification needs a value that can change.
-        Set(ref hasBottomTab, bottomTabs.HasDockedTab, nameof(HasBottomTab));
-
         if (!bottomTabs.IsVisible)
         {
             // Out of the layout, the group has no body and no title bar to carry: a hand-opened empty state cannot survive it.
@@ -781,7 +808,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             return;
         }
 
-        bool hasTab = hasBottomTab;
+        bool hasTab = bottomTabs.HasDockedTab;
         // A tab docking ends the hand-opened state of an empty group: from here the fold follows the intent and the tabs again.
         if (hasTab)
         {
@@ -1711,8 +1738,9 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         }
 
         // The group's own restore button (or the layout clearing a stale minimize) moves the intent with it, so the
-        // composer toggle and the title bar never disagree. Only a group with a tab is clickable, so the fold the layout
-        // forces on an empty group is not the user's choice and must stay out of the intent.
+        // composer toggle and the title bar never disagree. The fold the layout forces on a group with nothing docked
+        // is not the user's choice - the composer's chip reaches the body through RevealBottomBody, not through this -
+        // so it must stay out of the intent.
         if (e.PropertyName == nameof(TabGroupModel.IsMinimized) && ReferenceEquals(group, bottomTabs) &&
             bottomMinimized != bottomTabs.IsMinimized)
         {

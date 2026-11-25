@@ -69,6 +69,39 @@ public sealed class SubAgentTabIconTests
         return Task.CompletedTask;
     });
 
+    [Fact]
+    public Task A_live_sub_agent_tab_offers_no_close_until_its_run_ends() => SharedUi.RunAsync(() =>
+    {
+        var agent = new SubAgentViewModel(
+            "session-1", "Worker-3", "child-session-1", "Worker", "Say hi.", "test-model", stopRequested: null, parentAgentId: "root");
+        var header = new TabHeaderView { Model = new TabModel("tab-subagent", TabKind.SubAgent, agent, agent.TabTitle) };
+        var window = new Window { Width = 320, Height = 120, Content = header };
+        window.Show();
+        SharedUi.Settle(window);
+        var closeBox = header.GetVisualDescendants()
+            .OfType<PanelIconButton>()
+            .Single(button => button.Name == "PART_Close");
+
+        // Queued for a slot, then running: the tab is the window onto a live run, so it offers no close at all -
+        // a user-close would strand the run and, when it is the group's only tab, leave the composer's sub-agent
+        // chip nothing to open.
+        Assert.False(header.IsClosable);
+        Assert.False(closeBox.IsVisible);
+        agent.MarkRunning(DateTimeOffset.UtcNow);
+        SharedUi.Settle(window);
+        Assert.False(header.IsClosable);
+        Assert.False(closeBox.IsVisible);
+
+        // The run ends - stopped by the user included: the close box is back, and closing is the retire into history.
+        agent.Finish(SubAgentStatus.Stopped, TimeSpan.FromSeconds(3), null, DateTimeOffset.UtcNow);
+        SharedUi.Settle(window);
+        Assert.True(header.IsClosable);
+        Assert.True(closeBox.IsVisible);
+
+        window.Close();
+        return Task.CompletedTask;
+    });
+
     /// <summary>The named resource of the window's current theme; a missing key fails here instead of comparing two nulls.</summary>
     private static object Resource(Window window, string key)
     {

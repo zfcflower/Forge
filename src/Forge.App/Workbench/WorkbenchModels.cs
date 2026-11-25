@@ -126,9 +126,11 @@ internal sealed class TabGroupModel(string id, RegionRole region, string title) 
     }
 
     /// <summary>
-    /// True while a title-bar tool of the group still has content (the finished sub-agent menu), so the group keeps its
-    /// place in the layout without a docked tab. <see cref="WorkbenchLayout"/> recomputes the group's visibility when it
-    /// changes; the flag itself is not persisted.
+    /// True while the session the group serves still has sub-agent activity its title bar can stand in for - a finished
+    /// child the menu can reopen, or a live-roster child whose tab was closed or floated while it runs - so the group
+    /// keeps its place in the layout without a docked tab instead of taking its restore button with it. The shell
+    /// (<c>MainWindowViewModel.KeepsBottomGroupVisible</c>) is the one writer; <see cref="WorkbenchLayout"/> recomputes
+    /// the group's visibility when it changes; the flag itself is not persisted.
     /// </summary>
     public bool KeepsVisibleWhenEmpty
     {
@@ -178,7 +180,23 @@ internal sealed class TabModel(string id, TabKind kind, object content, string t
         set => Set(ref title, value);
     }
 
+    /// <summary>
+    /// Whether this kind of tab offers a close at all (a pinned inspector tool never does). The state of the content is
+    /// not in here - a live sub-agent's tab is closed by no user gesture, but its tab is still closable the moment its
+    /// run ends - so the close paths combine this flag with <see cref="BlocksUserClose"/>.
+    /// </summary>
     public bool IsClosable { get; init; } = true;
+
+    /// <summary>
+    /// True while this tab must refuse every user-initiated close: a sub-agent that is queued or running is the window
+    /// onto a live run - the tab is what its stream, its finish event and the roster's re-dock address, and a user-close
+    /// would strand the run where nothing can see or stop it.
+    /// The strip hides the close box, the tab menu omits "close", "close others" skips the tab, and the shell's close
+    /// guard vetoes what is left. A finished child - stopped by the user included - opens its close box again: closing
+    /// it is the retire into the history menu. The shell's own closes (session-switch prune, retire) call
+    /// <c>CloseTab</c> directly and are not user closes.
+    /// </summary>
+    public static bool BlocksUserClose(TabModel tab) => tab.Content is SubAgentViewModel { IsLive: true };
 
     /// <summary>
     /// The header's double-click rename, for a tab whose label the user owns (an agent session's own name today). The

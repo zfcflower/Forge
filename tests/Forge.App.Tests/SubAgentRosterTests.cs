@@ -186,6 +186,61 @@ public sealed class SubAgentRosterTests : IDisposable
         session.Dispose();
     });
 
+    [Fact]
+    public Task The_bottom_group_stays_in_the_layout_while_a_child_runs_with_no_history() => SharedUi.RunAsync(async () =>
+    {
+        var clock = new Clock();
+        var session = await SessionAsync(clock);
+        // No sub-agent activity at all: the group leaves the layout, as it always has.
+        Assert.False(MainWindowViewModel.KeepsBottomGroupVisible(session.FinishedMenu, session));
+
+        // A child runs; its tab is the group's only content, and the user can close or float it while it works.
+        // The group must stay in the layout - folded to its title bar, with the restore button that opens even an
+        // empty body - or the run's report has nowhere to land when the end event re-docks the tab.
+        Start(session, clock.GetUtcNow());
+        Pump();
+        Assert.Empty(session.Finished);
+        Assert.True(MainWindowViewModel.KeepsBottomGroupVisible(session.FinishedMenu, session));
+
+        // The run ended and the window closed it into history: the finished menu alone carries the group, same verdict.
+        Finish(session, SubAgentStatus.Completed, clock.GetUtcNow());
+        clock.Now = clock.GetUtcNow().AddHours(2);
+        session.Tick();
+        Assert.Single(session.Finished);
+        Assert.True(MainWindowViewModel.KeepsBottomGroupVisible(session.FinishedMenu, session));
+
+        session.Dispose();
+    });
+
+    [Fact]
+    public Task The_composer_chip_expand_asks_the_shell_to_open_the_region() => SharedUi.RunAsync(async () =>
+    {
+        var clock = new Clock();
+        var session = await SessionAsync(clock);
+        session.SubAgentsCollapsed = true;
+
+        // Without a shell attached (a standalone view, a test) the flag is all the expand can write.
+        session.ToggleSubAgentsCommand.Execute(null);
+        Assert.False(session.SubAgentsCollapsed);
+
+        // With one, the expand half is an ask, not a flag write: the shell records the wish itself and then opens the
+        // group's body - the empty state included - the way the title bar's restore button does.
+        session.SubAgentsCollapsed = true;
+        var asked = 0;
+        session.SubAgentRegionRevealRequested += () => asked++;
+        session.ToggleSubAgentsCommand.Execute(null);
+        Assert.Equal(1, asked);
+        Assert.True(session.SubAgentsCollapsed);
+
+        // The collapse half stays the plain flag write it always was.
+        session.SubAgentsCollapsed = false;
+        session.ToggleSubAgentsCommand.Execute(null);
+        Assert.Equal(1, asked);
+        Assert.True(session.SubAgentsCollapsed);
+
+        session.Dispose();
+    });
+
     private static void Start(SessionWorkspaceViewModel session, DateTimeOffset at, string childId = "Worker-1")
     {
         session.OnAgentEvent(new AgentSubAgentStarted("root", childId, "Worker", "Do the thing.", "test-model", childId + "-session", at));

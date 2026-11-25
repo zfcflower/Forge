@@ -116,7 +116,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private bool rootRebuilt;
     private bool subAgentsCollapsed;
     private bool subAgentRegionOpen;
-    private bool canToggleSubAgents;
     private CancellationTokenSource? turn;
     private int turnNumber;
 
@@ -376,7 +375,27 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             Composer.PropertyChanged += OnComposerSelectionChanged;
         }
 
-        ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
+        // Expanding cannot be a bare flag write: a group with nothing docked folds its own body right back, so the
+        // chip hands the ask to the shell, which opens the region - the empty state included - exactly as the group's
+        // own restore button does. Without a shell attached (a standalone view, a test) the flag is all there is.
+        ToggleSubAgentsCommand = new RelayCommand(() =>
+        {
+            if (SubAgentsCollapsed)
+            {
+                if (SubAgentRegionRevealRequested is null)
+                {
+                    SubAgentsCollapsed = false;
+                }
+                else
+                {
+                    SubAgentRegionRevealRequested();
+                }
+            }
+            else
+            {
+                SubAgentsCollapsed = true;
+            }
+        });
         Instruments = new SessionInstrumentsViewModel(
             session,
             instrumentSourcesResolved,
@@ -697,6 +716,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
     public event Action? SubAgentsChanged;
 
+    /// <summary>
+    /// The user asked the shell to open the sub-agent region from the composer's chip (the expand half of its toggle).
+    /// Writing <see cref="SubAgentsCollapsed"/> alone cannot open a group with nothing docked - its body folds on its
+    /// own - so the chip raises this instead, and the shell opens the body the way the title bar's restore button does.
+    /// </summary>
+    public event Action? SubAgentRegionRevealRequested;
+
     /// <summary>Raised when the agent hierarchy or one agent's run state changed; the left panel rebuilds its agent rows.</summary>
     public event Action? AgentTreeChanged;
 
@@ -762,18 +788,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     }
 
     /// <summary>
-    /// Whether the bottom group holds a tab this session can show or hide. The chip is drawn from
-    /// <see cref="HasSubAgentActivity"/> but clickable only from here: with nothing docked the group has no body, so a click
-    /// could not do anything and the chip says so instead of swallowing it.
+    /// Whether the composer's sub-agent chip is drawn: the bottom group belongs to a root session's conversation, so an
+    /// agent-session view never shows the toggle - a live sub-agent or a finished one in the dropdown is what it waits
+    /// for otherwise.
     /// </summary>
-    public bool CanToggleSubAgents
-    {
-        get => canToggleSubAgents;
-        internal set => Set(ref canToggleSubAgents, value);
-    }
-
-    /// <summary>Anything to collapse or reopen: a live sub-agent or a finished one in the dropdown.</summary>
-    public bool HasSubAgentActivity => subAgents.Count > 0 || finished.Count > 0;
+    public bool ShowsSubAgentToggle => !IsAgentSession && (subAgents.Count > 0 || finished.Count > 0);
 
     /// <summary>
     /// The agent hierarchy of this session as flat rows with parent links: the main agent, its sub-agents and their own
@@ -1037,7 +1056,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             SyncFinishedMenu();
 
             OnPropertyChanged(nameof(HasSubAgents));
-            OnPropertyChanged(nameof(HasSubAgentActivity));
+            OnPropertyChanged(nameof(ShowsSubAgentToggle));
             RaiseSubAgentCounters();
 
             // The replayed roster is what the project tree draws its agent rows (and the session's chevron) from, so the
@@ -3314,7 +3333,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         subAgents.Add(agent);
         DrainEarlyDeltas(agent);
         OnPropertyChanged(nameof(HasSubAgents));
-        OnPropertyChanged(nameof(HasSubAgentActivity));
+        OnPropertyChanged(nameof(ShowsSubAgentToggle));
         RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
         OnAgentStateChanged();
@@ -3344,7 +3363,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         resumed.Transcript.AddUserMessage(started.Task, started.At);
         DrainEarlyDeltas(resumed);
         OnPropertyChanged(nameof(HasSubAgents));
-        OnPropertyChanged(nameof(HasSubAgentActivity));
+        OnPropertyChanged(nameof(ShowsSubAgentToggle));
         RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
         OnAgentStateChanged();
@@ -3443,7 +3462,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         // turn reports only the new task's tokens and not the whole instance cumulative again.
         SyncFinishedMenu();
         OnPropertyChanged(nameof(HasSubAgents));
-        OnPropertyChanged(nameof(HasSubAgentActivity));
+        OnPropertyChanged(nameof(ShowsSubAgentToggle));
         RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
         OnAgentStateChanged();
@@ -3469,7 +3488,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         finished.Add(agent);
         SyncFinishedMenu();
         OnPropertyChanged(nameof(HasSubAgents));
-        OnPropertyChanged(nameof(HasSubAgentActivity));
+        OnPropertyChanged(nameof(ShowsSubAgentToggle));
         RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
         OnAgentStateChanged();

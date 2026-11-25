@@ -220,8 +220,7 @@
                 <Button Classes="instrument-chip"
                         Classes.active="{Binding SubAgentRegionOpen}"
                         Command="{Binding ToggleSubAgentsCommand}"
-                        IsVisible="{Binding HasSubAgentActivity}"
-                        IsEnabled="{Binding CanToggleSubAgents}"
+                        IsVisible="{Binding ShowsSubAgentToggle}"
                         ToolTip.Tip="{Binding SubAgentToggleTooltip}"
                         AutomationProperties.AutomationId="strip-subagents"
                         AutomationProperties.Name="{Binding SubAgentToggleName}">
