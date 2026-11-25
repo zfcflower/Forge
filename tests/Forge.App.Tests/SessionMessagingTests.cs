@@ -166,6 +166,8 @@ public sealed class SessionMessagingTests
             return new SessionTurnChanges(2, 5, 3);
         }
 
+        public bool AcceptsReceipts => true;
+
         public void DeliverReceipt(string initiatorSessionId, string text)
         {
             receipts.Enqueue(text);

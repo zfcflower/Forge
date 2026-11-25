@@ -380,6 +380,8 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// idle one gets it as an unread message in the transcript - written to its history, so the next turn reads it, and never
     /// turned into a turn of its own.
     /// </summary>
+    public bool AcceptsReceipts => !disposed && !closing;
+
     public void DeliverReceipt(string initiatorSessionId, string text)
     {
         if (string.IsNullOrEmpty(initiatorSessionId) || string.IsNullOrWhiteSpace(text))

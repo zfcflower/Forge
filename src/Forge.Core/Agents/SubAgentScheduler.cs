@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using Forge.Abstractions;
@@ -22,7 +22,29 @@ public sealed record SubAgentOutcome(string AgentId, string Text, bool IsError)
     /// conversation (and its prompt cache). The tool reports it to the model: the answer's id is not a fresh agent.
     /// </summary>
     public bool Resumed { get; init; }
+
+    /// <summary>
+    /// Why a stopped or failed run ended, in the run's own words (the stop note or the exception). Null for a run that finished;
+    /// the receipt's status line has to name it rather than say the reason is unknown.
+    /// </summary>
+    public string? Reason { get; init; }
 }
+
+/// <summary>
+/// How one background child ended (<see cref="SubAgentScheduler.StartBackgroundAsync"/>): the parent session it was spawned
+/// from, which child finished, and the report its blocking counterpart would have returned as the tool's result. It is what
+/// the parent reads when the child ends, as a reply message - never as a turn of its own.
+/// </summary>
+public sealed record BackgroundChildReport(
+    string ParentSessionId,
+    string ParentAgentId,
+    string AgentId,
+    string ChildSessionId,
+    string Kind,
+    string TaskLabel,
+    SessionReplyStatus Status,
+    string? Reason,
+    string Report);
 
 /// <summary>Who drives an instance: the model (<c>spawn_agent</c> and its control tools) or the user (a session the user opened under a root).</summary>
 public enum AgentOwner
@@ -40,6 +62,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
 {
     private const int TitleLimit = 80;
     private const string ParentCancelled = "parent cancelled";
+    private const string StoppedBeforeStart = "stopped before it started";
 
     /// <summary>A user-driven session sits directly under the root session; its own spawns are the only ones below it.</summary>
     private const int UserSessionDepth = 1;
@@ -56,6 +79,35 @@ public sealed class SubAgentScheduler : ISubAgentControl
     private readonly HashSet<string> finished = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The background runs (<see cref="StartBackgroundAsync"/>) still in flight, by agent id, with the parent session each was
+    /// spawned from. A background child is not linked to the turn it was spawned from, so this map - not a caller's token - is
+    /// what a stop and a host shutdown walk; the session is what makes a stop scoped (one agent session's tab stops its own
+    /// children, a root's tab stops the whole tree). Guarded by <see cref="gate"/>.
+    /// </summary>
+    private readonly Dictionary<string, string> backgroundRuns = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Bumped by every stop: one number for all sessions (teardown, a root's whole-tree stop) and one per parent session (an agent
+    /// session's own stop). A spawn that read them before its (awaited) preparation can tell afterwards that a stop covering it ran
+    /// meanwhile, and ends itself instead of starting a run the stop never saw.
+    /// </summary>
+    private long backgroundEpochAll;
+
+    private readonly Dictionary<string, long> backgroundEpochs = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Runs a stop named before their <see cref="SubAgentRun"/> existed, so they are stopped the moment they attach one. Guarded by
+    /// <see cref="gate"/>.
+    /// </summary>
+    private readonly HashSet<string> backgroundStopPending = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Set by <see cref="CloseBackgroundRuns"/> only (the runtime is being torn down): this host then takes no new background
+    /// child at all. An ordinary stop does not set it - the session keeps working, and its next turn may spawn again.
+    /// </summary>
+    private bool backgroundClosed;
+
+    /// <summary>
     /// When each child's last run ended, for the reuse window only: a child is a candidate while its last run ended less
     /// than <see cref="AgentOptions.SubAgentReuseWindow"/> ago. Kept beside <see cref="finished"/> rather than on the
     /// instance because it is scheduling state - the instance itself does not care when it last ran.
@@ -63,9 +115,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
     private readonly Dictionary<string, DateTimeOffset> lastFinishedAt = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Children a <c>reuse: false</c> spawn created - an automation's child and a review's reviewer. Their runs are not the
-    /// parent conversation's work (a reviewer must not carry its previous verdict into the next review), so the scheduler
-    /// never hands them a later <c>spawn_agent</c> task on its own; an explicit <c>resume_id</c> still can.
+    /// Children a <c>reuse: false</c> spawn created - an automation's child. Its run is not the parent conversation's work,
+    /// so the scheduler never hands it a later <c>spawn_agent</c> task on its own; an explicit <c>resume_id</c> still can.
     /// </summary>
     private readonly HashSet<string> notReusable = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> counters = new(StringComparer.Ordinal);
@@ -128,6 +179,75 @@ public sealed class SubAgentScheduler : ISubAgentControl
         lock (gate)
         {
             return owners.TryGetValue(id, out var owner) ? owner : AgentOwner.Model;
+        }
+    }
+
+    /// <summary>
+    /// Takes over the living children of a scheduler whose host was replaced for the same session: a prompt reload builds a
+    /// new <see cref="AgentHost"/>, and its scheduler would otherwise start from an empty roster and hand out fresh children
+    /// of kinds that are still sitting idle. The instances, their ownership, finish times and not-reusable marks move here,
+    /// and the id counters move with them so a new child cannot take an id a living one still holds.
+    /// <para>A child still running stays behind: its run ends, and reports, in the scheduler that started it (a reload refuses
+    /// to rebuild while any child runs, so this is the defensive half of the same rule).</para>
+    /// </summary>
+    public void TakeOverFrom(SubAgentScheduler previous)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+        if (ReferenceEquals(previous, this))
+        {
+            return;
+        }
+
+        lock (previous.gate)
+        {
+            lock (gate)
+            {
+                var taken = new List<string>(previous.instances.Count);
+                foreach (var (id, instance) in previous.instances)
+                {
+                    if (instance.IsAcquired)
+                    {
+                        continue;
+                    }
+
+                    taken.Add(id);
+                    instances[id] = instance;
+                    if (previous.owners.TryGetValue(id, out var owner))
+                    {
+                        owners[id] = owner;
+                    }
+
+                    if (previous.finished.Contains(id))
+                    {
+                        finished.Add(id);
+                    }
+
+                    if (previous.lastFinishedAt.TryGetValue(id, out var finishedAt))
+                    {
+                        lastFinishedAt[id] = finishedAt;
+                    }
+
+                    if (previous.notReusable.Contains(id))
+                    {
+                        notReusable.Add(id);
+                    }
+                }
+
+                foreach (var (prefix, current) in previous.counters)
+                {
+                    counters[prefix] = Math.Max(current, counters.GetValueOrDefault(prefix));
+                }
+
+                // The replaced host is going away, so it must not answer for an id this scheduler now drives.
+                foreach (var id in taken)
+                {
+                    previous.instances.Remove(id);
+                    previous.owners.Remove(id);
+                    previous.finished.Remove(id);
+                    previous.lastFinishedAt.Remove(id);
+                    previous.notReusable.Remove(id);
+                }
+            }
         }
     }
 
@@ -203,6 +323,345 @@ public sealed class SubAgentScheduler : ISubAgentControl
         ModelSettings? model = null,
         bool reuse = true)
     {
+        var prepared = await PrepareAsync(kind, task, resumeId, context, sink, parentId, ct, owner, model, reuse).ConfigureAwait(false);
+        if (prepared.Refusal is { } refusal)
+        {
+            return refusal;
+        }
+
+        var instance = prepared.Instance!;
+        try
+        {
+            var outcome = await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, prepared.Watch, ct).ConfigureAwait(false);
+            return prepared.Reused ? outcome with { Resumed = true } : outcome;
+        }
+        finally
+        {
+            // A blocking run's instance is the one a background child's report may have been interjected into, and the loop may end
+            // without reaching a boundary: the leftovers go to the store before the gate opens for the next turn.
+            await PersistLeftoverInterjectionsAsync(instance).ConfigureAwait(false);
+            instance.Release();
+        }
+    }
+
+    /// <summary>
+    /// Starts a spawn that does <b>not</b> wait for the child: the parent's tool call returns at once and goes on working, and the
+    /// child's finish is reported to <see cref="BackgroundReports"/> instead of coming back as the tool's result. The run is not
+    /// linked to the caller's token - that token dies with the turn the spawn came from, which is exactly what must not happen
+    /// to a child that is meant to outlive it - so it ends by itself, or through <see cref="Stop"/>. Everything a blocking spawn
+    /// does (depth limit, catalog, tool list, model override, reuse, slot pool, session row, start/finish events) happens here
+    /// first and unchanged; only the waiting moves out.
+    /// </summary>
+    public async Task<BackgroundSpawn> StartBackgroundAsync(
+        string kind,
+        string task,
+        string? resumeId,
+        ToolContext context,
+        IAgentEventSink sink,
+        string parentId,
+        CancellationToken ct = default,
+        AgentOwner owner = AgentOwner.Model,
+        ModelSettings? model = null,
+        bool reuse = true)
+    {
+        // A stop of this parent session is captured as an epoch: the preparation below waits on the store, so a stop may run while
+        // this spawn has no run to stop yet. The check when it registers is what refuses it then. Keyed by parent session, because a
+        // stop of one session must not cancel another session's spawn; the all-sessions number is the teardown's and a root's.
+        long epochAll;
+        long epochSession;
+        lock (gate)
+        {
+            if (backgroundClosed)
+            {
+                return new BackgroundSpawn(null, StoppedStarting(resumeId));
+            }
+
+            epochAll = backgroundEpochAll;
+            epochSession = backgroundEpochs.GetValueOrDefault(context.SessionId);
+        }
+
+        var prepared = await PrepareAsync(kind, task, resumeId, context, sink, parentId, ct, owner, model, reuse)
+            .ConfigureAwait(false);
+        if (prepared.Refusal is { } refusal)
+        {
+            return new BackgroundSpawn(null, refusal);
+        }
+
+        var instance = prepared.Instance!;
+        bool stale;
+        lock (gate)
+        {
+            // The preparation waited on the store, so a stop - or the cancellation of the tool call that asked for this - may have
+            // happened while this spawn had no run to stop. The run is in the map a stop walks from here on, and one that already
+            // happened is honoured by refusing to start at all.
+            stale = ct.IsCancellationRequested
+                || backgroundClosed
+                || epochAll != backgroundEpochAll
+                || epochSession != backgroundEpochs.GetValueOrDefault(context.SessionId);
+            if (!stale)
+            {
+                backgroundRuns[instance.Id] = context.SessionId;
+            }
+        }
+
+        if (stale)
+        {
+            // Nothing was run. The instance keeps its gate free and is barred from the reuse pool, so a later spawn cannot pick up a
+            // child that never had a turn; its (empty) session row stays, the way any spawn that failed before its first turn leaves one.
+            lock (gate)
+            {
+                notReusable.Add(instance.Id);
+            }
+
+            instance.Release();
+            return new BackgroundSpawn(null, StoppedStarting(resumeId));
+        }
+        // No await between the registration above and this call, and CompleteInBackgroundAsync reaches DriveAsync (which attaches
+        // the run the stop control needs) before its first await: a stop that saw the registration can always stop it.
+        // The caller's cancellation is live only across the start itself: if it fires before this method has answered, the child is
+        // stopped again (the model never learns its id, so nothing could ever steer or stop it). Once the start is reported, the
+        // background run belongs to the session, not to that turn, and this lease is gone.
+        using var lease = ct.Register(static state =>
+        {
+            var (owner, id) = ((SubAgentScheduler, string))state!;
+            owner.Stop(id, "the tool call that started it was cancelled");
+        }, (this, instance.Id));
+
+        _ = CompleteInBackgroundAsync(instance, task, sink, parentId, prepared.Watch, prepared.Reused, context);
+
+        return ct.IsCancellationRequested
+            ? new BackgroundSpawn(null, StoppedStarting(resumeId))
+            : new BackgroundSpawn(instance, Refusal: null);
+    }
+    /// <summary>
+    /// The child of one <see cref="StartBackgroundAsync"/>: what the spawn's tool call names (its id and session) and nothing
+    /// else - it is still running when the call returns. <see cref="Refusal"/> is set instead when the spawn never started.
+    /// </summary>
+    public sealed record BackgroundSpawn(AgentInstance? Instance, SubAgentOutcome? Refusal)
+    {
+        public string AgentId => Instance?.Id ?? Refusal?.AgentId ?? string.Empty;
+
+        public string ChildSessionId => Instance?.SessionId ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Where a background child's end is reported: the parent session it belongs to, the child that finished, and the report its
+    /// blocking counterpart would have returned as the tool's result. Null drops the report (a scheduler without a host), which is
+    /// what a bench or a bare unit test looks like.
+    /// </summary>
+    public Func<BackgroundChildReport, ValueTask>? BackgroundReports { get; set; }
+
+    /// <summary>
+    /// Stops the background children spawned from <paramref name="parentSessionId"/> - every one of them when it is null, which is
+    /// what a root's stop means (the whole tree). A background run no longer dies with the turn that started it, so this registry
+    /// walk is what ends it; the same control surface the model's stop tool and a sub-agent's own stop button use, so each run
+    /// ends the way a stop always ends (partial text kept and reported).
+    /// <para>The host keeps working afterwards: a new turn may spawn again. Only <see cref="CloseBackgroundRuns"/> refuses.</para>
+    /// <para>Deliberately driven from this registry rather than from the app's sub-agent rows: a background child can be running
+    /// before its start event has travelled through the frame coalescer, and a stop that trusted the rows would leave exactly
+    /// that child behind.</para>
+    /// </summary>
+    public int StopBackgroundRuns(string? parentSessionId, string? reason = null)
+    {
+        string[] ids;
+        lock (gate)
+        {
+            if (parentSessionId is null)
+            {
+                backgroundEpochAll++;
+            }
+            else
+            {
+                backgroundEpochs[parentSessionId] = backgroundEpochs.GetValueOrDefault(parentSessionId) + 1;
+            }
+
+            ids = [.. backgroundRuns
+                .Where(entry => parentSessionId is null || string.Equals(entry.Value, parentSessionId, StringComparison.Ordinal))
+                .Select(static entry => entry.Key)];
+            foreach (var id in ids)
+            {
+                // A run whose SubAgentRun is not attached yet takes the stop when it is (see Attach).
+                backgroundStopPending.Add(id);
+            }
+        }
+
+        var stopped = 0;
+        foreach (var id in ids)
+        {
+            if (Stop(id, reason) is SubAgentControlResult.Accepted or SubAgentControlResult.NotFound)
+            {
+                stopped++;
+            }
+        }
+
+        return stopped;
+    }
+
+    /// <summary>
+    /// The runtime is going away: every background child stops and this host takes no new one. Called only from the teardown of a
+    /// session runtime - an ordinary stop goes through <see cref="StopBackgroundRuns"/>, which leaves the host usable.
+    /// </summary>
+    public int CloseBackgroundRuns(string? reason = null)
+    {
+        lock (gate)
+        {
+            backgroundClosed = true;
+        }
+
+        return StopBackgroundRuns(parentSessionId: null, reason);
+    }
+
+    private static SubAgentOutcome StoppedStarting(string? resumeId) => new(
+        resumeId ?? string.Empty,
+        "This session stopped while the background sub-agent was starting, so it was not run.",
+        IsError: true);
+
+    private async Task CompleteInBackgroundAsync(
+        AgentInstance instance,
+        string task,
+        IAgentEventSink sink,
+        string parentId,
+        Stopwatch watch,
+        bool reused,
+        ToolContext context)
+    {
+        try
+        {
+            SubAgentOutcome outcome;
+            try
+            {
+                outcome = await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, watch, CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (reused)
+                {
+                    outcome = outcome with { Resumed = true };
+                }
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A background run has no caller to throw to: it is reported like a failed run, which is what the receipt says.
+                outcome = new SubAgentOutcome(instance.Id, $"Sub-agent '{instance.Id}' failed: {exception.Message}", IsError: true)
+                {
+                    Reason = exception.Message,
+                };
+            }
+            finally
+            {
+                // Order matters: the leftovers are taken while this run still owns the instance (a new turn cannot start under the
+                // write), and the gate is released only after they are in the history.
+                await PersistLeftoverInterjectionsAsync(instance).ConfigureAwait(false);
+                instance.Release();
+            }
+
+            if (BackgroundReports is not { } reports)
+            {
+                return;
+            }
+
+            var report = new BackgroundChildReport(
+                context.SessionId,
+                parentId,
+                instance.Id,
+                instance.SessionId,
+                instance.Definition.Name,
+                task,
+                StatusOf(outcome),
+                outcome.Reason,
+                outcome.Text);
+            try
+            {
+                await reports(report).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                Trace.TraceWarning($"background sub-agent report failed: {exception.Message}");
+            }
+        }
+        finally
+        {
+            // Only now is the run over as far as a shutdown is concerned: the report is delivered, so a teardown that waits for this
+            // task does not release anything the delivery still needs.
+            lock (gate)
+            {
+                backgroundRuns.Remove(instance.Id);
+                backgroundStopPending.Remove(instance.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Persists the interjections a model-spawned child's run never reached a boundary for. The root's tab hands its own leftovers
+    /// back to the queue and a user-driven session's tab does the same; a child of the model's own has no tab and no guaranteed
+    /// next turn, so an interjected message would otherwise sit in memory and vanish with the instance. The store is the one place
+    /// the next turn - or a reopened session - reads it from.
+    /// </summary>
+    internal async Task PersistLeftoverInterjectionsAsync(AgentInstance instance)
+    {
+        // A model-owned run (the root, a model-spawned child) has no tab to hand its leftovers back to, so they are stored here. A
+        // user-driven session's tab does that itself - but only when an app is behind this host at all; headless, nobody does, and
+        // the same store write is what keeps the message.
+        var modelOwned = OwnerOf(instance.Id) == AgentOwner.Model;
+        if (store is null || (!modelOwned && (ExternalHandBack?.Invoke() ?? false)))
+        {
+            return;
+        }
+
+        var leftovers = instance.TakeInterjections();
+        for (var index = 0; index < leftovers.Count; index++)
+        {
+            var interjection = leftovers[index];
+            var message = new ChatMessage(MessageRole.User, interjection.Content);
+            try
+            {
+                var seq = await store.AppendAsync(instance.SessionId, message, null, CancellationToken.None).ConfigureAwait(false);
+                instance.Add(message, seq);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // The store could not take it: this one and everything behind it go back to the inbox in their original order, so
+                // nothing is dropped and nothing overtakes what was typed before it.
+                for (var back = leftovers.Count - 1; back >= index; back--)
+                {
+                    instance.Requeue(leftovers[back]);
+                }
+
+                Trace.TraceWarning($"a leftover interjection could not be stored: {exception.Message}");
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an app behind this host hands a user-driven session's leftover interjections back to its own queue (the tab's job).
+    /// Set by the host to the same lazy lookup its delivery seam uses; null (a scheduler on its own) means nobody does.
+    /// </summary>
+    internal Func<bool>? ExternalHandBack { get; set; }
+
+    /// <summary>How one finished background child ended, in the terms the reply receipt's status line uses.</summary>
+    private static SessionReplyStatus StatusOf(SubAgentOutcome outcome) => outcome switch
+    {
+        { Stopped: true } => SessionReplyStatus.Stopped,
+        { IsError: true } => SessionReplyStatus.Failed,
+        _ => SessionReplyStatus.Completed,
+    };
+
+    /// <summary>
+    /// Everything both kinds of spawn do before a turn runs: validation, the instance to run (a resumed one, a reused idle one, or
+    /// a freshly created session), and the gate held for the drive. A refusal is returned instead of throwing, exactly as it was
+    /// returned from <see cref="SpawnAsync"/> before the waiting moved out of it.
+    /// </summary>
+    private async Task<Prepared> PrepareAsync(
+        string kind,
+        string task,
+        string? resumeId,
+        ToolContext context,
+        IAgentEventSink sink,
+        string parentId,
+        CancellationToken ct,
+        AgentOwner owner,
+        ModelSettings? model,
+        bool reuse)
+    {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(sink);
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
@@ -244,7 +703,6 @@ public sealed class SubAgentScheduler : ISubAgentControl
         WarnWhenBroaderThanParent(definition, parentId, sink);
 
         AgentInstance? instance = null;
-        var holdsGate = false;
         var reused = false;
         var watch = Stopwatch.StartNew();
         try
@@ -274,8 +732,6 @@ public sealed class SubAgentScheduler : ISubAgentControl
                 {
                     return new SubAgentOutcome(resumeId, $"Sub-agent '{resumeId}' is still running.", IsError: true);
                 }
-
-                holdsGate = true;
             }
 
             if (instance is null && resumeId is null && reuse && owner == AgentOwner.Model && model is null)
@@ -290,7 +746,6 @@ public sealed class SubAgentScheduler : ISubAgentControl
                     }
 
                     instance = candidate;
-                    holdsGate = true;
                     reused = true;
                     break;
                 }
@@ -303,8 +758,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
                 Register(instance, owner);
                 if (!reuse)
                 {
-                    // The caller opted out (automation, review): its child must not be picked up by a later spawn either,
-                    // or the review that just ran would answer the next one with its old verdict.
+                    // The caller opted out (an automation's child, which is nobody's next task): its child must not be picked
+                    // up by a later spawn either.
                     lock (gate)
                     {
                         notReusable.Add(instance.Id);
@@ -312,7 +767,6 @@ public sealed class SubAgentScheduler : ISubAgentControl
                 }
 
                 instance.TryAcquire();
-                holdsGate = true;
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -322,25 +776,25 @@ public sealed class SubAgentScheduler : ISubAgentControl
             return new SubAgentOutcome(id, $"Sub-agent '{id}' failed: {exception.Message}", IsError: true);
         }
 
-        try
-        {
-            var outcome = await DriveAsync(instance, ChatMessage.User(task), task, sink, parentId, watch, ct).ConfigureAwait(false);
-            return reused ? outcome with { Resumed = true } : outcome;
-        }
-        finally
-        {
-            if (holdsGate)
-            {
-                instance.Release();
-            }
-        }
+        return new Prepared(instance, Refusal: null, reused, watch);
+    }
+
+    /// <summary>
+    /// What <see cref="PrepareAsync"/> hands back: the instance whose gate is held for the run, or the refusal that ended the
+    /// spawn before it started. A bare <see cref="SubAgentOutcome"/> converts, so a refusal reads exactly as it did when the
+    /// whole spawn lived in one method.
+    /// </summary>
+    private readonly record struct Prepared(AgentInstance? Instance, SubAgentOutcome? Refusal, bool Reused, Stopwatch Watch)
+    {
+        public static implicit operator Prepared(SubAgentOutcome refusal) => new(null, refusal, Reused: false, Stopwatch.StartNew());
     }
 
     /// <summary>
     /// The children a spawn of <paramref name="kind"/> may continue, best first: same kind, the model's own, idle, and with
     /// their last run ended inside the reuse window; ranked by <see cref="SubAgentAffinity"/> and then by how recently they
-    /// ran, and only above the threshold - an unrelated task starts a fresh child rather than joining somebody else's
-    /// conversation. The gate is still taken by the caller, so two spawns racing for one child cannot both win it.
+    /// ran, then by how recently they ran, and only above the threshold - an unrelated task starts a fresh child rather
+    /// than joining somebody else's conversation. The gate is still taken by the caller, so two spawns racing for one child
+    /// cannot both win it.
     /// </summary>
     private List<AgentInstance> Reusable(string kind, string task)
     {
@@ -641,7 +1095,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
         }
         catch (OperationCanceledException) when (run is not null && run.StopRequested)
         {
-            return new SubAgentOutcome(instance.Id, StoppedText(instance, run), IsError: false) { Stopped = true };
+            return new SubAgentOutcome(instance.Id, StoppedText(instance, run), IsError: false) { Stopped = true, Reason = run.StopReason };
         }
         catch (OperationCanceledException)
         {
@@ -651,7 +1105,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
         {
             failure = exception.Message;
             sink.Emit(new AgentFailed(instance.Id, exception.Message));
-            return new SubAgentOutcome(instance.Id, $"Sub-agent '{instance.Id}' failed: {exception.Message}", IsError: true);
+            return new SubAgentOutcome(instance.Id, $"Sub-agent '{instance.Id}' failed: {exception.Message}", IsError: true) { Reason = exception.Message };
         }
         finally
         {
@@ -738,6 +1192,12 @@ public sealed class SubAgentScheduler : ISubAgentControl
         {
             runs[instance.Id] = run;
             finished.Remove(instance.Id);
+            // A stop that named this background run before it had one to stop: it is honoured here, inside the same lock the stop
+            // takes, so a stop landing between "is it pending?" and "attach" cannot be lost.
+            if (backgroundStopPending.Remove(instance.Id))
+            {
+                run.Stop(StoppedBeforeStart);
+            }
         }
 
         instance.Control = run;

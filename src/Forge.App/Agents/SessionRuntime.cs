@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Forge.Abstractions;
 using Forge.App.Approval;
 using Forge.App.Git;
@@ -295,6 +295,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     private AgentHost? host;
     private AgentInstance? root;
     private AgentInstance? activeRoot;
+
+    /// <summary>
+    /// The sink of the session this runtime drives, recorded as each turn starts (the tab's own event funnel). It outlives every turn,
+    /// which is what a background child's started/finished events need - the turn that spawned it is gone by then.
+    /// </summary>
+    private Action<AgentEvent>? sessionSink;
     private AgentDefinition? rootDefinition;
 
     /// <summary>The orchestration block of the host being built; empty when the default orchestration is off or has no router.</summary>
@@ -546,6 +552,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
         ArgumentNullException.ThrowIfNull(sink);
         var message = UserMessage(userText, attachments);
+
+        // The session's sink outlives this turn and is what a background child's events go to after this run's channel is done.
+        Volatile.Write(ref sessionSink, sink);
 
         // The first user message of an unnamed session is what its placeholder title describes: written here, before the host
         // is resolved, so the tab and the tree row already read as the task while the model streams its first token. A session
@@ -895,6 +904,38 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         }
 
         return built?.StopUserChildren(reason) ?? 0;
+    }
+
+    /// <summary>
+    /// Stops the background children spawned from <paramref name="parentSessionId"/> on this host - every one of them when it is
+    /// null, which is what a root's stop means (the whole tree). A background child (<c>spawn_agent</c>'s background mode) is not
+    /// linked to the turn that started it, so this is the path that ends it; the count is how many runs were asked to stop. Never
+    /// throws - a host that was never built holds none.
+    /// </summary>
+    internal int StopBackgroundChildren(string? parentSessionId, string reason)
+    {
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        return built?.StopBackgroundChildren(parentSessionId, reason) ?? 0;
+    }
+
+    /// <summary>
+    /// Stops every background child of this host and refuses new ones: the runtime is being torn down (a released session, a closed
+    /// window), so a run whose stop button nobody can reach must not start or keep going on a released store and workspace.
+    /// </summary>
+    internal int CloseBackgroundChildren(string reason)
+    {
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        return built?.CloseBackgroundChildren(reason) ?? 0;
     }
 
     /// <summary>Stops one user session's current run by its agent id - the stop button of its own tab; false when it is not running.</summary>
@@ -1895,6 +1936,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 StepReviewStore = services.StepReviewStore,
                 Artifacts = services.Artifacts,
                 SessionMessages = services.SessionMessages,
+                // A background child outlives the turn that started it, so its events go to the session's own sink, not only to that
+                // turn's channel (which is completed as soon as the turn ends).
+                SessionEvents = value => Volatile.Read(ref sessionSink)?.Invoke(value),
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),
                 SpawnModels = services.SpawnModels,
@@ -1919,6 +1963,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             });
         appliedCompaction = compaction;
         appliedMaxParallel = subAgents.MaxParallel;
+
+        // A reload rebuilds the host for the same session: the kinds and the prompt layers are new, but the sub-agents that
+        // are still alive belong to the conversation, not to the host that spawned them (forge-core "子 Agent 复用").
+        if (host is not null)
+        {
+            built.SubAgents.TakeOverFrom(host.SubAgents);
+        }
 
         // From here on a plugin or workflow run of this session can call tools through this session's tool set and handler.
         builtHost = built;
@@ -2514,6 +2565,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         ExtensionHostClient? client;
         SessionQuestionHandler? questionDisposable;
         string[] aliases;
+        // A background child outlives the turn that started it, so dropping the host is not enough to end it: it is asked to
+        // stop here, before the store and the tool router this runtime shares are released under it.
+        if (CloseBackgroundChildren("the session is closing") > 0)
+        {
+            AppLogs.Session.ZLogInformation($"{SessionId}: background sub-agents stopped with the runtime");
+        }
+
         lock (gate)
         {
             disposed = true;

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -199,9 +199,16 @@ public interface ISessionMessageEndpoint
 
     /// <summary>
     /// Hands one receipt to the session that asked for it. Never starts a turn: when that session is running a turn the app
-    /// puts the receipt at the next tool-batch boundary, otherwise it lands in the transcript as an unread message.
+    /// puts the receipt at the next tool-batch boundary, otherwise it lands in the transcript as an unread message. Only called
+    /// while <see cref="AcceptsReceipts"/> is true.
     /// </summary>
     void DeliverReceipt(string initiatorSessionId, string text);
+
+    /// <summary>
+    /// Whether this app can still take a receipt. False once the window is closing: the delivery is asynchronous (it posts to the
+    /// UI thread), so a report handed over then would be dropped without a trace - the caller keeps it itself instead.
+    /// </summary>
+    bool AcceptsReceipts { get; }
 }
 
 /// <summary>One message handed to a target session.</summary>
@@ -952,7 +959,89 @@ public sealed class SessionMessenger
                     files,
                     added,
                     removed,
-                    Fit(report));
+                    SessionReplies.Cut(report));
+        }
+    }
+
+    /// <summary>
+    /// Hands one receipt to the app's delivery seam, which owns what this host cannot do: drawing it in a tab it shows, storing it
+    /// when that tab is idle, marking it unread. False when no endpoint is installed (a script, a test) or when the one there refused
+    /// it (a window already closing) - the caller then has to keep the message itself.
+    /// </summary>
+    internal bool TryDeliverReceipt(string sessionId, string text)
+    {
+        if (endpoint() is not { } seam || !seam.AcceptsReceipts)
+        {
+            return false;
+        }
+
+        seam.DeliverReceipt(sessionId, text);
+        return true;
+    }
+
+    /// <summary>Whether an app is behind this host at all; false means the host itself has to keep the message.</summary>
+    internal bool HasEndpoint => endpoint() is not null;
+
+    /// <summary>
+    /// The receipt text of one background child. Composing stays here (the receipt's shape and its artifact fallback live in this
+    /// class); which conversation it lands in is the host's call, because only the host knows which instances it holds.
+    /// </summary>
+    internal Task<string> BuildBackgroundReportAsync(BackgroundChildReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        return BuildBackgroundReportTextAsync(report);
+    }
+
+    /// <summary>The receipt of one background child, with the report stored as an artifact when the caps would have cut it.</summary>
+    private async Task<string> BuildBackgroundReportTextAsync(BackgroundChildReport report)
+    {
+        var agentId = report.AgentId;
+        var reportText = report.Report ?? string.Empty;
+        try
+        {
+            return SessionReplies.BuildChildReport(report.Kind, agentId, report.Status, report.Reason, report.TaskLabel, 0, 0, 0, reportText);
+        }
+        catch (ArgumentException)
+        {
+            // Past the caps: the copy has to exist first, so the part that was cut stays readable. Without an artifact store
+            // the receipt is cut instead - an incomplete receipt still beats a report nobody ever sees.
+            var artifactId = await StoreChildReportAsync(report).ConfigureAwait(false);
+            return SessionReplies.BuildChildReport(
+                report.Kind,
+                agentId,
+                report.Status,
+                report.Reason,
+                report.TaskLabel,
+                0,
+                0,
+                0,
+                artifactId is { Length: > 0 } ? reportText : SessionReplies.Cut(reportText),
+                artifactId);
+        }
+    }
+
+    private async Task<string?> StoreChildReportAsync(BackgroundChildReport report)
+    {
+        if (artifacts is null || string.IsNullOrWhiteSpace(report.Report))
+        {
+            return null;
+        }
+
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(report.Report);
+            var info = await artifacts.PutAsync(
+                    report.ChildSessionId.Length > 0 ? report.ChildSessionId : report.ParentSessionId,
+                    "sub-agent-report.md",
+                    bytes,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            return info.Id;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.TraceWarning($"background sub-agent report could not be stored: {exception.Message}");
+            return null;
         }
     }
 
@@ -985,38 +1074,6 @@ public sealed class SessionMessenger
     /// The report cut to the caps by hand, for the one case the artifact store cannot serve: the last line says the rest is
     /// gone, because a receipt that silently lost half its report reads like a short answer.
     /// </summary>
-    private static string Fit(string report)
-    {
-        var builder = new StringBuilder(Math.Min(report.Length, SessionReplies.ReportCharLimit));
-        var used = 0;
-        var lines = 0;
-        foreach (var line in report.AsSpan().EnumerateLines())
-        {
-            if (lines == SessionReplies.ReportLineLimit)
-            {
-                break;
-            }
-
-            var separator = lines > 0 ? 1 : 0;
-            if (used + separator + line.Length > SessionReplies.ReportCharLimit)
-            {
-                break;
-            }
-
-            if (separator == 1)
-            {
-                builder.Append('\n');
-                used++;
-            }
-
-            builder.Append(line);
-            used += line.Length;
-            lines++;
-        }
-
-        return builder.Append("\n(报告超出上限，转存失败，已截断)").ToString();
-    }
-
     /// <summary>
     /// Writes one delivery's receipt exactly once. Two callers can get here for the same delivery - the worker that ran its
     /// turn and <see cref="CancelPending"/> - and the initiator must read one answer per dispatch number, whichever came first:

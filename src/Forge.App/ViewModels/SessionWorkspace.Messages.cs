@@ -378,3 +378,10 @@ internal sealed class SessionAuthorizationMarkViewModel : NotifyingObject
         OnPropertyChanged(nameof(RevokeTip));
     }
 }
+
+/// <summary>
+/// One user interjection with the turn card it belongs to, stamped on the event's own thread as it enters the sink. It travels
+/// through the same frame coalescer as every other event, so the turn's card is decided while that turn is the current one instead
+/// of when the frame finally runs (by then the next turn can have started), and event order is kept.
+/// </summary>
+internal sealed record StampedInterjection(AgentInterjected Interjection, TurnCardViewModel? Card) : AgentEvent(Interjection.AgentId);

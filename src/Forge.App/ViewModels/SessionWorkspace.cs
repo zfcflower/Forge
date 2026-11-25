@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -1379,6 +1379,24 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         queuePaused = true;
         redirectText = null;
         CancelTurn();
+        if (!disposed)
+        {
+            // The stop reaches every run of this tree, background children included: a `spawn_agent` with `background: true`
+            // outlives the turn that started it, so that turn's token no longer ends it. The host's own registry is walked
+            // rather than this tab's sub-agent rows, which are filled by the frame coalescer and can still be missing the child
+            // that just started - the one a row-based stop would leave running. A root's stop takes the whole tree; an agent
+            // session's stop takes only the children it spawned, so stopping one tab never kills a sibling's work. A draft agent
+            // session has no id of its own yet and therefore no scope: it stops nothing rather than falling back to the whole tree.
+            if (agentSession is null)
+            {
+                runtime?.StopBackgroundChildren(parentSessionId: null, SessionStrings.SubAgentStoppedByUser);
+            }
+            else if (agentChildSessionId is { Length: > 0 } scope)
+            {
+                runtime?.StopBackgroundChildren(scope, SessionStrings.SubAgentStoppedByUser);
+            }
+        }
+
         if (agentSession is null)
         {
             // The root's stop reaches the whole tree: the agent sessions it hosts stop with it (the same control surface the
@@ -2669,6 +2687,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     earlyThinking,
                     static (transcript, text) => transcript.QueueThinkingDelta(text));
                 break;
+            case AgentInterjected interjected when string.Equals(interjected.AgentId, "root", StringComparison.Ordinal):
+                // A user's interjection belongs to the turn that took it, and this sink runs on that turn's thread: the card is
+                // stamped here, before the coalescer's Background flush can lag past the end of the turn (the notice used to land
+                // on whichever card happened to be current when the frame finally ran, i.e. on the next turn's). It travels through
+                // the same FIFO the other events use - a stamped event, not a side-channel - so a batch larger than one flush keeps
+                // its order.
+                coalescer.Enqueue(new StampedInterjection(interjected, Volatile.Read(ref turnCard)));
+                break;
             case AgentToolProgress progress:
                 // Not queued: a snapshot supersedes the one before it, the producer already throttles, and the UI reads the
                 // latest one on its own tick (see SessionWorkspace.Tools.cs).
@@ -2874,6 +2900,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                         : CompactionStrings.Stalled(stalled.ContextTokens, stalled.TriggerTokens),
                     isError: true);
                 break;
+            case StampedInterjection stamped:
+                // An interjection whose owning turn card was stamped on the event's own thread (see OnAgentEvent).
+                OnInterjected(stamped.Interjection, stamped.Card);
+                break;
             case AgentInterjected interjected:
                 OnInterjected(interjected);
                 break;
@@ -2891,7 +2921,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
     }
 
-    private void OnInterjected(AgentInterjected interjected)
+    private void OnInterjected(AgentInterjected interjected) => OnInterjected(interjected, card: null);
+
+    /// <summary>
+    /// One delivered interjection: its chip leaves the strip and the turn card the user typed it into gains the notice.
+    /// <paramref name="card"/> is that turn's card, stamped on the event's own thread (see <see cref="OnAgentEvent"/>) so a late
+    /// frame cannot move the notice onto the next turn; a child's interjection passes null and takes its own transcript's card.
+    /// </summary>
+    private void OnInterjected(AgentInterjected interjected, TurnCardViewModel? card)
     {
         var attachments = interjected.Attachments ?? [];
         if (FindInterjectionChip(queued, interjected.Text, attachments) is { } chip)
@@ -2909,7 +2946,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         }
 
         // Marked as the user's own words: the note reads at body size in the primary colour, not as a muted caption.
-        Card(interjected.AgentId)?.AddNotice(
+        (card ?? Card(interjected.AgentId))?.AddNotice(
             SessionStrings.ComposerInterjectedNotice(interjected.Text, attachments),
             fromUser: true);
     }

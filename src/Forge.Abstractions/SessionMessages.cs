@@ -44,6 +44,49 @@ public static class SessionReplies
     /// </summary>
     public const string FullReportPointer = "\n完整报告: ";
 
+    /// <summary>The note a cut report ends with, so a reader knows the rest did not fit.</summary>
+    public const string CutNote = "\n(报告超出上限，已截断)";
+
+    /// <summary>
+    /// Cuts a report to what a receipt can carry <b>with the note that says it was cut</b>: the note's line and length are
+    /// reserved first, so the result always passes the caps that <see cref="Build"/> and <see cref="BuildChildReport"/> enforce.
+    /// The one caller that needs it is the receipt built when the full report could not be stored as an artifact - every other
+    /// receipt either fits or carries a pointer to the stored copy.
+    /// </summary>
+    public static string Cut(string report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        var budget = ReportCharLimit - CutNote.Length;
+        var builder = new System.Text.StringBuilder(Math.Min(report.Length, budget) + CutNote.Length);
+        var used = 0;
+        var lines = 0;
+        foreach (var line in report.AsSpan().EnumerateLines())
+        {
+            if (lines == ReportLineLimit - 1)
+            {
+                break;
+            }
+
+            var separator = lines > 0 ? 1 : 0;
+            if (used + separator + line.Length > budget)
+            {
+                break;
+            }
+
+            if (separator == 1)
+            {
+                builder.Append('\n');
+                used++;
+            }
+
+            builder.Append(line);
+            used += line.Length;
+            lines++;
+        }
+
+        return builder.Append(CutNote).ToString();
+    }
+
     /// <summary>The status word used on the wire; a failure or stop always carries its reason, flattened to one line so the three-line receipt stays three lines. An unmapped status throws rather than reading as success.</summary>
     public static string StatusText(SessionReplyStatus status, string? reason = null) => status switch
     {
@@ -76,6 +119,51 @@ public static class SessionReplies
         text.Append(Marker).Append(" #").Append(Label(dispatchId, 24))
             .Append(" · 来自 ").Append(Label(fromSession))
             .Append(" · 状态:").Append(StatusText(status, reason))
+            .Append(" · 任务:").Append(Label(taskLabel, 40))
+            .Append("]\n改动: ").Append(changedFiles).Append(" 个文件 (+").Append(addedLines).Append("/−").Append(removedLines).Append(")\n报告: ");
+        var store = string.IsNullOrWhiteSpace(artifactId) ? null : Label(artifactId, 80);
+        var fitted = AppendCapped(text, report);
+        if (!fitted && store is null)
+        {
+            throw new ArgumentException("A report past the caps must be stored as an artifact first; pass its id.", nameof(artifactId));
+        }
+
+        if (!fitted || store is not null)
+        {
+            text.Append(FullReportPointer).Append(store);
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// Builds the receipt one <b>background</b> sub-agent leaves in its parent session when it ends (a child spawned with
+    /// <c>spawn_agent</c>'s <c>background</c> mode, which never blocks the parent's turn). Same three lines and the same
+    /// <see cref="Marker"/> as a session-to-session receipt - header, change line, report - so the transcript draws it as the
+    /// card it is and the model reads it as one user message. There is no dispatch number behind it (nothing was sent), so the
+    /// header names the child instead. The caps and the artifact pointer behave exactly as in <see cref="Build"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">The report exceeds the caps and <paramref name="artifactId"/> is null.</exception>
+    public static string BuildChildReport(
+        string childName,
+        string agentId,
+        SessionReplyStatus status,
+        string? reason,
+        string taskLabel,
+        int changedFiles,
+        long addedLines,
+        long removedLines,
+        string report,
+        string? artifactId = null)
+    {
+        var text = new System.Text.StringBuilder(128 + Math.Min(report.Length, ReportCharLimit));
+        text.Append(Marker).Append(" · 子 Agent ").Append(Label(childName));
+        if (!string.IsNullOrWhiteSpace(agentId))
+        {
+            text.Append(" (").Append(Label(agentId, 32)).Append(')');
+        }
+
+        text.Append(" · 状态:").Append(StatusText(status, reason))
             .Append(" · 任务:").Append(Label(taskLabel, 40))
             .Append("]\n改动: ").Append(changedFiles).Append(" 个文件 (+").Append(addedLines).Append("/−").Append(removedLines).Append(")\n报告: ");
         var store = string.IsNullOrWhiteSpace(artifactId) ? null : Label(artifactId, 80);

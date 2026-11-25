@@ -1,3 +1,4 @@
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Forge.Abstractions;
@@ -149,6 +150,14 @@ public sealed record AgentHostOptions
     /// which is what a host without an app behind it - a script or a test - looks like.
     /// </summary>
     public Func<ISessionMessageEndpoint?>? SessionMessages { get; init; }
+
+    /// <summary>
+    /// The session's own event sink for runs that outlive the turn that started them (<c>spawn_agent</c>'s background mode). The
+    /// starting turn's channel is completed when that turn ends, so without this a background child's started/finished events would
+    /// never reach the tab that shows it: the roster would keep it running forever. The shell owns the session, so it hands its own
+    /// long-lived sink here; null (a script, a test) just means nobody watches.
+    /// </summary>
+    public Action<AgentEvent>? SessionEvents { get; init; }
 }
 
 /// <summary>
@@ -178,6 +187,13 @@ public sealed class AgentHost
     /// turn sends. Null until the root is created or resumed.
     /// </summary>
     private AgentInstance? rootInstance;
+
+    /// <summary>
+    /// How many root turns are running on this host right now. A root instance has no <see cref="AgentInstance.Control"/> (only runs of
+    /// sub-agents do), so its own <c>IsRunning</c> is always false - this counter is what tells a message aimed at the root whether a
+    /// turn is there to take it at a tool-batch boundary or whether it belongs in the history.
+    /// </summary>
+    private int rootRunning;
 
     public AgentHost(AgentHostOptions options)
     {
@@ -229,7 +245,7 @@ public sealed class AgentHost
         }
 
         scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);
-        builtIns.Add(new SpawnAgentTool(scheduler, catalog.All, options.SpawnModels));
+        builtIns.Add(new SpawnAgentTool(scheduler, catalog.All, options.SpawnModels, options.SessionEvents));
         builtIns.Add(new SubAgentSteerTool(scheduler.ModelControl));
         builtIns.Add(new SubAgentFollowUpTool(scheduler.ModelControl));
         builtIns.Add(new SubAgentStopTool(scheduler.ModelControl));
@@ -245,6 +261,11 @@ public sealed class AgentHost
             options.SessionMessages ?? (static () => null),
             RunUserChildTurnAsync);
         builtIns.Add(new MessageSessionTool(messenger));
+        // A background child (spawn_agent's background mode) ends after the turn that started it, so its report comes back as a
+        // reply message to the parent's conversation instead of as that turn's tool result (forge-core "后台子 Agent").
+        scheduler.BackgroundReports = DeliverBackgroundReportAsync;
+        // A user-driven session's leftovers belong to its tab, but only when a tab exists at all.
+        scheduler.ExternalHandBack = () => messenger.HasEndpoint;
 
         if (options.Reviews is { } reviews)
         {
@@ -485,6 +506,72 @@ public sealed class AgentHost
     }
 
     /// <summary>
+    /// Delivers one background child's report into the parent's conversation. The app's seam owns the sessions it shows (it puts a
+    /// receipt at the next tool-batch boundary of a running turn, or stores and draws it when the tab is idle); a child of the
+    /// model's own, which has no tab, is updated here - interjected while it runs, appended to its memory and the store when it is
+    /// idle. With no seam at all (a script, a test) the message still lands in the parent's memory and the store, never dropped.
+    /// </summary>
+    internal async ValueTask DeliverBackgroundReportAsync(BackgroundChildReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        var text = await messenger.BuildBackgroundReportAsync(report).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        var root = Volatile.Read(ref rootSession);
+        var isRoot = string.Equals(report.ParentAgentId, "root", StringComparison.Ordinal)
+            || (root is not null && string.Equals(report.ParentSessionId, root.SessionId, StringComparison.Ordinal));
+        var isUserSession = !isRoot && scheduler.TryGetUserSession(report.ParentSessionId, out _);
+        var parent = isRoot
+            ? Volatile.Read(ref rootInstance)
+            : scheduler.TryGetInstance(report.ParentAgentId, out var held) ? held : null;
+
+        // A session the app has a view of: its own receipt path is the complete one (boundary delivery, transcript card, unread).
+        if ((isRoot || isUserSession) && messenger.TryDeliverReceipt(report.ParentSessionId, text))
+        {
+            return;
+        }
+
+        // A turn is there to take it: delivered at its next tool-batch boundary, exactly like a user's interjection. The root's own
+        // turn is read off this host's counter, because a root instance's IsRunning is always false.
+        if (parent is not null && (isRoot ? Volatile.Read(ref rootRunning) > 0 : parent.IsRunning))
+        {
+            parent.Interject(text);
+            return;
+        }
+
+        // Idle, or an instance this host no longer holds: the next turn - and a reopened session - reads it from history.
+        var message = ChatMessage.User(text);
+        var seq = store is null
+            ? 0
+            : await store.AppendAsync(report.ParentSessionId, message, null, CancellationToken.None).ConfigureAwait(false);
+        parent?.Add(message, seq);
+    }
+
+    /// <summary>
+    /// Stops the background children spawned from <paramref name="parentSessionId"/> - every one of them when it is null, which is
+    /// what a root's stop means (the whole tree). A background run is not linked to the turn that started it, so this is the walk
+    /// that ends it; the host keeps taking background spawns afterwards.
+    /// </summary>
+    public int StopBackgroundChildren(string? parentSessionId, string? reason = null) =>
+        scheduler.StopBackgroundRuns(parentSessionId, reason);
+
+    /// <summary>
+    /// Stops every background child of this host and refuses new ones: the session's runtime is being torn down, so a run that
+    /// nobody can stop any more must not start (or keep going) on a released store and workspace.
+    /// </summary>
+    /// <summary>
+    /// Stops every background child of this host and refuses new ones: the session's runtime is being torn down, so a run that nobody
+    /// can stop any more must not start (or keep going). Deliberately does not wait: this is called from a synchronous teardown on the
+    /// UI thread, and everything a straggling run still touches - the store the shell owns, the workspace - outlives the runtime. What
+    /// the runtime itself owns (the tool router, the approval handlers) is not used by a run that is already stopping, and a report that
+    /// arrives after the window is closing is kept by the host itself (the seam refuses it).
+    /// </summary>
+    public int CloseBackgroundChildren(string? reason = null) => scheduler.CloseBackgroundRuns(reason);
+
+    /// <summary>
     /// Stops every run of a user-driven session this host owns - queued or running - drops the messages their mailboxes still
     /// owe (queued or in flight, each one answered by a stopped receipt), and returns how many runs were stopped. The root
     /// session's own turn is not touched: the shell stops that one and calls this for the sessions under it when the user
@@ -637,18 +724,29 @@ public sealed class AgentHost
     /// Runs one user turn whose message is already built (text plus attached images); otherwise the same as the text
     /// overload.
     /// </summary>
-    public IAsyncEnumerable<AgentEvent> RunAsync(
+    public async IAsyncEnumerable<AgentEvent> RunAsync(
         AgentInstance root,
         ChatMessage userMessage,
-        CancellationToken ct = default)
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(userMessage);
-        return StreamAsync(
-            root.Id,
-            root.Definition.Model,
-            (sink, token) => loop.RunAsync(root, userMessage, sink, token),
-            ct);
+        await foreach (var value in StreamAsync(
+                           root.Id,
+                           root.Definition.Model,
+                           (sink, token) => loop.RunAsync(root, userMessage, sink, token),
+                           ct,
+                           countsAsRoot: true).ConfigureAwait(false))
+        {
+            yield return value;
+        }
+
+        // A root's undelivered interjections are normally taken back by its tab (they become queued messages); a host with no app
+        // behind it has nobody to hand them to, so they are persisted here instead of waiting in memory for a turn that may never come.
+        if (!messenger.HasEndpoint)
+        {
+            await scheduler.PersistLeftoverInterjectionsAsync(root).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -660,7 +758,8 @@ public sealed class AgentHost
         string agentId,
         ModelSettings model,
         Func<IAgentEventSink, CancellationToken, Task> body,
-        [EnumeratorCancellation] CancellationToken ct)
+        [EnumeratorCancellation] CancellationToken ct,
+        bool countsAsRoot = false)
     {
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var channel = Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions
@@ -673,6 +772,11 @@ public sealed class AgentHost
         var run = Task.Run(
             async () =>
             {
+                if (countsAsRoot)
+                {
+                    Interlocked.Increment(ref rootRunning);
+                }
+
                 try
                 {
                     await body(sink, token).ConfigureAwait(false);
@@ -699,6 +803,11 @@ public sealed class AgentHost
                 }
                 finally
                 {
+                    if (countsAsRoot)
+                    {
+                        Interlocked.Decrement(ref rootRunning);
+                    }
+
                     channel.Writer.TryComplete();
                 }
             },

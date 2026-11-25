@@ -24,6 +24,21 @@ internal sealed class ChannelEventSink(ChannelWriter<AgentEvent> writer) : IAgen
 }
 
 /// <summary>
+/// The sink of a run that outlives the turn which started it (a <c>spawn_agent</c> in background mode): its events go to the run that
+/// started it <b>and</b> to the session's own long-lived sink, because the starting run's channel is completed when its turn ends and
+/// everything after that would be dropped - a background child would then never be reported as started or finished to the tab that
+/// shows it.
+/// </summary>
+internal sealed class DetachedEventSink(IAgentEventSink run, Action<AgentEvent>? session) : IAgentEventSink
+{
+    public void Emit(AgentEvent value)
+    {
+        run.Emit(value);
+        session?.Invoke(value);
+    }
+}
+
+/// <summary>
 /// Ambient pointer to the run currently on this execution context, so tools such as
 /// <see cref="SpawnAgentTool"/> can reach the event sink, parent id and parallelism slot of the calling
 /// agent.

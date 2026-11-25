@@ -226,6 +226,12 @@ public sealed class AgentInstance
         }
     }
 
+    /// <summary>
+    /// Puts an interjection this instance had already handed over back into its inbox: the caller took it and could not keep it
+    /// (a store write failed), so it waits for the next tool-batch boundary instead of being lost. Thread-safe.
+    /// </summary>
+    internal void Requeue(Interjection interjection) => Enqueue(interjection);
+
     private Interjection Enqueue(Interjection interjection)
     {
         lock (interjectionGate)
