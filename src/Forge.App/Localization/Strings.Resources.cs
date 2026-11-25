@@ -216,7 +216,7 @@ internal static class ResourceInspectorStrings
         Loc.Register(ColumnTokensKey, "≈ token", "≈ tokens");
         Loc.Register(TotalKey, "合计", "Total");
         Loc.Register(ToolsTitleKey, "工具占用", "Tool usage");
-        Loc.Register(ToolsNoteKey, "发给模型的工具定义,MCP 工具见上表", "The tool definitions sent to the model; MCP tools are in the table above");
+        Loc.Register(ToolsNoteKey, "本会话已注册的工具定义,MCP 工具见上表", "The tool definitions this session registered; MCP tools are in the table above");
         Loc.Register(ToolsCategoryKey, "类别", "Category");
         Loc.Register(ToolsEmptyKey, "第一回合开始后显示", "Shown once the first turn has started");
 

@@ -582,12 +582,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         return string.IsNullOrEmpty(budget) ? naming : budget + "\n" + naming;
     }
 
-    /// <summary>Names of the tools this session can call; empty until its first turn built the agent host.</summary>
-    internal IReadOnlyList<string> ToolNames() => runtime?.ToolNames() ?? [];
-
-    /// <summary>The session's tool catalog for the Tools settings section; empty until the first turn built the host.</summary>
-    internal IReadOnlyList<Forge.Abstractions.ToolDescriptor> DescribeTools() => runtime?.DescribeTools() ?? [];
-
     /// <summary>
     /// True for a session that is not the active session of its workspace: opened from history or the recycled rows, or
     /// turned read-only when the turn-start check found it taken over. Nothing can be sent and the tab shows no input area;

@@ -172,16 +172,11 @@ internal sealed class AppComposition : IAsyncDisposable
     public LocText EditorProblem { get; }
 
     /// <summary>
-    /// The active session's tool names, set by the window when it opens one: the tools section's rows and the tools counter's
-    /// denominator are the same set, and that set only exists per session.
+    /// Every tool this installation registers on the <c>tools</c> page, with origin and group: built from the composition's own
+    /// services, so it neither needs an open session nor waits for one to run a turn. What a <em>session</em> registered is the
+    /// resource window's reading, not this one.
     /// </summary>
-    public Func<IReadOnlyList<string>> ActiveSessionTools { get; set; } = static () => [];
-
-    /// <summary>
-    /// The active session's tool catalog (switched-off tools included, with origin and group), set by the window; the Tools
-    /// settings section lists it and offers a switch on each built-in. Empty when no session has run a turn yet.
-    /// </summary>
-    public Func<IReadOnlyList<Forge.Abstractions.ToolDescriptor>> ActiveSessionToolCatalog { get; set; } = static () => [];
+    public Func<IReadOnlyList<Forge.Abstractions.ToolDescriptor>> ToolInventory { get; set; } = static () => [];
 
     /// <summary>
     /// The working directory (worktree or scratch folder) of the session in front, or null. The prompts page's project
@@ -821,6 +816,7 @@ internal sealed class AppComposition : IAsyncDisposable
         composition.Updates = updates;
         composition.webServices = webServices;
         composition.PromptTemplates = promptTemplates;
+        composition.ToolInventory = runtimeServices.Inventory;
         composition.AgentDefaults = runtimeServices.AgentDefaults;
         composition.TodoStepCommitter = stepCommitter;
         composition.PullRequests = prPlatform;

@@ -293,10 +293,6 @@
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
-      <TextBlock Classes="caption"
-                 TextWrapping="Wrap"
-                 Text="{Binding EmptyText}"
-                 IsVisible="{Binding !HasGroups}" />
     </StackPanel>
   </ScrollViewer>
 </UserControl>

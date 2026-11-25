@@ -219,8 +219,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Status = new StatusBarViewModel(composition);
         Settings = new SettingsViewModel(composition);
         instruments = new SessionInstrumentSources(composition);
-        composition.ActiveSessionTools = () => activeSession?.ToolNames() ?? [];
-        composition.ActiveSessionToolCatalog = () => activeSession?.DescribeTools() ?? [];
         composition.ActiveSessionWorkspace = () => activeSession?.WorkDir;
         Projects = new ProjectTreeViewModel(
             composition.Projects,

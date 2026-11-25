@@ -28,6 +28,13 @@ internal sealed record AgentRuntimeServices(
     GitTools? Git = null)
 {
     /// <summary>
+    /// Every tool this installation registers, with where each belongs on the <c>tools</c> page. The page and the resource
+    /// window's tool sizes both read it, so one enumeration decides what a tool is; a session-specific list is not needed and
+    /// could disagree.
+    /// </summary>
+    public IReadOnlyList<ToolDescriptor> Inventory() => ToolCatalog.Describe(this);
+
+    /// <summary>
     /// The shell's approval wiring (queue, remembered rules and the extension authoring adapter). Null when the runtime was
     /// assembled without the composition root, : the session then has no approval handler and an ask is a
     /// denial, exactly as before the queue existed.
@@ -173,6 +180,14 @@ internal sealed record AgentRuntimeServices(
     /// card the model's own call would have raised); <c>write</c>, <c>edit</c> and <c>bash</c> stay out of it entirely.
     /// </summary>
     public IReadOnlyList<ITool> FileTools { get; set; } = [];
+
+    /// <summary>
+    /// The spec-graph tools (<c>spec_get</c>, <c>spec_graph</c>, <c>spec_validate</c>), all read-only. Stateless across sessions
+    /// like <see cref="FileTools"/>: every call resolves the graph of its <see cref="ToolContext"/> directory, and the resolver
+    /// caches one index per directory for the whole app. Handed to a host only while the session's workspace has specs (or the
+    /// orchestration is on); the <c>tools</c> page lists it regardless, because its switch is global.
+    /// </summary>
+    public SpecTools SpecTools { get; set; } = new();
 
     // --- web tools (web_fetch / web_search) ---
     /// <summary>
@@ -1890,8 +1905,6 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         }
     }
 
-    private readonly SpecTools specTools = new();
-
     /// <summary>Whether this session belongs to the General project. Decided once per host build; a lookup failure keeps the git tools.</summary>
     private bool IsGeneralSession()
     {
@@ -2223,73 +2236,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     }
 
     /// <summary>
-    /// Names of the tools this session can call right now, sorted ordinally. Empty until the first turn built the agent
-    /// host: building it here would register the scope and subscribe to the extension host as a side effect of a readout.
-    /// </summary>
-    internal IReadOnlyList<string> ToolNames()
-    {
-        lock (gate)
-        {
-            if (disposed || builtHost is null)
-            {
-                return [];
-            }
-
-            var definitions = builtHost.Tools.Definitions;
-            var names = new string[definitions.Count];
-            for (var i = 0; i < definitions.Count; i++)
-            {
-                names[i] = definitions[i].Name;
-            }
-
-            return names;
-        }
-    }
-
-    /// <summary>
-    /// Every tool this session registers, switched-off ones included, with where it comes from; the Tools settings section
-    /// groups them and offers a switch on each built-in. Empty until the first turn built the agent host.
-    /// </summary>
-    internal IReadOnlyList<ToolDescriptor> DescribeTools()
-    {
-        AgentHost? current;
-        lock (gate)
-        {
-            current = disposed ? null : builtHost;
-        }
-
-        if (current is null)
-        {
-            return [];
-        }
-
-        var (builtIns, external) = current.AllTools;
-        var descriptors = new List<ToolDescriptor>(builtIns.Count + 32);
-        foreach (var tool in builtIns)
-        {
-            descriptors.Add(ToolCatalog.DescribeCore(tool.Definition.Name));
-        }
-
-        // Classified by the list each tool came from rather than by name, so a plugin cannot pose as a built-in. Collected
-        // afresh (not read from the host) because the host keeps no record of the source list.
-        DescribeExternal(descriptors);
-
-        // The web tools are built per host (web_search only while a backend is configured), so they are read from what the
-        // host actually holds instead of calling the factory again.
-        foreach (var tool in external)
-        {
-            if (IsWebTool(tool.Definition.Name))
-            {
-                descriptors.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.Web));
-            }
-        }
-
-        return descriptors;
-    }
-
-    /// <summary>
     /// What this session's tools, MCP servers and prompt sources cost in context, read from the host that was built (the same
     /// snapshot the model is sent); empty until the first turn built the host. The size is the definition text, not a call count.
+    /// <para>The catalog those tools are named by is <see cref="ToolCatalog.Describe"/> — the settings page's own list — so the
+    /// window and the page can never disagree about what a tool is or where it belongs. Tools the catalog does not know are
+    /// left unsized rather than guessed at.</para>
     /// </summary>
     internal ResourceUsage DescribeUsage()
     {
@@ -2305,73 +2256,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         }
 
         var (builtIns, external) = current.AllTools;
-        var (groups, servers) = ResourceUsageBuilder.Tools(DescribeTools(), [.. builtIns, .. external]);
+        var (groups, servers) = ResourceUsageBuilder.Tools(ToolCatalog.Describe(services), [.. builtIns, .. external]);
         return new ResourceUsage(groups, servers, ResourceUsageBuilder.Prompts(Volatile.Read(ref builtLayers), orchestration, chatRendering));
-    }
-
-    private void DescribeExternal(List<ToolDescriptor> into)
-    {
-        if (services.HostClient is { } client)
-        {
-            foreach (var tool in client.Tools)
-            {
-                into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.Extension, ToolGroups.Extensions, CanDisable: false));
-            }
-
-            // The same decision CollectExternalTools made when it published the tools: run_code exists exactly while a
-            // script has something to call, which is not the same as "a plugin registered tools".
-            if (Volatile.Read(ref scriptSurface) is not null)
-            {
-                into.Add(new ToolDescriptor(ToolCatalog.RunCode, ToolOrigin.BuiltIn, ToolGroups.Extensions));
-            }
-
-            if (services.Approvals?.Extensions is not null)
-            {
-                foreach (var name in (string[])[ExtensionToolNames.List, ExtensionToolNames.Create, ExtensionToolNames.Update, ExtensionToolNames.Disable, ExtensionToolNames.Delete])
-                {
-                    into.Add(new ToolDescriptor(name, ToolOrigin.BuiltIn, ToolGroups.Extensions));
-                }
-            }
-        }
-
-        if (services.Git is { } git)
-        {
-            foreach (var tool in git.All)
-            {
-                into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.Git));
-            }
-        }
-
-        foreach (var tool in services.FileTools)
-        {
-            into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.Files));
-        }
-
-        into.Add(new ToolDescriptor(SkillTool.Name, ToolOrigin.BuiltIn, ToolGroups.Session));
-        if (services.Providers is not null)
-        {
-            into.Add(new ToolDescriptor(ModelsTool.Name, ToolOrigin.BuiltIn, ToolGroups.Agents));
-        }
-
-        foreach (var tool in services.PullRequestTools)
-        {
-            into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.PullRequests));
-        }
-
-        // Every ready MCP tool, not only the ones this turn offers: the Tools section is where a user looks to see what a server
-        // provides, and a trimmed list there would read as a missing tool.
-        if (services.Mcp is { } mcp)
-        {
-            foreach (var adapter in mcp.Manager.Tools)
-            {
-                into.Add(new ToolDescriptor(
-                    adapter.ExposedName,
-                    ToolOrigin.Mcp,
-                    adapter.ServerName,
-                    adapter.ServerName,
-                    CanDisable: false));
-            }
-        }
     }
 
     // ISessionToolScope: what the router reads. The tool set is the live one (built-ins plus the current external tools).
@@ -2482,7 +2368,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
         if (specToolsOn)
         {
-            conditional.AddRange(specTools.All);
+            conditional.AddRange(services.SpecTools.All);
         }
 
         if (pullRequestToolsOn)
@@ -2546,8 +2432,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         var scriptTools = CodeModeTools.Collect(plugins, services.FileTools, web, mcpTools, ReservedScriptNames(web));
 
         // A script needs something to call: with nothing to fan out over, run_code would be a prompt line that can only
-        // compute. Its own surface is not part of the loop's tools, so this list is also the only writer of it. The
-        // outcome is kept (scriptSurface) so the Tools settings page lists run_code by this same decision.
+        // compute. Its own surface is not part of the loop's tools, only the proxy holds it.
         CodeModeToolRegistry? surface = null;
         if (services.HostClient is { } hostClient && scriptTools.Count > 0)
         {
@@ -2555,15 +2440,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             conditional.Add(hostClient.CreateRunCodeTool(surface, RunCodeOptions()));
         }
 
-        Volatile.Write(ref scriptSurface, surface);
         return new ExternalTools(fixedTools, conditional, outside);
     }
 
-    /// <summary>The script registry of the last collection, or null when that collection produced no <c>run_code</c>.</summary>
-    private CodeModeToolRegistry? scriptSurface;
-
-    /// <summary>The registry the live <c>run_code</c> resolves inner calls against; null while there is no <c>run_code</c>.</summary>
-    internal IToolRegistry? ScriptSurface => Volatile.Read(ref scriptSurface);
 
     /// <summary>
     /// The names a plugin tool may not take on the script surface: every name the session resolves to something other than

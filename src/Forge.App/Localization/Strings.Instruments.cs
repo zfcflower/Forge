@@ -81,8 +81,6 @@ internal static class InstrumentsStrings
     public const string ToolsPermissionWorkspaceKey = "settings.tools.permission.workspace";
     public const string ToolsPermissionAllKey = "settings.tools.permission.all";
     public const string ToolsPermissionHintKey = "settings.tools.permission.hint";
-    public const string ToolsSectionEmptyKey = "settings.tools.empty";
-    public const string ToolsSectionNoSessionKey = "settings.tools.noSession";
     public const string ToolsInventoryKey = "settings.tools.inventory";
     public const string ToolsGroupFilesKey = "settings.tools.group.files";
     public const string ToolsGroupGitKey = "settings.tools.group.git";
@@ -269,10 +267,6 @@ internal static class InstrumentsStrings
 
     public static string ToolsPermissionHint => Loc.Instance[ToolsPermissionHintKey];
 
-    public static string ToolsSectionEmpty => Loc.Instance[ToolsSectionEmptyKey];
-
-    public static string ToolsSectionNoSession => Loc.Instance[ToolsSectionNoSessionKey];
-
     /// <summary>Title of a built-in group (<see cref="Forge.Abstractions.ToolGroups"/>); an unknown group shows its id.</summary>
     public static string ToolsGroup(string group) => group switch
     {
@@ -394,10 +388,8 @@ internal static class InstrumentsStrings
 
         Loc.Register(
             ToolsSectionHintKey,
-            "当前会话注册的工具。内置工具可逐个关闭，从下一回合起对主 Agent 与子 Agent 生效；扩展工具随插件启停，MCP 工具随服务器启停。",
-            "The tools this session registers. Built-in tools can be switched off one by one; the change applies to the main agent and its sub-agents from the next turn. Extension tools follow their plugin, MCP tools their server.");
-        Loc.Register(ToolsSectionEmptyKey, "没有可列出的工具", "No tools to list");
-        Loc.Register(ToolsSectionNoSessionKey, "没有活动会话", "No active session");
+            "产品的全部工具。内置工具可逐个关闭，从下一回合起对每个会话的主 Agent 与子 Agent 生效；扩展工具随插件启停，MCP 工具随服务器启停。某个会话实际注册了哪些工具，见资源窗口。",
+            "Every tool the product registers. A built-in tool can be switched off one by one, and the change applies to every session's main agent and its sub-agents from the next turn; extension tools follow their plugin, MCP tools their server. What a particular session registered is the resource window's reading.");
         Loc.Register(
             ToolsInventoryKey,
             "应用内扩展宿主：插件 {0} · 工具 {1} · 命令 {2}",

@@ -220,7 +220,7 @@ public sealed class ToolSurface
 
     internal ToolSet Current => Volatile.Read(ref current);
 
-    /// <summary>The Core built-in tools of this host, including disabled ones; the catalog page lists them with their switch.</summary>
+    /// <summary>The Core built-in tools of this host, including disabled ones; the resource window sizes the ones a session registered.</summary>
     public IReadOnlyList<ITool> BuiltIns => builtIns.Tools;
 
     /// <summary>The tools last published through <c>ReplaceExternal</c> (built-in names already dropped), including disabled ones.</summary>

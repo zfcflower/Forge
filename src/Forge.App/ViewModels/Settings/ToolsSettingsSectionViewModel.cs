@@ -55,9 +55,11 @@ internal sealed record ToolGroupViewModel(string Title, IReadOnlyList<ToolRowVie
 
 /// <summary>
 /// The <c>tools</c> section: the global tool permission mode on top, then the <c>run_code</c> script block (wave W14), the
-/// context limits, the terminal block (wave W17a) and the active session's tool catalog grouped by origin. Built-in groups come
+/// context limits, the terminal block (wave W17a) and the product's tool catalog grouped by origin. Built-in groups come
 /// first, in a fixed order, each tool with a switch unless another feature needs it; extension and MCP tools follow, read-only,
-/// because their plugin or server is where they are switched. Switches write
+/// because their plugin or server is where they are switched. The catalog is a property of the installation
+/// (<see cref="AppComposition.ToolInventory"/>), not of a session: the page lists and switches tools with no tab open and
+/// before any turn has run, and what a particular session registered is the resource window's business. Switches write
 /// <see cref="AppPreferences.ToolsDisabled"/>; every session applies it before its next turn. The permission radios write
 /// <see cref="AppPreferences.ToolsPermission"/>, which each approval evaluation reads live. The script block edits
 /// <see cref="AppPreferences.CodeScriptMaxConcurrentCalls"/>, <see cref="AppPreferences.CodeScriptResultChars"/>,
@@ -82,7 +84,6 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
     private readonly AppComposition composition;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private string inventoryText = string.Empty;
-    private string emptyText = string.Empty;
     private bool disposed;
 
     public ToolsSettingsSectionViewModel(AppComposition composition)
@@ -94,14 +95,6 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
     public string Hint => InstrumentsStrings.ToolsSectionHint;
 
     public ObservableCollection<ToolGroupViewModel> Groups { get; } = [];
-
-    public bool HasGroups => Groups.Count > 0;
-
-    public string EmptyText
-    {
-        get => emptyText;
-        private set => Set(ref emptyText, value);
-    }
 
     /// <summary>What the extension host registered for the whole app (plugins, plugin tools, commands).</summary>
     public string InventoryText
@@ -276,14 +269,12 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
             : string.Empty;
 
         Groups.Clear();
-        foreach (var group in Build(composition.ActiveSessionToolCatalog() ?? [], composition.Preferences))
+        foreach (var group in Build(composition.ToolInventory(), composition.Preferences))
         {
             Groups.Add(group);
         }
 
-        EmptyText = InstrumentsStrings.ToolsSectionNoSession;
         OnPropertyChanged(nameof(Hint));
-        OnPropertyChanged(nameof(HasGroups));
         OnPropertyChanged(nameof(PermissionHeading));
         OnPropertyChanged(nameof(PermissionWorkspaceLabel));
         OnPropertyChanged(nameof(PermissionAllLabel));

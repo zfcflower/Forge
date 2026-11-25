@@ -66,7 +66,7 @@
 - `settings.json` 的 `preferences.toolsDisabled` 是开关集合（去空白、去重、按序数排序，为空不写）；`read_artifact`、三个子 Agent 控制工具与 `skill` 是必需项，写了也忽略。
 - `spawn_agent` 与 `request_review` 各按自己在允许清单里的条目开关；不再有“允许派生 Agent”总开关。
 - 工具面是可替换快照（`ToolSurface`：版本 + 注册表，`Volatile` 读）：版本未变复用同一 `Definitions` 数组，提示词缓存不破；集合没变时不发布。批准后的下一次模型请求就能看到新工具。
-- `AgentHost.AllTools` 列出全部内置与外部工具（含已禁用），供 `tools` 分区显示。
+- `AgentHost.AllTools` 列出全部内置与外部工具（含已禁用），供资源窗口按会话统计工具占用；设置页 `tools` 分区的目录是应用级清单（`ToolCatalog.Describe`，组合根算出来），不读宿主，也不随会话变。
 - `run_code` 的脚本面只收“插件工具 + `SideEffect == ReadOnly` 的文件/web/MCP 三族”（只读判定不认名字）；`copy`/`move`/`delete`、所有 git/PR 工具（含只读）以及 `write`/`edit`/`bash`、扩展编写工具一概不进。
 
 ## 2.3 子 Agent
