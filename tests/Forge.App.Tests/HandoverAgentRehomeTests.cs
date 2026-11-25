@@ -7,10 +7,9 @@ using Xunit;
 namespace Forge.App.Tests;
 
 /// <summary>
-/// A handover hands the workspace over, and the old root's still-active agent sessions follow it (the same rule an
-/// archive-with-successor applies): left under the archived old root they would surface in the branch's history group
-/// while never having been archived. The archived agent sessions stay with the old root - an archived root keeps its
-/// archived family in history.
+/// A handover hands the workspace over: the old root demotes to an archived agent session of the session that took
+/// over and its agent family follows (the same shape an archive-with-successor leaves), so the branch's history
+/// group lists agent sessions only and the workspace's active agent sessions keep their place beside the new root.
 /// </summary>
 public sealed class HandoverAgentRehomeTests : IDisposable
 {
@@ -41,7 +40,7 @@ public sealed class HandoverAgentRehomeTests : IDisposable
         };
 
     [Fact]
-    public async Task A_new_session_takes_the_roots_active_agent_sessions_with_it()
+    public async Task A_new_session_takes_the_roots_agent_family_and_demotes_the_old_root()
     {
         await using var store = new SqliteSessionStore(directory);
         var oldRoot = await store.CreateAsync(Session("old root"), CancellationToken.None);
@@ -58,13 +57,16 @@ public sealed class HandoverAgentRehomeTests : IDisposable
         Assert.Null(taker.ParentSessionId);
         Assert.Equal(taker.Id, (await store.GetSessionAsync(active.Id, CancellationToken.None))!.ParentSessionId);
         Assert.Equal(SessionStatus.Active, (await store.GetSessionAsync(active.Id, CancellationToken.None))!.Status);
-        // The archived worker never left the old root: it is history, not a live row gone astray.
-        Assert.Equal(oldRoot.Id, (await store.GetSessionAsync(archived.Id, CancellationToken.None))!.ParentSessionId);
-        Assert.Equal(SessionStatus.Archived, (await store.GetSessionAsync(oldRoot.Id, CancellationToken.None))!.Status);
+        Assert.Equal(taker.Id, (await store.GetSessionAsync(archived.Id, CancellationToken.None))!.ParentSessionId);
+        // The old root is an archived agent session of the taker, not a second root row in the branch's history.
+        var demoted = await store.GetSessionAsync(oldRoot.Id, CancellationToken.None);
+        Assert.Equal(SessionStatus.Archived, demoted!.Status);
+        Assert.Equal(taker.Id, demoted.ParentSessionId);
+        Assert.Equal(AgentSessionKinds.ChildDriverUser, demoted.ChildDriver);
     }
 
     [Fact]
-    public async Task A_resumed_session_takes_the_roots_active_agent_sessions_with_it()
+    public async Task A_resumed_session_takes_the_roots_agent_family_and_demotes_the_old_root()
     {
         await using var store = new SqliteSessionStore(directory);
         var resumed = await store.CreateAsync(Session("old root"), CancellationToken.None);
@@ -80,7 +82,10 @@ public sealed class HandoverAgentRehomeTests : IDisposable
         Assert.Equal(SessionStatus.Active, taker.Status);
         Assert.Null(taker.ParentSessionId);
         Assert.Equal(resumed.Id, (await store.GetSessionAsync(active.Id, CancellationToken.None))!.ParentSessionId);
-        Assert.Equal(holder.Id, (await store.GetSessionAsync(archived.Id, CancellationToken.None))!.ParentSessionId);
-        Assert.Equal(SessionStatus.Archived, (await store.GetSessionAsync(holder.Id, CancellationToken.None))!.Status);
+        Assert.Equal(resumed.Id, (await store.GetSessionAsync(archived.Id, CancellationToken.None))!.ParentSessionId);
+        var demoted = await store.GetSessionAsync(holder.Id, CancellationToken.None);
+        Assert.Equal(SessionStatus.Archived, demoted!.Status);
+        Assert.Equal(resumed.Id, demoted.ParentSessionId);
+        Assert.Equal(AgentSessionKinds.ChildDriverUser, demoted.ChildDriver);
     }
 }

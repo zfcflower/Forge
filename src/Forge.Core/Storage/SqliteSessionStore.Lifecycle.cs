@@ -422,8 +422,9 @@ public sealed partial class SqliteSessionStore
 
     /// <summary>
     /// Conditional <c>Archived|Deleted → Active</c> of one row (clears <c>deleted_at</c>), then Deleted descendants →
-    /// Archived. Returns null when there is no such row; throws when the key is held or the row is in another state
-    /// than <paramref name="allowActive"/> permits.
+    /// Archived. Returns null when there is no such row; throws when the row is in another state than
+    /// <paramref name="allowActive"/> permits. A root whose workspace is held by an Active root joins that root as an
+    /// agent session instead of taking the key — a restore never refuses on occupancy.
     /// </summary>
     private static async Task<bool?> ActivateRowAsync(
         SqliteConnection connection,
@@ -459,20 +460,46 @@ public sealed partial class SqliteSessionStore
 
         if (root)
         {
-            // A root takes the workspace's occupancy key on its own; an existing Active root is the occupied dialog's case.
-            await using var update = Command(
+            // The one-root rule: a restored root rejoins the workspace's Active root as an agent session when there is
+            // one (the same rule an agent session follows — occupancy never refuses a restore, the occupied dialog is
+            // the create path's), and only takes the workspace, as the branch's one root, when there is none. Whatever
+            // root rows the branch's history still holds demote under the row that just became its root.
+            var holder = await FindHolderAsync(connection, transaction, key).ConfigureAwait(false);
+            await using (var update = Command(
                 connection,
                 transaction,
-                $"""
-                UPDATE sessions SET status = 'Active', deleted_at = NULL
-                WHERE id = $id AND status IN ('Archived', 'Deleted') AND {KeyFreeSql}
-                """);
-            update.Parameters.AddWithValue("$id", sessionId);
-            update.Parameters.AddWithValue("$key", key);
-            var changed = await ExecuteOccupyingAsync(update, connection, transaction, key, zeroRowsMeansOccupied: true).ConfigureAwait(false);
-            if (changed != 1)
+                holder is null
+                    ? $"""
+                    UPDATE sessions SET status = 'Active', deleted_at = NULL
+                    WHERE id = $id AND status IN ('Archived', 'Deleted') AND {KeyFreeSql}
+                    """
+                    : $"UPDATE sessions SET status = 'Active', deleted_at = NULL, parent_session_id = $holder, child_driver = '{StorageSchema.ChildDriverUser}' WHERE id = $id AND status IN ('Archived', 'Deleted')"))
             {
-                throw new InvalidOperationException($"Session {sessionId} could not be activated.");
+                update.Parameters.AddWithValue("$id", sessionId);
+                update.Parameters.AddWithValue("$key", key);
+                if (holder is not null)
+                {
+                    update.Parameters.AddWithValue("$holder", holder);
+                }
+
+                if (await update.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false) != 1)
+                {
+                    throw new InvalidOperationException($"Session {sessionId} could not be activated.");
+                }
+            }
+
+            // The row's own descendants revive before any row moves: an adoption that happens first would let a
+            // deleted child escape the revival when it follows its row across the tree.
+            await ReviveDescendantsAsync(connection, transaction, sessionId).ConfigureAwait(false);
+            if (holder is null)
+            {
+                await AdoptPriorRootsAsync(connection, transaction, key, sessionId).ConfigureAwait(false);
+            }
+            else
+            {
+                // An old database's restored root may still hold its agent family; it joins under the Active root with
+                // the family following, exactly like a demoted root's family follows at a takeover.
+                await AdoptAgentsOfAsync(connection, transaction, sessionId, holder).ConfigureAwait(false);
             }
         }
         else
@@ -508,17 +535,25 @@ public sealed partial class SqliteSessionStore
                 }
             }
 
+            // Same rule as the root path: the row's own descendants revive while they still hang under it, so a
+            // revival cannot depend on which way the adoption moves that follow send them.
+            await ReviveDescendantsAsync(connection, transaction, sessionId).ConfigureAwait(false);
+
             if (activeRoot is null && parentId is not null)
             {
-                // The row it hung under becomes an agent of it when that row is a root, and every user agent session of
-                // that row follows the branch's new root (an archived one left behind would be a row nothing can reach).
+                // The row it hung under becomes an agent of it when that row is a root of the same workspace - landing
+                // as an archived one, the same uniform demotion AdoptPriorRoots writes (a self-heal-removed root's
+                // directory was just rebuilt, so "removed" would describe a state that no longer exists) - and every user
+                // agent session of that row
+                // follows the branch's new root (an archived one left behind would be a row nothing can reach).
                 await using (var demote = Command(
                     connection,
                     transaction,
-                    $"UPDATE sessions SET parent_session_id = $id, child_driver = '{StorageSchema.ChildDriverUser}' WHERE id = $parent AND parent_session_id IS NULL"))
+                    $"UPDATE sessions SET status = 'Archived', deleted_at = NULL, parent_session_id = $id, child_driver = '{StorageSchema.ChildDriverUser}' WHERE id = $parent AND parent_session_id IS NULL AND occupancy_key = $key"))
                 {
                     demote.Parameters.AddWithValue("$id", sessionId);
                     demote.Parameters.AddWithValue("$parent", parentId);
+                    demote.Parameters.AddWithValue("$key", key);
                     await demote.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
                 }
 
@@ -532,8 +567,27 @@ public sealed partial class SqliteSessionStore
                     await adopt.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
                 }
             }
+
+            if (activeRoot is null)
+            {
+                // It became the branch's one root: whatever root rows an old database left in its history demote under it.
+                await AdoptPriorRootsAsync(connection, transaction, key, sessionId).ConfigureAwait(false);
+            }
+            else
+            {
+                // It rejoined under the branch's Active root; a row an old database still lists as a root may hold its
+                // own agent family — it joins with the family following, like every demoted root's family does.
+                await AdoptAgentsOfAsync(connection, transaction, sessionId, activeRoot).ConfigureAwait(false);
+            }
         }
 
+        return true;
+    }
+
+    /// <summary>The row's own <c>Deleted</c> descendants come back as <c>Archived</c> (deleted_at cleared) - a restore
+    /// revives the family that hung under it, before any adoption move sends rows across the tree.</summary>
+    private static async Task ReviveDescendantsAsync(SqliteConnection connection, SqliteTransaction transaction, string sessionId)
+    {
         await using (var children = Command(
             connection,
             transaction,
@@ -542,8 +596,6 @@ public sealed partial class SqliteSessionStore
             children.Parameters.AddWithValue("$id", sessionId);
             await children.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
         }
-
-        return true;
     }
 
     private static async Task<int> SoftDeleteTreeAsync(SqliteConnection connection, SqliteTransaction transaction, string idsJson)
@@ -598,6 +650,13 @@ public sealed partial class SqliteSessionStore
         protected override async ValueTask<SessionInfo> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences)
         {
             await InsertSessionAsync(connection, transaction, session, key).ConfigureAwait(false);
+            if (session.ParentSessionId is null)
+            {
+                // A new root takes the workspace: any root rows its history still holds (a plain archive, an old
+                // database) are demoted under it — a branch owns at most one root row.
+                await AdoptPriorRootsAsync(connection, transaction, key, session.Id).ConfigureAwait(false);
+            }
+
             return session;
         }
     }
@@ -663,6 +722,56 @@ public sealed partial class SqliteSessionStore
         }
     }
 
+    /// <summary>
+    /// The one-root rule: <paramref name="rootId"/> just became the Active root of the workspace <paramref name="key"/>,
+    /// so every other non-Active root row of it — a plain archive without a successor, a handover before this rule, an
+    /// old database — is demoted to an archived agent session of it (a removed row comes back as an archived one:
+    /// its directory lives on under the workspace, only its row said it was gone), and the user agent sessions of those
+    /// rows follow
+    /// (archived ones included: the tree only expands a root's agent rows, so leaving them behind would hide them —
+    /// the same rule an archive-with-successor applies). A branch therefore holds at most one root row at any time.
+    /// </summary>
+    private static async Task AdoptPriorRootsAsync(SqliteConnection connection, SqliteTransaction transaction, string key, string rootId)
+    {
+        var prior = "id FROM sessions WHERE occupancy_key = $key AND parent_session_id IS NULL AND id <> $root AND status IN ('Archived', 'Deleted')";
+        await using (var agents = Command(
+            connection,
+            transaction,
+            $"UPDATE sessions SET parent_session_id = $root WHERE child_driver = '{StorageSchema.ChildDriverUser}' AND parent_session_id IN (SELECT {prior})"))
+        {
+            agents.Parameters.AddWithValue("$root", rootId);
+            agents.Parameters.AddWithValue("$key", key);
+            await agents.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        await using (var demote = Command(
+            connection,
+            transaction,
+            $"UPDATE sessions SET status = 'Archived', deleted_at = NULL, parent_session_id = $root, child_driver = '{StorageSchema.ChildDriverUser}' WHERE id IN (SELECT {prior})"))
+        {
+            demote.Parameters.AddWithValue("$root", rootId);
+            demote.Parameters.AddWithValue("$key", key);
+            await demote.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The user agent sessions hanging under <paramref name="sessionId"/> follow it into the root <paramref name="rootId"/>
+    /// — the join half of the one-root rule: a row that rejoins an active root leaves no agent family behind it.
+    /// </summary>
+    private static async Task AdoptAgentsOfAsync(SqliteConnection connection, SqliteTransaction transaction, string sessionId, string rootId)
+    {
+        await using (var agents = Command(
+            connection,
+            transaction,
+            $"UPDATE sessions SET parent_session_id = $root WHERE parent_session_id = $id AND child_driver = '{StorageSchema.ChildDriverUser}'"))
+        {
+            agents.Parameters.AddWithValue("$root", rootId);
+            agents.Parameters.AddWithValue("$id", sessionId);
+            await agents.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
     private sealed class ActivateOp(string sessionId, CancellationToken ct) : WriteOp<bool>(ct)
     {
         public override bool UsesSavepoint => true;
@@ -671,7 +780,7 @@ public sealed partial class SqliteSessionStore
             await ActivateRowAsync(connection, transaction, sessionId, allowActive: true).ConfigureAwait(false) ?? false;
     }
 
-    /// <summary>Section 4.4: archive old (must be Active) → create / activate the target, all under one savepoint.</summary>
+    /// <summary>Section 4.4: archive old (must be Active) → create / activate the target, the prior roots demoting under it, all under one savepoint.</summary>
     private sealed class HandoverOp(
         SqliteSessionStore store,
         string oldSessionId,
@@ -743,23 +852,17 @@ public sealed partial class SqliteSessionStore
 
                 // Only now, with every sub-step done, does the writer learn the new session's last sequence.
                 sequences.Record(created.Id, messages.Count);
+
+                // The new root takes the workspace: the archived old root (and any root row an old database left in this
+                // branch's history) demotes to an archived agent session of it, its agent family following — the same
+                // shape an archive-with-successor leaves, so the history group lists agent sessions only.
+                await AdoptPriorRootsAsync(connection, transaction, key!, created.Id).ConfigureAwait(false);
                 taker = created;
             }
 
-            // 3. The old root's still-active agent sessions follow the workspace to the taker (the same rule an
-            //    archive-with-successor applies): left under the archived old root they would surface in the branch's
-            //    history group without ever having been archived. The archived ones stay - an archived root keeps its
-            //    archived family in history. A resume that already adopted them (the taker was one of them) finds none.
-            await using (var rehome = Command(
-                connection,
-                transaction,
-                $"UPDATE sessions SET parent_session_id = $taker WHERE parent_session_id = $old AND child_driver = '{StorageSchema.ChildDriverUser}' AND status = 'Active'"))
-            {
-                rehome.Parameters.AddWithValue("$taker", taker.Id);
-                rehome.Parameters.AddWithValue("$old", oldSessionId);
-                await rehome.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-
+            // 3. Nothing else to move: a new session adopted the prior roots above, and a resume adopted them in
+            //    ActivateRowAsync (its own root path sweeps, its agent-promotion path demotes the old root and sweeps
+            //    the rest) — the old root's agent family followed in the same statements.
             return taker;
         }
 
