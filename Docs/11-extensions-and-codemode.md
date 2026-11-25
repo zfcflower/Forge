@@ -16,7 +16,7 @@ FORGE 的扩展执行全部在进程外：主程序保持 Native AOT、不可变
 
 ## 11.2 SDK 与 IPC
 
-- `Forge.Plugin.Sdk` 3.0.0：插件源码引用的稳定契约与全部线上 DTO（`ExtensionCallContext`、`ToolDeclaration`、`CommandDeclaration`、`WorkflowDeclaration`、`AgentDeclaration`、`IPluginPromptContributor`、`PanelDeclaration`、`PluginContributionSet`、`Permission`、`PluginStatusResponse`、`CodeExecutionRequest/Result`、`IHostFacade`、`IPlugin` 等）。
+- `Forge.Plugin.Sdk` 3.0.0：插件源码引用的稳定契约与全部线上 DTO（工具/命令/工作流/Agent/提示词贡献者/面板/贡献集/权限/状态查询/代码执行请求与结果，外加 `IHostFacade`、`IPlugin` 等入口）。逐项清单以 `src/Forge.Plugin.Sdk/SPEC.md` 为准，本文件不复制。
 - 线格式 MessagePack，成员按整数 `Key` 编号：已发布的 Key 不改号、不复用，新增成员只追加；枚举按整数传输、接收端校验已定义值；无反射序列化。
 - IPC：命名管道（Linux/macOS 为 Unix 域套接字）+ 4 字节长度前缀 + MessagePack 帧；协议版本 2；单帧上限 16 MiB（零长度/超限帧读侧拒绝并跳帧重同步，超过 64 MiB 重同步上限才关连接）；错误分层为 `IpcProtocolException` / `IpcRemoteException` / `IpcTimeoutException` / `IpcConnectionClosedException` / `IpcVersionMismatchException`（拒绝该帧、连接保持可用）。
 - 操作分组：宿主控制（`host.stop`/`host.tool_call`/`plugin.problem`）、插件（`plugins.refresh`/`plugins.status`/`plugin.execute`/`approve`/`revoke`/`disable`/`enable`/`delete`/`plugin.command`/`plugin.prompt`）、注册（`tools.register`/`unregister`、`contributions.register`/`unregister`）、脚本（`code.execute`、执行器侧 `executor.load/run/stop`）、扩展编写（`extensions.stage`/`pending`/`commit`/`discard`）、安装（`extensions.install`）、Worker（`worker.load`/`execute`/`command`/`prompt`/`unload`/`stop`）、终端（`terminal.*`）。
