@@ -317,6 +317,9 @@ internal sealed partial class MainWindowViewModel
                 : null,
         };
         created = session;
+        // Same as a root tab: the constructor's fill ran before `created` was assigned, so an agent-session tab would keep an
+        // empty @ picker until an unrelated agent-session event refilled it.
+        session.RefreshSessionMentions();
         if (!readOnly)
         {
             // The turn check is the root's (6.3): an agent session may not run under a root the store no longer holds as

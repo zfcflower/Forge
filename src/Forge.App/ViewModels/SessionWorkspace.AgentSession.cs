@@ -185,6 +185,9 @@ internal sealed partial class SessionWorkspaceViewModel
         agentRootTitle = root.Title;
         OnPropertyChanged(nameof(AgentSessionRoot));
         RaiseAgentTitleChanged();
+        // The @ picker's session group is the root's own answer: re-read it, or the tab keeps offering the root it no longer
+        // hangs under - an archived one, whose mentions can no longer be delivered.
+        RefreshSessionMentions();
     }
 
     /// <summary>The root session was renamed: this tab's "root › child" prefix follows it.</summary>

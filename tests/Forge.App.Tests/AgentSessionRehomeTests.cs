@@ -1,4 +1,5 @@
 using Forge.Abstractions;
+using Forge.App.Agents;
 using Forge.App.Providers;
 using Forge.App.ViewModels;
 using Forge.Core.Storage;
@@ -75,5 +76,71 @@ public sealed class AgentSessionRehomeTests : IDisposable
         Assert.StartsWith("Promoted \u203a ", view.Title, StringComparison.Ordinal);
         // The transcript the tab already showed is the one it keeps: nothing is replayed by the move.
         Assert.Equal(rounds, view.Transcript.Rounds.Count);
+    }
+
+    /// <summary>
+    /// The <c>@</c> picker's session group is the root the tab hangs under (forge-app "`@` 会话提及与授权"): moving that root
+    /// has to re-read the shell's source, or the tab keeps offering the root it left behind - archived by the same promotion,
+    /// so a mention of it can no longer be delivered - and never offers the one that now runs it.
+    /// </summary>
+    [Fact]
+    public async Task A_rehomed_tab_offers_the_new_root_in_the_at_picker()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+        var oldRoot = await store.CreateAsync(new SessionCreate(directory, "Old Root"), CancellationToken.None);
+        var promoted = await store.CreateAsync(
+            new SessionCreate(directory, "Promoted")
+            {
+                ParentSessionId = oldRoot.Id,
+                ChildDriver = AgentSessionKinds.ChildDriverUser,
+                AgentKind = "Worker",
+            },
+            CancellationToken.None);
+        var worker = await store.CreateAsync(
+            new SessionCreate(directory, "Worker 2")
+            {
+                ParentSessionId = oldRoot.Id,
+                ChildDriver = AgentSessionKinds.ChildDriverUser,
+                AgentKind = "Worker",
+            },
+            CancellationToken.None);
+
+        var services = new AgentRuntimeServices(
+            ProviderFactory: _ => throw new InvalidOperationException("this test never runs a turn"),
+            HostClient: null,
+            Store: store,
+            Catalog: store,
+            Todos: new SqliteTodoStore(directory),
+            Model: new ModelSettings("test-model"));
+        using var runtime = new SessionRuntime(services, oldRoot);
+        using var promotedRuntime = new SessionRuntime(services, promoted);
+        var providers = new ProviderServices(Path.Combine(directory, "settings.json"), directory, http);
+        SessionWorkspaceViewModel? created = null;
+        using var view = new SessionWorkspaceViewModel(
+            worker,
+            runtime,
+            checkpoints: null,
+            store: store,
+            providers,
+            fileSource: _ => Task.FromResult<IReadOnlyList<string>>([]),
+            agentSession: new AgentSessionLaunch(oldRoot, Ordinal: 2, IsDraft: false),
+            // The shell's own source in an agent-session tab's shape (MainWindowViewModel.SessionMentionTargetsFor): the
+            // root the tab hangs under at the moment it is asked.
+            sessionMentions: () => created?.AgentSessionRoot is { } root
+                ? [new SessionMentionTarget(root.Id, root.Title)]
+                : []);
+        created = view;
+
+        // The fill the shell does right after it builds a tab; from here on the picker shows what the view answers.
+        view.RefreshSessionMentions();
+        view.Composer.UpdateSuggestions("@", 1);
+        Assert.Equal(oldRoot.Id, Assert.Single(view.Composer.Suggestions).SessionId);
+
+        view.RehomeTo(promoted, promotedRuntime);
+
+        var row = Assert.Single(view.Composer.Suggestions);
+        Assert.Equal(promoted.Id, row.SessionId);
+        Assert.Equal("Promoted", row.Title);
     }
 }

@@ -1183,6 +1183,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 : null,
         };
         created = session;
+        // The constructor's first fill runs before `created` is assigned and can only answer empty: ask again now that the
+        // view can name itself, so a freshly opened (or role-rebuilt) tab starts on the @ picker its role gives it.
+        session.RefreshSessionMentions();
         if (!readOnly)
         {
             session.TurnGate = token => CheckTurnAsync(session, token);
