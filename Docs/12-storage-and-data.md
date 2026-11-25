@@ -33,14 +33,14 @@
 
 ## 12.2 `forge.db`
 
-- `PRAGMA user_version` 是 schema 阶梯，当前 **14**。每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写版本号，事务内重读版本防止多进程重复迁移；读到更高版本立即 `InvalidDataException`，不降级不写库。
+- `PRAGMA user_version` 是 schema 阶梯，当前 **15**。每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写版本号，事务内重读版本防止多进程重复迁移；读到更高版本立即 `InvalidDataException`，不降级不写库。
 - 阶梯要点：
   - 1：工作台表。
   - 2：`todos` 加 `commit_subject`/`summary`/`verification`/`commit_id`/`commit_error` 五列 + `plan_summaries(session_id PK, text, updated_at)`。
   - 3：一次性规范化历史时间戳并为每个时间戳列装写守卫。
   - 4：`todo_groups(id PK, session_id, title, order_index, updated_at)` 与 `todos.group_id`/`todos.origin`（旧行 `group_id` 保持 NULL 即待排区、`origin` 默认 `agent`）。
   - 5：会话占用键回填 + `ux_sessions_occupancy`（`status='Active' AND parent_session_id IS NULL`）唯一索引；按键去重保留 `last_active_ticks` 最大者，被归档者写 `storage_notices`（`dedupe-archived`）。
-  - 6：`deleted_at`。7：`projects.closed_at`（软关闭，同路径再添加复活原 id）。8：`fork_of_branch`/`fork_base_sha`。9：`inherits_from_session_id`/`inherits_up_to_seq`/`lineage_root_id`（回填自身）/`origin_kind`（回填 `cold`）/`prefix_fingerprint`。
+  - 6：`deleted_at`。7：`projects.closed_at`（软关闭，同路径再添加复活原 id）。8：`fork_of_branch`/`fork_base_sha`。9：`lineage_root_id`（回填自身）/`origin_kind`（回填 `cold`）/`prefix_fingerprint`（继承的两列曾在这一步加入，已由 15 号步骤删除）。15：删 `inherits_from_session_id`/`inherits_up_to_seq` 与 `ix_sessions_inherits`，并把 `origin_kind='full'` 折回 `cold`（完整继承整个能力取消）。
   - 10：`automation_runs`、`automation_state`、`sessions.automation_id`/`automation_run_id`。
   - 11：`plan_summary_revisions(id 自增 PK, session_id, text, replaced_at)` + `ix_plan_summary_revisions_session(session_id, id DESC)`。
   - 12：`sessions.title_source TEXT`（NULL = 仍是创建默认标题，`derived`/`agent`/`user` 见 [01-sessions-and-workspaces.md](01-sessions-and-workspaces.md)），无回填——旧行读作“未命名”。它**走阶梯**而不是像 `child_driver` 那样直带建表脚本：NULL 对历史行有确切含义（还没人给它起名），补一列即可，不需要删库。

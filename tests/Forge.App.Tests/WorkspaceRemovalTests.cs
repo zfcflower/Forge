@@ -8,10 +8,9 @@ using Xunit;
 namespace Forge.App.Tests;
 
 /// <summary>
-/// Removing a workspace removes every session on it through the same purge as a session removal (7.3). The inheritance
-/// guard refuses to purge a session while another session still inherits from it, so the flow has to go in rounds: an heir
-/// first, the session it inherits from in the next pass. Without the rounds the refused session would silently stay behind
-/// after the directory was already recycled.
+/// Removing a workspace removes every session on it through the same purge as a session removal (7.3): the directory goes
+/// to the trash once, and every archived session of it - and its descendants - is gone from the store afterwards. Nothing is
+/// allowed to stay behind after the directory was already recycled.
 /// </summary>
 public sealed class WorkspaceRemovalTests : IDisposable
 {
@@ -31,7 +30,7 @@ public sealed class WorkspaceRemovalTests : IDisposable
     }
 
     [Fact]
-    public async Task Removing_a_workspace_purges_an_heir_before_the_session_it_inherits_from()
+    public async Task Removing_a_workspace_purges_every_session_on_it_and_recycles_the_directory_once()
     {
         var worktree = Path.Combine(directory, "worktree");
         System.IO.Directory.CreateDirectory(worktree);
@@ -41,19 +40,14 @@ public sealed class WorkspaceRemovalTests : IDisposable
             CancellationToken.None);
         Assert.Null(await store.ArchiveAndPromoteAsync(older.Id, null, CancellationToken.None));
         var heir = await store.CreateAsync(
-            new SessionCreate(worktree, "heir")
+            new SessionCreate(worktree, "second")
             {
                 ProjectId = "p1",
                 WorktreePath = worktree,
-                InheritsFromSessionId = older.Id,
-                InheritsUpToSeq = 0,
             },
             CancellationToken.None);
         Assert.Null(await store.ArchiveAndPromoteAsync(heir.Id, null, CancellationToken.None));
 
-        // The older row goes first, so its purge is refused once: the heir is removed in that same round and the older
-        // session in the next one. Without the rounds the workspace would end up with the refused session still there.
-        await store.TouchAsync(older.Id, DateTimeOffset.UtcNow.AddMinutes(1), CancellationToken.None);
         var project = new ProjectInfo("p1", "repo", Path.Combine(directory, "repo"), ProjectKind.Repository, 0, DateTimeOffset.UnixEpoch);
         var plan = new WorkspaceRemovalPlan(
             project,
@@ -80,7 +74,6 @@ public sealed class WorkspaceRemovalTests : IDisposable
         var outcome = await flow.ExecuteWorkspaceRemovalAsync(plan, CancellationToken.None);
 
         Assert.Null(outcome.Error);
-        Assert.Empty(outcome.Refused);
         Assert.Contains(older.Id, outcome.RemovedSessionIds);
         Assert.Contains(heir.Id, outcome.RemovedSessionIds);
         Assert.Null(await store.GetSessionAsync(older.Id, CancellationToken.None));

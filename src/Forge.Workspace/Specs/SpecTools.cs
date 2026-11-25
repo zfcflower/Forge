@@ -221,12 +221,18 @@ internal static class SpecToolJson
 {
     public static string Serialize(object payload) => JsonPayload.Serialize(payload);
 
-    public static string? String(JsonElement root, string name) =>
-        root.ValueKind == JsonValueKind.Object
-        && root.TryGetProperty(name, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
+    /// <summary>An optional string argument; blank counts as absent, so the schema's default applies.</summary>
+    public static string? String(JsonElement root, string name)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty(name, out var value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return value.GetString() is { } text && !string.IsNullOrWhiteSpace(text) ? text : null;
+    }
 
     public static string? RequiredString(JsonElement root, string name)
     {

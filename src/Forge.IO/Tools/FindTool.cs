@@ -52,7 +52,7 @@ public sealed class FindTool : ToolBase, IBoundedOutputTool
             pattern = DefaultPattern;
         }
 
-        var requested = ToolJson.OptionalString(arguments, "path") ?? ".";
+        var requested = ToolJson.OptionalPath(arguments, "path");
         var depth = ToolJson.OptionalInt(
             arguments,
             "depth",

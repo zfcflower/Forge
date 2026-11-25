@@ -6,9 +6,6 @@ public enum SessionOrigin
     /// <summary>A fresh session with no carried-over context (also every session stored before v9).</summary>
     Cold,
 
-    /// <summary>Full inheritance: the history of <see cref="SessionInfo.InheritsFromSessionId"/> by reference.</summary>
-    Full,
-
     /// <summary>Started from a persisted handover summary message.</summary>
     Summary,
 
@@ -41,18 +38,6 @@ public sealed class SessionNotActiveException : InvalidOperationException
     }
 
     public string SessionId { get; }
-}
-
-/// <summary>A purge was refused because other sessions inherit history from the purged ones.</summary>
-public sealed class SessionPurgeRefusedException : InvalidOperationException
-{
-    public SessionPurgeRefusedException(IReadOnlyList<string> inheritingSessionIds)
-        : base($"{inheritingSessionIds.Count} session(s) still inherit from this session.")
-    {
-        InheritingSessionIds = inheritingSessionIds;
-    }
-
-    public IReadOnlyList<string> InheritingSessionIds { get; }
 }
 
 /// <summary>What <see cref="ISessionCatalog.HandoverAsync"/> makes Active after archiving the old session.</summary>

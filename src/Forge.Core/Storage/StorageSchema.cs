@@ -12,13 +12,12 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 14;
+    public const int Version = 15;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
     public const string StatusDeleted = "Deleted";
     public const string OriginCold = "cold";
-    public const string OriginFull = "full";
     public const string OriginSummary = "summary";
     public const string OriginBlank = "blank";
     public const string OriginResume = "resume";
@@ -445,6 +444,9 @@ internal static class StorageSchema
                 // database from before the column has it missing after the climb; the metrics store's shape probe
                 // bypasses the feature there until the database is rebuilt — no ALTER, nothing carried over.
                 break;
+            case 14:
+                await MigrateToV15Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
         }
@@ -664,16 +666,14 @@ internal static class StorageSchema
     }
 
     /// <summary>
-    /// The v9 step, inheritance and prompt-cache bookkeeping. Every existing session is its own lineage root and began
-    /// cold.
+    /// The v9 step, lineage and prompt-cache bookkeeping. Every existing session is its own lineage root and began cold.
+    /// (The inheritance columns this step once added were dropped again in v15; a fresh climb never creates them.)
     /// </summary>
     private static async Task MigrateToV9Async(
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken ct)
     {
-        await AddColumnIfMissingAsync(connection, transaction, "sessions", "inherits_from_session_id", "TEXT NULL", ct).ConfigureAwait(false);
-        await AddColumnIfMissingAsync(connection, transaction, "sessions", "inherits_up_to_seq", "INTEGER NULL", ct).ConfigureAwait(false);
         await AddColumnIfMissingAsync(connection, transaction, "sessions", "lineage_root_id", "TEXT NULL", ct).ConfigureAwait(false);
         await AddColumnIfMissingAsync(connection, transaction, "sessions", "origin_kind", "TEXT NULL", ct).ConfigureAwait(false);
         await AddColumnIfMissingAsync(connection, transaction, "sessions", "prefix_fingerprint", "TEXT NULL", ct).ConfigureAwait(false);
@@ -683,8 +683,6 @@ internal static class StorageSchema
             """
             UPDATE sessions SET lineage_root_id = id WHERE lineage_root_id IS NULL;
             UPDATE sessions SET origin_kind = 'cold' WHERE origin_kind IS NULL;
-            CREATE INDEX IF NOT EXISTS ix_sessions_inherits ON sessions (inherits_from_session_id)
-                WHERE inherits_from_session_id IS NOT NULL;
             """,
             ct).ConfigureAwait(false);
     }
@@ -745,6 +743,41 @@ internal static class StorageSchema
             await AddColumnIfMissingAsync(connection, transaction, "turn_metrics", "effort", "TEXT NULL", ct)
                 .ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The v15 step: full inheritance is gone, so its two session columns and their index go with it. A database that
+    /// already went through v9 has them and a row or two may name a parent; the step only drops the bookkeeping — the
+    /// messages themselves were never copied into the child, so nothing of the child's own history changes, and the child
+    /// simply starts at its own first message. An <c>origin_kind</c> of <c>full</c> — a value this build no longer writes
+    /// or reads — is folded back to <c>cold</c> here rather than left to fail the strict reader.
+    /// </summary>
+    private static async Task MigrateToV15Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        var tables = await ExistingColumnsAsync(connection, transaction, ct).ConfigureAwait(false);
+        if (!tables.TryGetValue("sessions", out var columns))
+        {
+            return;
+        }
+
+        await ExecuteAsync(connection, transaction, "DROP INDEX IF EXISTS ix_sessions_inherits", ct).ConfigureAwait(false);
+        if (columns.Contains("inherits_from_session_id"))
+        {
+            await ExecuteAsync(connection, transaction, "ALTER TABLE sessions DROP COLUMN inherits_from_session_id", ct)
+                .ConfigureAwait(false);
+        }
+
+        if (columns.Contains("inherits_up_to_seq"))
+        {
+            await ExecuteAsync(connection, transaction, "ALTER TABLE sessions DROP COLUMN inherits_up_to_seq", ct)
+                .ConfigureAwait(false);
+        }
+
+        await ExecuteAsync(connection, transaction, "UPDATE sessions SET origin_kind = 'cold' WHERE origin_kind = 'full'", ct)
+            .ConfigureAwait(false);
     }
 
     private const string V10SchemaSql = """

@@ -223,16 +223,12 @@ internal sealed record WorkspaceRemovalPlan(
     public IReadOnlyList<string> Reasons => [.. Guard.Select(static reason => reason.Text)];
 }
 
-/// <summary>A history session the inheritance guard kept: its title and the sessions that inherit from it.</summary>
-internal sealed record RemovalRefusal(string Title, IReadOnlyList<string> InheritingTitles);
-
 /// <summary>
-/// What a removal did: the removed ids (so the shell can close their tabs), the sessions the inheritance guard kept,
-/// a cleanup warning and a hard error. A removal that reports <see cref="Error"/> may still have removed sessions.
+/// What a removal did: the removed ids (so the shell can close their tabs), a cleanup warning and a hard error. A removal
+/// that reports <see cref="Error"/> may still have removed sessions.
 /// </summary>
 internal sealed record RemovalOutcome(
     IReadOnlyList<string> RemovedSessionIds,
-    IReadOnlyList<RemovalRefusal> Refused,
     string? Warning,
     string? Error)
 {
@@ -242,7 +238,7 @@ internal sealed record RemovalOutcome(
     /// </summary>
     public bool DirectoryGone { get; init; }
 
-    public static RemovalOutcome Failed(string error) => new([], [], null, error);
+    public static RemovalOutcome Failed(string error) => new([], null, error);
 }
 
 /// <summary>
@@ -312,8 +308,8 @@ internal sealed class RemovalFlow(
             return RemovalOutcome.Failed(RemovalStrings.ArchiveFirst);
         }
 
-        var (removed, refusal, warning, error) = await PurgeAsync(current, ct).ConfigureAwait(false);
-        return new RemovalOutcome(removed, refusal is null ? [] : [refusal], warning, error);
+        var (removed, warning, error) = await PurgeAsync(current, ct).ConfigureAwait(false);
+        return new RemovalOutcome(removed, warning, error);
     }
 
     /// <param name="baseBranch">
@@ -401,60 +397,35 @@ internal sealed class RemovalFlow(
 
     /// <summary>
     /// The session half of a workspace removal: every root session of the directory, newest first, through
-    /// <see cref="PurgeAsync"/>. A session kept by the inheritance guard waits for the round that removed its heir; a store
-    /// failure is reported once and not retried. Nothing here touches the directory.
+    /// <see cref="PurgeAsync"/>. A store failure is reported once and not retried. Nothing here touches the directory.
     /// </summary>
     private async Task<RemovalOutcome> RemoveWorkspaceSessionsAsync(IReadOnlyList<SessionInfo> roots, CancellationToken ct)
     {
         if (roots.Count == 0)
         {
-            return new RemovalOutcome([], [], null, null);
+            return new RemovalOutcome([], null, null);
         }
 
-        var pending = roots.OrderByDescending(static s => s.LastActiveAt).ToList();
-        var refusals = new Dictionary<string, RemovalRefusal>(StringComparer.Ordinal);
         var removed = new List<string>();
         var warnings = new List<string>();
         var errors = new List<string>();
-        bool progressed;
-        do
+        foreach (var session in roots.OrderByDescending(static s => s.LastActiveAt))
         {
-            progressed = false;
-            foreach (var session in pending.ToArray())
+            var (purged, warning, failure) = await PurgeAsync(session, ct).ConfigureAwait(false);
+            removed.AddRange(purged);
+            if (warning is not null)
             {
-                var (purged, refusal, warning, failure) = await PurgeAsync(session, ct).ConfigureAwait(false);
-                if (purged.Count > 0)
-                {
-                    progressed = true;
-                    pending.Remove(session);
-                    refusals.Remove(session.Id);
-                    removed.AddRange(purged);
-                }
-                else if (refusal is not null)
-                {
-                    refusals[session.Id] = refusal;
-                }
-                else
-                {
-                    // Already gone (purged as another session's descendant) or failed: neither retries.
-                    pending.Remove(session);
-                    if (failure is not null)
-                    {
-                        errors.Add(failure);
-                    }
-                }
+                warnings.Add(warning);
+            }
 
-                if (warning is not null)
-                {
-                    warnings.Add(warning);
-                }
+            if (failure is not null)
+            {
+                errors.Add(failure);
             }
         }
-        while (progressed && pending.Count > 0);
 
         return new RemovalOutcome(
             removed,
-            [.. refusals.Values],
             warnings.Count == 0 ? null : string.Join("\n", warnings.Distinct(StringComparer.Ordinal)),
             errors.Count == 0 ? null : string.Join("\n", errors.Distinct(StringComparer.Ordinal)));
     }
@@ -516,7 +487,7 @@ internal sealed class RemovalFlow(
     /// draft). The inheritance guard keeps the session and names who inherits from it; a cleanup failure after the purge
     /// only warns.
     /// </summary>
-    private async Task<(IReadOnlyList<string> Removed, RemovalRefusal? Refusal, string? Warning, string? Error)> PurgeAsync(
+    private async Task<(IReadOnlyList<string> Removed, string? Warning, string? Error)> PurgeAsync(
         SessionInfo session,
         CancellationToken ct)
     {
@@ -525,21 +496,10 @@ internal sealed class RemovalFlow(
         {
             purged = await catalog.PurgeAsync(session.Id, ct).ConfigureAwait(false);
         }
-        catch (SessionPurgeRefusedException refused)
-        {
-            var titles = new List<string>(refused.InheritingSessionIds.Count);
-            foreach (var id in refused.InheritingSessionIds)
-            {
-                var inheriting = await store.GetSessionAsync(id, CancellationToken.None).ConfigureAwait(false);
-                titles.Add(inheriting?.Title ?? id);
-            }
-
-            return ([], new RemovalRefusal(session.Title, titles), null, null);
-        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             var reason = exception is OperationCanceledException ? RemovalStrings.Cancelled : exception.Message;
-            return ([], null, null, RemovalStrings.RemoveFailed(session.Title, reason));
+            return ([], null, RemovalStrings.RemoveFailed(session.Title, reason));
         }
 
         var failures = new List<string>();
@@ -560,7 +520,6 @@ internal sealed class RemovalFlow(
 
         return (
             purged,
-            null,
             failures.Count == 0 ? null : RemovalStrings.RemovePartial(string.Join("; ", failures.Distinct(StringComparer.Ordinal))),
             null);
     }

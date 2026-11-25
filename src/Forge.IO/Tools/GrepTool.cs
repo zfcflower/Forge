@@ -55,7 +55,7 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
     {
         var bounds = options();
         var pattern = ToolJson.RequiredString(arguments, "pattern");
-        var requested = ToolJson.OptionalString(arguments, "path") ?? ".";
+        var requested = ToolJson.OptionalPath(arguments, "path");
         var glob = NormalizeGlob(ToolJson.OptionalString(arguments, "glob"));
         var regex = ToolJson.OptionalBool(arguments, "regex", false);
         var caseSensitive = ToolJson.OptionalBool(arguments, "case_sensitive", true);

@@ -377,7 +377,8 @@ internal sealed class PrCreateTool(
 
     private async Task<(string Body, string Source)> ResolveBodyAsync(string sessionId, string? supplied, CancellationToken ct)
     {
-        if (supplied is not null)
+        // A blank body is "not given", not "an empty description": the schema's default renders it from the plan.
+        if (!string.IsNullOrWhiteSpace(supplied))
         {
             return (supplied, "the body argument");
         }

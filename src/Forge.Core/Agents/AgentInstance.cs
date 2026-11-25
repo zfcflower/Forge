@@ -3,12 +3,8 @@ using Forge.Abstractions;
 
 namespace Forge.Core.Agents;
 
-/// <summary>
-/// One message of an instance's context; <see cref="Seq"/> is its session store sequence, 0 when unpersisted.
-/// <see cref="Inherited"/> marks the prefix taken over from an ancestor session by full inheritance: its
-/// <see cref="Seq"/> belongs to that ancestor, and compaction keeps the whole inherited part as it is.
-/// </summary>
-internal readonly record struct AgentMessage(ChatMessage Message, long Seq, bool Inherited = false);
+/// <summary>One message of an instance's context; <see cref="Seq"/> is its session store sequence, 0 when unpersisted.</summary>
+internal readonly record struct AgentMessage(ChatMessage Message, long Seq);
 
 /// <summary>
 /// A live agent: a definition (shared, immutable) plus the context of this instance (history, usage)
@@ -278,12 +274,11 @@ public sealed class AgentInstance
     }
 
     /// <summary>
-    /// The seq of the last message this instance persisted in its own session, 0 when nothing did or the newest entry
-    /// was inherited from an ancestor (an inherited seq names the ancestor's session, not this one). The run-end event
-    /// and the shell's counters read this: it is the turn's exact stream position, the one key a replay pairs the
-    /// turn's metrics row by.
+    /// The seq of the last message this instance persisted in its own session, 0 when nothing did. The run-end event and
+    /// the shell's counters read this: it is the turn's exact stream position, the one key a replay pairs the turn's
+    /// metrics row by.
     /// </summary>
-    public long LastPersistedSeq => history is [.., var last] && !last.Inherited && last.Seq > 0 ? last.Seq : 0;
+    public long LastPersistedSeq => history is [.., var last] && last.Seq > 0 ? last.Seq : 0;
 
     /// <summary>Bumped whenever the history is replaced rather than appended to, so recorded positions stop matching.</summary>
     internal int HistoryVersion { get; private set; }

@@ -25,15 +25,15 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
     /// <summary>Columns <see cref="ReadSession"/> reads, in ordinal order; a missing lineage root reads as the row's own id.</summary>
     private const string SessionColumns =
         "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
-        "last_active_at, deleted_at, fork_of_branch, fork_base_sha, inherits_from_session_id, inherits_up_to_seq, " +
+        "last_active_at, deleted_at, fork_of_branch, fork_base_sha, " +
         "COALESCE(lineage_root_id, id), origin_kind, prefix_fingerprint, automation_id, automation_run_id, child_driver, " +
         "title_source";
 
     /// <summary>Columns a new session row is written with; <c>occupancy_key</c> is always computed by the store.</summary>
     private const string InsertColumns =
         "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
-        "last_active_at, last_active_ticks, occupancy_key, fork_of_branch, fork_base_sha, inherits_from_session_id, " +
-        "inherits_up_to_seq, lineage_root_id, origin_kind, automation_id, automation_run_id, child_driver";
+        "last_active_at, last_active_ticks, occupancy_key, fork_of_branch, fork_base_sha, " +
+        "lineage_root_id, origin_kind, automation_id, automation_run_id, child_driver";
 
     /// <summary>Name of the savepoint each occupancy-changing / lifecycle write runs under inside a writer batch.</summary>
     private const string OperationSavepoint = "forge_op";
@@ -543,19 +543,17 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
                 : null,
             ForkOfBranch = StorageDb.ReadOptionalText(reader, 13, "fork_of_branch", _databasePath, row),
             ForkBaseSha = StorageDb.ReadOptionalText(reader, 14, "fork_base_sha", _databasePath, row),
-            InheritsFromSessionId = StorageDb.ReadOptionalText(reader, 15, "inherits_from_session_id", _databasePath, row),
-            InheritsUpToSeq = reader.IsDBNull(16) ? null : StorageDb.ReadInt64(reader, 16, "inherits_up_to_seq", _databasePath, row),
-            LineageRootId = StorageDb.ReadText(reader, 17, "lineage_root_id", _databasePath, row),
-            Origin = ParseOrigin(StorageDb.ReadOptionalText(reader, 18, "origin_kind", _databasePath, row), _databasePath, row),
-            PrefixFingerprint = StorageDb.ReadOptionalText(reader, 19, "prefix_fingerprint", _databasePath, row),
-            AutomationId = StorageDb.ReadOptionalText(reader, 20, "automation_id", _databasePath, row),
-            AutomationRunId = StorageDb.ReadOptionalText(reader, 21, "automation_run_id", _databasePath, row),
+            LineageRootId = StorageDb.ReadText(reader, 15, "lineage_root_id", _databasePath, row),
+            Origin = ParseOrigin(StorageDb.ReadOptionalText(reader, 16, "origin_kind", _databasePath, row), _databasePath, row),
+            PrefixFingerprint = StorageDb.ReadOptionalText(reader, 17, "prefix_fingerprint", _databasePath, row),
+            AutomationId = StorageDb.ReadOptionalText(reader, 18, "automation_id", _databasePath, row),
+            AutomationRunId = StorageDb.ReadOptionalText(reader, 19, "automation_run_id", _databasePath, row),
             ChildDriver = ParseChildDriver(
-                StorageDb.ReadOptionalText(reader, 22, "child_driver", _databasePath, row),
+                StorageDb.ReadOptionalText(reader, 20, "child_driver", _databasePath, row),
                 _databasePath,
                 row),
             TitleSource = ParseTitleSource(
-                StorageDb.ReadOptionalText(reader, 23, "title_source", _databasePath, row),
+                StorageDb.ReadOptionalText(reader, 21, "title_source", _databasePath, row),
                 _databasePath,
                 row),
         };

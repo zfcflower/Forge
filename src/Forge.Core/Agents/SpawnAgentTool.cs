@@ -99,7 +99,7 @@ public sealed class SpawnAgentTool : ITool
 
             kind = kindElement.GetString()!;
             task = taskElement.GetString()!;
-            resumeId = JsonArguments.OptionalString(root, "resume_id");
+            resumeId = JsonArguments.OptionalText(root, "resume_id");
             model = StringArgument(root, "model");
             provider = StringArgument(root, "provider");
             thinking = StringArgument(root, "thinking");

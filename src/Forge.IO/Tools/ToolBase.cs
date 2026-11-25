@@ -142,6 +142,15 @@ public static class ToolJson
         return value.GetString();
     }
 
+    /// <summary>
+    /// An optional path that defaults to the workspace root. Absent, null and blank all mean "no path": these schemas say
+    /// "default the root", and a model that fills an unused optional string with <c>""</c> is saying exactly that - the
+    /// reading <c>bash</c> already gives <c>workdir</c>. Passing the blank through instead failed on the argument guard in
+    /// <see cref="WorkspacePath.Resolve"/>, which exists for a caller that forgot a path, not for tool input.
+    /// </summary>
+    public static string OptionalPath(JsonElement arguments, string name) =>
+        OptionalString(arguments, name) is { } value && !string.IsNullOrWhiteSpace(value) ? value : ".";
+
     public static int OptionalInt(JsonElement arguments, string name, int fallback, int minimum, int maximum)
     {
         if (!arguments.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)

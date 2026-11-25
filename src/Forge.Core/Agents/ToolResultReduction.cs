@@ -61,7 +61,7 @@ internal static class ToolResultReduction
         for (var index = 0; index < guard; index++)
         {
             var entry = messages[index];
-            if (entry.Inherited || entry.Message.Role != MessageRole.Tool)
+            if (entry.Message.Role != MessageRole.Tool)
             {
                 continue;
             }
@@ -118,8 +118,7 @@ internal static class ToolResultReduction
 
             projected.Add(new AgentMessage(
                 new ChatMessage(entry.Message.Role, Replaced(entry.Message, chosen, calls, entry.Seq, counter, counting)),
-                entry.Seq,
-                entry.Inherited));
+                entry.Seq));
         }
 
         var released = Count(counter, messages) - Count(counter, projected);

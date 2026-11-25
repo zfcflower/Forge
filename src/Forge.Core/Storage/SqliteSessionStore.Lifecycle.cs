@@ -253,8 +253,6 @@ public sealed partial class SqliteSessionStore
             LastActiveAt = now,
             ForkOfBranch = request.ForkOfBranch,
             ForkBaseSha = request.ForkBaseSha,
-            InheritsFromSessionId = request.InheritsFromSessionId,
-            InheritsUpToSeq = request.InheritsUpToSeq,
             LineageRootId = request.LineageRootId ?? id,
             Origin = request.Origin,
             AutomationId = request.AutomationId,
@@ -266,7 +264,6 @@ public sealed partial class SqliteSessionStore
     internal static string OriginName(SessionOrigin origin) => origin switch
     {
         SessionOrigin.Cold => StorageSchema.OriginCold,
-        SessionOrigin.Full => StorageSchema.OriginFull,
         SessionOrigin.Summary => StorageSchema.OriginSummary,
         SessionOrigin.Blank => StorageSchema.OriginBlank,
         SessionOrigin.Resume => StorageSchema.OriginResume,
@@ -277,7 +274,6 @@ public sealed partial class SqliteSessionStore
     private static SessionOrigin ParseOrigin(string? value, string databasePath, string row) => value switch
     {
         null or StorageSchema.OriginCold => SessionOrigin.Cold,
-        StorageSchema.OriginFull => SessionOrigin.Full,
         StorageSchema.OriginSummary => SessionOrigin.Summary,
         StorageSchema.OriginBlank => SessionOrigin.Blank,
         StorageSchema.OriginResume => SessionOrigin.Resume,
@@ -387,7 +383,7 @@ public sealed partial class SqliteSessionStore
         var sql = $"""
             INSERT INTO sessions ({InsertColumns})
             SELECT $id, $ws, $title, $at, $project, $worktree, $branch, $parent, $kind, $task, 'Active', $active, $ticks, $key,
-                   $fork, $forkSha, $inherits, $inheritsSeq, $lineage, $origin, $automation, $automationRun, $childDriver
+                   $fork, $forkSha, $lineage, $origin, $automation, $automationRun, $childDriver
             {(root ? "WHERE " + KeyFreeSql : string.Empty)}
             """;
         await using var command = Command(connection, transaction, sql);
@@ -406,8 +402,6 @@ public sealed partial class SqliteSessionStore
         command.Parameters.AddWithValue("$key", key);
         BindNullable(command, "$fork", session.ForkOfBranch);
         BindNullable(command, "$forkSha", session.ForkBaseSha);
-        BindNullable(command, "$inherits", session.InheritsFromSessionId);
-        BindNullable(command, "$inheritsSeq", session.InheritsUpToSeq);
         command.Parameters.AddWithValue("$lineage", session.LineageRootId ?? session.Id);
         command.Parameters.AddWithValue("$origin", OriginName(session.Origin));
         BindNullable(command, "$automation", session.AutomationId);
@@ -1128,30 +1122,6 @@ public sealed partial class SqliteSessionStore
             }
 
             var json = JsonArray(ids);
-            var inheriting = new List<string>();
-            await using (var guard = Command(
-                connection,
-                transaction,
-                """
-                SELECT id FROM sessions
-                WHERE inherits_from_session_id IN (SELECT value FROM json_each($ids))
-                  AND id NOT IN (SELECT value FROM json_each($ids))
-                ORDER BY id
-                """))
-            {
-                guard.Parameters.AddWithValue("$ids", json);
-                await using var reader = await guard.ExecuteReaderAsync(CancellationToken.None).ConfigureAwait(false);
-                while (await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false))
-                {
-                    inheriting.Add(reader.GetString(0));
-                }
-            }
-
-            if (inheriting.Count > 0)
-            {
-                throw new SessionPurgeRefusedException(inheriting);
-            }
-
             await DeleteSessionRowsAsync(connection, transaction, "messages", json).ConfigureAwait(false);
 
             // Both search tables, each on its own existence: clearing only the one this build uses leaves the purged

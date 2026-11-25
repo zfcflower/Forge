@@ -95,11 +95,6 @@ internal sealed partial class MainWindowViewModel
         var outcome = await Task.Run(() => flow.RemoveSessionAsync(current, CancellationToken.None), CancellationToken.None)
             .ConfigureAwait(true);
         ReleaseRemovedSessions(outcome.RemovedSessionIds);
-        foreach (var refusal in outcome.Refused)
-        {
-            await dialogs.NotifyAsync(title, RemovalStrings.RemoveRefused(refusal.Title, refusal.InheritingTitles)).ConfigureAwait(true);
-        }
-
         if (outcome.Warning is { } warning)
         {
             await dialogs.NotifyAsync(title, warning).ConfigureAwait(true);
@@ -231,11 +226,6 @@ internal sealed partial class MainWindowViewModel
                 : RemovalStrings.ArchivedNotRemoved(archived[0].Title, error));
         }
 
-        foreach (var refusal in outcome.Refused)
-        {
-            notes.Add(RemovalStrings.RemoveRefused(refusal.Title, refusal.InheritingTitles));
-        }
-
         if (outcome.Warning is { } warning)
         {
             notes.Add(warning);
@@ -315,9 +305,9 @@ internal sealed partial class MainWindowViewModel
     /// <summary>
     /// "Restore session…" (7.4) of a history session, archived or removed: a missing directory is rebuilt first (a worktree
     /// from its branch, a scratch folder empty), then the session goes back through <see cref="ISessionCatalog.ActivateAsync"/>:
-    /// a root session takes the workspace, an agent session rejoins the workspace's active root, and an agent session in a
-    /// workspace without an active root becomes that root (its own parent becomes an agent of it, and the parent's other
-    /// agent sessions follow). A workspace with an active root still ends in the occupied dialog for a root. An existing
+    /// a workspace without an active root gets the restored session as its root (an agent session's own parent becomes
+    /// an agent of it, and the parent's other agent sessions follow), and a workspace with an active root gets it as
+    /// that root's agent session - a restore never refuses on occupancy; the occupied dialog is the create path's. An existing
     /// directory git no longer treats as a worktree stops the restore with git's reason. A rebuilt directory whose session
     /// stayed read-only says so; the retry finds the directory and skips the rebuild.
     /// </summary>
@@ -369,11 +359,6 @@ internal sealed partial class MainWindowViewModel
             {
                 reason = RemovalStrings.Changed;
             }
-        }
-        catch (WorktreeOccupiedException occupied)
-        {
-            // Never a direct SetStatus(Active): the workspace's active session is handed over to this one (6.2).
-            await ShowOccupiedAsync(occupied, HandoverIntent.Resume(current.Id), CancellationToken.None).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {

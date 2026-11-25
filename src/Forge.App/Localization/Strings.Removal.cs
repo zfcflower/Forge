@@ -79,7 +79,6 @@ internal static class RemovalStrings
     public const string WorkspacePresentKey = "lifecycle.restore.workspacePresent";
 
     // ---------------------------------------------------------------- files kept outside the database (removal)
-    public const string PurgeRefusedKey = "lifecycle.purge.refused";
     public const string PurgePartialKey = "lifecycle.purge.partial";
     public const string PurgeNotRetriedKey = "lifecycle.purge.notRetried";
     public const string PurgeRetryFailedKey = "lifecycle.purge.retryFailed";
@@ -208,9 +207,6 @@ internal static class RemovalStrings
     public static string WorkspaceRestored(string directory) => Loc.Instance.Format(WorkspaceRestoredKey, directory);
 
     public static string WorkspacePresent(string directory) => Loc.Instance.Format(WorkspacePresentKey, directory);
-
-    public static string RemoveRefused(string title, IEnumerable<string> inheriting) =>
-        Loc.Instance.Format(PurgeRefusedKey, title, string.Join(", ", inheriting));
 
     public static string RemovePartial(string reasons) => Loc.Instance.Format(PurgePartialKey, reasons);
 
@@ -350,10 +346,6 @@ internal static class RemovalStrings
             "目录 {0} 已存在,无需重建;其会话请逐个“恢复会话”。",
             "{0} already exists and needs no rebuild; restore its sessions one by one.");
 
-        Loc.Register(
-            PurgeRefusedKey,
-            "“{0}”仍被以下会话继承——它们的前半段历史就是它的消息，删了就没有上下文了——所以保留未删:{1}。要移除它，先移除这些会话",
-            "\"{0}\" was kept: these sessions still inherit from it - their opening history is its messages, so the link cannot be cut silently: {1}. Remove those sessions first if it has to go");
         Loc.Register(
             PurgePartialKey,
             "会话记录已删除,部分附属文件未清理,下次启动会重试:{0}",

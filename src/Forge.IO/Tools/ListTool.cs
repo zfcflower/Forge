@@ -44,7 +44,7 @@ public sealed class ListTool : ToolBase, IBoundedOutputTool
     protected override ValueTask<ToolResult> InvokeCoreAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
     {
         var bounds = options();
-        var requested = ToolJson.OptionalString(arguments, "path") ?? ".";
+        var requested = ToolJson.OptionalPath(arguments, "path");
         var depth = ToolJson.OptionalInt(arguments, "depth", DefaultDepth, 1, MaxDepth);
         var root = WorkspacePath.ResolveRealPath(Root(context));
         var start = WorkspacePath.Resolve(root, requested);

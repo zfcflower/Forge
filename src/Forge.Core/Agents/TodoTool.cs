@@ -92,10 +92,10 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
 
             operation = operationElement.GetString()!.Trim().ToLowerInvariant();
             id = JsonArguments.OptionalString(root, "id");
-            title = JsonArguments.OptionalString(root, "title");
+            title = JsonArguments.OptionalText(root, "title");
             status = JsonArguments.OptionalString(root, "status");
             note = JsonArguments.OptionalString(root, "note");
-            afterId = JsonArguments.OptionalString(root, "after_id");
+            afterId = JsonArguments.OptionalText(root, "after_id");
             group = JsonArguments.OptionalString(root, "group");
             commitSubject = JsonArguments.OptionalString(root, "commit_subject");
             summary = JsonArguments.OptionalString(root, "summary");

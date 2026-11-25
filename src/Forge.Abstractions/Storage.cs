@@ -46,13 +46,7 @@ public sealed record SessionInfo(string Id, string WorkspacePath, string Title, 
     /// <summary>Commit the fork branch started from; set together with <see cref="ForkOfBranch"/>.</summary>
     public string? ForkBaseSha { get; init; }
 
-    /// <summary>Session whose history this one continues by reference (full inheritance); never a sub-agent parent link.</summary>
-    public string? InheritsFromSessionId { get; init; }
-
-    /// <summary>Last parent message sequence number that belongs to this session's inherited prefix.</summary>
-    public long? InheritsUpToSeq { get; init; }
-
-    /// <summary>Root of the inheritance / handover / fork lineage; a store returns the session's own id when none is recorded.</summary>
+    /// <summary>Root of the handover / fork lineage; a store returns the session's own id when none is recorded.</summary>
     public string? LineageRootId { get; init; }
 
     /// <summary>How the session's context began.</summary>
@@ -99,10 +93,6 @@ public sealed record SessionCreate(string WorkspacePath, string Title)
 
     /// <summary>Lineage root to record; null = the new session's own id.</summary>
     public string? LineageRootId { get; init; }
-
-    public string? InheritsFromSessionId { get; init; }
-
-    public long? InheritsUpToSeq { get; init; }
 
     public SessionOrigin Origin { get; init; } = SessionOrigin.Cold;
 
@@ -200,8 +190,7 @@ public interface ISessionCatalog
     /// <summary>
     /// Permanently deletes an Archived / Deleted session and its descendants: every <c>forge.db</c> row keyed by their
     /// session id (messages, search rows, summaries, todos, todo groups, plan summaries, turn checkpoints, the session
-    /// rows). Throws <see cref="SessionPurgeRefusedException"/> when a session outside the purged set inherits from one of
-    /// them, and <see cref="InvalidOperationException"/> when the session is still Active (archive it first). Returns the
+    /// rows), and <see cref="InvalidOperationException"/> when the session is still Active (archive it first). Returns the
     /// purged ids (self first), so the caller can clean files kept outside the database.
     /// </summary>
     Task<IReadOnlyList<string>> PurgeAsync(string sessionId, CancellationToken ct) =>

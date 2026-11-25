@@ -885,12 +885,12 @@ public sealed class AgentLoop(AgentLoopServices services)
             && state.HistoryVersionAtRequest == instance.HistoryVersion
             && state.MessagesAtRequest <= messages.Count)
         {
-            return (int)Math.Min(int.MaxValue, (long)state.LastPromptTokens + Estimate(messages, state.MessagesAtRequest, ownOnly: false));
+            return (int)Math.Min(int.MaxValue, (long)state.LastPromptTokens + Estimate(messages, state.MessagesAtRequest));
         }
 
         return (int)Math.Min(
             int.MaxValue,
-            (long)Estimate(messages, 0, ownOnly: false) + services.TokenCounter.Count(instance.Prompt.StablePrefix) + Math.Max(0, toolTokens));
+            (long)Estimate(messages, 0) + services.TokenCounter.Count(instance.Prompt.StablePrefix) + Math.Max(0, toolTokens));
     }
 
     /// <summary>Per-definition overhead of the wire wrapper (type, name and parameter keys) beyond the counted text.</summary>
@@ -911,7 +911,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         return (int)Math.Min(int.MaxValue, total);
     }
 
-    private int OwnTokens(AgentInstance instance) => Estimate(instance.Messages, 0, ownOnly: true);
+    private int OwnTokens(AgentInstance instance) => Estimate(instance.Messages, 0);
 
     /// <summary>
     /// Tokens automatic summarization can never drop: the inherited prefix (untouchable — it is what makes a fork's prompt
@@ -920,26 +920,14 @@ public sealed class AgentLoop(AgentLoopServices services)
     /// summary counts as zero: a pass can always rewrite it smaller, so charging its size here would abandon an instance
     /// that a summary could still help. This is a lower bound, and it is only computed once the context is over the line.
     /// </summary>
-    private int IrreducibleTokens(AgentInstance instance, int toolTokens, int keepRecent)
-    {
-        var inherited = new List<ChatMessage>();
-        foreach (var entry in instance.Messages)
-        {
-            if (entry.Inherited)
-            {
-                inherited.Add(entry.Message);
-            }
-        }
-
-        return (int)Math.Min(
+    private int IrreducibleTokens(AgentInstance instance, int toolTokens, int keepRecent) =>
+        (int)Math.Min(
             int.MaxValue,
-            (long)services.TokenCounter.Count(inherited)
-            + services.TokenCounter.Count(instance.Prompt.StablePrefix)
+            (long)services.TokenCounter.Count(instance.Prompt.StablePrefix)
             + Math.Max(0, toolTokens)
             + Math.Min(keepRecent, OwnTokens(instance)));
-    }
 
-    private int Estimate(List<AgentMessage> messages, int from, bool ownOnly)
+    private int Estimate(List<AgentMessage> messages, int from)
     {
         if (from >= messages.Count)
         {
@@ -949,13 +937,10 @@ public sealed class AgentLoop(AgentLoopServices services)
         var slice = new List<ChatMessage>(messages.Count - from);
         for (var index = from; index < messages.Count; index++)
         {
-            if (!ownOnly || !messages[index].Inherited)
-            {
-                slice.Add(messages[index].Message);
-            }
+            slice.Add(messages[index].Message);
         }
 
-        return slice.Count == 0 ? 0 : services.TokenCounter.Count(slice);
+        return services.TokenCounter.Count(slice);
     }
 
     /// <summary>Usage recorded for another model no longer applies, and neither does that model's hysteresis.</summary>

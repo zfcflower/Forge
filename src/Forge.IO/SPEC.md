@@ -42,6 +42,7 @@ parent: forge-architecture
 - **只给十个工具,名字对齐提示词。** `read`/`write`/`edit`/`ls`/`find`/`grep`/`copy`/`move`/`delete`/`bash` 的名字与 `Forge.Core.Prompts.BuiltInAgents` 的白名单逐字一致(Scout 与 Plan 用前面四个,Worker 再加 `edit`/`write`/`copy`/`move`/`delete`/`bash`;Reviewer 是前面四个加只读的 `git_diff`,它不属本模块,见 forge-core),所以工具落地不需要改提示词与白名单。`copy`/`move`/`delete` 是独立工具而不是 `bash` 一行命令:进程启动比文件操作本身贵得多(基准:600 文件复制 94 ms vs 进程 306 ms,删除 21 ms vs 112 ms),且工作区边界与 `PathGate` 看不到 shell 命令里的路径。
 - **文件操作留在进程内。** 读、写、改、列、找、搜全部是原生实现,不搭 `cat`/`sed`/`find` 进程;只有真的需要外部程序时才创建子进程,`grep` 的 ripgrep 后端只是可选的加速,不是前提。
 - **常量 schema。** 每个工具的 `InputSchemaJson` 是 `const string`,参数由 `JsonDocument` 读取(无反射、无源生成以外的序列化);两次请求字节相同,提示词缓存不被无意义地打散。参数错误一律转成 `IsError` 结果,只有取消向外抛。
+- **可选字符串的空白等于省略。** 可选参数按“空白 = 没给”读,取各自 schema 里写的默认值:`path`(`grep`/`ls`/`find`,经 `ToolJson.OptionalPath`)、`workdir`、`glob`、`pattern`、`git_diff` 的 `base`、`models` 的 `provider`。依据:模型常把未使用的可选字符串填成 `""` 而不是省略它,而把空串当输入错误会让三个只读遍历工具在那类模型手里 100% 失败,报错还只是 `WorkspacePath.Resolve` 那句 .NET 参数守卫的原话(点名内部形参、不给下一步)。`WorkspacePath.Resolve` 自己的空白守卫保持不动——它挡的是调用方漏传,不是工具输入。
 - **审批只看副作用。** `read`/`ls`/`find`/`grep` 是 `ReadOnly`(走 `DefaultApprovalPolicy` 的自动放行),`write`/`edit`/`copy`/`move`/`delete` 是 `Write`,`bash` 是 `Execute`。**W14 起**:`read`/`ls`/`find`/`grep` 进 `run_code` 的脚本注册表,依据就是同一个 `ReadOnly` 判定(主程序按 `SideEffect == ReadOnly` 挑候选,不认名字);`write`/`edit`/`copy`/`move`/`delete`/`bash` 仍永不进,脚本既调不到也看不到。用户在 `tools` 分区关掉其中某个工具后,脚本面也同步去掉它(`Tools.List()` 不列、调用按未知名拒绝)。
 
 ### 读与写

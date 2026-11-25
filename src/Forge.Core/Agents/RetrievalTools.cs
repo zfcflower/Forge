@@ -250,4 +250,12 @@ internal static class JsonArguments
         root.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String
             ? element.GetString()
             : null;
+
+    /// <summary>
+    /// An optional string that is absent when it is blank. Every schema names a default for these ("omit to start fresh",
+    /// "default appends"), and a model that fills an unused optional field with <c>""</c> instead of omitting it is asking
+    /// for that default - handing the blank on made the tool answer "no sub-agent with id ''" instead.
+    /// </summary>
+    public static string? OptionalText(JsonElement root, string name) =>
+        OptionalString(root, name) is { } text && !string.IsNullOrWhiteSpace(text) ? text : null;
 }

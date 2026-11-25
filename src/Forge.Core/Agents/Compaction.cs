@@ -249,7 +249,7 @@ public sealed class SummaryCompactor : IContextCompactor
         // this session's own messages are summarized and they get the budget the inherited part and the current summary
         // leave; the new summary replaces the current one, so its size is the best guess for the new one.
         var summaryTokens = tokens.Count(SessionHistory.RenderSummaries(view));
-        var rawBudget = request.TargetTokens - InheritedTokens(instance) - summaryTokens;
+        var rawBudget = request.TargetTokens - summaryTokens;
         if (SummaryLayers.PlanCut(raw, rawBudget, request.KeepRecentTokens, CountMessage) is not { } cut)
         {
             return null;
@@ -308,32 +308,13 @@ public sealed class SummaryCompactor : IContextCompactor
         return raw;
     }
 
-    private int InheritedTokens(AgentInstance instance)
-    {
-        List<ChatMessage>? inherited = null;
-        foreach (var entry in instance.Messages)
-        {
-            if (entry.Inherited)
-            {
-                (inherited ??= []).Add(entry.Message);
-            }
-        }
-
-        return inherited is null ? 0 : tokens.Count(inherited);
-    }
-
-    /// <summary>[inherited prefix, unchanged] + [own summary view] + [own messages after the last summarized sequence].</summary>
+    /// <summary>[Summary view] + [messages after the last summarized sequence].</summary>
     private static List<AgentMessage> Rebuild(AgentInstance instance, ContextView view)
     {
-        var inherited = new List<AgentMessage>();
         var recent = new List<AgentMessage>();
         foreach (var entry in instance.Messages)
         {
-            if (entry.Inherited)
-            {
-                inherited.Add(entry);
-            }
-            else if (entry.Seq > view.LastSummarizedSeq)
+            if (entry.Seq > view.LastSummarizedSeq)
             {
                 recent.Add(entry);
             }
@@ -344,8 +325,7 @@ public sealed class SummaryCompactor : IContextCompactor
             recent.RemoveAt(0);
         }
 
-        var rebuilt = new List<AgentMessage>(inherited.Count + recent.Count + 1);
-        rebuilt.AddRange(inherited);
+        var rebuilt = new List<AgentMessage>(recent.Count + 1);
         var summaryText = SessionHistory.RenderSummaries(view);
         if (summaryText.Length > 0)
         {
