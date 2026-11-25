@@ -165,13 +165,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private Task? selectionSave;
 
     /// <summary>
-    /// The root instance's counters as the turn began (tokens, streaming time, and which instance they belong to). The turn-end
-    /// difference is the metrics row's snapshot. They are read from the instance itself, not from events: a turn that failed
-    /// or was stopped never sends <c>AgentTurnCompleted</c>, yet its calls already moved the counters, and an event-fed copy
-    /// would charge that spend to the next turn.
-    /// </summary>
-    private RootCounters turnStartCounters = RootCounters.None;
-
     /// <summary>Tool calls the root agent started during this turn; incremented on the event thread, reset when the turn
     /// begins. Counted there — not in TrackTool — so a Background flush landing after the turn's finally cannot miss a
     /// call.</summary>
@@ -2353,7 +2346,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         turnStartedAt = DateTimeOffset.Now;
         Interlocked.Exchange(ref lastActivityTicks, turnStartedAt.UtcTicks);
         Interlocked.Exchange(ref runningTools, 0);
-        turnStartCounters = live.ReadRootCounters();
         turnToolCalls = 0;
         Interlocked.Exchange(ref turnScriptCalls, 0);
         Interlocked.Exchange(ref turnResultChars, 0);
@@ -3158,8 +3150,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// The same event carries the instance's cumulative streaming time, differenced the same way into the card's
     /// <see cref="TurnCardViewModel.StreamElapsed"/> — the divider's output rate divides by that, never by the wall clock.
     /// <para>The metrics row does not read this difference: it differences two snapshots of the instance counter itself
-    /// (the root instance's live counters against <see cref="turnStartCounters"/>), so the row and the card agree but do not
-    /// depend on the same flush timing, and a failed or stopped turn still records what it spent.</para>
+    /// (the root instance's live counters against <see cref="SessionRuntime.TurnBaseline"/>), so the row and the card agree
+    /// but do not depend on the same flush timing, and a failed or stopped turn still records what it spent.</para>
     /// </summary>
     private void AddTurnUsage(AgentTurnCompleted completed)
     {
@@ -3362,10 +3354,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         try
         {
-            // The agent is rebuilt during a turn (agent or model switch): the new instance starts from zero, so the turn's
-            // start snapshot of the old one means nothing against it.
+            // The reading the turn is measured against is the one its own run sampled: the instance the runtime resolved
+            // for this turn, before it wrote anything. A pre-turn reading of the view's is not a substitute - on the first
+            // turn of a runtime there is no instance yet, and after a rebuild it is another one, so every such row lost its
+            // position and its divider read "—" on every replay. The identity proof stays for the difference: an instance
+            // rebuilt mid-turn starts from zero, so the old reading means nothing against it.
             var end = runtime?.ReadRootCounters() ?? RootCounters.None;
-            var start = ReferenceEquals(end.Instance, turnStartCounters.Instance) ? turnStartCounters : RootCounters.None;
+            var baseline = runtime?.TurnBaseline ?? RootCounters.None;
+            var start = ReferenceEquals(end.Instance, baseline.Instance) ? baseline : RootCounters.None;
             recorder.Record(TurnMetricsRowFactory.Build(
                 SessionId,
                 turn,

@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Providers;
+using Forge.App.Services;
 using Forge.App.ViewModels;
 using Forge.Core.Agents;
 using Forge.Core.Providers;
@@ -32,6 +33,9 @@ internal sealed class OverloadSession : IDisposable
 
     public SessionWorkspaceViewModel Tab { get; }
 
+    /// <summary>The session store the tab writes through, for a case that has to read back what a turn persisted.</summary>
+    public SqliteSessionStore Store => store;
+
     /// <summary>Turns that produced a card; a session can hold a notice round of its own (a provider that cannot be resolved).</summary>
     public int Turns => Tab.Transcript.Rounds.Count(static round => round.Card is not null);
 
@@ -41,7 +45,12 @@ internal sealed class OverloadSession : IDisposable
     /// numbers wants. False keeps the real middleware — the end-to-end cases let the server's own <c>Retry-After</c> decide the
     /// wait, so nothing has to be injected.
     /// </param>
-    public static async Task<OverloadSession> StartAsync(IChatProvider endpoint, bool mechanicalWaits = true)
+    /// <param name="instruments">The tab's instrument sources, built on the temp directory the session lives in; null keeps
+    /// the null object, which records no metrics row at all.</param>
+    public static async Task<OverloadSession> StartAsync(
+        IChatProvider endpoint,
+        bool mechanicalWaits = true,
+        Func<string, ISessionInstrumentSources>? instruments = null)
     {
         var directory = Path.Combine(Path.GetTempPath(), "forge-overload-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -70,7 +79,8 @@ internal sealed class OverloadSession : IDisposable
             runtime,
             checkpoints: null,
             store,
-            new ProviderServices(Path.Combine(directory, "settings.json"), directory, new HttpClient()))
+            new ProviderServices(Path.Combine(directory, "settings.json"), directory, new HttpClient()),
+            instrumentSources: instruments?.Invoke(directory))
         {
             // Nothing fires behind an assertion unless the case asks for it.
             AutoResumeDelay = TimeSpan.FromMinutes(5),

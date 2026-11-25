@@ -302,6 +302,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     private AgentHost? host;
     private AgentInstance? root;
     private AgentInstance? activeRoot;
+    private RootCounters turnBaseline = RootCounters.None;
 
     /// <summary>
     /// The sink of the session this runtime drives, recorded as each turn starts (the tab's own event funnel). It outlives every turn,
@@ -568,6 +569,17 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         }
 
         ArgumentNullException.ThrowIfNull(sink);
+
+        // The fallback baseline, in place before this turn's first await and before it resolves its own instance: naming the
+        // session, reading its window or resolving the root can still fail or be cancelled, and measuring against what the
+        // runtime already held is what stops such a zero-write turn from naming a message it never wrote - an idle delivery
+        // may have appended to that instance since the previous turn. A resolved turn overwrites it below.
+        var held = ReadRootCounters();
+        lock (gate)
+        {
+            turnBaseline = held;
+        }
+
         var message = UserMessage(userText, attachments);
 
         // The session's sink outlives this turn and is what a background child's events go to after this run's channel is done.
@@ -597,10 +609,17 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         // surface is refreshed at the start of the turn and never stored.
         Volatile.Write(ref mcpFocus, userText);
 
+        // The turn's own baseline replaces the fallback the moment its instance exists: sampled here, on the instance this
+        // turn resolved and before it wrote anything, it is both what the row is differenced against and the position the
+        // row may name. The view cannot supply it: on the first turn of a runtime (a reopened tab, a fresh session) there
+        // is no instance yet, and the first turn after a rebuild (a model, agent or step switch) has another one - either
+        // way the identity proof never held, so those rows stayed positionless and read "—" on every replay.
         var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
+        var (baselineUsage, baselineStream) = agent.ReadCounters();
         lock (gate)
         {
             activeRoot = agent;
+            turnBaseline = new RootCounters(baselineUsage, baselineStream, agent, agent.LastPersistedSeq);
         }
 
         try
@@ -1390,6 +1409,21 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>
+    /// The counters and the position of the instance the last run resolved for its turn, sampled before that turn wrote
+    /// anything: what the turn's metrics row is differenced against and the position it may name.
+    /// </summary>
+    internal RootCounters TurnBaseline
+    {
+        get
+        {
+            lock (gate)
+            {
+                return turnBaseline;
+            }
         }
     }
 
