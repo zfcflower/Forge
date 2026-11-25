@@ -76,7 +76,7 @@ internal static class TreeMenuControls
     /// <summary>
     /// The submenu arrow's 8x16 size and its chevron geometry are written into the MenuItem's control template, and a template
     /// value outranks every style: a style setter for that path never applied. The size is therefore set on the template child
-    /// itself, once the item has one - 6x6, so the arrow sits beside the label instead of dwarfing it.
+    /// itself, once the item has one - 8x8, so the arrow sits beside the label instead of standing twice as tall as it.
     /// </summary>
     private static void ShrinkSubmenuChevron(MenuItem item) =>
         // The template's parts exist only once it has been applied: attaching to the visual tree happens before that.
@@ -86,8 +86,8 @@ internal static class TreeMenuControls
             {
                 if (shape.Name == "PART_ChevronPath")
                 {
-                    shape.Width = 6;
-                    shape.Height = 6;
+                    shape.Width = 8;
+                    shape.Height = 8;
                 }
             }
         };

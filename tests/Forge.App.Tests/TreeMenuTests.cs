@@ -167,7 +167,7 @@ public sealed class TreeMenuTests
     /// template child (a style setter for `PART_ChevronPath` silently did nothing). This pins the real rendered size.
     /// </summary>
     [Fact]
-    public Task A_submenu_entry_draws_a_six_pixel_chevron() => SharedUi.RunAsync(() =>
+    public Task A_submenu_entry_draws_an_eight_pixel_chevron() => SharedUi.RunAsync(() =>
     {
         var items = TreeMenuControls.Build(
         [
@@ -184,8 +184,8 @@ public sealed class TreeMenuTests
         SharedUi.Settle(window);
 
         var chevron = parent.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single(shape => shape.Name == "PART_ChevronPath");
-        Assert.Equal(6, chevron.Width);
-        Assert.Equal(6, chevron.Height);
+        Assert.Equal(8, chevron.Width);
+        Assert.Equal(8, chevron.Height);
 
         window.Close();
         return Task.CompletedTask;
