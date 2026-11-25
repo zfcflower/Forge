@@ -419,7 +419,6 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         OnPropertyChanged(nameof(NewSessionTooltip));
         OnPropertyChanged(nameof(PairRemoteTooltip));
         OnPropertyChanged(nameof(ForkLabel));
-        OnPropertyChanged(nameof(ForkHeader));
         OnPropertyChanged(nameof(MergeBackHeader));
         OnPropertyChanged(nameof(SyncHeader));
         OnPropertyChanged(nameof(AbortMergeHeader));
@@ -548,9 +547,6 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         set => SetAndNotify(ref isConflicted, value, nameof(HasAbortMerge));
     }
 
-    /// <summary>The fork entry's label, resolved on read: a session row inherits the session, a workspace row does not.</summary>
-    public string ForkHeader => Kind == TreeNodeKind.Session ? ForkStrings.MenuForkInherit : ForkStrings.MenuFork;
-
     public string MergeBackHeader => forkOfBranch is null ? string.Empty : ForkStrings.MenuMergeBack(forkOfBranch);
 
     public string SyncHeader => forkOfBranch is null ? string.Empty : ForkStrings.MenuSync(forkOfBranch);
@@ -649,7 +645,7 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     /// <summary>Re-asks every command of the row whether it can run, after an in-memory lifecycle state changed.</summary>
     public void NotifyCommandStates()
     {
-        foreach (var command in new[] { OpenCommand, NewSessionCommand, NewAgentSessionCommand, ArchiveCommand, PromoteCommand, RenameCommand, RevealCommand, RemoveCommand, ForkCommand, MergeBackCommand, SyncCommand, AbortMergeCommand, RestoreCommand, LinkWorkspaceCommand, ReplaceSessionCommand, RenameBranchCommand, OpenInVsCodeCommand })
+        foreach (var command in new[] { OpenCommand, NewSessionCommand, NewAgentSessionCommand, ArchiveCommand, PromoteCommand, RenameCommand, RevealCommand, RemoveCommand, ForkCommand, MergeBackCommand, SyncCommand, AbortMergeCommand, RestoreCommand, LinkWorkspaceCommand, RenameBranchCommand, OpenInVsCodeCommand })
         {
             (command as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         }
@@ -947,7 +943,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     public Func<string, Task<bool>>? ArchiveGuard { get; set; }
 
     /// <summary>Runs the parallel fork dialog (6.5) for a source workspace with the given default context; set by the shell.</summary>
-    public Func<ForkSource, HandoverContextMode, CancellationToken, Task>? ForkWorkspace { get; set; }
+    public Func<ForkSource, CancellationToken, Task>? ForkWorkspace { get; set; }
 
     /// <summary>Runs the merge-back / sync dialog (6.6) of a fork workspace; set by the shell.</summary>
     public Func<ForkRelation, MergeDirection, CancellationToken, Task>? MergeFork { get; set; }
@@ -2442,7 +2438,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             var headForkable = plan.HeadKind is null or GitHeadKind.Branch;
             var present = plan.RowMark != TreeRowMark.Missing && !plan.IsStaleWorktree;
             fork = new AsyncRelayCommand(
-                ct => ForkWorkspace?.Invoke(source, HandoverContextMode.Summary, ct) ?? Task.CompletedTask,
+                ct => ForkWorkspace?.Invoke(source, ct) ?? Task.CompletedTask,
                 () => present && headForkable && !Blocked(directory),
                 OnFailed);
             if (plan.ForkOfBranch is { } sourceBranch)
@@ -2464,17 +2460,6 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
             abort = new AsyncRelayCommand(
                 ct => AbortMerge?.Invoke(directory, ct) ?? Task.CompletedTask,
                 () => true, // the shell refuses it while another operation runs there
-                OnFailed);
-        }
-        else if (plan.Kind == TreeNodeKind.Session
-                 && plan.Session is { Status: SessionStatus.Active, ParentSessionId: null } session
-                 && plan.Project is { Kind: ProjectKind.Repository } sessionProject)
-        {
-            var directory = DirectoryOf(session);
-            var source = new ForkSource(sessionProject, directory, session);
-            fork = new AsyncRelayCommand(
-                ct => ForkWorkspace?.Invoke(source, HandoverContextMode.Full, ct) ?? Task.CompletedTask,
-                () => !Blocked(directory) && IsSessionBusy?.Invoke(session.Id) != true,
                 OnFailed);
         }
 

@@ -16,9 +16,7 @@ internal enum TreeMenuKey
     CloseProject,
     NewSession,
     NewAgentSession,
-    ReplaceSession,
     Fork,
-    ForkInherit,
     MergeBack,
     Sync,
     AbortMerge,
@@ -237,8 +235,9 @@ internal static class TreeMenu
         return entries;
     }
 
-    /// <summary>5.3: new session / replace X / parallel fork, by the active session's state. The agent session leads: it is the
-    /// one entry that never needs the current session to be idle, so it stays usable while the rest of the group waits.</summary>
+    /// <summary>5.3: new root session / agent session / parallel fork. The same three entries whether or not the branch has a
+    /// session: a new root session beside a live one hands the branch over (the dialog asks what the new session starts with),
+    /// and the agent session hangs under whichever root is active.</summary>
     private static List<TreeMenuEntry> First(TreeRowState row)
     {
         var block = row.DirectoryMissing ? LifecycleStrings.DirectoryMissing : row.StaleReason ?? WorkspaceBlock(row);
@@ -247,9 +246,9 @@ internal static class TreeMenu
         {
             var empty = new List<TreeMenuEntry>(3)
             {
+                Gate(TreeMenuKey.NewSession, block, isDefault: true) with { Warning = warning },
                 // An agent session hangs under an active root session; without one there is nothing to attach it to.
                 Gate(TreeMenuKey.NewAgentSession, block ?? AgentSessionStrings.NoRoot),
-                Gate(TreeMenuKey.NewSession, block, isDefault: true) with { Warning = warning },
             };
 
             // A workspace without a session can still be forked: the new branch records the source branch, which is how a
@@ -266,14 +265,14 @@ internal static class TreeMenu
         var replaceReason = block ?? busy;
         var entries = new List<TreeMenuEntry>(3)
         {
+            // Taking the branch over needs the holder idle; a busy holder leaves "fork" as the one way on (5.3 "X 忙").
+            Gate(TreeMenuKey.NewSession, replaceReason, isDefault: true) with { Warning = warning },
             // The root is busy or not: an agent session queues for a run slot like any other child, so only a workspace that
             // cannot take a new session at all disables this one.
             Gate(TreeMenuKey.NewAgentSession, block),
-            Gate(TreeMenuKey.ReplaceSession, replaceReason, isDefault: true) with { Warning = warning },
         };
         if (row.InRepository)
         {
-            // A busy holder leaves "fork" as the one way on, so it becomes the default (5.3 "X 忙").
             var forkReason = block ?? (row.HeadOffBranch ? TreeMenuStrings.HeadNotOnBranch : null);
             entries.Add(Gate(TreeMenuKey.Fork, forkReason, isDefault: replaceReason is not null));
         }
@@ -286,15 +285,10 @@ internal static class TreeMenu
         // Handing over / an operation / a conflict stop everything; busy stops what would pull the session away (5.3).
         var block = WorkspaceBlock(row);
         var waits = block ?? BusyReason(row);
-        var entries = new List<TreeMenuEntry>(3) { Gate(TreeMenuKey.RenameSession, block) };
-        if (row.InRepository)
-        {
-            entries.Add(Gate(TreeMenuKey.ForkInherit, waits));
-        }
 
         // No removal entry: only an archived (history) session can be removed, so the archive above is what the row offers.
-        entries.Add(Gate(TreeMenuKey.Archive, waits));
-        return entries;
+        // No fork either: the branch row above is where a workspace and its sessions are forked.
+        return [Gate(TreeMenuKey.RenameSession, block), Gate(TreeMenuKey.Archive, waits)];
     }
 
     /// <summary>An agent session beside its root: rename, promote it to the workspace's root, or archive it.</summary>
@@ -402,9 +396,7 @@ internal static class TreeMenu
         TreeMenuKey.CloseProject => RemovalStrings.MenuCloseProject,
         TreeMenuKey.NewSession => ProjectStrings.NewSession,
         TreeMenuKey.NewAgentSession => AgentSessionStrings.MenuNew,
-        TreeMenuKey.ReplaceSession => TreeMenuStrings.ReplaceSession(row.SessionTitle ?? string.Empty),
         TreeMenuKey.Fork => ForkStrings.MenuFork,
-        TreeMenuKey.ForkInherit => ForkStrings.MenuForkInherit,
         TreeMenuKey.MergeBack => ForkStrings.MenuMergeBack(row.ForkOfBranch ?? string.Empty),
         TreeMenuKey.Sync => ForkStrings.MenuSync(row.ForkOfBranch ?? string.Empty),
         TreeMenuKey.AbortMerge => ForkStrings.MenuAbort,

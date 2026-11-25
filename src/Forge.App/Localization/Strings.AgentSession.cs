@@ -79,7 +79,7 @@ internal static class AgentSessionStrings
     [ModuleInitializer]
     internal static void Register()
     {
-        Loc.Register(MenuNewKey, "新增 Agent 会话", "New agent session");
+        Loc.Register(MenuNewKey, "新Agent会话", "New agent session");
         Loc.Register(NoRootKey, "这个工作区没有活动的根会话", "No active root session in this workspace");
         Loc.Register(NoKindKey, "没有可用作会话的 Agent 种类:它们的工具集能改 git 或开 PR", "No agent kind can drive a session here: their tool sets change git or open pull requests");
         Loc.Register(AgentNoToolsKey, "这个 Agent 没有 tools 白名单,不能作为 Agent 会话运行", "This agent declares no tools, so it cannot run as an agent session");

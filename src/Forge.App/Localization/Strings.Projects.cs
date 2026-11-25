@@ -100,8 +100,8 @@ internal static class ProjectStrings
         Loc.Register(NotAGitRepositoryKey, "该文件夹不是 git 仓库。", "This folder is not a git repository.");
         Loc.Register(GeneralWorkspaceMissingKey, "常规工作区尚未注册。", "The general workspace is not registered yet.");
 
-        Loc.Register(NewSessionKey, "新建会话", "New session");
-        Loc.Register(NewSessionTooltipKey, "新建会话", "New session");
+        Loc.Register(NewSessionKey, "新根会话…", "New root session…");
+        Loc.Register(NewSessionTooltipKey, "新建根会话", "New root session");
         Loc.Register(RenameKey, "重命名", "Rename");
         Loc.Register(ArchiveKey, "归档", "Archive");
         Loc.Register(RevealInExplorerKey, "在资源管理器中打开", "Reveal in Explorer");

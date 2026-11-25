@@ -13,7 +13,6 @@ internal static class TreeMenuStrings
     // ---------------------------------------------------------------- entries
     public const string LinkWorkspaceKey = "lifecycle.menu.linkWorkspace";
     public const string RenameProjectKey = "lifecycle.menu.renameProject";
-    public const string ReplaceSessionKey = "lifecycle.menu.replaceSession";
     public const string RenameBranchKey = "lifecycle.menu.renameBranch";
 
     // ---------------------------------------------------------------- reasons and warnings
@@ -60,7 +59,6 @@ internal static class TreeMenuStrings
 
     public static string RenameProject => Loc.Instance[RenameProjectKey];
 
-    public static string ReplaceSession(string holderTitle) => Loc.Instance.Format(ReplaceSessionKey, holderTitle);
 
     public static string RenameBranch => Loc.Instance[RenameBranchKey];
 
@@ -140,7 +138,6 @@ internal static class TreeMenuStrings
     {
         Loc.Register(LinkWorkspaceKey, "关联已有工作区…", "Link existing workspace…");
         Loc.Register(RenameProjectKey, "重命名项目", "Rename project");
-        Loc.Register(ReplaceSessionKey, "新会话(替换 {0})…", "New session (replace {0})…");
         Loc.Register(RenameBranchKey, "重命名分支…", "Rename branch…");
 
         Loc.Register(ReasonSeparatorKey, "、", ", ");

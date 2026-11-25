@@ -12,7 +12,6 @@ internal static class ForkStrings
 {
     // ---------------------------------------------------------------- fork: menu and row
     public const string MenuForkKey = "lifecycle.fork.menu";
-    public const string MenuForkInheritKey = "lifecycle.fork.menuInherit";
     public const string ForkedFromKey = "lifecycle.fork.forkedFrom";
 
     // ---------------------------------------------------------------- fork: dialog
@@ -79,8 +78,6 @@ internal static class ForkStrings
     public const string RemoveFailedKey = "lifecycle.merge.removeFailed";
 
     public static string MenuFork => Loc.Instance[MenuForkKey];
-
-    public static string MenuForkInherit => Loc.Instance[MenuForkInheritKey];
 
     public static string ForkedFrom(string branch) => Loc.Instance.Format(ForkedFromKey, branch);
 
@@ -207,7 +204,6 @@ internal static class ForkStrings
     internal static void Register()
     {
         Loc.Register(MenuForkKey, "并行分叉…", "Parallel fork…");
-        Loc.Register(MenuForkInheritKey, "并行分叉(继承此会话)…", "Parallel fork (inherit this session)…");
         Loc.Register(ForkedFromKey, "⑂ 分叉自 {0}", "⑂ forked from {0}");
 
         Loc.Register(TitleKey, "并行分叉", "Parallel fork");

@@ -1719,7 +1719,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// state until the attempt ends, so no turn starts under the commit (its queued input waits, nothing is dropped). On
     /// success the new session opens and the trees refresh; the source session goes on untouched.
     /// </summary>
-    internal async Task ForkWorkspaceAsync(ForkSource source, HandoverContextMode defaultMode, CancellationToken ct)
+    internal async Task ForkWorkspaceAsync(ForkSource source, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (dialogs is null)
@@ -1759,7 +1759,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             sourceBusy,
             preparation.Sparse is not null,
             ForkFlow.DefaultBranchName(composition.Worktrees.Manager.Options.BranchPrefix),
-            defaultMode,
+            // The fork dialog no longer offers a context mode: a forked workspace starts blank and the user decides what the
+            // new session is told once they create one there.
+            HandoverContextMode.Blank,
             async (choice, token) =>
             {
                 // "Commit first": checked and claimed on the UI thread, which owns every busy source, so nothing can start

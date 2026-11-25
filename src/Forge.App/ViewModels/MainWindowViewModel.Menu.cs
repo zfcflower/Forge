@@ -21,7 +21,6 @@ internal sealed partial class MainWindowViewModel
     {
         var states = composition.WorkspaceStates;
         var git = composition.Git;
-        tree.ReplaceSession = (holder, create, ct) => ReplaceSessionAsync(git, holder, create, ct);
         tree.RenameBranch = RenameBranchAsync;
         tree.LinkWorkspace = LinkWorkspaceAsync;
         tree.SessionBusyReasons = SessionBusyReasons;
@@ -32,29 +31,6 @@ internal sealed partial class MainWindowViewModel
         // The raw porcelain list (it throws when git fails): WorktreeService.ListAsync answers "none" for a root git cannot
         // resolve, which would read as "every workspace unregistered" instead of "unknown".
         tree.ReadWorktrees = (root, ct) => git.ListWorktreesAsync(root, ct);
-    }
-
-    /// <summary>
-    /// "New session (replace X)…" (6.2): the branch the new session records is read from the workspace now, after the
-    /// click; the tree's plan only knows the branch the holder was created on, which an outside checkout may have changed.
-    /// </summary>
-    private async Task ReplaceSessionAsync(GitCli git, SessionInfo holder, SessionCreate create, CancellationToken ct)
-    {
-        var directory = create.WorktreePath ?? create.WorkspacePath;
-        GitHead head;
-        try
-        {
-            head = await BackgroundRead.RunAsync(token => git.GetHeadAsync(directory, token), ct).ConfigureAwait(true);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException and not OperationCanceledException)
-        {
-            // The handover reads the workspace again and reports what it cannot do; the stored branch stands meanwhile.
-            AppLogs.Menu.ZLogWarning($"could not read the HEAD of '{directory}': {exception.Message}");
-            head = new GitHead(GitHeadKind.Branch, create.Branch);
-        }
-
-        var branch = head.Kind == GitHeadKind.Branch ? head.Branch : null;
-        await TakeOverAsync(holder, HandoverIntent.NewSession(create with { Branch = branch }), ct).ConfigureAwait(true);
     }
 
     /// <summary>

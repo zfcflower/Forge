@@ -51,9 +51,6 @@ internal sealed partial class TreeNodeViewModel
     /// <summary>"Link an existing workspace…" on a repository project row (7.10).</summary>
     public ICommand? LinkWorkspaceCommand { get; private set; }
 
-    /// <summary>"New session (replace X)…" on a workspace row with an active session (6.2).</summary>
-    public ICommand? ReplaceSessionCommand { get; private set; }
-
     /// <summary>"Rename branch…" on a linked workspace row (7.8).</summary>
     public ICommand? RenameBranchCommand { get; private set; }
 
@@ -79,12 +76,10 @@ internal sealed partial class TreeNodeViewModel
     /// <summary>Replaces the commands only the generated menu reaches; null leaves the entry without a command (disabled).</summary>
     public void SetMenuCommands(
         ICommand? linkWorkspace,
-        ICommand? replaceSession,
         ICommand? renameBranch,
         ICommand? openInVsCode)
     {
         LinkWorkspaceCommand = linkWorkspace;
-        ReplaceSessionCommand = replaceSession;
         RenameBranchCommand = renameBranch;
         OpenInVsCodeCommand = openInVsCode;
     }
@@ -165,8 +160,7 @@ internal sealed partial class TreeNodeViewModel
         TreeMenuKey.RenameProject or TreeMenuKey.RenameSession => RenameCommand,
         TreeMenuKey.Reveal => RevealCommand,
         TreeMenuKey.CloseProject or TreeMenuKey.RemoveWorkspace or TreeMenuKey.RemoveSession => RemoveCommand,
-        TreeMenuKey.ReplaceSession => ReplaceSessionCommand,
-        TreeMenuKey.Fork or TreeMenuKey.ForkInherit => ForkCommand,
+        TreeMenuKey.Fork => ForkCommand,
         TreeMenuKey.MergeBack => MergeBackCommand,
         TreeMenuKey.Sync => SyncCommand,
         TreeMenuKey.AbortMerge => AbortMergeCommand,
@@ -221,9 +215,6 @@ internal sealed partial class ProjectTreeViewModel
 
     /// <summary>"Rename branch…" (7.8) of a linked workspace row; set by the shell.</summary>
     public Func<WorkspaceTarget, CancellationToken, Task>? RenameBranch { get; set; }
-
-    /// <summary>"New session (replace X)…" (6.2): the holder and the session that would replace it; set by the shell.</summary>
-    public Func<SessionInfo, SessionCreate, CancellationToken, Task>? ReplaceSession { get; set; }
 
     /// <summary>Why a session is not idle: its open tab's busy sources plus those of the user-driven agent sessions under it
     /// (a closed root tab keeps both); in memory only, empty when idle.</summary>
@@ -690,7 +681,6 @@ internal sealed partial class ProjectTreeViewModel
     private void ApplyMenuCommands(TreeNodeViewModel node, TreeNodePlan plan)
     {
         ICommand? link = null;
-        ICommand? replace = null;
         ICommand? renameBranch = null;
         ICommand? openInVsCode = null;
         switch (plan.Kind)
@@ -718,24 +708,6 @@ internal sealed partial class ProjectTreeViewModel
                         OnFailed));
                 }
 
-                if (plan.ActiveSession is { } holder)
-                {
-                    var branch = plan.Branch;
-                    replace = new AsyncRelayCommand(
-                        ct => ReplaceSession?.Invoke(
-                                  holder,
-                                  new SessionCreate(directory, ProjectStrings.WorktreeSessionTitle())
-                                  {
-                                      ProjectId = owner.Id,
-                                      WorktreePath = directory,
-                                      Branch = branch,
-                                  },
-                                  ct)
-                              ?? Task.CompletedTask,
-                        () => ReplaceSession is not null && !Blocked(directory) && IsSessionBusy?.Invoke(holder.Id) != true,
-                        OnFailed);
-                }
-
                 if (IsLinkedWorkspace(plan, owner) && !string.IsNullOrEmpty(plan.Branch))
                 {
                     var target = new WorkspaceTarget(owner, directory, plan.Branch, plan.ForkOfBranch);
@@ -751,7 +723,7 @@ internal sealed partial class ProjectTreeViewModel
                 break;
         }
 
-        node.SetMenuCommands(link, replace, renameBranch, openInVsCode);
+        node.SetMenuCommands(link, renameBranch, openInVsCode);
         node.IsPlainProject = plan.Kind == TreeNodeKind.Project && !IsRepository(plan.Project);
         node.IsSparse = plan.GitState?.IsSparse == true;
         node.MenuState = MenuStateFactory(plan);
