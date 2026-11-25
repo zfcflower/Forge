@@ -17,6 +17,7 @@ internal readonly record struct AgentMessage(ChatMessage Message, long Seq, bool
 public sealed class AgentInstance
 {
     private readonly List<AgentMessage> history = [];
+    private readonly Lock historyGate = new();
     private readonly StringBuilder streaming = new();
     private readonly Lock interjectionGate = new();
     private List<Interjection>? interjections;
@@ -254,7 +255,27 @@ public sealed class AgentInstance
     /// </summary>
     internal bool IsAcquired => Volatile.Read(ref running) != 0;
 
-    internal void Add(ChatMessage message, long seq) => history.Add(new AgentMessage(message, seq));
+    internal void Add(ChatMessage message, long seq)
+    {
+        // Guarded: a delivery can append to an idle instance while a spawn reads its history to judge reuse, and the two
+        // must not see each other's half-written list.
+        lock (historyGate)
+        {
+            history.Add(new AgentMessage(message, seq));
+        }
+    }
+
+    /// <summary>
+    /// A point-in-time copy of the context, for a reader outside the run that owns the instance (the reuse scan): it walks a
+    /// snapshot instead of the live list, so a delivery appending meanwhile cannot make the walk throw.
+    /// </summary>
+    internal AgentMessage[] SnapshotHistory()
+    {
+        lock (historyGate)
+        {
+            return [.. history];
+        }
+    }
 
     /// <summary>
     /// The seq of the last message this instance persisted in its own session, 0 when nothing did or the newest entry
@@ -285,9 +306,12 @@ public sealed class AgentInstance
 
     internal void ReplaceHistory(IEnumerable<AgentMessage> messages)
     {
-        history.Clear();
-        history.AddRange(messages);
-        HistoryVersion++;
+        lock (historyGate)
+        {
+            history.Clear();
+            history.AddRange(messages);
+            HistoryVersion++;
+        }
     }
 
     /// <summary>One instance's cumulative counters, replaced as a whole: an instance's usage and streaming time never mix two requests.</summary>

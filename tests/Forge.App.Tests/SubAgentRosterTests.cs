@@ -118,6 +118,78 @@ public sealed class SubAgentRosterTests : IDisposable
         session.Dispose();
     });
 
+    [Fact]
+    public Task A_child_still_inside_its_window_comes_back_on_the_roster_after_a_restart() => SharedUi.RunAsync(async () =>
+    {
+        var clock = new Clock();
+        var startedAt = clock.GetUtcNow();
+        Directory.CreateDirectory(directory);
+        SessionInfo root;
+        SessionInfo child;
+        await using (var seeding = new SqliteSessionStore(directory))
+        {
+            root = await seeding.CreateAsync(new SessionCreate(directory, "root"), CancellationToken.None);
+            // The child as the store holds it after a restart: its own session row plus the state row the scheduler wrote
+            // when its run ended. The state row is what says the child is still continuable and what it is called.
+            child = await seeding.CreateAsync(
+                new SessionCreate(directory, "Fix the badge.")
+                {
+                    ParentSessionId = root.Id,
+                    AgentKind = "Worker",
+                    Task = "Fix the badge.",
+                },
+                CancellationToken.None);
+            await ((ISubAgentStateStore)seeding).SaveSubAgentStateAsync(
+                new SubAgentState(child.Id, "Worker-1", "Worker", new ModelSettings("test-model"), startedAt.AddMinutes(1)),
+                CancellationToken.None);
+        }
+
+        var reopened = new SessionWorkspaceViewModel(
+            root,
+            runtime: null,
+            checkpoints: null,
+            store: new SqliteSessionStore(directory),
+            new ProviderServices(Path.Combine(directory, "settings.json"), directory, http))
+        {
+            Clock = clock,
+            ChildQuery = (parent, _) => Task.FromResult<IReadOnlyList<SessionInfo>>(
+                string.Equals(parent, root.Id, StringComparison.Ordinal) ? [child] : []),
+        };
+
+        clock.Now = startedAt.AddMinutes(20);
+        await reopened.LoadHistoryAsync(CancellationToken.None);
+        Pump();
+
+        // Inside the window the row is a live tab again, not a line in the history menu: named by the id its parent can
+        // hand the next task to, titled by what the store remembered, and still reusable.
+        var docked = Assert.Single(reopened.SubAgents);
+        Assert.Empty(reopened.Finished);
+        Assert.Equal("Worker-1", docked.DisplayName);
+        Assert.Equal("test-model", docked.Model);
+        Assert.Equal(startedAt.AddMinutes(1), docked.FinishedAt);
+        Assert.False(docked.IsReadOnly);
+
+        // The parent hands it the next task: the start event names the agent id, which must find this very row - keyed by
+        // anything else, the same child session would get a second tab and the run would stream into neither.
+        reopened.OnAgentEvent(new AgentSubAgentStarted(
+            "root", "Worker-1", "Worker", "Next task.", "test-model", child.Id, clock.GetUtcNow()));
+        Pump();
+        Assert.Same(docked, Assert.Single(reopened.SubAgents));
+        Assert.Empty(reopened.Finished);
+
+        // It runs (its old end stamp cleared), ends, and then ages on the store's stamp rather than on the reload: past the
+        // hour it drops into history like one that just ended.
+        reopened.OnAgentEvent(new AgentSubAgentFinished(
+            "Worker-1", SubAgentStatus.Completed, TokenUsage.Empty, TimeSpan.FromMinutes(1), null, clock.GetUtcNow()));
+        Pump();
+        clock.Now = startedAt.AddMinutes(100);
+        reopened.Tick();
+        Assert.Empty(reopened.SubAgents);
+        Assert.Same(docked, Assert.Single(reopened.Finished));
+
+        reopened.Dispose();
+    });
+
     private async Task<SessionWorkspaceViewModel> SessionAsync(
         TimeProvider clock,
         Func<string, IReadOnlyList<SessionInfo>>? childRows = null)

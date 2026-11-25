@@ -153,8 +153,7 @@ public sealed record AgentHostOptions
 
     /// <summary>
     /// The session's own event sink for runs that outlive the turn that started them - every <c>spawn_agent</c> does, since it never
-    /// waits. The
-    /// starting turn's channel is completed when that turn ends, so without this a background child's started/finished events would
+    /// waits. The starting turn's channel is completed when that turn ends, so without this a child's started/finished events would
     /// never reach the tab that shows it: the roster would keep it running forever. The shell owns the session, so it hands its own
     /// long-lived sink here; null (a script, a test) just means nobody watches.
     /// </summary>
@@ -339,6 +338,13 @@ public sealed class AgentHost
     public AgentCatalog Catalog => catalog;
 
     public SubAgentScheduler SubAgents => scheduler;
+
+    /// <summary>
+    /// Rebuilds the sub-agents a previous process left continuable, so a restarted session can hand a task to the child that
+    /// already did it instead of starting a fresh one (see <see cref="SubAgentScheduler.RestoreAsync"/>). Called once per
+    /// host, before the first turn.
+    /// </summary>
+    public Task RestoreSubAgentsAsync(string rootSessionId, CancellationToken ct) => scheduler.RestoreAsync(rootSessionId, ct);
 
     /// <summary>Control surface over the live sub-agents of this host; the UI stop button uses the same path as the tools.</summary>
     public ISubAgentControl SubAgentControl => scheduler;

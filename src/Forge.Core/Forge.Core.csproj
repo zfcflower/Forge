@@ -7,6 +7,8 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Forge.App.Tests" />
+    <!-- The sub-agent reuse scan is internal: the bench times the affinity reader the scheduler runs. -->
+    <InternalsVisibleTo Include="Forge.Bench" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />

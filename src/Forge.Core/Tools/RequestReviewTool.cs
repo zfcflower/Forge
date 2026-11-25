@@ -193,7 +193,7 @@ public sealed class RequestReviewTool : ITool
         await using (scope.Permit.Detach(ct))
         {
             outcome = await scheduler
-                .SpawnAsync(ReviewerKind, package.Text, resumeId: null, context, scope.Sink, scope.AgentId, ct, reuse: false)
+                .SpawnAsync(ReviewerKind, package.Text, resumeId: null, context, scope.Sink, scope.AgentId, ct)
                 .ConfigureAwait(false);
         }
 

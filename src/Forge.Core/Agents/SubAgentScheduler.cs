@@ -102,6 +102,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
     /// </summary>
     private readonly HashSet<string> backgroundStopPending = new(StringComparer.Ordinal);
 
+
     /// <summary>
     /// Set by <see cref="CloseBackgroundRuns"/> only (the runtime is being torn down): this host then takes no new background
     /// child at all. An ordinary stop does not set it - the session keeps working, and its next turn may spawn again.
@@ -123,6 +124,9 @@ public sealed class SubAgentScheduler : ISubAgentControl
     private readonly Dictionary<string, int> counters = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
 
+    /// <summary>Where a child's id, kind, model and run end outlive the process; null when the store has no such table.</summary>
+    private readonly ISubAgentStateStore? stateStore;
+
     public SubAgentScheduler(
         AgentCatalog catalog,
         PromptLayers layers,
@@ -138,6 +142,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
         this.layers = layers;
         this.composer = composer;
         this.store = store;
+        stateStore = store as ISubAgentStateStore;
         sessions = SessionCatalogs.From(store);
         this.options = options;
         ModelControl = new OwnerScopedControl(this);
@@ -540,8 +545,9 @@ public sealed class SubAgentScheduler : ISubAgentControl
         }
         catch (OperationCanceledException)
         {
-            // The caller's token was cancelled: that is not the child failing, and the tool loop turns it into the "cancelled by
-            // the user" result every other tool gets. Swallowing it would record a review as failed when the user only stopped it.
+            // The caller's token was cancelled: that is not the child failing, and the caller (the tool loop) turns it into the
+            // "cancelled by the user" result every other tool gets. Swallowing it here would record a review as failed when the
+            // user only stopped it.
             throw;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -572,6 +578,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
     {
         try
         {
+            // A background run's token is nobody's: DriveAsync converts a stop into a Stopped outcome, so the only cancellation
+            // that can surface here is a run torn down under it. Reported as stopped either way, never as an unobserved fault.
             var outcome = await DriveToEndAsync(instance, task, sink, parentId, watch, CancellationToken.None, reused)
                 .ConfigureAwait(false);
             await ReportAsync(instance, outcome, task, parentId, context).ConfigureAwait(false);
@@ -800,6 +808,11 @@ public sealed class SubAgentScheduler : ISubAgentControl
                     }
                 }
 
+                // The id and the model it starts with are what the next process needs to continue this child at all. No caller
+                // token: a stop that arrives now would otherwise abandon a child whose session row is already written, and the
+                // bookkeeping must not turn a spawn into a failure.
+                await SaveStateAsync(instance, reuse, null, CancellationToken.None).ConfigureAwait(false);
+
                 instance.TryAcquire();
             }
         }
@@ -825,15 +838,15 @@ public sealed class SubAgentScheduler : ISubAgentControl
 
     /// <summary>
     /// The children a spawn of <paramref name="kind"/> may continue, best first: same kind, the model's own, idle, and with
-    /// their last run ended inside the reuse window; ranked by <see cref="SubAgentAffinity"/> and then by how recently they
-    /// ran, and only above the threshold - an unrelated task starts a fresh child rather
+    /// their last run ended inside the reuse window; ranked by <see cref="SubAgentAffinity"/> over the whole prose of their
+    /// history, then by how recently they ran, and only above the threshold - an unrelated task starts a fresh child rather
     /// than joining somebody else's conversation. The gate is still taken by the caller, so two spawns racing for one child
     /// cannot both win it.
     /// </summary>
     private List<AgentInstance> Reusable(string kind, string task)
     {
         var now = options.SubAgentReuseClock.GetUtcNow();
-        var candidates = new List<(AgentInstance Instance, int Score, DateTimeOffset FinishedAt)>();
+        var eligible = new List<(AgentInstance Instance, DateTimeOffset FinishedAt, AgentMessage[] History)>();
         lock (gate)
         {
             foreach (var instance in instances.Values)
@@ -848,12 +861,19 @@ public sealed class SubAgentScheduler : ISubAgentControl
                     continue;
                 }
 
-                var (lastTask, lastReport) = SubAgentAffinity.ReadLastExchange(instance.History);
-                var score = SubAgentAffinity.Score(task, lastTask, lastReport);
-                if (score >= options.SubAgentReuseThreshold)
-                {
-                    candidates.Add((instance, score, finishedAt));
-                }
+                // Copied under the instance's own lock and scored outside the scheduler gate: walking a whole conversation is
+                // the expensive half, and every run start and end waits on that gate.
+                eligible.Add((instance, finishedAt, instance.SnapshotHistory()));
+            }
+        }
+
+        var candidates = new List<(AgentInstance Instance, int Score, DateTimeOffset FinishedAt)>();
+        foreach (var (instance, finishedAt, history) in eligible)
+        {
+            var score = SubAgentAffinity.Score(task, SubAgentAffinity.ReadHistory(history));
+            if (score >= options.SubAgentReuseThreshold)
+            {
+                candidates.Add((instance, score, finishedAt));
             }
         }
 
@@ -1150,10 +1170,17 @@ public sealed class SubAgentScheduler : ISubAgentControl
                 instance.Control = null;
                 Detach(instance.Id, run);
                 run.Dispose();
+                var finishedAt = options.SubAgentReuseClock.GetUtcNow();
+                bool reusable;
                 lock (gate)
                 {
-                    lastFinishedAt[instance.Id] = options.SubAgentReuseClock.GetUtcNow();
+                    lastFinishedAt[instance.Id] = finishedAt;
+                    reusable = !notReusable.Contains(instance.Id);
                 }
+
+                // Written as the run ends, not at shutdown: a graceful close that follows already has the row, and it is the
+                // only thing the next process needs to continue this child.
+                await SaveStateAsync(instance, reusable, finishedAt, CancellationToken.None).ConfigureAwait(false);
             }
         }
     }
@@ -1384,6 +1411,133 @@ public sealed class SubAgentScheduler : ISubAgentControl
                 ct)
             .ConfigureAwait(false);
         return session.Id;
+    }
+
+    /// <summary>
+    /// Writes one child's state for the next process. Best effort: a store that fails must not fail the spawn or the run that
+    /// just ended - the reusable window is a convenience, the report is the result.
+    /// </summary>
+    private async Task SaveStateAsync(
+        AgentInstance instance,
+        bool reusable,
+        DateTimeOffset? finishedAt,
+        CancellationToken ct)
+    {
+        if (stateStore is null || OwnerOf(instance.Id) != AgentOwner.Model)
+        {
+            return;
+        }
+
+        try
+        {
+            await stateStore.SaveSubAgentStateAsync(
+                new SubAgentState(instance.SessionId, instance.Id, instance.Definition.Name, instance.Definition.Model, finishedAt)
+                {
+                    Reusable = reusable,
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Trace.TraceWarning($"sub-agent state of '{instance.Id}' was not stored: {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the children a previous process left continuable: the same agent id and conversation, the model the child
+    /// started with, and a window counted from the run end the store recorded. Only what
+    /// <see cref="AgentOptions.SubAgentReuseWindow"/> still covers is restored; a kind that no longer exists, a child marked
+    /// not reusable, and an id this scheduler already holds are skipped. Nothing is announced here: the app places its rows
+    /// from the store itself, and a run announces itself when it starts.
+    /// </summary>
+    public async Task RestoreAsync(string rootSessionId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootSessionId);
+        if (stateStore is null || store is not { } sessionStore)
+        {
+            return;
+        }
+
+        IReadOnlyList<RestorableSubAgent> restorable;
+        try
+        {
+            restorable = await stateStore.LoadSubAgentStatesAsync(rootSessionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Trace.TraceWarning($"sub-agent state could not be read: {exception.Message}");
+            return;
+        }
+
+        var now = options.SubAgentReuseClock.GetUtcNow();
+        foreach (var candidate in restorable)
+        {
+            var state = candidate.State;
+            if (!state.Reusable
+                || state.FinishedAt is not { } finishedAt
+                || finishedAt > now
+                || now - finishedAt > options.SubAgentReuseWindow
+                || !catalog.TryGet(state.Kind, out var definition)
+                || definition.ToolNames is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            lock (gate)
+            {
+                if (instances.ContainsKey(state.AgentId))
+                {
+                    continue;
+                }
+            }
+
+            definition = definition with { Model = state.Model };
+            try
+            {
+                var instance = new AgentInstance(
+                    state.AgentId,
+                    definition,
+                    state.SessionId,
+                    Path.GetFullPath(candidate.WorkingDirectory),
+                    candidate.Depth,
+                    composer.Compose(new PromptInput(layers, definition.Prompt, null)));
+                instance.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, state.SessionId, ct).ConfigureAwait(false));
+                lock (gate)
+                {
+                    if (!instances.TryAdd(state.AgentId, instance))
+                    {
+                        continue;
+                    }
+
+                    owners[state.AgentId] = AgentOwner.Model;
+                    lastFinishedAt[state.AgentId] = finishedAt;
+                    BumpCounterLocked(definition.Name, state.AgentId);
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                Trace.TraceWarning($"sub-agent '{state.AgentId}' was not restored: {exception.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Moves the id counter past a restored id, so the next spawn of that kind cannot hand out a number a living child still
+    /// holds. Called under <see cref="gate"/>.
+    /// </summary>
+    private void BumpCounterLocked(string kind, string agentId)
+    {
+        var prefix = Identifier(kind);
+        if (!agentId.StartsWith(prefix + "-", StringComparison.Ordinal)
+            || !int.TryParse(agentId.AsSpan(prefix.Length + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+        {
+            return;
+        }
+
+        if (number > counters.GetValueOrDefault(prefix))
+        {
+            counters[prefix] = number;
+        }
     }
 
     private static string Identifier(string kind)

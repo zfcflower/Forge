@@ -348,6 +348,16 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     /// <summary>A hot reload was asked for: the next turn builds a fresh host (new snapshot) and resumes the root from the store.</summary>
     private bool reloadPending;
 
+    /// <summary>
+    /// The one recovery of continuable sub-agents this runtime does, not one per rebuilt host. It is a task rather than a flag
+    /// because two callers resolve the host at the same time (a turn and an automation) and the second must wait for the first
+    /// instead of spawning past a half-restored pool - an order that would hand out an id a stored child still holds.
+    /// </summary>
+    private Task? subAgentsRestore;
+
+    /// <summary>The host <see cref="subAgentsRestore"/> recovered into: a rebuild newer than that task gets its own.</summary>
+    private AgentHost? restoredHost;
+
     /// <summary>The rebuild a reload asked for has read the sources and armed its watcher: an edit from here on is real, even while the root agent is still being resumed.</summary>
     private bool reloadBuilt;
 
@@ -1429,23 +1439,18 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
 
     private async Task<(AgentHost Host, AgentInstance Agent)> ResolveAsync()
     {
+        // The host is already built and current: hand it out, but never before a recovery the first caller started is done.
+        if (await ReuseBuiltAsync().ConfigureAwait(false) is { } reused)
+        {
+            return reused;
+        }
+
         AgentHost built;
         AgentInstance agent;
         AgentDefinition? definition;
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (host is not null && root is not null && !rootStale && !reloadPending)
-            {
-                ApplyDisabledTools(host);
-                ApplySubAgentLimits(host);
-                RefreshWebTools(host);
-                RefreshPullRequestTools(host);
-                RefreshMcpTools(host);
-                ApplyCompaction(host);
-                ApplyPendingGrants(host);
-                return (host, root);
-            }
 
             // A changed root definition reuses the host (its tools, approval handler and router registration) and only
             // rebuilds the root agent from the store.
@@ -1480,7 +1485,67 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         // The host now has its root, so the grants the user picked before it existed can be written.
         ApplyPendingGrants(built);
 
+        // Once per runtime: the children a previous process left continuable come back as instances, so the first turn of a
+        // restarted session can hand its task to the child that already did it (forge-core "子 Agent 复用").
+        await RestoreSubAgentsOnceAsync(built).ConfigureAwait(false);
+
         return (built, agent);
+    }
+
+    /// <summary>
+    /// The already-built host, when it is current: the tool and limit refreshes run under the gate and the caller gets the pair
+    /// back only after the sub-agent recovery it published has finished - a caller that spawned past a half-restored pool would
+    /// hand out an id a stored child still holds. Null means the host has to be (re)built.
+    /// </summary>
+    private async Task<(AgentHost Host, AgentInstance Agent)?> ReuseBuiltAsync()
+    {
+        Task? restoring;
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (host is null || root is null || rootStale || reloadPending)
+            {
+                return null;
+            }
+
+            ApplyDisabledTools(host);
+            ApplySubAgentLimits(host);
+            RefreshWebTools(host);
+            RefreshPullRequestTools(host);
+            RefreshMcpTools(host);
+            ApplyCompaction(host);
+            ApplyPendingGrants(host);
+            if (subAgentsRestore is null)
+            {
+                return (host, root);
+            }
+
+            restoring = subAgentsRestore;
+        }
+
+        await restoring.ConfigureAwait(false);
+        lock (gate)
+        {
+            return (host, root);
+        }
+    }
+
+    /// <summary>
+    /// Runs the recovery for this runtime and awaits the same task afterwards. It is bound to the host it recovered into: a
+    /// second host built before the first was published gets its own, which skips the ids the store already handed out.
+    /// </summary>
+    private Task RestoreSubAgentsOnceAsync(AgentHost built)
+    {
+        lock (gate)
+        {
+            if (restoredHost != built)
+            {
+                restoredHost = built;
+                subAgentsRestore = built.RestoreSubAgentsAsync(SessionId, CancellationToken.None);
+            }
+
+            return subAgentsRestore!;
+        }
     }
 
     /// <summary>

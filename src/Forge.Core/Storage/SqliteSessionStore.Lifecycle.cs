@@ -1182,6 +1182,12 @@ public sealed partial class SqliteSessionStore
                 await DeleteSessionRowsAsync(connection, transaction, "turn_metrics", json).ConfigureAwait(false);
             }
 
+            // Same stance for the sub-agent state: created outside the ladder on every open, so a file may not have it.
+            if (await TableExistsAsync(connection, transaction, "sub_agent_state").ConfigureAwait(false))
+            {
+                await DeleteSessionRowsAsync(connection, transaction, "sub_agent_state", json).ConfigureAwait(false);
+            }
+
             await using (var sessions = Command(connection, transaction, "DELETE FROM sessions WHERE id IN (SELECT value FROM json_each($ids))"))
             {
                 sessions.Parameters.AddWithValue("$ids", json);

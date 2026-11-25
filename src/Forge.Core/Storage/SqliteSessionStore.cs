@@ -16,7 +16,7 @@ namespace Forge.Core.Storage;
 /// The same file is the session catalog: project/worktree bindings, parent links, archive state and
 /// activity are columns of the <c>sessions</c> row, so there is no second place to keep in sync.
 /// </summary>
-public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncDisposable, IDisposable
+public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog, ISubAgentStateStore, IAsyncDisposable, IDisposable
 {
     private const int WriterBatchLimit = 128;
     private const int WriterQueueCapacity = 4096;
@@ -586,6 +586,7 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         {
             await StorageDb.ConfigureAsync(connection, CancellationToken.None).ConfigureAwait(false);
             var fts5 = await StorageSchema.EnsureAsync(connection, _databasePath, CancellationToken.None).ConfigureAwait(false);
+            await StorageSchema.EnsureSubAgentStateAsync(connection, CancellationToken.None).ConfigureAwait(false);
             _searchInsertSql = fts5 ? FtsInsertSql : FallbackInsertSql;
             Volatile.Write(ref _fts5Available, fts5 ? 1 : 0);
         }

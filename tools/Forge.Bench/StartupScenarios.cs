@@ -57,18 +57,17 @@ internal static class StartupScenarios
                     Run = async cancellationToken =>
                     {
                         var watch = Stopwatch.StartNew();
-                        var messages = await TranscriptReplay.ReadAsync(store, sessionId, cancellationToken).ConfigureAwait(false);
+                        var load = await TranscriptReplay.ReadAllAsync(store, null, sessionId, cancellationToken).ConfigureAwait(false);
                         var readMs = watch.Elapsed.TotalMilliseconds;
                         watch.Restart();
-                        var transcript = new TranscriptViewModel(collapseOlderTurns: false);
-                        TranscriptReplay.Apply(transcript, messages);
+                        var (transcript, _) = TranscriptReplay.ReplayPage(load);
                         var applyMs = watch.Elapsed.TotalMilliseconds;
                         Console.Error.WriteLine(string.Create(
                             CultureInfo.InvariantCulture,
-                            $"startup.replay.{turns}turns: read {readMs:F1} ms · apply {applyMs:F1} ms · {messages.Count} messages, {transcript.Rounds.Count} rounds"));
+                            $"startup.replay.{turns}turns: read {readMs:F1} ms · apply {applyMs:F1} ms · {load.Page.Messages.Count} messages, {transcript.Rounds.Count} rounds"));
                         return new OpResult(
                             Bytes: (long)(readMs + applyMs),
-                            Items: messages.Count,
+                            Items: load.Page.Messages.Count,
                             Signature: transcript.Rounds.Count,
                             Observation: $"read {readMs:F0} + apply {applyMs:F0} ms, {transcript.Rounds.Count} rounds");
                     },

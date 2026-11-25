@@ -1271,6 +1271,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 token => live is not null ? live.QueryChildrenAsync(parentSessionId, token) : query!(parentSessionId, token),
                 ct)
             .ConfigureAwait(true);
+        var states = await LoadSubAgentStatesAsync(ct).ConfigureAwait(true);
+        var docked = false;
         foreach (var child in children)
         {
             // A session the user opened under this one (an "Agent session") is a session row of its own beside the root, with
@@ -1283,10 +1285,74 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
             var status = await BackgroundRead.RunAsync(token => DeriveStoredStatusAsync(child.Id, token), ct)
                 .ConfigureAwait(true);
-            finished.Add(SubAgentViewModel.FromStored(SessionId, child, parentAgentId, status, Title, openSession, instrumentSources));
-            await RestoreSubAgentsAsync(child.Id, child.Id, ct).ConfigureAwait(true);
+            var state = states.GetValueOrDefault(child.Id);
+
+            // A child whose run ended inside the reuse window is still continuable, and the scheduler rebuilt it: it comes
+            // back on the roster - docked, finished, named by its own id - rather than into the history menu it would drop out
+            // of an hour later anyway. A row that is only history keeps what the store alone can say about it (its kind, its
+            // last active stamp), because the id it no longer answers to would be a name the model cannot resume.
+            var dockedInsideWindow = state is { Reusable: true, FinishedAt: { } finishedAt }
+                && Clock.GetUtcNow() - finishedAt < AgentOptions.DefaultSubAgentReuseWindow;
+            var row = SubAgentViewModel.FromStored(
+                SessionId,
+                child,
+                parentAgentId,
+                status,
+                Title,
+                openSession,
+                instrumentSources,
+                dockedInsideWindow ? state : null);
+
+            // Keyed by agent id like every live row: the next run's start event names the agent id, and that lookup is what
+            // hands this row the run instead of a second row for the same child session.
+            if (dockedInsideWindow && subAgentById.TryAdd(row.AgentId, row))
+            {
+                row.IsReadOnly = false;
+                subAgents.Add(row);
+                docked = true;
+            }
+            else
+            {
+                finished.Add(row);
+            }
+
+            // The child's own agent id is what its own children nest under (the tree matches ParentAgentId to a row's
+            // AgentId), which is the stored id for a docked row and the session id for a history-only one.
+            await RestoreSubAgentsAsync(child.Id, row.AgentId, ct).ConfigureAwait(true);
+        }
+
+        if (docked)
+        {
+            SyncFinishedMenu();
+            OnPropertyChanged(nameof(HasSubAgents));
+            OnPropertyChanged(nameof(ShowsSubAgentToggle));
+            RaiseSubAgentCounters();
+            SubAgentsChanged?.Invoke();
+            OnAgentStateChanged();
         }
     }
+
+    /// <summary>
+    /// The sub-agent state the store kept for this session's tree, keyed by child session id: the id, the model and the run end
+    /// a restarted child is placed and resumed by. A store without the table (or a test host) answers empty.
+    /// </summary>
+    private Task<IReadOnlyDictionary<string, SubAgentState>> LoadSubAgentStatesAsync(CancellationToken ct) =>
+        BackgroundRead.RunAsync<IReadOnlyDictionary<string, SubAgentState>>(async token =>
+        {
+            if (store is not ISubAgentStateStore states)
+            {
+                return new Dictionary<string, SubAgentState>(StringComparer.Ordinal);
+            }
+
+            var rows = await states.LoadSubAgentStatesAsync(SessionId, token).ConfigureAwait(false);
+            var map = new Dictionary<string, SubAgentState>(rows.Count, StringComparer.Ordinal);
+            foreach (var row in rows)
+            {
+                map[row.State.SessionId] = row.State;
+            }
+
+            return map;
+        }, ct);
 
     /// <summary>
     /// The store keeps no run status for a sub-agent session, so the last stored message decides: a cancelled tool result
@@ -3818,7 +3884,9 @@ internal sealed class SubAgentViewModel : NotifyingObject
     {
         get
         {
-            if (FromStoredRow || AgentId.Length == 0)
+            // A row replayed from the store now carries the agent id the store kept, so it is named exactly like the tab it
+            // was before the restart - the parent can name it again by that same id.
+            if (AgentId.Length == 0 || string.Equals(AgentId, ChildSessionId, StringComparison.Ordinal))
             {
                 return Kind;
             }
@@ -4068,36 +4136,46 @@ internal sealed class SubAgentViewModel : NotifyingObject
         SubAgentStatus? status,
         string? parentTitle = null,
         Action? backToParent = null,
-        ISessionInstrumentSources? sources = null)
+        ISessionInstrumentSources? sources = null,
+        SubAgentState? state = null)
     {
         var agent = new SubAgentViewModel(
             sessionId,
-            session.Id,
+            state?.AgentId ?? session.Id,
             session.Id,
             session.AgentKind ?? string.Empty,
             session.Task ?? session.Title,
-            string.Empty,
+            state?.Model.Model ?? string.Empty,
             stopRequested: null,
             parentAgentId,
             parentTitle,
             backToParent,
             sources,
+            providerId: state?.Model.ProviderId,
             childInfo: session)
         {
             IsReadOnly = true,
             FromStoredRow = true,
         };
+        var at = state?.FinishedAt ?? session.LastActiveAt;
         if (status is { } known)
         {
-            agent.Finish(known, TimeSpan.Zero, null, session.LastActiveAt);
+            agent.Finish(known, TimeSpan.Zero, null, at);
         }
         else
         {
             agent.MarkEndedUnknown();
+            agent.MarkEndedAt(at);
         }
 
         return agent;
     }
+
+    /// <summary>
+    /// A row replayed from the store retires on the same roster window a live one does, so it needs the run end the store
+    /// recorded even when the last message cannot prove how that run ended.
+    /// </summary>
+    internal void MarkEndedAt(DateTimeOffset at) => FinishedAt = at;
 
     /// <summary>Ended, with no stored evidence of how; the row then says only that it ended.</summary>
     private void MarkEndedUnknown()

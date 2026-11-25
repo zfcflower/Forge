@@ -35,7 +35,7 @@ public sealed record AgentOptions
 
     /// <summary>
     /// How long a finished sub-agent stays on the live roster: a <c>spawn_agent</c> of the same kind inside this window, whose
-    /// task overlaps what that child last worked on, continues the idle child instead of starting a new one - its prompt
+    /// task overlaps what that child's conversation is about, continues the idle child instead of starting a new one - its prompt
     /// prefix is still in the provider's cache and its context is the same work. Outside the window the child is history.
     /// The app keeps the child's tab docked for the same window, so the roster the user sees is the one the scheduler picks
     /// from.
@@ -44,9 +44,10 @@ public sealed record AgentOptions
 
     /// <summary>
     /// How much context a candidate must share with the new task before it is reused: <see cref="SubAgentAffinity"/> scores
-    /// a shared file (3) and a shared identifier (1). Below the threshold an unrelated task gets a fresh child rather than
-    /// being stapled onto somebody else's conversation - reuse trades context pollution for cache hits, so it only pays
-    /// when the two tasks are the same work. Two means one shared file or two shared identifiers.
+    /// a shared file name (3) and a shared term (1) - a Latin word, or one adjacent pair of characters of a CJK stretch.
+    /// Below the threshold an unrelated task gets a fresh child rather than being stapled onto somebody else's conversation -
+    /// reuse trades context pollution for cache hits, so it only pays when the two tasks are the same work. Two means one
+    /// shared file or two shared terms.
     /// </summary>
     public int SubAgentReuseThreshold { get; init; } = 2;
 

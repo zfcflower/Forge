@@ -159,6 +159,25 @@ internal static class StorageSchema
         ) WITHOUT ROWID;
         """;
 
+    /// <summary>
+    /// The state a spawned sub-agent needs to be continued by the next process (forge-core "子 Agent 复用"). It rides no
+    /// schema step: the product is unreleased and a new side table is created with <c>IF NOT EXISTS</c> on every open, so a
+    /// file written before the table existed gains it without a ladder step and without touching <c>sessions</c>.
+    /// </summary>
+    private const string SubAgentStateSql = """
+        CREATE TABLE IF NOT EXISTS sub_agent_state (
+            session_id     TEXT PRIMARY KEY,
+            agent_id       TEXT NOT NULL,
+            kind           TEXT NOT NULL,
+            model          TEXT NOT NULL,
+            provider       TEXT NULL,
+            thinking       TEXT NULL,
+            max_output     INTEGER NULL,
+            finished_at    TEXT NULL,
+            reusable       INTEGER NOT NULL DEFAULT 1
+        );
+        """;
+
     private const string V2SchemaSql = """
         ALTER TABLE todos ADD COLUMN commit_subject TEXT NULL;
         ALTER TABLE todos ADD COLUMN summary TEXT NULL;
@@ -203,6 +222,7 @@ internal static class StorageSchema
         ("summaries", ["id"], ["at"]),
         ("projects", ["id"], ["added_at", "closed_at"]),
         ("todos", ["id"], ["updated_at"]),
+        ("sub_agent_state", ["session_id"], ["finished_at"]),
         ("ui_state", ["key"], ["updated_at"]),
         ("turn_checkpoints", ["session_id", "turn"], ["started_at", "ended_at"]),
         ("turn_metrics", ["session_id", "turn"], ["started_at", "ended_at"]),
@@ -281,6 +301,22 @@ internal static class StorageSchema
         }
 
         return await EnsureSearchTableAsync(connection, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Creates the sub-agent state table when the file does not have it yet. It is not a ladder step: the product is
+    /// unreleased, so a new side table is added by running its create statement again on every open rather than by teaching
+    /// every existing database a version bump.
+    /// </summary>
+    public static async Task EnsureSubAgentStateAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        await using var command = connection.CreateCommand();
+        command.CommandText = SubAgentStateSql;
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        // The table is younger than the ladder step that installs timestamp guards, so it installs its own from the same
+        // registration - the way `artifacts` does (see EnsureOwnedTimestampsAsync).
+        await EnsureOwnedTimestampsAsync(connection, "sub_agent_state", ct).ConfigureAwait(false);
     }
 
     public static void ThrowIfNewer(int version, string databasePath)

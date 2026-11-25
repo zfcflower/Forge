@@ -135,6 +135,7 @@
 - 结论落 `reviews.db` 的 `review_conclusions`：session、工作目录、`step_id` 或 `base`、HEAD、结论态、Reviewer 原文（截 8000 字符）。结论态五值固定：`0 Unstructured / 1 Approve / 2 RequestChanges / 3 Stopped / 4 Failed`，`Stopped` 与 `Failed` 都不是通过。
 - 评审方式可配置（`git` 分区）：`reviewMode` = `subagent`（默认）/ `manual`；`reviewAfterStepCommit`（默认关）在步骤提交成功且模式为 subagent 时，把一条带 `step_id` 的 `request_review` 请求交给该会话（空闲起一回合、忙则进草稿，绝不背着用户起第二回合）。
 - 评审与作者自评互不影响：Reviewer 的 `git_diff` 记在它自己的子会话上（`GitReviewLedger` 按 session + worktree 分键），所以一次评审既不会让 `pr_create` 的闸门通过，也不会被当成作者自评。
+- 评审者与其他子 Agent 同规则复用：同一会话里上一次评审已结束（1 小时内）、类型相同且任务文本与它读过的变更集足够相似时，`request_review` 续跑同一个 Reviewer 而不是新开一个。它自己的提示词要求按本次 package 判断，所以上一次的 `verdict:` 行不是这一次的结论；不变量只剩“结论只认它本次最后一条 `verdict:` 行”。
 
 ## 2.8 提问卡（`ask_user`）
 

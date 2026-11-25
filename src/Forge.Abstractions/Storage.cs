@@ -305,6 +305,33 @@ public interface ISessionStore
     Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct);
 }
 
+/// <summary>
+/// What the next process needs to continue a spawned sub-agent: its id (<c>"worker-1"</c>, the word the model resumes it by),
+/// the kind it ran as, the model it started with, and when its last run ended. The session row already tells Core where and
+/// whose child it is; this is the half that lived only in the scheduler's memory (forge-core "子 Agent 复用").
+/// </summary>
+public sealed record SubAgentState(string SessionId, string AgentId, string Kind, ModelSettings Model, DateTimeOffset? FinishedAt)
+{
+    /// <summary>False for a child a <c>reuse: false</c> spawn created (an automation's): it is never continued.</summary>
+    public bool Reusable { get; init; } = true;
+}
+
+/// <summary>One restorable child: its state, where it ran, and how deep under the root it sits (a direct child is 1).</summary>
+public sealed record RestorableSubAgent(SubAgentState State, string WorkingDirectory, int Depth);
+
+/// <summary>
+/// Where spawned sub-agents outlive the process that ran them. A store that does not implement it cannot restore them, which
+/// is what a test store or a script host looks like.
+/// </summary>
+public interface ISubAgentStateStore
+{
+    /// <summary>Inserts or replaces one child's state; called when the child is spawned and after every run ends.</summary>
+    Task SaveSubAgentStateAsync(SubAgentState state, CancellationToken ct = default);
+
+    /// <summary>Every spawned child below <paramref name="rootSessionId"/>, the descendants of its children included.</summary>
+    Task<IReadOnlyList<RestorableSubAgent>> LoadSubAgentStatesAsync(string rootSessionId, CancellationToken ct = default);
+}
+
 public interface IArtifactStore
 {
     Task<ArtifactInfo> PutAsync(string sessionId, string name, ReadOnlyMemory<byte> content, CancellationToken ct);
