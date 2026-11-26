@@ -21,6 +21,45 @@ public sealed class OlderHistoryReadTests : IDisposable
     /// the whole prefix. The page it returns has to be the page the counted path returns - same rows, same round number,
     /// same "is there more".
     /// </summary>
+    /// <summary>
+    /// A stored user message is not necessarily a turn's opening question: the loop persists an interjection (steering it
+    /// delivered mid-turn) as a user message too. A page whose count boundary lands on one is read back to the first user
+    /// message of the row's span - otherwise the replay draws the interjection as the turn's question and leaves the real
+    /// question on the page above it, which is the same seam defect in another shape.
+    /// </summary>
+    [Fact]
+    public async Task A_page_that_lands_on_an_interjection_starts_at_the_question_instead()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+        var session = await store.CreateAsync(new SessionCreate(directory, "interjected"), CancellationToken.None);
+
+        // Turn 1: question, answer. Turn 2: question, a partial answer, the interjection the loop stored mid-turn, the rest.
+        // Turn 3: question, answer - seq 1..8. A four-message page off the end starts on seq 5, the interjection.
+        await store.AppendAsync(session.Id, ChatMessage.User("q1"), null, CancellationToken.None);
+        await store.AppendAsync(session.Id, ChatMessage.Assistant("a1"), null, CancellationToken.None);
+        await store.AppendAsync(session.Id, ChatMessage.User("q2"), null, CancellationToken.None);
+        await store.AppendAsync(session.Id, ChatMessage.Assistant("a2 part one"), null, CancellationToken.None);
+        await store.AppendAsync(session.Id, ChatMessage.User("use b.cs instead"), null, CancellationToken.None);
+        await store.AppendAsync(session.Id, ChatMessage.Assistant("a2 part two"), null, CancellationToken.None);
+        await store.AppendAsync(session.Id, ChatMessage.User("q3"), null, CancellationToken.None);
+        await store.AppendAsync(session.Id, ChatMessage.Assistant("a3"), null, CancellationToken.None);
+
+        var metrics = new FakeTurnMetricsStore();
+        metrics.Rows.Add(Row(session.Id, turn: 1, lastSeq: 2));
+        metrics.Rows.Add(Row(session.Id, turn: 2, lastSeq: 6));
+        metrics.Rows.Add(Row(session.Id, turn: 3, lastSeq: 8));
+
+        var load = await TranscriptReplay.ReadPageAsync(
+            store, metrics, session.Id, long.MaxValue, maxMessages: 4, CancellationToken.None);
+
+        Assert.Equal(3, load.Page.Messages[0].Seq);
+        Assert.Equal(MessageRole.User, load.Page.Messages[0].Message.Role);
+        Assert.Equal(6, load.Page.Messages.Count);
+        Assert.Equal(1, load.Page.TurnsBefore);
+        Assert.True(load.Page.HasMore);
+    }
+
     [Fact]
     public async Task A_page_numbered_from_the_known_count_is_the_counted_page()
     {
@@ -123,6 +162,16 @@ public sealed class OlderHistoryReadTests : IDisposable
         // Nothing older in the store: the scroll behaviour is told to stop asking, which is not the same as a failure.
         Assert.Equal(SessionWorkspaceViewModel.OlderPageLoad.Exhausted, await session.LoadOlderHistoryAsync(CancellationToken.None));
     }
+
+    /// <summary>One metrics row: a completed turn numbered <paramref name="turn"/>, ending at <paramref name="lastSeq"/>.</summary>
+    private static TurnMetric Row(string sessionId, int turn, long lastSeq) =>
+        new(
+            sessionId,
+            turn,
+            DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch.AddSeconds(1),
+            TurnMetricStatus.Completed,
+            LastSeq: lastSeq);
 
     private async Task<SessionInfo> SeedAsync(SqliteSessionStore store, int turns)
     {

@@ -35,7 +35,9 @@ internal static class TranscriptReplay
 
     /// <summary>
     /// Reads one page backwards from the end of the session (<paramref name="beforeSeq"/> = long.MaxValue for the newest page,
-    /// otherwise the oldest sequence already shown), off the UI thread, together with the session's metrics rows.
+    /// otherwise the oldest sequence already shown), off the UI thread, together with the session's metrics rows. The page
+    /// comes back starting at the user message that opened the turn it landed in (see
+    /// <see cref="AlignToOpeningTurnAsync"/>).
     /// <para>A tab that already holds the metrics rows and the turn count above the page boundary passes them in
     /// (<paramref name="metrics"/>, <paramref name="turnsAboveBeforeSeq"/> = the previous page's
     /// <see cref="SessionPage.TurnsBefore"/>): metrics rows are immutable once written, and the store numbers the page from
@@ -52,11 +54,95 @@ internal static class TranscriptReplay
         IReadOnlyList<TurnMetric>? metrics = null,
         long? turnsAboveBeforeSeq = null)
     {
+        // The rows are read first: where a turn began is what the page's start is aligned to, and both reads belong off the
+        // UI thread (storage is synchronous under its async surface).
+        var rows = metrics ?? await ReadMetricsAsync(turnMetrics, sessionId, ct).ConfigureAwait(false);
         var page = await Task.Run(
-                () => store.ReadTailAsync(sessionId, beforeSeq, maxMessages, turnsAboveBeforeSeq, ct),
+                async () => await AlignToOpeningTurnAsync(
+                        store,
+                        sessionId,
+                        await store.ReadTailAsync(sessionId, beforeSeq, maxMessages, turnsAboveBeforeSeq, ct)
+                            .ConfigureAwait(false),
+                        rows,
+                        ct)
+                    .ConfigureAwait(false),
                 ct)
             .ConfigureAwait(false);
-        return new Load(page, metrics ?? await ReadMetricsAsync(turnMetrics, sessionId, ct).ConfigureAwait(false));
+        return new Load(page, rows);
+    }
+
+    /// <summary>
+    /// Moves a page's start to the user message that opened the turn it landed in. The store aligns a page to a stored user
+    /// message, which is not the same thing: a stored user message can also be an interjection (steering the loop delivered
+    /// inside a turn) or a receipt, so a page starting there would draw that text as the turn's question and leave the real
+    /// question on the page above it. A turn begins where the previous metrics row ends, so a page that lands inside a row's
+    /// span is read back to the span's first user message — the rule the replay itself uses to tell a turn's opening input
+    /// from an interjection. One read, bounded by one turn, and only for the pages that land inside one.
+    /// <para>The rows are the only thing that knows where a turn began: a session whose rows carry no position (recorded
+    /// before the column existed) keeps the boundary the store gave it.</para>
+    /// </summary>
+    private static async Task<SessionPage> AlignToOpeningTurnAsync(
+        ISessionStore store,
+        string sessionId,
+        SessionPage page,
+        IReadOnlyList<TurnMetric> metrics,
+        CancellationToken ct)
+    {
+        if (page.Messages.Count == 0 || page.Messages[0].Message.Role != MessageRole.User)
+        {
+            return page;
+        }
+
+        var first = page.Messages[0].Seq;
+        var ends = metrics
+            .Where(metric => metric.LastSeq is > 0)
+            .OrderBy(metric => metric.LastSeq)
+            .ToArray();
+        var landedIn = Array.FindIndex(ends, metric => metric.LastSeq!.Value >= first);
+        if (landedIn < 0)
+        {
+            return page;
+        }
+
+        var spanStart = landedIn == 0 ? 1 : ends[landedIn - 1].LastSeq!.Value + 1;
+        if (spanStart >= first)
+        {
+            // The page already starts at (or before) the turn's opening input.
+            return page;
+        }
+
+        var prefix = new List<StoredMessage>();
+        await foreach (var stored in store.ReadAsync(sessionId, spanStart, first - 1, ct).ConfigureAwait(false))
+        {
+            prefix.Add(stored);
+        }
+
+        // The loop persists a turn's input before anything else of it, so a span begins with that input; a span that does not
+        // is one this cannot place, and its page stays what the store read.
+        if (prefix.Count == 0 || prefix[0].Message.Role != MessageRole.User)
+        {
+            return page;
+        }
+
+        var messages = new List<StoredMessage>(prefix.Count + page.Messages.Count);
+        messages.AddRange(prefix);
+        messages.AddRange(page.Messages);
+        var insidePrefix = 0L;
+        foreach (var stored in prefix)
+        {
+            if (stored.Message.Role == MessageRole.User)
+            {
+                insidePrefix++;
+            }
+        }
+
+        return page with
+        {
+            Messages = messages,
+            TurnsBefore = page.TurnsBefore - insidePrefix,
+            // The row above the span ends at a stored message, so a span that does not start the session has more above it.
+            HasMore = spanStart > 1,
+        };
     }
 
     /// <summary>
