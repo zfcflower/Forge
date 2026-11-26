@@ -82,7 +82,7 @@ FORGE 的扩展执行全部在进程外：主程序保持 Native AOT、不可变
 - 模型写一段 C# 脚本，脚本可 `await`、可并行（`Task.WhenAll`）调用已注册工具，只把最终结果一次返回模型。
 - 编译服务常驻 Host（`ScriptCodeCompiler`，唯一缓存所有者），按“编译表面指纹 + 源码 + 全部选项”缓存编译产物与错误；同一缓存键的并发编译共享一次，取消隔离；失败编译也入 LRU。
 - 产物是 PE 映像（`CSharpCompilation` + `Emit`，Embedded PDB、确定性），不是 CSharpScript 提交；`ScriptArtifact` 携带长度、SHA-256、globals MVID、运行时大版本、契约版本、入口名。
-- 脚本白名单与语义检查：固定引用集与命名空间，`AllowUnsafe=false`，`#r`/`#load`/`unsafe`/`typeof`/指针在编译前拒绝，禁用命名空间与受限类型（`Environment`、`AppContext`、`Thread`、`TaskFactory` 等）由语义遍历拒绝；诊断带行列、条数与字符数有界。这不是进程隔离（内存不限，CPU 空转靠杀进程）。
+- 脚本白名单与语义检查：固定引用集与命名空间，`AllowUnsafe=false`，`#r`/`#load`/`unsafe`/`typeof`/指针在编译前拒绝，禁用命名空间与受限类型（`Environment`、`AppContext`、`Thread`、`TaskFactory` 等）由语义遍历拒绝；`using` 指令不拒（它不绑定可达 API），`System.IO` 仅放行 `Path` 的纯字符串成员，`File`/`Directory`/`Path.GetFullPath` 仍拒；诊断带行列、条数与字符数有界。这不是进程隔离（内存不限，CPU 空转靠杀进程）。
 - 脚本可见表面（`Forge.ScriptRuntime`）：`ScriptGlobals`（`Tools`/`Log`/`Cancellation`）、`ToolsFacade`（`Call`/`Call<T>`/`CallJson`/`CallJson<T>`/`Json`/`Json<T>`/`List()`/`Describe(name)`）、`ToolCallException`；类型仍在 `Forge.Scripting` 命名空间，源码与旧引擎兼容。
 - `Tools.List()`/`Describe(name)` 只读本次运行的元数据、不发 IPC；这是主程序提示里不再逐工具列 schema 的另一半——模型要细节时脚本自己问一句。
 

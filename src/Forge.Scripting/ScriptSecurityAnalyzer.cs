@@ -63,6 +63,23 @@ internal static class ScriptSecurityAnalyzer
         ["System.Reflection.MemberInfo"] = ["Name", "FullName", "Namespace", "ToString", "Equals", "GetHashCode"],
         ["System.Delegate"] = ["Invoke", "Equals", "GetHashCode", "ToString"],
         ["System.MulticastDelegate"] = ["Invoke", "Equals", "GetHashCode", "ToString"],
+
+        // System.IO stays a banned namespace, but a path is also just a string: these members only split and join text, so
+        // a script can name a file without gaining any file access. Everything that reads the file system or the
+        // environment (GetFullPath, GetTempPath, GetRandomFileName) stays out, and File/Directory/FileInfo stay banned by
+        // namespace.
+        ["System.IO.Path"] =
+        [
+            "ChangeExtension",
+            "Combine",
+            "GetDirectoryName",
+            "GetExtension",
+            "GetFileName",
+            "GetFileNameWithoutExtension",
+            "GetRelativePath",
+            "HasExtension",
+        ],
+
         ["System.Threading.Thread"] = null,
         ["System.Threading.ThreadPool"] = null,
         ["System.Threading.Timer"] = null,
@@ -169,6 +186,14 @@ internal static class ScriptSecurityAnalyzer
                 if (RejectBySyntax(node) is { } text)
                 {
                     ReportMessage(node.GetLocation(), text);
+                    continue;
+                }
+
+                // A using directive names nothing it could reach on its own: binding a type or member is what gives access,
+                // and every such binding is still inspected. Skipping the directive is what makes `using System.IO;`
+                // compile while the only System.IO members a script may then touch are the ones in RestrictedTypes.
+                if (node.FirstAncestorOrSelf<UsingDirectiveSyntax>() is not null)
+                {
                     continue;
                 }
 
