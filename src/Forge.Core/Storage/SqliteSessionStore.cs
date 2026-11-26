@@ -279,10 +279,12 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
     /// messages below <paramref name="beforeSeq"/>): numbering the page is then one pass over the page's own rows instead
     /// of a walk over the whole prefix through <c>json_extract</c> (10k messages: 21-45 ms of every page, measured). The
     /// "is there more" probe is unchanged, and null counts the prefix exactly as before.
-    /// <para>A page is whole rounds: <paramref name="maxMessages"/> bounds it from below, and a boundary that lands inside a
-    /// turn is moved back to that turn's opening user message (one extra read, only for such a page). A seam inside a turn
-    /// draws that turn twice in the transcript - once with its question, once as a round without one - and the derived count
-    /// stays exact either way, because every user message between the two boundaries ends up inside the page.</para>
+    /// <para><paramref name="maxMessages"/> bounds the page from below: a boundary that lands inside a turn's content is moved
+    /// back to the newest stored user message above it (one extra read, only for such a page), because user messages are the
+    /// boundaries this store can name by itself. A stored user message can also be an interjection inside a turn, so the
+    /// reader moves the start on to the turn's opening user message from the metrics rows it holds (App:
+    /// <c>TranscriptReplay.ReadPageAsync</c>); the derived count stays exact either way, because every user message between
+    /// the two boundaries ends up inside the page.</para>
     /// </summary>
     public async Task<SessionPage> ReadTailAsync(
         string sessionId, long beforeSeq, int maxMessages, long? turnsAboveBeforeSeq, CancellationToken ct)

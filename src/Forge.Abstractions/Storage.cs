@@ -264,9 +264,12 @@ public interface ISessionStore
     /// end), in order, with the turn count that precedes them: a transcript pages backwards from the end and has to number its
     /// rounds as if the whole session had been read. The default reads everything and takes the tail, so an implementer that
     /// cannot page is correct but slow; the SQLite store answers it with one bounded query.
-    /// <para>A page is whole rounds: it starts at the user message that opened the turn its oldest message belongs to, so
-    /// <paramref name="maxMessages"/> bounds the page from below rather than fixing its length. A seam inside a turn would
-    /// draw that turn twice — once with its question, once as a round with no question of its own.</para>
+    /// <para>A page never starts inside a turn's content: it starts at the newest stored user message at or above its oldest
+    /// message, so <paramref name="maxMessages"/> bounds the page from below rather than fixing its length. That is the
+    /// store's own notion of a round boundary — one it can answer without the turn model, and a stored user message can also
+    /// be an interjection inside a turn — so the reader, which has the turn rows, moves the start to the turn's opening user
+    /// message before replaying (App: <c>TranscriptReplay.ReadPageAsync</c>). A seam inside a turn would draw that turn twice:
+    /// once with its question, once as a round with no question of its own.</para>
     /// </summary>
     async Task<SessionPage> ReadTailAsync(string sessionId, long beforeSeq, int maxMessages, CancellationToken ct)
     {
