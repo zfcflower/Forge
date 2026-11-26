@@ -203,28 +203,42 @@ internal static class TranscriptReplay
 
         // The pairing itself: a card's own last position meets the row that names it. Rows whose seq no card consumed
         // (an older page's rows, one the replay never reached) simply stay unclaimed, so the same whole-session list
-        // serves every page without slicing.
-        var maxTurn = 0;
+        // serves every page without slicing. A row seeds its card's readings and nothing else.
+        //
+        // The page's round numbers stay one sequence: the count the replay assigned is ordered by construction, while a
+        // row's own turn number can skip (a row the recorder dropped) or repeat what a neighbour says, and adopting it
+        // card by card is what made two rounds of one page both read "第 N 轮". What the rows can correct is where the
+        // sequence starts - the count also counts stored user messages that opened no turn (receipts, interjections) -
+        // so they move the whole page by one amount, and only when every paired card derives the same one.
+        var paired = 0;
+        int? turnsBeforePage = null;
+        var turnsBeforeAgree = true;
         if (lastSeqOfCard is not null)
         {
             foreach (var (card, seq) in lastSeqOfCard)
             {
-                if (bySeq.TryGetValue(seq, out var metric) && !ambiguous.Contains(metric))
+                if (!bySeq.TryGetValue(seq, out var metric) || ambiguous.Contains(metric))
                 {
-                    card.SeedReplayMetrics(metric);
-                    maxTurn = Math.Max(maxTurn, metric.Turn);
+                    continue;
+                }
+
+                card.SeedReplayMetrics(metric);
+                paired++;
+                var derived = metric.Turn - (card.Round - transcript.RoundSeed);
+                if (turnsBeforePage is not { } known)
+                {
+                    turnsBeforePage = derived;
+                }
+                else if (known != derived)
+                {
+                    turnsBeforeAgree = false;
                 }
             }
         }
 
-        // A matched row is the authority the replayed display numbers follow — but only when the rows reach the end of
-        // the stored stream without a span the rows could not bound: turns whose rows were dropped still counted in
-        // the replay's own numbering, and adopting the last surviving row's number would repeat it for the next live
-        // turn. Rows that reach the tail mean every turn was recorded, so the count is theirs.
-        var tailCovered = messages.Count > 0 && rowAt < ends.Length;
-        if (maxTurn > 0 && tailCovered && ambiguous.Count == 0)
+        if (paired > 0 && turnsBeforeAgree && turnsBeforePage is { } baseTurn)
         {
-            transcript.AdoptReplayTurnNumbers(maxTurn);
+            transcript.ShiftRoundNumbers(baseTurn - transcript.RoundSeed);
         }
 
         return new TokenUsage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheWrite1hTokens);

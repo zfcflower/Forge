@@ -122,13 +122,13 @@ internal sealed class UserMessageViewModel : TranscriptItemViewModel, ICopyableT
     /// <summary>
     /// The round this message starts, peeked from the transcript's counter when the message arrived. The card the next
     /// <c>BeginTurn</c> opens carries the same number, so the subtitle names the round the reply below belongs to.
-    /// Null for a transcript that never numbers rounds (sub-agent transcripts have no user turns). A replay adopts the
-    /// number the turn's own metrics row recorded (see <see cref="Renumber"/>), which is the truth the live turn ran
-    /// under — the peeked count drifts on stored user messages that never opened a live turn.
+    /// Null for a transcript that never numbers rounds (sub-agent transcripts have no user turns). A replay moves the whole
+    /// page by one amount when its metrics rows agree on where the page began (see <see cref="Renumber"/> and
+    /// <c>TranscriptViewModel.ShiftRoundNumbers</c>); it never renumbers a round on its own.
     /// </summary>
     public int? Round { get; private set; }
 
-    /// <summary>Adopts the round number the turn's metrics row recorded; the replayed count only ever approximated it.</summary>
+    /// <summary>Moves this message's round by the page's one shift; a page's rounds keep their order and spacing.</summary>
     internal void Renumber(int round)
     {
         if (Round == round)
@@ -823,19 +823,14 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     /// Seeds what a stored conversation cannot reconstruct (wall clock, stream time, outcome, identity) from the turn's
     /// metrics row. Only fills what the replay did not already measure: a measured elapsed time and a counted tool call stay.
     /// The outcome always follows the table — a replayed finish carries no outcome of its own.
+    /// <para>The row never renumbers the card it is paired with: a page's round numbers are one sequence, and taking a row's
+    /// number card by card is what made two neighbouring rounds read the same "第 N 轮" when the table skipped a turn or
+    /// repeated one. What the rows correct is where the page's sequence starts, once for the whole page (see
+    /// <see cref="TranscriptViewModel.ShiftRoundNumbers"/>).</para>
     /// </summary>
     internal void SeedReplayMetrics(TurnMetric metric)
     {
         ArgumentNullException.ThrowIfNull(metric);
-
-        // The row's own number is the authority the replay adopts: the transcript's recount only approximates it (stored
-        // user messages exist that never opened a live turn — receipts, interjections), and the user message's subtitle
-        // follows the card. Live cards are never seeded, so this touches replayed numbers only.
-        if (metric.Turn > 0 && metric.Turn != Round)
-        {
-            Round = metric.Turn;
-            UserMessage?.Renumber(metric.Turn);
-        }
 
         var duration = metric.EndedAt - metric.StartedAt;
         if (lastElapsed is null && duration >= TimeSpan.Zero)
@@ -1296,6 +1291,9 @@ internal sealed class TranscriptViewModel : ObservableObject
     private TurnCardViewModel? current;
     private int round;
 
+    /// <summary>The number the last <see cref="SeedRoundCounter"/> set, before any round of the page opened.</summary>
+    private int roundSeed;
+
     /// <summary>The round the last user message opened and the next <c>BeginTurn</c> claims; null once claimed.</summary>
     private TranscriptRoundViewModel? pendingRound;
 
@@ -1308,9 +1306,42 @@ internal sealed class TranscriptViewModel : ObservableObject
     /// <summary>
     /// Numbers the rounds that follow this call. A transcript read backwards from the end of a session starts part-way in: the
     /// page's first round is number <paramref name="playedRounds"/> + 1, so "第 N 轮" stays the session's own number instead of
-    /// restarting at 1 on every restore.
+    /// restarting at 1 on every restore. The seed is kept, because a page's metrics rows can move the whole sequence (see
+    /// <see cref="ShiftRoundNumbers"/>).
     /// </summary>
-    internal void SeedRoundCounter(long playedRounds) => round = (int)Math.Clamp(playedRounds, 0, int.MaxValue);
+    internal void SeedRoundCounter(long playedRounds)
+    {
+        round = (int)Math.Clamp(playedRounds, 0, int.MaxValue);
+        roundSeed = round;
+    }
+
+    /// <summary>The number the page was seeded with: what a replay compares a metrics row's turn number against.</summary>
+    internal int RoundSeed => roundSeed;
+
+    /// <summary>
+    /// Moves every round of the page by one amount, and the counter that continues after it with them: the replay's own
+    /// numbering is one ordered sequence, so a page either starts where its metrics rows say all of its rounds began or
+    /// keeps the count - never a number per card.
+    /// </summary>
+    internal void ShiftRoundNumbers(int shift)
+    {
+        if (shift == 0)
+        {
+            return;
+        }
+
+        round += shift;
+        foreach (var host in rounds)
+        {
+            if (host.Card is not { } card)
+            {
+                continue;
+            }
+
+            card.Round += shift;
+            card.UserMessage?.Renumber(card.Round);
+        }
+    }
 
     /// <summary>
     /// Puts an older page in front of what is already here. The page comes from a transcript of its own (numbered by
@@ -1682,20 +1713,6 @@ internal sealed class TranscriptViewModel : ObservableObject
         else if (at >= 0)
         {
             rows.RemoveAt(at);
-        }
-    }
-
-    /// <summary>
-    /// The turn numbers the replay's matched rows carry, taken as the truth the next live turn continues from: the
-    /// recount <see cref="SeedRoundCounter"/> started from only approximates them, and stored user messages that never
-    /// opened a live turn inflate it. A replay that matched no row keeps the recount — rows recorded before the seq
-    /// column existed still count turns even though their dividers read "—".
-    /// </summary>
-    internal void AdoptReplayTurnNumbers(int maxTurn)
-    {
-        if (maxTurn > 0)
-        {
-            round = maxTurn;
         }
     }
 

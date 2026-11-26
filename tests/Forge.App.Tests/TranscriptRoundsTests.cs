@@ -1,6 +1,7 @@
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
+using Forge.Core.Storage;
 using Xunit;
 
 namespace Forge.App.Tests;
@@ -16,6 +17,23 @@ public sealed class TranscriptRoundsTests
     /// <summary>A stored assistant message exactly as a provider reports it: reasoning, then the answer, then the calls.</summary>
     private static StoredMessage Assistant(long seq, params ContentBlock[] content) =>
         new(seq, new ChatMessage(MessageRole.Assistant, content), null, At);
+
+    /// <summary><paramref name="turns"/> stored turns of a question and its answer each, one message per seq.</summary>
+    private static List<StoredMessage> Turns(int turns)
+    {
+        var messages = new List<StoredMessage>(turns * 2);
+        for (var turn = 1; turn <= turns; turn++)
+        {
+            messages.Add(new StoredMessage(messages.Count + 1, ChatMessage.User($"question {turn}"), null, At));
+            messages.Add(new StoredMessage(messages.Count + 1, ChatMessage.Assistant($"answer {turn}"), null, At));
+        }
+
+        return messages;
+    }
+
+    /// <summary>One metrics row: a completed turn numbered <paramref name="turn"/>, ending at <paramref name="lastSeq"/>.</summary>
+    private static TurnMetric Row(int turn, long lastSeq) =>
+        new("s", turn, At, At.AddSeconds(3), TurnMetricStatus.Completed, LastSeq: lastSeq);
 
     [Fact]
     public void A_reopened_session_shows_the_thinking_rows_of_every_turn()
@@ -97,6 +115,44 @@ public sealed class TranscriptRoundsTests
         Assert.False(picks[1].IsChosen);
         Assert.True(picks[2].IsChosen);
         Assert.Equal("Read every line", question.Options[1].Description);
+    }
+
+    /// <summary>
+    /// The metrics table can skip a turn (the recorder may drop a row) or repeat one (a live counter that ran ahead of the
+    /// stored user messages). A replay still labels its rounds 1..N in reading order: adopting the row's own number card by
+    /// card is what made two rounds of one page both read "第 4 轮" and the numbers between them disappear.
+    /// </summary>
+    [Fact]
+    public void Rounds_stay_one_sequence_even_when_the_metrics_rows_skip_and_repeat()
+    {
+        var transcript = MainTranscript();
+        TranscriptReplay.Apply(
+            transcript,
+            Turns(4),
+            [Row(1, lastSeq: 2), Row(3, lastSeq: 4), Row(4, lastSeq: 6), Row(4, lastSeq: 8)]);
+
+        Assert.Equal([1, 2, 3, 4], transcript.Rounds.Select(round => round.Card!.Round));
+        Assert.Equal<int?>(
+            [1, 2, 3, 4],
+            transcript.Rounds.Select(round => Assert.IsType<UserMessageViewModel>(round.Rows[0]).Round));
+    }
+
+    /// <summary>
+    /// The count a page is seeded with is an approximation - stored user messages exist that opened no live turn (receipts,
+    /// interjections). When every paired row agrees on how many turns preceded the page, the page moves to that number in one
+    /// step, and the turn after it continues from the moved sequence.
+    /// </summary>
+    [Fact]
+    public void Agreeing_rows_move_the_page_to_where_its_turns_really_were()
+    {
+        var transcript = MainTranscript();
+        transcript.SeedRoundCounter(2);
+        TranscriptReplay.Apply(transcript, Turns(2), [Row(2, lastSeq: 2), Row(3, lastSeq: 4)]);
+
+        Assert.Equal([2, 3], transcript.Rounds.Select(round => round.Card!.Round));
+
+        transcript.AddUserMessage("next", At);
+        Assert.Equal(4, Assert.IsType<UserMessageViewModel>(transcript.Rounds[^1].Rows[0]).Round);
     }
 
     [Fact]
