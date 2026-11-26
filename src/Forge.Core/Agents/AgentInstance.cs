@@ -20,6 +20,8 @@ public sealed class AgentInstance
     private int pendingInterjections;
     private string lastText = string.Empty;
     private int running;
+    private readonly Lock idleGate = new();
+    private TaskCompletionSource? idle;
     private DateTimeOffset? lastRequestAt;
     private string? cacheTtlInUse;
 
@@ -134,8 +136,8 @@ public sealed class AgentInstance
 
     /// <summary>
     /// A run is driving this instance right now. Roots have no <see cref="Control"/> and a finished sub-agent has none either,
-    /// so this answers for the instances that carry a run - in practice the user-driven sessions, whose turn a mailbox delivery
-    /// has to wait for (<see cref="SessionMessenger"/>).
+    /// so this answers for the instances that carry a run. It is attached a moment after the run takes the instance, so a caller
+    /// that has to wait for a run uses the gate itself (<see cref="IsAcquired"/>) - <see cref="SessionMessenger"/> does.
     /// </summary>
     internal bool IsRunning => Control is not null;
 
@@ -239,9 +241,53 @@ public sealed class AgentInstance
         }
     }
 
-    internal bool TryAcquire() => Interlocked.CompareExchange(ref running, 1, 0) == 0;
+    internal bool TryAcquire()
+    {
+        lock (idleGate)
+        {
+            if (running != 0)
+            {
+                return false;
+            }
 
-    internal void Release() => Volatile.Write(ref running, 0);
+            // A fresh source per run, taken with the gate itself and never reused: the source this run ends on belongs to it
+            // alone, so a waiter can never be handed one that a release is about to complete (which would spin on a completed
+            // task) or a stale one it never hears from again.
+            idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Volatile.Write(ref running, 1);
+            return true;
+        }
+    }
+
+    internal void Release()
+    {
+        lock (idleGate)
+        {
+            // Released and signalled as one step: a waiter that wakes re-reads <see cref="IsAcquired"/> and must see the run
+            // gone, and a run taking the instance right now must not end on this release's source. The continuations run on the
+            // pool (RunContinuationsAsynchronously), so completing under the lock runs no user code here.
+            Volatile.Write(ref running, 0);
+            idle?.TrySetResult();
+            idle = null;
+        }
+    }
+
+    /// <summary>
+    /// Completes when the run holding this instance ends, so a caller that has to wait for the user's own turn - a mailbox
+    /// delivery (see <see cref="SessionMessenger"/>) - is woken by the end of that turn instead of polling for it. Read it and
+    /// then check <see cref="IsAcquired"/> again: a source that was already completed only means "look again", which is what
+    /// keeps a wake-up raised between the check and the read from being lost.
+    /// </summary>
+    internal Task Idle
+    {
+        get
+        {
+            lock (idleGate)
+            {
+                return idle?.Task ?? Task.CompletedTask;
+            }
+        }
+    }
 
     /// <summary>
     /// A run holds this instance right now, read from the gate itself rather than from <see cref="Control"/>: the control

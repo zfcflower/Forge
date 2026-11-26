@@ -200,7 +200,8 @@ public interface ISessionMessageEndpoint
     /// <summary>
     /// Hands one receipt to the session that asked for it. Never starts a turn: when that session is running a turn the app
     /// puts the receipt at the next tool-batch boundary, otherwise it lands in the transcript as an unread message. Only called
-    /// while <see cref="AcceptsReceipts"/> is true.
+    /// while <see cref="AcceptsReceipts"/> is true - the messenger checks it, and a receipt the seam does not take goes into the
+    /// initiator's own history instead of being dropped.
     /// </summary>
     void DeliverReceipt(string initiatorSessionId, string text);
 
@@ -247,8 +248,12 @@ public sealed class SessionMessenger
     /// </summary>
     public static readonly TimeSpan IdleWaitLimit = TimeSpan.FromMinutes(30);
 
-    /// <summary>The pause between two looks at whether a busy target has gone idle.</summary>
-    private static readonly TimeSpan IdlePollInterval = TimeSpan.FromMilliseconds(200);
+    /// <summary>
+    /// How many deliveries one target may have waiting. Each waiting delivery is a whole turn of that session - its own model
+    /// calls - and a batch of <c>message_session</c> calls arrives at once, so the queue needs a ceiling: past it the tool refuses
+    /// and says so, leaving the decision to send again to the model instead of letting one batch spend without bound.
+    /// </summary>
+    internal const int MaxQueuedDeliveries = 8;
 
     private readonly Func<SessionAnchor?> anchor;
     private readonly SubAgentScheduler scheduler;
@@ -256,6 +261,7 @@ public sealed class SessionMessenger
     private readonly IArtifactStore? artifacts;
     private readonly Func<ISessionMessageEndpoint?> endpoint;
     private readonly Func<AgentInstance, ChatMessage, CancellationToken, IAsyncEnumerable<AgentEvent>> runUserChildTurn;
+    private readonly Func<string, string, CancellationToken, Task> keepReceipt;
     private readonly SessionAuthorizationTable grants = new();
     private readonly Dictionary<string, Mailbox> mailboxes = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
@@ -273,18 +279,21 @@ public sealed class SessionMessenger
         ISessionStore? store,
         IArtifactStore? artifacts,
         Func<ISessionMessageEndpoint?> endpoint,
-        Func<AgentInstance, ChatMessage, CancellationToken, IAsyncEnumerable<AgentEvent>> runUserChildTurn)
+        Func<AgentInstance, ChatMessage, CancellationToken, IAsyncEnumerable<AgentEvent>> runUserChildTurn,
+        Func<string, string, CancellationToken, Task> keepReceipt)
     {
         ArgumentNullException.ThrowIfNull(anchor);
         ArgumentNullException.ThrowIfNull(scheduler);
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(runUserChildTurn);
+        ArgumentNullException.ThrowIfNull(keepReceipt);
         this.anchor = anchor;
         this.scheduler = scheduler;
         this.store = store;
         this.artifacts = artifacts;
         this.endpoint = endpoint;
         this.runUserChildTurn = runUserChildTurn;
+        this.keepReceipt = keepReceipt;
     }
 
     /// <summary>The grant table of this root: written by the app's <c>@</c> mentions, read by the tool and by the input marks.</summary>
@@ -346,7 +355,7 @@ public sealed class SessionMessenger
 
                 // Only a delivery whose turn is still running is stopped here. One that already recorded its outcome is
                 // past the turn: it is reading its change line and building its receipt right now, so its answer is the
-                // one the initiator must read - a "已停止" thrown in here would be it, because Reply hands out the first
+                // one the initiator must read - a "已停止" thrown in here would be it, because AnswerAsync hands out the first
                 // receipt only and the real one would be dropped.
                 if (box.Current is { Outcome: null } running)
                 {
@@ -358,7 +367,9 @@ public sealed class SessionMessenger
         previous.Cancel();
         foreach (var delivery in stopped)
         {
-            Reply(delivery, Receipt(delivery, new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, text, 0), null));
+            // Not awaited: this runs on the UI thread (the stop button), and the answer's own bookkeeping - handing it to the
+            // seam or keeping it in the initiator's history - must not hold the window. AnswerAsync catches everything.
+            _ = AnswerAsync(delivery, Receipt(delivery, new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, text, 0), null));
         }
 
         return stopped.Count;
@@ -405,6 +416,11 @@ public sealed class SessionMessenger
             grants.RevokeRoot(current.SessionId);
             return Error("The root session is no longer active, so its sessions cannot deliver to each other.");
         }
+
+        // The name the target's own card shows as the sender: the root's row is already here, a user session's is one read more.
+        var initiatorName = initiatorIsRoot
+            ? NameOf(root, initiator)
+            : NameOf(await ReadSessionAsync(initiator, ct).ConfigureAwait(false), initiator);
 
         var resolved = await ResolveAsync(current.SessionId, initiatorIsRoot, initiator, targetName.Trim(), ct).ConfigureAwait(false);
         if (resolved.Error is { } problem)
@@ -455,6 +471,7 @@ public sealed class SessionMessenger
         var delivery = new PendingDelivery(
             id,
             initiator,
+            initiatorName,
             target.SessionId,
             target.Name,
             text,
@@ -465,6 +482,13 @@ public sealed class SessionMessenger
         lock (gate)
         {
             box = mailboxFor(target.SessionId);
+            if (box.Queue.Count >= MaxQueuedDeliveries)
+            {
+                return Error(
+                    $"The session '{target.Name}' already has {MaxQueuedDeliveries} deliveries waiting, so this one was not queued: "
+                    + "each of them runs a whole turn there. Send it again once it has worked through them.");
+            }
+
             // What the target already owes: the mailbox work read under the gate here, plus the busy reading taken above
             // (its own run or a turn this host does not queue - the user's turn on the root, or one in the session's tab).
             queued = box.Running || box.Queue.Count > 0 || targetBusy;
@@ -479,7 +503,7 @@ public sealed class SessionMessenger
 
         if (start)
         {
-            _ = Task.Run(() => DrainAsync(box), CancellationToken.None);
+            _ = Task.Run(() => DrainAsync(target.SessionId, box), CancellationToken.None);
         }
 
         return new ToolResult(
@@ -596,17 +620,21 @@ public sealed class SessionMessenger
 
     private sealed record Resolved(Target? Target, string? Error, string? Invalidated);
 
+    /// <summary>One delivery waiting in a mailbox: what it says, who asked for it (id and name, as the target's card shows it)
+    /// and what the receipt will call it.</summary>
     private sealed record PendingDelivery(
         long DispatchId,
         string InitiatorSessionId,
+        string InitiatorName,
         string TargetSessionId,
         string TargetName,
         string Message,
         string TaskLabel)
     {
         /// <summary>
-        /// Whether the receipt went out; read and written under the messenger's gate, because <see cref="CancelPending"/> and
-        /// the worker that runs the delivery can both reach <see cref="Reply"/> for it.
+        /// Whether this delivery was answered; read and written under the messenger's gate, because <see cref="CancelPending"/> and
+        /// the worker that runs the delivery can both reach <see cref="AnswerAsync"/> for it. "Answered" is not "handed to the
+        /// seam": the answer also counts when the receipt went into the initiator's own history instead.
         /// </summary>
         public bool Replied { get; set; }
 
@@ -628,12 +656,15 @@ public sealed class SessionMessenger
         }
     }
 
-    /// <summary>Whether a user-driven session is inside a turn right now; false when this host does not hold it.</summary>
+    /// <summary>Whether a user-driven session is inside a turn right now - its gate taken - or held by this host at all. False when
+    /// this host does not hold it.</summary>
     private bool IsUserSessionRunning(string sessionId) =>
-        scheduler.TryGetUserSession(sessionId, out var child) && child.IsRunning;
+        scheduler.TryGetUserSession(sessionId, out var child) && child.IsAcquired;
 
-    /// <summary>Takes deliveries one at a time until the queue is empty, then releases the mailbox.</summary>
-    private async Task DrainAsync(Mailbox box)
+    /// <summary>Takes deliveries one at a time until the queue is empty, then releases the mailbox and drops it: a target that is
+    /// idle again holds no state here, so a long-lived host does not accumulate one empty <see cref="Mailbox"/> per target it
+    /// ever delivered to.</summary>
+    private async Task DrainAsync(string targetSessionId, Mailbox box)
     {
         while (true)
         {
@@ -645,6 +676,11 @@ public sealed class SessionMessenger
                 {
                     box.Running = false;
                     box.Draining = false;
+                    if (mailboxes.TryGetValue(targetSessionId, out var current) && ReferenceEquals(current, box))
+                    {
+                        mailboxes.Remove(targetSessionId);
+                    }
+
                     return;
                 }
 
@@ -664,7 +700,7 @@ public sealed class SessionMessenger
                 // first keeps a stop that arrives in this moment from taking the answer away from the worker.
                 var failed = new SessionTurnOutcome(string.Empty, SessionReplyStatus.Failed, exception.Message, 0);
                 MarkEnded(delivery, failed);
-                Reply(delivery, Receipt(delivery, failed, null));
+                await AnswerAsync(delivery, Receipt(delivery, failed, null)).ConfigureAwait(false);
             }
             finally
             {
@@ -701,7 +737,7 @@ public sealed class SessionMessenger
             }
         }
 
-        Reply(delivery, await BuildReceiptAsync(delivery, outcome, changes).ConfigureAwait(false));
+        await AnswerAsync(delivery, await BuildReceiptAsync(delivery, outcome, changes).ConfigureAwait(false)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -718,7 +754,7 @@ public sealed class SessionMessenger
             return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Failed, "the app's sessions are not connected", 0);
         }
 
-        var request = new SessionTurnRequest(delivery.TargetSessionId, delivery.Message, delivery.InitiatorSessionId, delivery.TargetName);
+        var request = new SessionTurnRequest(delivery.TargetSessionId, delivery.Message, delivery.InitiatorSessionId, delivery.InitiatorName);
         var isRoot = string.Equals(delivery.TargetSessionId, anchor()?.SessionId, StringComparison.Ordinal);
         try
         {
@@ -887,21 +923,21 @@ public sealed class SessionMessenger
     /// Waits until the instance holds no run: a session the user is driving keeps its turn, and the delivery starts right
     /// after it instead of failing ("目标忙则排队"). Bounded by <see cref="IdleWaitLimit"/> and by the root's stop, because a
     /// mailbox that never gets there would leave the initiator without the receipt the state line owes it.
+    /// <para>The wait is woken by the end of that run (<see cref="AgentInstance.Idle"/>), not by a timer: looking again every pause
+    /// spent the whole <see cref="IdleWaitLimit"/> in wake-ups that learned nothing.</para>
     /// </summary>
     /// <returns>Whether the target went idle; false when the limit ran out or the root was stopped.</returns>
     private static async Task<bool> WaitUntilIdleAsync(AgentInstance child, CancellationToken stop)
     {
-        var waited = Stopwatch.StartNew();
-        while (child.IsRunning)
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        limit.CancelAfter(IdleWaitLimit);
+        // The gate the instance holds, not the run control attached a moment later: a run between the two would be missed and
+        // the delivery would drive a second one over it.
+        while (child.IsAcquired)
         {
-            if (waited.Elapsed >= IdleWaitLimit)
-            {
-                return false;
-            }
-
             try
             {
-                await Task.Delay(IdlePollInterval, stop).ConfigureAwait(false);
+                await child.Idle.WaitAsync(limit.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -963,8 +999,8 @@ public sealed class SessionMessenger
 
     /// <summary>
     /// Hands one receipt to the app's delivery seam, which owns what this host cannot do: drawing it in a tab it shows, storing it
-    /// when that tab is idle, marking it unread. False when no endpoint is installed (a script, a test) or when the one there refused
-    /// it (a window already closing) - the caller then has to keep the message itself.
+    /// when that tab is idle, marking it unread. False when no endpoint is installed (a script, a test), when the one there no
+    /// longer takes receipts (a window already closing), or when it threw - the caller then has to keep the message itself.
     /// </summary>
     internal bool TryDeliverReceipt(string sessionId, string text)
     {
@@ -973,8 +1009,16 @@ public sealed class SessionMessenger
             return false;
         }
 
-        seam.DeliverReceipt(sessionId, text);
-        return true;
+        try
+        {
+            seam.DeliverReceipt(sessionId, text);
+            return true;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.TraceWarning($"the receipt for '{sessionId}' was not taken by the app: {exception.Message}");
+            return false;
+        }
     }
 
     /// <summary>Whether an app is behind this host at all; false means the host itself has to keep the message.</summary>
@@ -1078,8 +1122,11 @@ public sealed class SessionMessenger
     /// a turn that ended before the stop counts (<see cref="CancelPending"/> no longer answers for a delivery that recorded its
     /// <see cref="PendingDelivery.Outcome"/>, and this first-wins check is the belt to that suspender), a stopped delivery does
     /// not owe a second line.
+    /// <para>The answer has two routes and no third: the app's seam when it still takes receipts, its own history otherwise. A
+    /// receipt nobody kept would leave the initiator reading "no message yet" as success - the one outcome the state line must
+    /// never produce - so the fallback is not optional and not fire-and-forget from where the turn ended.</para>
     /// </summary>
-    private void Reply(PendingDelivery delivery, string receipt)
+    private async Task AnswerAsync(PendingDelivery delivery, string receipt)
     {
         lock (gate)
         {
@@ -1091,23 +1138,18 @@ public sealed class SessionMessenger
             delivery.Replied = true;
         }
 
-        Deliver(delivery.InitiatorSessionId, receipt);
-    }
-
-    private void Deliver(string initiatorSessionId, string receipt)
-    {
-        if (endpoint() is not { } seam)
+        if (TryDeliverReceipt(delivery.InitiatorSessionId, receipt))
         {
             return;
         }
 
         try
         {
-            seam.DeliverReceipt(initiatorSessionId, receipt);
+            await keepReceipt(delivery.InitiatorSessionId, receipt, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.TraceWarning($"message_session: receipt not delivered to '{initiatorSessionId}': {exception.Message}");
+            Trace.TraceWarning($"message_session: receipt of #{delivery.DispatchId} kept nowhere: {exception.Message}");
         }
     }
 

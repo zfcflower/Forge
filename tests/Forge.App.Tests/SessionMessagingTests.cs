@@ -79,12 +79,14 @@ public sealed class SessionMessagingTests
     {
         private readonly TaskCompletionSource<SessionTurnOutcome?> heldTurn = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<SessionTurnRequest> firstRequest = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<SessionTurnRequest> secondRequest = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<string> firstReceipt = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource turnEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly ConcurrentQueue<SessionTurnRequest> requests = new();
         private readonly ConcurrentQueue<string> receipts = new();
         private readonly ConcurrentQueue<string> begins = new();
         private int blockChangesOnce;
+        private int requestCount;
         private TaskCompletionSource? changesEntered;
         private TaskCompletionSource? changesGate;
 
@@ -110,14 +112,26 @@ public sealed class SessionMessagingTests
 
         public Task<SessionTurnRequest> FirstRequest => firstRequest.Task;
 
+        /// <summary>
+        /// The second delivery the mailbox hands over: the mailbox answers one delivery completely - including writing the answer
+        /// where it belongs - before it starts the next, so a test that awaits this sees the previous delivery's answer finished.
+        /// </summary>
+        public Task<SessionTurnRequest> SecondRequest => secondRequest.Task;
+
         public Task<string> FirstReceipt => firstReceipt.Task;
 
         public bool IsBusy(string sessionId) => RootBusy;
 
         public Task<SessionTurnOutcome?> RunSessionTurnAsync(SessionTurnRequest request, CancellationToken ct)
         {
+            var index = Interlocked.Increment(ref requestCount);
             requests.Enqueue(request);
             firstRequest.TrySetResult(request);
+            if (index == 2)
+            {
+                secondRequest.TrySetResult(request);
+            }
+
             if (ViewSessionId is { } view && !string.Equals(request.SessionId, view, StringComparison.Ordinal))
             {
                 return Task.FromResult<SessionTurnOutcome?>(null);
@@ -166,10 +180,21 @@ public sealed class SessionMessagingTests
             return new SessionTurnChanges(2, 5, 3);
         }
 
-        public bool AcceptsReceipts => true;
+        public bool AcceptsReceipts => !RefusesReceipts;
+
+        /// <summary>Whether the seam no longer takes receipts (the window began closing): the receipt must then be kept by Core.</summary>
+        public bool RefusesReceipts { get; set; }
+
+        /// <summary>Raise instead of taking a receipt: the other way a hand-over fails, and the one that used to end in a log line.</summary>
+        public bool ThrowsOnReceipt { get; set; }
 
         public void DeliverReceipt(string initiatorSessionId, string text)
         {
+            if (ThrowsOnReceipt)
+            {
+                throw new InvalidOperationException("the app is going away");
+            }
+
             receipts.Enqueue(text);
             if (OnReceipt is { } callback)
             {
@@ -489,9 +514,87 @@ public sealed class SessionMessagingTests
         var request = await harness.Endpoint.FirstRequest;
         Assert.Equal(harness.Root.SessionId, request.SessionId);
         Assert.Equal("please review", request.Message);
+        // The root's turn is asked for by this child, so the card in the root's transcript names the child.
+        Assert.Equal(child.Id, request.FromSessionId);
+        Assert.Equal(child.Title, request.FromName);
 
         harness.Endpoint.CompleteTurn();
         Assert.StartsWith("[会话回复 #1 · 来自 Root · 状态:完成", await harness.Endpoint.FirstReceipt);
+    }
+
+    [Fact]
+    public async Task A_target_whose_queue_is_full_refuses_the_next_delivery_without_queueing_it()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var child = await harness.AddUserSessionAsync();
+        harness.Host.SessionMessaging.Grant(harness.Root.SessionId, child.Id, child.Title);
+
+        // #1 leaves the queue and is held inside its turn, so what is counted below is exactly the waiting part.
+        Assert.Equal(
+            "已投递 #1（未完成，你现在没有结果）",
+            (await SendAsync(harness, RootContext(harness), "Worker", "first")).Text);
+        Assert.Equal(child.Id, (await harness.Endpoint.FirstRequest).SessionId);
+
+        for (var dispatch = 2; dispatch <= 9; dispatch++)
+        {
+            Assert.Equal(
+                $"已排队 #{dispatch}（未完成，你现在没有结果）",
+                (await SendAsync(harness, RootContext(harness), "Worker", "later " + dispatch)).Text);
+        }
+
+        var refused = await SendAsync(harness, RootContext(harness), "Worker", "one too many");
+        Assert.True(refused.IsError);
+        Assert.Equal(
+            "The session 'Worker' already has 8 deliveries waiting, so this one was not queued: each of them runs a whole turn there. "
+            + "Send it again once it has worked through them.",
+            refused.Text);
+        // The refused delivery never reached the target: only the one that is running was handed over.
+        Assert.Single(harness.Endpoint.Requests);
+    }
+
+    [Fact]
+    public async Task A_delivery_waits_for_the_targets_own_turn_to_end_instead_of_failing_or_polling_past_it()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var child = await harness.AddUserSessionAsync();
+        harness.Host.SessionMessaging.Grant(harness.Root.SessionId, child.Id, child.Title);
+        // No app view of this session, so the delivery's turn is Core's own and it has to wait for the turn the user is running.
+        harness.Endpoint.ViewSessionId = harness.Root.SessionId;
+        var receipt = NextReceiptOf(harness, "#1");
+
+        var instance = harness.Host.FindUserChild(child.Id);
+        Assert.NotNull(instance);
+        var inTurn = harness.Provider.BlockNextTurn();
+        var ownTurn = Task.Run(
+            async () =>
+            {
+                var turn = harness.Host.RunUserChildTurnAsync(
+                    instance!,
+                    ChatMessage.User("the user's own turn"),
+                    TestContext.Current.CancellationToken);
+                await foreach (var _ in turn)
+                {
+                }
+            },
+            TestContext.Current.CancellationToken);
+        await inTurn.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            "已排队 #1（未完成，你现在没有结果）",
+            (await SendAsync(harness, RootContext(harness), "Worker")).Text);
+        // The delivery reached the mailbox and found the instance held by the user's turn, so it waits instead of answering at
+        // once with a failure ("still running"). Its turn can only start after the release below - which is what the receipt
+        // and the provider's two calls below pin down.
+        Assert.Equal(child.Id, (await harness.Endpoint.FirstRequest).SessionId);
+        Assert.Empty(harness.Endpoint.Receipts);
+
+        harness.Provider.ReleaseBlockedTurn();
+        await ownTurn.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
+
+        var answered = await receipt.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
+        Assert.Equal("[会话回复 #1 · 来自 Worker · 状态:完成 · 任务:inspect the change]", Header(answered));
+        // The user's turn and the delivery's: two model calls, in that order.
+        Assert.Equal(2, harness.Provider.Calls);
     }
 
     [Fact]
@@ -653,6 +756,54 @@ public sealed class SessionMessagingTests
         Assert.Single(harness.Endpoint.Receipts);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_receipt_the_seam_no_longer_takes_is_kept_in_the_initiator_history(bool throwing)
+    {
+        await using var harness = await Harness.CreateAsync();
+        var child = await harness.AddUserSessionAsync();
+        harness.Host.SessionMessaging.Grant(harness.Root.SessionId, child.Id, child.Title);
+        // The window begins closing while the delivery is inside its turn: the answer must survive in the root's own history.
+        if (throwing)
+        {
+            harness.Endpoint.ThrowsOnReceipt = true;
+        }
+        else
+        {
+            harness.Endpoint.RefusesReceipts = true;
+        }
+
+        Assert.Equal(
+            "已投递 #1（未完成，你现在没有结果）",
+            (await SendAsync(harness, RootContext(harness), "Worker", "first task")).Text);
+        Assert.Equal(child.Id, (await harness.Endpoint.FirstRequest).SessionId);
+        Assert.Equal(
+            "已排队 #2（未完成，你现在没有结果）",
+            (await SendAsync(harness, RootContext(harness), "Worker", "second task")).Text);
+
+        harness.Endpoint.CompleteTurn(new SessionTurnOutcome("finished report", SessionReplyStatus.Completed, null, 1));
+        // The mailbox answers a delivery completely before it hands the next one over, so this is where #1's answer is written.
+        await harness.Endpoint.SecondRequest.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
+
+        Assert.Empty(harness.Endpoint.Receipts);
+        var stored = new List<StoredMessage>();
+        await foreach (var message in harness.Store.ReadAsync(harness.Root.SessionId, 1, null, CancellationToken.None))
+        {
+            stored.Add(message);
+        }
+
+        var kept = Assert.Single(stored, message => ReceiptText(message).StartsWith("[会话回复 #1 ·", StringComparison.Ordinal));
+        var expected =
+            "[会话回复 #1 · 来自 Worker · 状态:完成 · 任务:first task]\n改动: 2 个文件 (+5/−3)\n报告: finished report";
+        Assert.Equal(expected, ReceiptText(kept));
+        // The live instance got it too: the very next turn of the root reads it as an ordinary user message.
+        Assert.Contains(harness.Root.History, message => message.Content.OfType<TextBlock>().Any(block => block.Text == expected));
+
+        static string ReceiptText(StoredMessage message) =>
+            Assert.IsType<TextBlock>(message.Message.Content.Single()).Text;
+    }
+
     [Fact]
     public async Task An_idle_initiator_receives_a_persisted_receipt_without_starting_a_model_turn()
     {
@@ -689,6 +840,54 @@ public sealed class SessionMessagingTests
     }
 
     [Fact]
+    public async Task A_receipt_kept_while_the_root_is_inside_its_own_turn_is_interjected_not_appended_behind_it()
+    {
+        await using var harness = await Harness.CreateAsync();
+        // The root's instance carries no run control, so nothing about it says a turn is in flight except the host's counter: a
+        // receipt kept during that turn must be interjected, or it would be written behind the loop that owns the history and
+        // never reach the model at a tool-batch boundary.
+        var inTurn = harness.Provider.BlockNextTurn();
+        var rootTurn = Task.Run(
+            async () =>
+            {
+                await foreach (var _ in harness.Host.RunAsync(
+                                   harness.Root,
+                                   "go",
+                                   TestContext.Current.CancellationToken))
+                {
+                }
+            },
+            TestContext.Current.CancellationToken);
+        await inTurn.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
+
+        const string Receipt =
+            "[会话回复 #1 · 来自 Worker · 状态:完成 · 任务:inspect]\n改动: 0 个文件 (+0/−0)\n报告: done";
+        await harness.Host.AppendSessionMessageAsync(
+            harness.Root.SessionId,
+            Receipt,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(harness.Root.HasInterjections);
+        var stored = new List<StoredMessage>();
+        await foreach (var message in harness.Store.ReadAsync(
+                           harness.Root.SessionId,
+                           1,
+                           null,
+                           TestContext.Current.CancellationToken))
+        {
+            stored.Add(message);
+        }
+
+        // Nothing was written behind the running loop: the only row is the turn's own prompt.
+        Assert.DoesNotContain(
+            stored,
+            message => message.Message.Content.OfType<TextBlock>().Any(block => block.Text == Receipt));
+
+        harness.Provider.ReleaseBlockedTurn();
+        await rootTurn.WaitAsync(Watchdog, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task A_user_session_that_has_not_run_a_turn_takes_the_delivery_through_its_tab()
     {
         await using var harness = await Harness.CreateAsync();
@@ -713,6 +912,9 @@ public sealed class SessionMessagingTests
         var request = await harness.Endpoint.FirstRequest;
         Assert.Equal(child.Id, request.SessionId);
         Assert.Equal("say hi", request.Message);
+        // The card the target's transcript draws names the session that asked, never the target itself.
+        Assert.Equal(harness.Root.SessionId, request.FromSessionId);
+        Assert.Equal("Root", request.FromName);
 
         harness.Endpoint.CompleteTurn();
         Assert.StartsWith("[会话回复 #1 · 来自 say hi · 状态:完成", await harness.Endpoint.FirstReceipt);

@@ -26,6 +26,12 @@ namespace Forge.App.ViewModels;
 internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
 {
     /// <summary>
+    /// How often a delivery re-checks a target tab that is busy without running a turn - its own queue, a handover, a sub-agent:
+    /// none of those raises the turn-end signal, so the wait there is a bounded re-check rather than a wake-up.
+    /// </summary>
+    private static readonly TimeSpan BusyRecheckInterval = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
     /// The sessions the <c>@</c> picker of one root offers: the agent sessions the user opened under it, by their stored
     /// name (what the tree and the picker show). Filled from the store on demand and refreshed whenever one is created,
     /// renamed or closed; a draft has no row yet and therefore no name to mention.
@@ -81,11 +87,11 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
 
     /// <summary>
     /// One delivered turn, run inside the session's own tab. Null means the tab is not open (Core then either drives a user
-    /// session itself or reports that the root cannot run), so the loop below keeps polling until the tab appears or the
-    /// session stops being busy.
+    /// session itself or reports that the root cannot run), so the loop below looks again until the tab appears or the session
+    /// stops being busy.
     /// <para>The wait is bounded by <see cref="SessionMessenger.IdleWaitLimit"/>, the same limit and the same reason Core's own
     /// wait ends with (forge-core "授权通信"): this is the path a root's delivery takes, since the app holds the root's turn, so
-    /// a target that never goes idle must end as <see cref="SessionReplyStatus.Stopped"/> here too instead of polling forever.
+    /// a target that never goes idle must end as <see cref="SessionReplyStatus.Stopped"/> here too instead of waiting forever.
     /// The clock only runs while there is no outcome, which is the whole loop - an outcome returns at once.</para>
     /// </summary>
     public async Task<SessionTurnOutcome?> RunSessionTurnAsync(SessionTurnRequest request, CancellationToken ct)
@@ -112,19 +118,33 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
                 return outcome;
             }
 
-            if (waited.Elapsed >= SessionMessenger.IdleWaitLimit)
+            var remaining = SessionMessenger.IdleWaitLimit - waited.Elapsed;
+            if (remaining <= TimeSpan.Zero)
             {
                 return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, SessionMessenger.BusyTooLongReason, 0);
             }
 
-            // The tab is open but busy with the user's own turn: the delivery waits for it (a busy target queues).
+            // The tab is open but busy with the user's own turn: the delivery waits for it (a busy target queues). The tab says
+            // when that turn ends; only a busy state that raises no such signal (its own queue, a handover, a sub-agent) is
+            // re-checked on a timer.
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(250), ct).ConfigureAwait(false);
+                if (step.TurnEnded is { IsCompleted: false } turnEnded)
+                {
+                    await turnEnded.WaitAsync(remaining, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Task.Delay(BusyRecheckInterval, ct).ConfigureAwait(false);
+                }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, "cancelled", 0);
+            }
+            catch (TimeoutException)
+            {
+                return new SessionTurnOutcome(string.Empty, SessionReplyStatus.Stopped, SessionMessenger.BusyTooLongReason, 0);
             }
         }
 
@@ -132,18 +152,20 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     }
 
     /// <summary>
-    /// One look at the session on the UI thread: whether its tab exists and, when the tab was free, the turn's outcome.
-    /// Opening the tab never takes the user away from the session they are in.
+    /// One look at the session on the UI thread: whether its tab exists, the turn's outcome when the tab was free, and - when it
+    /// was not - the task that completes when the turn it is running ends. Opening the tab never takes the user away from the
+    /// session they are in.
     /// </summary>
-    private async Task<(bool HasView, SessionTurnOutcome? Outcome)> TryRunDeliveredTurnAsync(SessionTurnRequest request)
+    private async Task<(bool HasView, SessionTurnOutcome? Outcome, Task? TurnEnded)> TryRunDeliveredTurnAsync(SessionTurnRequest request)
     {
         var session = await FindOrOpenSessionForDeliveryAsync(request.SessionId).ConfigureAwait(true);
         if (session is null || session.IsReadOnlyView)
         {
-            return (false, null);
+            return (false, null, null);
         }
 
-        return (true, await session.RunDeliveredTurnAsync(request.Message, request.FromName).ConfigureAwait(true));
+        var outcome = await session.RunDeliveredTurnAsync(request.Message, request.FromName).ConfigureAwait(true);
+        return (true, outcome, outcome is null ? session.TurnEndedSignal : null);
     }
 
     /// <summary>
@@ -429,6 +451,10 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     {
         if (disposed || closing)
         {
+            // The seam said it takes receipts, so Core handed this one over; the window began closing before this post ran.
+            // Dropping it here would leave the initiator's question unanswered for good, so it goes straight into the store -
+            // the one write a closing window can still make, and the row that makes the next reopen replay the card.
+            await AppendReceiptRowAsync(initiatorSessionId, text).ConfigureAwait(true);
             return;
         }
 
@@ -524,23 +550,49 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// </summary>
     private async Task AppendReceiptAsync(SessionWorkspaceViewModel? session, string sessionId, string text)
     {
+        // Through the root's runtime, not around it: that is the side holding the live instance the next turn sends, and
+        // it hands the message to a turn that is still running instead of writing behind that turn's back.
+        SessionRuntime? runtime;
         try
         {
-            // Through the root's runtime, not around it: that is the side holding the live instance the next turn sends, and
-            // it hands the message to a turn that is still running instead of writing behind that turn's back.
-            var runtime = session?.Runtime ?? await RuntimeOfAsync(sessionId).ConfigureAwait(true);
-            if (runtime is not null)
-            {
-                await runtime.AppendSessionMessageAsync(sessionId, text, CancellationToken.None).ConfigureAwait(true);
-                return;
-            }
+            runtime = session?.Runtime ?? await RuntimeOfAsync(sessionId).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"session receipt: runtime of '{sessionId}' not read: {exception.Message}");
+            runtime = null;
+        }
 
+        if (runtime is null)
+        {
+            await AppendReceiptRowAsync(sessionId, text).ConfigureAwait(true);
+            return;
+        }
+
+        try
+        {
+            await runtime.AppendSessionMessageAsync(sessionId, text, CancellationToken.None).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // A receipt that cannot be stored is lost to the model, but it must not take the window down: the log says so.
+            AppLogs.Session.ZLogWarning($"session receipt for '{sessionId}' not stored: {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The store row of one receipt, without its runtime: the only route left when no live instance can take it (no tab, or a
+    /// window already closing). The next resume loads it like any other user message, so the receipt card is replayed there.
+    /// </summary>
+    private async Task AppendReceiptRowAsync(string sessionId, string text)
+    {
+        try
+        {
             await composition.Sessions.AppendAsync(sessionId, ChatMessage.User(text), null, CancellationToken.None)
                 .ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            // A receipt that cannot be stored is lost to the model, but it must not take the window down: the log says so.
             AppLogs.Session.ZLogWarning($"session receipt for '{sessionId}' not stored: {exception.Message}");
         }
     }

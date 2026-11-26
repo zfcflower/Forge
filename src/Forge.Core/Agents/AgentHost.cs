@@ -259,7 +259,10 @@ public sealed class AgentHost
             options.Store,
             options.Artifacts,
             options.SessionMessages ?? (static () => null),
-            RunUserChildTurnAsync);
+            RunUserChildTurnAsync,
+            // A receipt the app can no longer take is kept here: the same route a background child's report falls back to, so a
+            // delivery answer is never lost just because the window was closing when it arrived.
+            AppendSessionMessageAsync);
         builtIns.Add(new MessageSessionTool(messenger));
         // A spawned child ends after the turn that started it (spawn_agent never waits), so its report comes back as a reply
         // message to the parent's conversation instead of as that turn's tool result (forge-core "后台子 Agent").
@@ -484,22 +487,30 @@ public sealed class AgentHost
     /// it exactly like a message the user typed - and a session that is inside a turn gets it through
     /// <see cref="AgentInstance.Interject(string)"/>, which the loop delivers at that turn's next tool-batch boundary. The
     /// running loop owns the history, so nothing is appended behind its back.
+    /// <para>What says a session is inside a turn differs by owner: a user session's instance answers through its gate
+    /// (<see cref="AgentInstance.IsAcquired"/> - not <see cref="AgentInstance.IsRunning"/>, whose control is attached a moment
+    /// after the gate is taken), while the root's instance carries no run control at all, so the host's own counter is the reading
+    /// (the same one <see cref="DeliverBackgroundReportAsync"/> makes). Getting this wrong writes a receipt behind the loop that
+    /// owns the history instead of reaching the model at the next boundary.</para>
     /// </summary>
     public async Task AppendSessionMessageAsync(string sessionId, string text, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(text);
         AgentInstance? instance = null;
+        var running = false;
         if (Volatile.Read(ref rootSession) is { } anchor && string.Equals(anchor.SessionId, sessionId, StringComparison.Ordinal))
         {
             instance = Volatile.Read(ref rootInstance);
+            running = Volatile.Read(ref rootRunning) > 0;
         }
         else if (scheduler.TryGetUserSession(sessionId, out var child))
         {
             instance = child;
+            running = child.IsAcquired;
         }
 
-        if (instance is { IsRunning: true })
+        if (running && instance is not null)
         {
             instance.Interject(text);
             return;

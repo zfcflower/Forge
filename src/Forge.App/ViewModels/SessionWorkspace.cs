@@ -204,6 +204,12 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private volatile bool automationTurn;
 
     /// <summary>
+    /// The signal of the turn running here right now (see <see cref="TurnEndedSignal"/>); null while the tab is idle. Created on
+    /// demand, completed by the <see cref="IsRunning"/> setter.
+    /// </summary>
+    private TaskCompletionSource? turnEndedSignal;
+
+    /// <summary>
     /// The model an automation's own turn runs on when its agent overrides the composer's pick, and null otherwise: the turn
     /// card and its metrics row both name the model and the reasoning step that actually ran, not the chip the user left behind.
     /// </summary>
@@ -750,6 +756,15 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 CancelCommand.NotifyCanExecuteChanged();
                 // The window's prompt reload button follows the turn: it is refused while one runs.
                 RunningResourcesChanged?.Invoke(this, EventArgs.Empty);
+                // Every turn boundary goes through here, so this is the one place the waiters of this tab are released; a waiter
+                // re-reads IsRunning after waking, so releasing on the way out is safe.
+                if (!value)
+                {
+                    var signal = turnEndedSignal;
+                    turnEndedSignal = null;
+                    signal?.TrySetResult();
+                }
+
                 // Either turn boundary drops what this agent left behind: at the end because a cancelled call never reports a
                 // finish of its own, at the start so a snapshot parked for the previous turn cannot seed a row of this one. A
                 // live child's entries are left alone - it may be streaming outside the turn (see ClearTurnTools).
@@ -757,6 +772,16 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             }
         }
     }
+
+    /// <summary>
+    /// Completes when the turn this tab is running ends (already completed when it is idle), so a mailbox delivery waiting for
+    /// the user's own turn is woken by that turn instead of polling this tab. UI thread only - the delivery asks from the UI
+    /// thread and awaits the task off it.
+    /// </summary>
+    internal Task TurnEndedSignal =>
+        !isRunning
+            ? Task.CompletedTask
+            : (turnEndedSignal ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
 
     public bool IsIdle => !isRunning;
 
