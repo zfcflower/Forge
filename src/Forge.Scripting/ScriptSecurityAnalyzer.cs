@@ -17,6 +17,9 @@ internal readonly record struct ApiViolation(string Description, int Line, int C
 /// </summary>
 internal static class ScriptSecurityAnalyzer
 {
+    /// <summary>Namespaces whose types a script may not name. The ban lands where a type or member is bound: a namespace
+    /// name on its own — a using directive, or the prefix of a qualified name — grants nothing, so reporting it would refuse
+    /// an allowed type that happens to live in a banned namespace.</summary>
     private static readonly string[] BannedNamespaces =
     [
         "System.IO",
@@ -227,13 +230,6 @@ internal static class ScriptSecurityAnalyzer
                     return;
                 case IAliasSymbol alias:
                     Inspect(alias.Target, location);
-                    return;
-                case INamespaceSymbol ns:
-                    if (IsBannedNamespace(ns.ToDisplayString()))
-                    {
-                        Report(location, ns.ToDisplayString());
-                    }
-
                     return;
                 case ITypeSymbol type:
                     InspectType(type, location);
