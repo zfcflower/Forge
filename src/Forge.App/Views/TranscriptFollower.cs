@@ -143,8 +143,11 @@ internal sealed class TranscriptFollower
     /// <summary>
     /// Points the behaviour at the transcript it scrolls: a prepend must not be read as the user sending a message, and the
     /// prefetch resumes after a page lands.
+    /// <para>The transcript is read off the collection the list shows (see <see cref="TranscriptRoundCollection"/>): the
+    /// signals cannot be left unbound by a view that forgot a second call. The fields above are not the list's business, so a
+    /// swapped ItemsSource also re-arms the prefetch, which is exactly what a new tab needs.</para>
     /// </summary>
-    public void BindTranscript(TranscriptViewModel? value)
+    private void BindTranscript(TranscriptViewModel? value)
     {
         if (transcript is not null)
         {
@@ -166,6 +169,7 @@ internal sealed class TranscriptFollower
     /// <summary>What keeps the paused transcript's content in place while rows change.</summary>
     internal TranscriptScrollAnchor Anchor => anchor;
 
+    /// <summary>The list's round collection changed (a new transcript, or none): listen to what it now shows.</summary>
     private void Hook(INotifyCollectionChanged? source)
     {
         if (items is not null)
@@ -173,6 +177,7 @@ internal sealed class TranscriptFollower
             items.CollectionChanged -= OnItemsChanged;
         }
 
+        BindTranscript((source as TranscriptRoundCollection)?.Owner);
         items = source;
         if (items is not null)
         {
@@ -312,8 +317,9 @@ internal sealed class TranscriptFollower
             following = true;
         }
 
-        // The anchor hears about every change, following or not: a prepend turns following back off in the same turn (see
-        // BindTranscript), and the anchor then has to know the rows moved around the one it holds.
+        // The anchor hears about every change, following or not: a prepend turns following back off in the same turn (the
+        // behaviour binds the transcript through the rounds collection it shows), and the anchor then has to know the rows
+        // moved around the one it holds.
         anchor.ItemsChanged(e);
         if (following)
         {

@@ -1269,6 +1269,18 @@ internal static class TurnDividerText
 }
 
 /// <summary>
+/// A transcript's rounds, as a list binds them, plus the transcript they belong to. The scroll behaviour reads the owner off
+/// the collection it is already listening to, so the two can never be out of step: a list showing these rounds follows this
+/// transcript's own signals without anyone handing it the transcript, and a tab that swaps its transcript swaps the signals
+/// with the items.
+/// </summary>
+internal sealed class TranscriptRoundCollection(TranscriptViewModel owner, ObservableCollection<TranscriptRoundViewModel> rounds)
+    : ReadOnlyObservableCollection<TranscriptRoundViewModel>(rounds)
+{
+    public TranscriptViewModel Owner { get; } = owner;
+}
+
+/// <summary>
 /// The ordered transcript of one agent (the main session or one sub-agent). Streaming text is merged on the worker thread
 /// into a pending buffer; the session's frame coalescer drains it on the UI thread.
 /// </summary>
@@ -1331,13 +1343,15 @@ internal sealed class TranscriptViewModel : ObservableObject
     public TranscriptViewModel(bool collapseOlderTurns)
     {
         CollapseOlderTurns = collapseOlderTurns;
-        Rounds = new ReadOnlyObservableCollection<TranscriptRoundViewModel>(rounds);
+        Rounds = new TranscriptRoundCollection(this, rounds);
     }
 
     /// <summary>
     /// What the transcript list binds to: one container per round. Every row of a round lives inside that round, so rows of
     /// different rounds are never siblings and the axis of one round cannot be crossed by another. The panel prices a round
     /// it has not realized yet as the sum of its rows (see <c>TranscriptStackPanel</c>) instead of one average per round.
+    /// <para>The collection names its transcript, so the list displaying it follows that transcript's own signals - an older
+    /// page landing in front of the reader is not a message they sent (see <c>TranscriptFollower</c>).</para>
     /// </summary>
     public ReadOnlyObservableCollection<TranscriptRoundViewModel> Rounds { get; }
 

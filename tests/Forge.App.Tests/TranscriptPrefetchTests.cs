@@ -184,7 +184,6 @@ public sealed class TranscriptPrefetchTests
         Settle(window);
         var scroller = list.GetVisualDescendants().OfType<ScrollViewer>().First();
         follower.StopFollowing();
-        follower.BindTranscript(transcript);
         return (window, list, scroller, follower);
     }
 
