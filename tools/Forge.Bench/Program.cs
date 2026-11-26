@@ -120,6 +120,11 @@ internal static class Program
             yield return scenario;
         }
 
+        foreach (var scenario in ShapingScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
         foreach (var scenario in WriteScenarios.Create(fixtures))
         {
             yield return scenario;

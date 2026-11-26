@@ -127,6 +127,50 @@ public static class ToolJson
         return list;
     }
 
+    /// <summary>
+    /// An optional list of strings: absent or null means "not given" (null), a single string counts as a list of one. A
+    /// blank entry and an empty array are refused rather than ignored - a list of paths with a hole in it is a malformed
+    /// call, not an omission, and the tools that take lists act on every entry.
+    /// </summary>
+    public static List<string>? OptionalStrings(JsonElement arguments, string name)
+    {
+        if (!arguments.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString() is { } one && !string.IsNullOrWhiteSpace(one) ? [one] : null;
+        }
+
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            throw new ToolArgumentException($"'{name}' must be a string or an array of strings.");
+        }
+
+        var list = new List<string>();
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                throw new ToolArgumentException($"'{name}' must be a string or an array of strings.");
+            }
+
+            var text = item.GetString() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                throw new ToolArgumentException($"'{name}' must not contain an empty path.");
+            }
+
+            list.Add(text);
+        }
+
+        return list.Count == 0
+            ? throw new ToolArgumentException($"'{name}' must name at least one path.")
+            : list;
+    }
+
     public static string? OptionalString(JsonElement arguments, string name)
     {
         if (!arguments.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)

@@ -179,4 +179,52 @@ public sealed class GrepToolOutputTests : IDisposable
             ],
             Lines(result));
     }
+
+    [Fact]
+    public async Task Files_only_lists_the_matching_files_with_a_per_file_count()
+    {
+        Make("a.txt", "hit one\nmiss\nhit two\n");
+        Make("b.txt", "hit three\n");
+        Make("c.txt", "nothing");
+
+        var result = await RunAsync(("pattern", "hit"), ("files_only", true));
+
+        Assert.False(result.IsError, result.Content);
+        Assert.Equal(["a.txt: 2 matching lines", "b.txt: 1 matching line"], Lines(result));
+    }
+
+    [Fact]
+    public async Task Max_per_file_keeps_the_first_lines_of_each_file_and_says_what_it_left_out()
+    {
+        Make("a.txt", "hit 1\nhit 2\nhit 3\nhit 4\n");
+        Make("b.txt", "hit 5\n");
+
+        var result = await RunAsync(("pattern", "hit"), ("max_per_file", 2));
+
+        Assert.False(result.IsError, result.Content);
+        Assert.Equal(
+            [
+                "a.txt:1:hit 1",
+                "a.txt:2:hit 2",
+                "b.txt:1:hit 5",
+                "… (max_per_file=2: 2 matching line(s) left out)",
+            ],
+            Lines(result));
+    }
+
+    [Fact]
+    public async Task The_total_budget_is_taken_from_the_densest_file_not_from_the_last_one()
+    {
+        Make("a.txt", string.Join('\n', Enumerable.Range(1, 5).Select(index => $"hit {index} {new string('x', 300)}")) + "\n");
+        Make("b.txt", "hit last\n");
+
+        var result = await RunAsync(("pattern", "hit"), ("total_chars", 1000));
+
+        var lines = Lines(result);
+        Assert.False(result.IsError, result.Content);
+        Assert.Contains("b.txt:1:hit last", lines);
+        Assert.StartsWith("a.txt:1:hit 1 ", lines[0], StringComparison.Ordinal);
+        Assert.DoesNotContain(lines, line => line.StartsWith("a.txt:5:", StringComparison.Ordinal));
+        Assert.EndsWith("more line(s) left out; raise total_chars or narrow with glob)", lines[^1], StringComparison.Ordinal);
+    }
 }

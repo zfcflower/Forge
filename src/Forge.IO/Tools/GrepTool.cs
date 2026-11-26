@@ -16,7 +16,7 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
     private const int MaxContextLines = ToolOptions.MaxGrepContextLines;
 
     private const string Schema =
-        """{"type":"object","properties":{"pattern":{"type":"string","description":"Text to find, or a .NET regular expression when `regex` is true."},"path":{"type":"string","description":"Directory or file to search, relative to the workspace root or absolute (inside or outside it); default the root."},"glob":{"type":"string","description":"Only search files whose path matches this glob (relative to the workspace root, or to the searched directory when `path` lies outside it): `*` inside one segment, `**` across segments, `?`, `[...]`. A glob without `/` matches a name at any depth."},"regex":{"type":"boolean","description":"Treat `pattern` as a .NET regular expression; default false."},"case_sensitive":{"type":"boolean","description":"Case-sensitive matching; default true."},"context":{"type":"integer","description":"Context lines before and after each match; default 0, at most 5 (a larger value is capped, and the result says so)."},"limit":{"type":"integer","description":"Maximum matching lines; default 1000, at most 10000. Past it the output says how many lines matched in all."}},"required":["pattern"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"pattern":{"type":"string","description":"Text to find, or a .NET regular expression when `regex` is true."},"path":{"type":"string","description":"Directory or file to search, relative to the workspace root or absolute (inside or outside it); default the root."},"glob":{"type":"string","description":"Only search files whose path matches this glob (relative to the workspace root, or to the searched directory when `path` lies outside it): `*` inside one segment, `**` across segments, `?`, `[...]`. A glob without `/` matches a name at any depth."},"regex":{"type":"boolean","description":"Treat `pattern` as a .NET regular expression; default false."},"case_sensitive":{"type":"boolean","description":"Case-sensitive matching; default true."},"context":{"type":"integer","description":"Context lines before and after each match; default 0, at most 5 (a larger value is capped, and the result says so)."},"limit":{"type":"integer","description":"Maximum matching lines; default 1000, at most 10000. Past it the output says how many lines matched in all."},"files_only":{"type":"boolean","description":"Return only the files that matched, one `path: N match(es)` line each, with no line text."},"max_per_file":{"type":"integer","description":"Keep at most this many matching lines per file, so one dense file cannot fill the answer; default unlimited.","minimum":1,"maximum":10000},"total_chars":{"type":"integer","description":"Character budget for the whole answer; default 32000, at most 32000. The budget is shared across files: it is taken from the files with the most lines, not from the last ones.","minimum":1000,"maximum":32000}},"required":["pattern"],"additionalProperties":false}""";
 
     private readonly Func<ToolOptions> options;
     private readonly IProcessRunner? runner;
@@ -40,7 +40,10 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
             + "is searched too (reading there needs no approval) and its files are reported by absolute path. Skips binary and oversized "
             + "files and reports how "
             + "many. A query with no hit says how many files it scanned (not an error), and warns when a pattern carrying "
-            + "regular-expression syntax was searched literally.",
+            + "regular-expression syntax was searched literally. Three parameters shape one answer instead of a second "
+            + "call: `files_only` lists the matching files with a per-file count, `max_per_file` caps how many lines one "
+            + "file may contribute, and `total_chars` is a budget shared across files (taken from the densest files, never "
+            + "from the last ones). A shaped answer always says how many matching lines it left out.",
             Schema,
             ToolSideEffect.ReadOnly)
     {
@@ -67,6 +70,10 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
             Math.Clamp(bounds.GrepMaxResults, 1, ToolOptions.MaxGrepMaxResults),
             1,
             ToolOptions.MaxGrepMaxResults);
+        var shaping = new Shaping(
+            FilesOnly: ToolJson.OptionalBool(arguments, "files_only", false),
+            MaxPerFile: ToolJson.OptionalInt(arguments, "max_per_file", 0, 0, ToolOptions.MaxGrepMaxResults),
+            TotalChars: ToolJson.OptionalInt(arguments, "total_chars", BoundedOutput.MaxChars, 1_000, BoundedOutput.MaxChars));
 
         var root = WorkspacePath.ResolveRealPath(Root(context));
         var start = WorkspacePath.ResolveReadable(root, requested);
@@ -119,7 +126,7 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
             result = await GrepEngine.SearchAsync(request, ct).ConfigureAwait(false);
         }
 
-        return new ToolResult(Format(result, request, fallback, contextNote, absolute ? anchor : null));
+        return new ToolResult(Format(result, request, fallback, contextNote, absolute ? anchor : null, shaping));
     }
 
     /// <summary>
@@ -144,19 +151,21 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
     /// answer over a hundred files arrived as a shuffle, and a model that could not see which file held what simply called
     /// grep again. Sorting costs one pass over at most <c>limit</c> lines.</para>
     /// </summary>
-    private static string Format(GrepResult result, GrepRequest request, string? fallback, string? contextNote, string? absoluteRoot)
+    /// <summary>What the caller asked the answer to look like: a file list, a per-file cap, a total budget.</summary>
+    private readonly record struct Shaping(bool FilesOnly, int MaxPerFile, int TotalChars);
+
+    private static string Format(
+        GrepResult result,
+        GrepRequest request,
+        string? fallback,
+        string? contextNote,
+        string? absoluteRoot,
+        Shaping shaping)
     {
         var lines = new List<string>(result.Lines.Count + 4);
-        foreach (var line in Ordered(result.Lines))
-        {
-            var separator = line.IsMatch ? ':' : '-';
-            var path = absoluteRoot is null ? line.Path : Shown(absoluteRoot, line.Path);
-            var builder = new StringBuilder(path.Length + line.Text.Length + 16);
-            builder.Append(path).Append(separator).Append(line.LineNumber).Append(separator).Append(line.Text);
-            lines.Add(builder.ToString());
-        }
+        var shapingNotes = new List<string>(2);
 
-        if (lines.Count == 0)
+        if (result.Lines.Count == 0)
         {
             lines.Add("no matches");
             lines.Add(result.FilesScanned == 0
@@ -172,6 +181,17 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
                 lines.Add("`case_sensitive` is true (pass `case_sensitive: false` to ignore case)");
             }
         }
+
+        else if (shaping.FilesOnly)
+        {
+            AppendFilesOnly(lines, result, absoluteRoot, shaping, shapingNotes);
+        }
+        else
+        {
+            AppendHits(lines, result, absoluteRoot, shaping, shapingNotes);
+        }
+
+        lines.AddRange(shapingNotes);
 
         if (result.Truncated)
         {
@@ -208,6 +228,236 @@ public sealed class GrepTool : ToolBase, IBoundedOutputTool
         }
 
         return BoundedOutput.Join(lines, "Narrow with `path`, `glob` or a more specific `pattern`.");
+    }
+
+    /// <summary>
+    /// The hits as they are, grouped by file so the shaping parameters act on whole files rather than on the flat list: the
+    /// answer keeps the path order the engine's output already has, and a file that loses lines is the one with the most.
+    /// </summary>
+    private static void AppendHits(
+        List<string> lines,
+        GrepResult result,
+        string? absoluteRoot,
+        Shaping shaping,
+        List<string> notes)
+    {
+        var groups = new List<(string Path, List<GrepLine> Lines)>();
+        foreach (var line in Ordered(result.Lines))
+        {
+            if (groups.Count == 0 || !string.Equals(groups[^1].Path, line.Path, StringComparison.Ordinal))
+            {
+                groups.Add((line.Path, []));
+            }
+
+            groups[^1].Lines.Add(line);
+        }
+
+        var overCap = new int[groups.Count];
+        if (shaping.MaxPerFile > 0)
+        {
+            CapPerFile(groups, shaping.MaxPerFile, overCap);
+        }
+
+        var rendered = new List<List<string>>(groups.Count);
+        foreach (var group in groups)
+        {
+            rendered.Add(Render(group.Path, group.Lines, absoluteRoot));
+        }
+
+        var overBudget = new int[groups.Count];
+        FitBudget(rendered, shaping.TotalChars, overBudget);
+
+        foreach (var file in rendered)
+        {
+            lines.AddRange(file);
+        }
+
+        var capped = overCap.Sum();
+        if (capped > 0)
+        {
+            notes.Add($"… (max_per_file={shaping.MaxPerFile}: {capped} matching line(s) left out)");
+        }
+
+        var trimmed = overBudget.Sum();
+        if (trimmed > 0)
+        {
+            notes.Add(
+                $"… (total_chars={shaping.TotalChars}: {trimmed} more line(s) left out; raise total_chars or narrow with glob)");
+        }
+    }
+
+    /// <summary>
+    /// Keeps at most <paramref name="cap"/> matching lines per file, dropping the context lines that belong to a dropped
+    /// match and keeping the ones that belong to a kept one. Context lines that arrive before their match are held until the
+    /// match is accepted, so a dropped match cannot leave an orphaned excerpt behind.
+    /// </summary>
+    private static void CapPerFile(List<(string Path, List<GrepLine> Lines)> groups, int cap, int[] dropped)
+    {
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var source = groups[index].Lines;
+            var kept = new List<GrepLine>(source.Count);
+            var pending = new List<GrepLine>();
+            var matches = 0;
+            var skipping = false;
+            var accepted = false;
+            foreach (var line in source)
+            {
+                if (line.IsMatch)
+                {
+                    if (matches >= cap)
+                    {
+                        skipping = true;
+                        pending.Clear();
+                        dropped[index]++;
+                        continue;
+                    }
+
+                    matches++;
+                    accepted = true;
+                    skipping = false;
+                    kept.AddRange(pending);
+                    pending.Clear();
+                    kept.Add(line);
+                }
+                else if (skipping)
+                {
+                    // Context of a match that is not shown: showing it would be an excerpt of something the answer omitted.
+                }
+                else if (accepted)
+                {
+                    kept.Add(line);
+                }
+                else
+                {
+                    pending.Add(line);
+                }
+            }
+
+            groups[index] = (groups[index].Path, kept);
+        }
+    }
+
+    /// <summary>One file's lines as the model reads them: <c>path:line:text</c>, <c>path-line-text</c> for context.</summary>
+    private static List<string> Render(string path, List<GrepLine> source, string? absoluteRoot)
+    {
+        var shown = absoluteRoot is null ? path : Shown(absoluteRoot, path);
+        var rendered = new List<string>(source.Count);
+        foreach (var line in source)
+        {
+            var separator = line.IsMatch ? ':' : '-';
+            var builder = new StringBuilder(shown.Length + line.Text.Length + 16);
+            builder.Append(shown).Append(separator).Append(line.LineNumber).Append(separator).Append(line.Text);
+            rendered.Add(builder.ToString());
+        }
+
+        return rendered;
+    }
+
+    /// <summary>
+    /// Trims the answer to <paramref name="budget"/> characters by taking lines from the files that have the most of them,
+    /// so a dense file cannot eat the budget on its own and the files that disappear first are the ones with the most lines
+    /// rather than the ones that came last. Ties take the later file: path order is what the answer reads in, and the files
+    /// the caller named first keep the benefit of the doubt.
+    /// </summary>
+    private static void FitBudget(List<List<string>> rendered, int budget, int[] dropped)
+    {
+        var total = 0;
+        foreach (var file in rendered)
+        {
+            foreach (var line in file)
+            {
+                total += line.Length + 1;
+            }
+        }
+
+        if (total <= budget)
+        {
+            return;
+        }
+
+        var queue = new PriorityQueue<int, (int Count, int Index)>();
+        for (var index = 0; index < rendered.Count; index++)
+        {
+            if (rendered[index].Count > 0)
+            {
+                queue.Enqueue(index, (-rendered[index].Count, -index));
+            }
+        }
+
+        while (total > budget && queue.TryDequeue(out var target, out _))
+        {
+            var file = rendered[target];
+            if (file.Count == 0)
+            {
+                continue;
+            }
+
+            total -= file[^1].Length + 1;
+            file.RemoveAt(file.Count - 1);
+            dropped[target]++;
+            if (file.Count > 0)
+            {
+                queue.Enqueue(target, (-file.Count, -target));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The file list alone: what a caller wants when the next step is "read these", and the answer that costs a few hundred
+    /// characters instead of the matching lines' text. It honours <c>total_chars</c> as well, so the list can never grow
+    /// past the budget either.
+    /// </summary>
+    private static void AppendFilesOnly(
+        List<string> lines,
+        GrepResult result,
+        string? absoluteRoot,
+        Shaping shaping,
+        List<string> notes)
+    {
+        var order = new List<string>();
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var line in Ordered(result.Lines))
+        {
+            if (!line.IsMatch)
+            {
+                continue;
+            }
+
+            if (counts.TryGetValue(line.Path, out var count))
+            {
+                counts[line.Path] = count + 1;
+            }
+            else
+            {
+                counts[line.Path] = 1;
+                order.Add(line.Path);
+            }
+        }
+
+        var used = 0;
+        var listed = 0;
+        while (listed < order.Count)
+        {
+            var path = order[listed];
+            var shown = absoluteRoot is null ? path : Shown(absoluteRoot, path);
+            var count = counts[path];
+            var entry = $"{shown}: {count} matching line{(count == 1 ? string.Empty : "s")}";
+            if (used + entry.Length + 1 > shaping.TotalChars)
+            {
+                break;
+            }
+
+            lines.Add(entry);
+            used += entry.Length + 1;
+            listed++;
+        }
+
+        if (listed < order.Count)
+        {
+            notes.Add(
+                $"… (total_chars={shaping.TotalChars}: {order.Count - listed} more file(s) not listed; raise total_chars or narrow with glob)");
+        }
     }
 
     /// <summary>An outside search's own directory put back in front of the relative path the engine reported.</summary>
