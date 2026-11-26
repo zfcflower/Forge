@@ -264,6 +264,9 @@ public interface ISessionStore
     /// end), in order, with the turn count that precedes them: a transcript pages backwards from the end and has to number its
     /// rounds as if the whole session had been read. The default reads everything and takes the tail, so an implementer that
     /// cannot page is correct but slow; the SQLite store answers it with one bounded query.
+    /// <para>A page is whole rounds: it starts at the user message that opened the turn its oldest message belongs to, so
+    /// <paramref name="maxMessages"/> bounds the page from below rather than fixing its length. A seam inside a turn would
+    /// draw that turn twice — once with its question, once as a round with no question of its own.</para>
     /// </summary>
     async Task<SessionPage> ReadTailAsync(string sessionId, long beforeSeq, int maxMessages, CancellationToken ct)
     {
@@ -274,6 +277,11 @@ public interface ISessionStore
         }
 
         var from = Math.Max(0, all.Count - Math.Max(1, maxMessages));
+        while (from > 0 && all[from].Message.Role != MessageRole.User)
+        {
+            from--;
+        }
+
         var page = all.GetRange(from, all.Count - from);
         var turnsBefore = 0L;
         for (var i = 0; i < from; i++)
@@ -294,7 +302,8 @@ public interface ISessionStore
     /// inside it, so the store need not walk the whole prefix again for a number the reader can derive (10k messages: the
     /// walk is 21-45 ms of every page, measured). Null asks the store to count, exactly like the overload above.
     /// <para>A store that cannot skip the walk keeps this default: the page is read the ordinary way and renumbered, which
-    /// is correct but no faster.</para>
+    /// is correct but no faster. The count stays exact because the page it renumbers starts at its own oldest turn's user
+    /// message: every user message between the two boundaries is inside the page.</para>
     /// </summary>
     async Task<SessionPage> ReadTailAsync(
         string sessionId, long beforeSeq, int maxMessages, long? turnsAboveBeforeSeq, CancellationToken ct)

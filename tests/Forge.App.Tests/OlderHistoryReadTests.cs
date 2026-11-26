@@ -47,6 +47,46 @@ public sealed class OlderHistoryReadTests : IDisposable
     }
 
     /// <summary>
+    /// A page is whole rounds: the message count only bounds it from below, so a boundary that lands inside a turn is moved
+    /// back to the user message that opened that turn. The transcript pages in rounds - a page that starts mid-turn draws the
+    /// turn twice, once of them without the question that opened it - and the derived turn number stays exact, because the
+    /// extra rows are inside the page.
+    /// </summary>
+    [Fact]
+    public async Task A_page_starts_at_the_user_message_that_opened_its_oldest_turn()
+    {
+        Directory.CreateDirectory(directory);
+        await using var store = new SqliteSessionStore(directory);
+
+        // Three messages a turn (question, answer, answer), so a 100-message page off the end of 50 turns starts at seq 51 -
+        // the second answer of turn 17, whose question is seq 49.
+        var session = await store.CreateAsync(new SessionCreate(directory, "page-seam"), CancellationToken.None);
+        for (var turn = 1; turn <= 50; turn++)
+        {
+            await store.AppendAsync(session.Id, ChatMessage.User($"question {turn}"), null, CancellationToken.None);
+            await store.AppendAsync(session.Id, ChatMessage.Assistant($"answer {turn} a"), null, CancellationToken.None);
+            await store.AppendAsync(session.Id, ChatMessage.Assistant($"answer {turn} b"), null, CancellationToken.None);
+        }
+
+        var page = await store.ReadTailAsync(session.Id, long.MaxValue, 100, CancellationToken.None);
+
+        Assert.Equal(MessageRole.User, page.Messages[0].Message.Role);
+        Assert.Equal(49, page.Messages[0].Seq);
+        Assert.Equal(102, page.Messages.Count);
+        Assert.Equal(16, page.TurnsBefore);
+        Assert.True(page.HasMore);
+
+        // The page above it ends at the same seam: every turn is read in full exactly once.
+        var older = await store.ReadTailAsync(
+            session.Id, page.Messages[0].Seq, 100, page.TurnsBefore, CancellationToken.None);
+        Assert.Equal(MessageRole.User, older.Messages[0].Message.Role);
+        Assert.Equal(1, older.Messages[0].Seq);
+        Assert.Equal(48, older.Messages.Count);
+        Assert.Equal(0, older.TurnsBefore);
+        Assert.False(older.HasMore);
+    }
+
+    /// <summary>
     /// A failed read is a state on the tab, not a row in the transcript: the transcript's top shows the red retry line, the
     /// list is untouched, and the next read clears it once the store answers again.
     /// </summary>

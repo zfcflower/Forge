@@ -278,7 +278,11 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
     /// The tail page. <paramref name="turnsAboveBeforeSeq"/> carries the count the paging reader already has (the user
     /// messages below <paramref name="beforeSeq"/>): numbering the page is then one pass over the page's own rows instead
     /// of a walk over the whole prefix through <c>json_extract</c> (10k messages: 21-45 ms of every page, measured). The
-    /// page itself and the "is there more" probe are unchanged, and null counts the prefix exactly as before.
+    /// "is there more" probe is unchanged, and null counts the prefix exactly as before.
+    /// <para>A page is whole rounds: <paramref name="maxMessages"/> bounds it from below, and a boundary that lands inside a
+    /// turn is moved back to that turn's opening user message (one extra read, only for such a page). A seam inside a turn
+    /// draws that turn twice in the transcript - once with its question, once as a round without one - and the derived count
+    /// stays exact either way, because every user message between the two boundaries ends up inside the page.</para>
     /// </summary>
     public async Task<SessionPage> ReadTailAsync(
         string sessionId, long beforeSeq, int maxMessages, long? turnsAboveBeforeSeq, CancellationToken ct)
@@ -307,6 +311,7 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
             }
         }
 
+        await ExtendToOpeningTurnAsync(connection, sessionId, messages, ct).ConfigureAwait(false);
         if (messages.Count == 0)
         {
             return new SessionPage(messages, 0, HasMore: false);
@@ -328,6 +333,49 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         }
 
         return new SessionPage(messages, turns, hasMore);
+    }
+
+    /// <summary>
+    /// Moves a page's start back to the user message that opened the turn its oldest message belongs to, so a paged
+    /// transcript never splits a turn over two pages. The extra read is bounded by one turn and happens only when the
+    /// message boundary falls inside one.
+    /// </summary>
+    private async Task ExtendToOpeningTurnAsync(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        string sessionId,
+        List<StoredMessage> messages,
+        CancellationToken ct)
+    {
+        if (messages.Count == 0 || messages[0].Message.Role == MessageRole.User)
+        {
+            return;
+        }
+
+        var boundary = messages[0].Seq;
+        var prefix = new List<StoredMessage>();
+        await using (var command = StorageDb.Command(
+                         connection,
+                         """
+                         SELECT seq, content_json, usage_json, at FROM messages
+                         WHERE session_id = $id AND seq < $boundary AND seq >= COALESCE((
+                             SELECT MAX(seq) FROM messages
+                             WHERE session_id = $id AND seq < $boundary AND json_extract(content_json, '$.role') = 'user'), 0)
+                         ORDER BY seq
+                         """))
+        {
+            command.Parameters.AddWithValue("$id", sessionId);
+            command.Parameters.AddWithValue("$boundary", boundary);
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                prefix.Add(ReadMessage(reader, sessionId));
+            }
+        }
+
+        if (prefix.Count > 0)
+        {
+            messages.InsertRange(0, prefix);
+        }
     }
 
     /// <summary>The user messages inside a page: the rounds the page itself opens.</summary>
