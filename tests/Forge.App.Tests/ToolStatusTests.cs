@@ -12,7 +12,8 @@ namespace Forge.App.Tests;
 /// A tool call's status is the transcript's only live report on it: a turning glyph while the call has not returned, then the
 /// same ✓/✗ it has always worn. Both halves are load-bearing. The marks are derived properties, and before the call started
 /// raising them the card's status slot went blank the moment a result landed and only filled in when its container was
-/// recycled and bound again. These assert the visuals at the moment of the result, which is what a reader watches.
+/// recycled and bound again. These assert the visuals at the moment of the result, which is what a reader watches, and that
+/// the busy glyph is painted rather than merely attached.
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class ToolStatusTests
@@ -75,6 +76,28 @@ public sealed class ToolStatusTests
         Assert.False(busy.IsVisible);
         Assert.True(mark.IsVisible);
         Assert.Equal("✓", mark.Text);
+        return Task.CompletedTask;
+    });
+
+    /// <summary>
+    /// A <see cref="PathIcon"/> paints only through its control theme: an icon subclass with no theme of its own gets no
+    /// template and draws nothing at all, while <c>IsVisible</c> still reads true. This pins the glyph being drawn, not just
+    /// attached and visible.
+    /// </summary>
+    [Fact]
+    public Task The_card_s_busy_glyph_is_drawn_not_merely_present() => SharedUi.RunAsync(() =>
+    {
+        var group = new TurnToolGroupViewModel();
+        group.Add(new ToolRowViewModel("bash", """{"command":"dotnet build src/Forge.App"}"""));
+
+        var window = Show(group);
+        var busy = Assert.Single(window.GetVisualDescendants().OfType<WaitingGlyph>());
+        Assert.True(busy.IsVisible);
+
+        var painted = Assert.Single(busy.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>());
+        Assert.Same(busy.Data, painted.Data);
+        Assert.True(painted.IsEffectivelyVisible, "the glyph's path is not visible");
+        Assert.True(painted.Bounds.Width > 0 && painted.Bounds.Height > 0, $"the glyph has nothing to paint: {painted.Bounds}");
         return Task.CompletedTask;
     });
 

@@ -1,6 +1,7 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:controls="using:Forge.App.Workbench.Controls">
+                    xmlns:controls="using:Forge.App.Workbench.Controls"
+                    xmlns:views="using:Forge.App.Views">
 
   <!-- ============================ 图标:唯一来源、唯一渲染处 ============================
        来源:Fluent System Icons (https://github.com/microsoft/fluentui-system-icons,MIT),24px 系列。
@@ -159,25 +160,34 @@
   <!-- 竖向撑开:两个箭头朝外 · Fluent arrow_maximize_vertical 24 regular(文件面板的“全部展开”,以及面板从“只剩标题条”还原) -->
   <StreamGeometry x:Key="IconArrowMaximizeVertical">M13.7197 5.78033C14.0126 6.07322 14.4874 6.07322 14.7803 5.78033C15.0732 5.48744 15.0732 5.01256 14.7803 4.71967L12.2803 2.21967C11.9874 1.92678 11.5126 1.92678 11.2197 2.21967L8.71967 4.71967C8.42678 5.01256 8.42678 5.48744 8.71967 5.78033C9.01256 6.07322 9.48744 6.07322 9.78033 5.78033L11 4.56066L11 8.75C11 9.16421 11.3358 9.5 11.75 9.5C12.1642 9.5 12.5 9.16421 12.5 8.75V4.56066L13.7197 5.78033ZM4 11.75C4 11.3358 4.33579 11 4.75 11H19.25C19.6642 11 20 11.3358 20 11.75C20 12.1642 19.6642 12.5 19.25 12.5H4.75C4.33579 12.5 4 12.1642 4 11.75ZM12.5 14.75C12.5 14.3358 12.1642 14 11.75 14C11.3358 14 11 14.3358 11 14.75V19.4393L9.78033 18.2197C9.48744 17.9268 9.01256 17.9268 8.71967 18.2197C8.42678 18.5126 8.42678 18.9874 8.71967 19.2803L11.2197 21.7803C11.5126 22.0732 11.9874 22.0732 12.2803 21.7803L14.7803 19.2803C15.0732 18.9874 15.0732 18.5126 14.7803 18.2197C14.4874 17.9268 14.0126 17.9268 13.7197 18.2197L12.5 19.4393V14.75Z</StreamGeometry>
 
-    <!-- 唯一的图标渲染件:<controls:FluentIcon>(<see cref="Avalonia.Controls.PathIcon"/> 的零逻辑子类,不改绘制)。
+    <!-- 唯一的图标绘制件:<controls:FluentIcon>(<see cref="Avalonia.Controls.PathIcon"/> 的零逻辑子类,不改绘制)。
        它的模板把一块固定的 24x24 画布放进 Viewbox,于是缩放的是网格而不是图标的墨迹外框——FIS 的图形在 24 网格里
        通常只占 18 个单位,按墨迹拉伸会让 14px 的按钮图标比设计大一号。默认 14 与旧标题栏一致,使用处的 Width/Height
-       仍然优先。刻意不覆盖内置 PathIcon 的主题:那是框架控件(下拉箭头、展开器)也在用的类型。 -->
+       仍然优先。刻意不覆盖内置 PathIcon 的主题:那是框架控件(下拉箭头、展开器)也在用的类型。
+       模板只写一份:FluentIcon 与等待转圈各要一条 ControlTheme(按 StyleKey 精确匹配,子类拿不到基类那条),而 PathIcon
+       唯一的画法就是主题里的模板——少了那一条就没有模板、一个像素也不画,IsVisible 还是 true。 -->
+  <ControlTemplate x:Key="Icon24Template" TargetType="PathIcon">
+    <Border Background="{TemplateBinding Background}">
+      <Viewbox Stretch="Uniform">
+        <Canvas Width="24" Height="24">
+          <Path Data="{TemplateBinding Data}" Fill="{TemplateBinding Foreground}" Stretch="None" />
+        </Canvas>
+      </Viewbox>
+    </Border>
+  </ControlTemplate>
+
   <ControlTheme x:Key="{x:Type controls:FluentIcon}" TargetType="controls:FluentIcon">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Width" Value="14" />
     <Setter Property="Height" Value="14" />
-    <Setter Property="Template">
-      <ControlTemplate>
-        <Border Background="{TemplateBinding Background}">
-          <Viewbox Stretch="Uniform">
-            <Canvas Width="24" Height="24">
-              <Path Data="{TemplateBinding Data}" Fill="{TemplateBinding Foreground}" Stretch="None" />
-            </Canvas>
-          </Viewbox>
-        </Border>
-      </ControlTemplate>
-    </Setter>
+    <Setter Property="Template" Value="{StaticResource Icon24Template}" />
+  </ControlTheme>
+
+  <!-- 转圈:工具卡片的运行态、独立工具行与历史加载共用(Views/WaitingGlyph)。与 FluentIcon 同一条模板,只为它自己这条
+       StyleKey 而存在。 -->
+  <ControlTheme x:Key="{x:Type views:WaitingGlyph}" TargetType="views:WaitingGlyph">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Template" Value="{StaticResource Icon24Template}" />
   </ControlTheme>
 
   <!-- 服务器:MCP 分区 · Fluent server 24 regular -->
