@@ -3,6 +3,11 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The script surface's declaration rule is a contract worth pinning: a sub-agent's script must not be handed the
+         write or execute tools its own allow-list withheld. -->
+    <InternalsVisibleTo Include="Forge.App.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Forge.Ipc\Forge.Ipc.csproj" />
     <ProjectReference Include="..\Forge.Ipc.Protocol\Forge.Ipc.Protocol.csproj" />
     <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />

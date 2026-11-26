@@ -13,7 +13,7 @@ namespace Forge.HostClient;
 /// lifetime. The stable description is built from the main-program tool registry, so two turns with the same tools
 /// send identical bytes.
 /// </summary>
-internal sealed class RunCodeProxyTool : ITool
+internal sealed class RunCodeProxyTool : ITool, IBoundedOutputTool
 {
     internal const string Name = "run_code";
 
@@ -55,6 +55,12 @@ internal sealed class RunCodeProxyTool : ITool
     /// <summary>A built definition together with the fingerprint of the inputs it was built from.</summary>
     private sealed record Published(int Fingerprint, ToolDefinition Definition);
 
+    /// <summary>
+    /// Runs code, and says so: the script worker itself cannot touch files, the network or processes (the reference whitelist
+    /// has none of those APIs), but the classification belongs to what the tool does rather than to what it can reach. It costs
+    /// no card anyway - a script names no path, so its <see cref="ToolCallScope"/> is inside the workspace and
+    /// <c>DefaultApprovalPolicy</c> allows it there; only a tool that names a path outside the workspace asks.
+    /// </summary>
     public ToolSideEffect SideEffect => ToolSideEffect.Execute;
 
     /// <summary>The bounds in force right now: the live provider when one is configured, else the fixed options.
@@ -83,7 +89,7 @@ internal sealed class RunCodeProxyTool : ITool
             return new ToolResult(argumentError, IsError: true);
         }
 
-        var declarations = RunCodeToolSurface.Declarations(RunCodeToolSurface.Snapshot(registry.Tools));
+        var declarations = RunCodeToolSurface.Declarations(RunCodeToolSurface.Snapshot(registry.Tools), context);
         return await client
             .InvokeCodeAsync(registry, execution, code, declarations, timeout, context, ct)
             .ConfigureAwait(false);
@@ -234,13 +240,39 @@ internal static class RunCodeToolSurface
         return hash.ToHashCode();
     }
 
-    internal static Sdk.ToolDeclaration[] Declarations(List<RunCodeToolEntry> surface)
+    /// <summary>
+    /// What one run may call, as the Extension Host is told it. <b>A script may call only tools its own agent holds</b>
+    /// (<see cref="ToolContext.Tools"/>: the caller's allow-list after the user's switches), because the session's script
+    /// surface can be wider than the agent that is calling — plugin tools with write or execute side effects belong to the
+    /// root, and the Reviewer is deliberately without web tools. Filtering by side effect alone would have handed the Reviewer
+    /// a web fetch inside a script, which is the one thing its allow-list exists to prevent.
+    /// <para>Where the caller is not an agent loop (<c>Tools</c> is null: a plugin bridge, a workflow step, a test), the answer
+    /// is empty: nothing is callable without a list to intersect with, and a second rule must not grow back here.</para>
+    /// </summary>
+    internal static Sdk.ToolDeclaration[] Declarations(List<RunCodeToolEntry> surface, ToolContext context)
     {
-        var declarations = new Sdk.ToolDeclaration[surface.Count];
-        for (var index = 0; index < surface.Count; index++)
+        ArgumentNullException.ThrowIfNull(surface);
+        ArgumentNullException.ThrowIfNull(context);
+        var held = context.Tools;
+        var countable = 0;
+        foreach (var entry in surface)
         {
-            var entry = surface[index];
-            declarations[index] = new Sdk.ToolDeclaration(
+            if (Callable(entry, held))
+            {
+                countable++;
+            }
+        }
+
+        var declarations = new Sdk.ToolDeclaration[countable];
+        var index = 0;
+        foreach (var entry in surface)
+        {
+            if (!Callable(entry, held))
+            {
+                continue;
+            }
+
+            declarations[index++] = new Sdk.ToolDeclaration(
                 entry.Name,
                 entry.Description,
                 entry.SchemaJson,
@@ -254,6 +286,10 @@ internal static class RunCodeToolSurface
 
         return declarations;
     }
+
+    /// <summary>The one rule both passes use: the caller holds the tool. Fail closed when it holds nothing to compare with.</summary>
+    private static bool Callable(RunCodeToolEntry entry, IToolRegistry? held) =>
+        held is not null && held.TryGet(entry.Name, out _);
 }
 
 /// <summary>Builds <c>run_code</c>'s description: the script surface and the enforced budgets. The callable tool names,
@@ -280,7 +316,18 @@ internal static class RunCodeDescription
     {
         ArgumentNullException.ThrowIfNull(execution);
         var text = new StringBuilder(2048);
-        text.Append("Runs one C# script in the Extension Host's script worker and returns its value once, so a chain of tool calls costs a single round trip instead of one per call.\n\n");
+        text.Append("Runs one C# script in a separate process and returns its value once.\n\n");
+        text.Append("Write a script when the **next step depends on the result of the previous one**. Independent calls in one ")
+            .Append("message already run in parallel, so a script is not how you save a round trip.\n\n");
+        text.Append("Worth a script:\n");
+        text.Append("  - fan-out: search first, then read only the files the search returned - the set is computed from that ")
+            .Append("result, not known when you write the script\n");
+        text.Append("  - conditional steps: read one implementation, then decide which of its callers to look up\n");
+        text.Append("  - shaping: filter, group, dedupe or compare twenty results and return the few lines that carry the ")
+            .Append("answer, each with its path and line number\n");
+        text.Append("  - bulk that should not reach the conversation at all: the script reads everything, you receive what it ")
+            .Append("returns\n");
+        text.Append("Not worth a script: one file, one search, or a handful of independent calls.\n\n");
         text.Append("Script surface:\n");
         foreach (var (form, meaning) in Surface)
         {
@@ -304,9 +351,17 @@ internal static class RunCodeDescription
             .Append(" chars (logs at ")
             .Append(execution.MaxLogChars.ToString(CultureInfo.InvariantCulture))
             .Append(").\n");
-        text.Append("Each script runs in its own worker process with an exclusive slot: a run that exceeds its budget is terminated with that process, and the main program never runs script code itself. That is process separation, not an OS sandbox - same-account file and network access stays possible through the tools you call. run_code cannot be invoked from inside another extension invocation - a script or a plugin callback - and a plugin may not be called back into while it is already on the call chain. Every inner tool call is approval-checked on its own, exactly like a direct call.\n\n");
+        text.Append("Each script runs in its own process with an exclusive slot: a run that exceeds its budget is terminated ")
+            .Append("with that process, and the main program never runs script code itself. The script needs no approval of its ")
+            .Append("own: it cannot touch files, the network or other processes, so every effect it has goes through the tools it ")
+            .Append("calls, and each of those is approval-checked on its own, exactly like a direct call. That is process ")
+            .Append("separation, not an OS sandbox - the tools you call keep their own access. A script is all-or-nothing: a ")
+            .Append("compile or runtime error costs a whole turn, so keep it short and split it when in doubt. run_code cannot be ")
+            .Append("invoked from inside another extension invocation - a script or a plugin callback - and a plugin may not be ")
+            .Append("called back into while it is already on the call chain.\n\n");
 
         text.Append("Callable tools: this description does not list them, because the set changes between requests. Call Tools.List() for the names available in this run, and Tools.Describe(\"name\") for one tool's description and argument schema.\n");
+        text.Append("A script may call only tools its own agent holds **and** that belong to the script surface. Never callable, whatever the agent holds: write, edit, copy, move, delete, bash, the git and pull-request tools, the extension authoring tools. Tools.List() is the authority; a name outside it throws, and a script has no partial success, so it costs the whole turn.\n");
         return text.ToString();
     }
 

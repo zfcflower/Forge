@@ -1780,6 +1780,12 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                     AgentDepth = run.Depth + 1,
                     Progress = null,
                     OutOfWorkspaceAllowed = scope == ToolCallScope.OutsideWorkspace,
+
+                    // A script's read is not the agent's read: the agent never saw the text, so stamping its file-version
+                    // ledger here would let a later whole-file write pass the "read it before overwriting" guard on content
+                    // that only the script held. ToolContext.FileVersions documents exactly this (null when the caller is
+                    // not an agent loop).
+                    FileVersions = null,
                 };
                 var previous = trustedCall.Value;
                 trustedCall.Value = new TrustedCall(run.RunId, run.Generation, run.Chain, childContext.AgentDepth);

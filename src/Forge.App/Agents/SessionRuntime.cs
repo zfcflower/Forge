@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Forge.Abstractions;
 using Forge.App.Approval;
 using Forge.App.Git;
@@ -2440,9 +2441,46 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
             conditional.Add(hostClient.CreateRunCodeTool(surface, RunCodeOptions()));
         }
 
+        LogCodeModeSurface(scriptTools, surface);
         return new ExternalTools(fixedTools, conditional, outside);
     }
 
+    /// <summary>The last surface diagnostic written, so a republish that changes nothing stays silent.</summary>
+    private string? codeModeDiagnostic;
+
+    /// <summary>
+    /// Why <c>run_code</c> is, or is not, in this session's tool set — on one line, once per change of the answer. The three
+    /// layers that can remove it fail quietly: a JIT layout that cannot be located leaves <see cref="services.HostClient"/>
+    /// null, an empty candidate set drops the proxy, and a stored tool switch removes individual callables. Without this line
+    /// all three read as "the model never chose it", which is the one conclusion that must not be reached by accident.
+    /// </summary>
+    private void LogCodeModeSurface(IReadOnlyList<ITool> candidates, CodeModeToolRegistry? surface)
+    {
+        var hidden = new List<string>();
+        if (surface is not null)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (!surface.TryGet(candidate.Definition.Name, out _))
+                {
+                    hidden.Add(candidate.Definition.Name);
+                }
+            }
+        }
+
+        var text = "codemode host=" + (services.HostClient is null ? "absent" : "ready")
+            + " run_code=" + (surface is null ? "absent" : "registered")
+            + " candidates=" + candidates.Count.ToString(CultureInfo.InvariantCulture)
+            + " callable=" + (surface?.Tools.Count ?? 0).ToString(CultureInfo.InvariantCulture)
+            + " hidden=" + (hidden.Count == 0 ? "none" : string.Join('/', hidden));
+        if (string.Equals(text, codeModeDiagnostic, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        codeModeDiagnostic = text;
+        AppLogs.Session.ZLogInformation($"{text}");
+    }
 
     /// <summary>
     /// The names a plugin tool may not take on the script surface: every name the session resolves to something other than

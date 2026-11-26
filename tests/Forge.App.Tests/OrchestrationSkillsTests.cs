@@ -38,8 +38,9 @@ public sealed class OrchestrationSkillsTests : IDisposable
         var skills = DiscoverBuiltIn();
 
         Assert.Equal(
-            ["brainstorming", "choosing-a-workflow", "hardening-tests", "shipping-a-pr", "todos"],
+            ["brainstorming", "choosing-a-workflow", "codemode", "hardening-tests", "shipping-a-pr", "todos"],
             skills.Select(skill => skill.Name));
+        // codemode is a technique, not a workflow: it must not show up in the orchestration chip or in the routing table.
         Assert.Equal(
             ["brainstorming", "hardening-tests", "shipping-a-pr"],
             skills.Where(skill => skill.IsWorkflow).Select(skill => skill.Name));

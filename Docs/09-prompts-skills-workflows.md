@@ -49,7 +49,7 @@
   2. 工作区 `.forge/skills`（`项目`）
   3. `~/.forge/skills`（`全局`）
   4. 产品内置（`产品内置`，优先级最低）
-- 产品内置五份编排技能随产品发布：`choosing-a-workflow`、`brainstorming`、`hardening-tests`、`todos`、`shipping-a-pr`，作为 `Forge.App` 的嵌入资源，启动时物化到 `<UserData>/builtin-skills/<内容哈希>/<name>/SKILL.md`（幂等、best-effort 清旧版本、写不出只记日志）；资源名里的连字符会变成下划线，所以技能名一律取 front matter 的 `name`。
+- 产品内置六份技能随产品发布：五份编排技能 `choosing-a-workflow`、`brainstorming`、`hardening-tests`、`todos`、`shipping-a-pr`，外加一份**技法**技能 `codemode`（何时用一个 `run_code` 脚本代替多次调用，含三条配方；不带 `workflow: true`，所以不出现在编排 chip 里），作为 `Forge.App` 的嵌入资源，启动时物化到 `<UserData>/builtin-skills/<内容哈希>/<name>/SKILL.md`（幂等、best-effort 清旧版本、写不出只记日志）；资源名里的连字符会变成下划线，所以技能名一律取 front matter 的 `name`。
 - 用户与项目用同名技能即可覆盖默认编排，不需要第二套覆盖机制；技能发现顺序即优先级。
 - `skill` 工具：只读、无审批，`{"name": "…"}` 返回该技能 `SKILL.md` 全文（上限 64000 字符，超出截断并说明）；名字只在本会话发现到的四个根里解析（大小写不敏感），模型给不出路径；未知名返回可用名列表。它是技能正文到达模型的**设计上的唯一通道**；但 `read` 当前允许工作区外的绝对路径，因此这不是由路径守卫强制执行的边界。
 - `skills` 分区（只读）：名称、描述、`SKILL.md` 路径、来源徽标。
