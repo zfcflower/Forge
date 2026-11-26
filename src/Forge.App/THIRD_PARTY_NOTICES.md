@@ -26,6 +26,7 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`,
   `code`, `document_text`, `globe`, `info`, `lightbulb`, `task_list_ltr`, `warning`;
   the model-capability icons (2026-11) add `brain_sparkle`, `document_pdf`, `image`, `speaker_2`, `text_description` and `video`.
+  The waiting state of a tool call (2026-11-26) adds `clock`.
   The picture viewer (2026-11) adds `zoom_in`, `zoom_out`, `scale_fit` and `full_screen_maximize`.
   The tool timeline's per-kind icons add `edit_arrow_back`, `tray_item_remove` (both variants), plus the filled
   variants of `copy` and `delete`; `folder_list` exists only at 20 px, so both of its variants are scaled by

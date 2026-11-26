@@ -39,6 +39,10 @@
               <wc:FluentIcon Classes="tool-status fail"
                              Data="{StaticResource IconClose}"
                              IsVisible="{Binding IsError}" />
+              <!-- Asked and not answered yet: a still clock, never a turning glyph - the call waits on the user, it does not run. -->
+              <wc:FluentIcon Classes="tool-status waiting"
+                             Data="{StaticResource IconClock}"
+                             IsVisible="{Binding IsAwaitingApproval}" />
               <!-- A call that has not returned yet: the same glyph the history loader waits with, so one control covers every
                    spinner in the app and no style animation has to run inside the transcript. -->
               <views:WaitingGlyph Data="{StaticResource IconRefresh}"

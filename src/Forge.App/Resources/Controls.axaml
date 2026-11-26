@@ -336,6 +336,11 @@
     <Setter Property="Foreground" Value="{DynamicResource StatusErrorBrush}" />
   </Style>
 
+  <!-- Waiting for the user's answer: a still glyph, not a turning one - the call is not running yet. -->
+  <Style Selector="wc|FluentIcon.tool-status.waiting">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
   <Style Selector="Border.tool-open">
     <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />

@@ -118,7 +118,8 @@ internal static class SessionStrings
     public const string TurnResumeKey = "turn.resume";
     public const string TurnResumeNameKey = "turn.resumeName";
     public const string TurnAutoResumeKey = "turn.autoResume";
-    public const string DeniedKey = "turn.denied";
+    public const string ToolDeniedKey = "tool.denied";
+    public const string ToolAwaitingApprovalKey = "tool.awaitingApproval";
     public const string CompactedKey = "turn.compacted";
     public const string ProviderNoticeTitleKey = "turn.providerNotice.title";
     public const string CacheRewriteTitleKey = "turn.cacheRewrite.title";
@@ -395,8 +396,11 @@ internal static class SessionStrings
     public static string AutoResume(int seconds, int round, int rounds) =>
         Loc.Instance.Format(TurnAutoResumeKey, seconds, round, rounds);
 
-    /// <summary>The notice shown in place of an approved-but-unavailable tool call.</summary>
-    public static LocText Denied(string tool) => new(DeniedKey, tool);
+    /// <summary>What a tool card says while the policy has asked the user and no answer is in yet.</summary>
+    public static LocText ToolAwaitingApproval => new(ToolAwaitingApprovalKey);
+
+    /// <summary>The refusal a tool card is closed with: the same sentence a replayed transcript shows for that call.</summary>
+    public static LocText ToolDenied(string tool) => new(ToolDeniedKey, tool);
 
     /// <summary>The notice shown after the context was compacted.</summary>
     public static LocText Compacted(int before, int after) => new(CompactedKey, TextFormat.Number(before), TextFormat.Number(after));
@@ -690,7 +694,8 @@ internal static class SessionStrings
             TurnAutoResumeKey,
             "服务过载，约 {0} 秒后自动继续（第 {1}/{2} 次）",
             "Endpoint busy: continuing automatically in about {0}s (round {1} of {2})");
-        Loc.Register(DeniedKey, "已拒绝：{0}（尚未配置审批对话框）", "Denied: {0} (no approval dialog yet)");
+        Loc.Register(ToolDeniedKey, "已拒绝：{0}", "Denied: {0}");
+        Loc.Register(ToolAwaitingApprovalKey, "等待审批", "Waiting for approval");
         Loc.Register(CompactedKey, "已压缩上下文：{0} → {1} tokens", "Context compacted: {0} → {1} tokens");
         Loc.Register(ProviderNoticeTitleKey, "本轮请求的形状被降级", "This turn ran with a reduced request");
         Loc.Register(CacheRewriteTitleKey, "提示词缓存被反复整段重写", "The prompt cache was rewritten from scratch repeatedly");

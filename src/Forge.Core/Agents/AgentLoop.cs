@@ -1255,19 +1255,33 @@ public sealed class AgentLoop(AgentLoopServices services)
             sideEffect,
             instance.WorkingDirectory,
             Scope: scope);
-        if (!await IsApprovedAsync(request, ct).ConfigureAwait(false))
+
+        // The loop has committed to this call, whether or not the user still has to allow it: the row appears now, and says
+        // which half it is in. Emitting this before the gate is what keeps a call that waits for the user on screen instead
+        // of showing nothing until the answer arrives.
+        var mode = services.Policy.Evaluate(request);
+        var awaitingApproval = mode == ApprovalMode.Ask;
+        sink.Emit(new AgentToolStarted(instance.Id, call, awaitingApproval));
+
+        if (!await IsApprovedAsync(mode, request, ct).ConfigureAwait(false))
         {
+            // Denied: the denied event is this call's terminal one (a denied call is never invoked), so no finished follows it.
             sink.Emit(new AgentApprovalDenied(instance.Id, call));
             return new ToolResultBlock(call.Id, "The user denied this tool call.", IsError: true);
         }
 
         // The call's own token, linked to the turn's: a turn cancel still reaches every call, and CancelToolCall reaches this
-        // one only. Registered before the start event, so a stop pressed as soon as the row shows finds it.
+        // one only. Registered before the running event, so a stop pressed as soon as the row shows one finds it.
         var callSource = toolCalls.Begin(instance.Id, call.Id, ct);
         ToolResult result;
         try
         {
-            sink.Emit(new AgentToolStarted(instance.Id, call));
+            if (awaitingApproval)
+            {
+                // It was waiting on the user; now it runs.
+                sink.Emit(new AgentToolRunning(instance.Id, call));
+            }
+
             // Only a call the policy put outside the workspace and the user allowed may resolve its paths outside it; a call
             // that stayed inside keeps the tools' own containment check as the second gate.
             var callContext = context with
@@ -1326,9 +1340,12 @@ public sealed class AgentLoop(AgentLoopServices services)
         return builder.Append('.').ToString();
     }
 
-    private async ValueTask<bool> IsApprovedAsync(ApprovalRequest request, CancellationToken ct)
+    /// <summary>
+    /// Answers whether the call may run. The caller has already evaluated the policy (that answer is what
+    /// <see cref="AgentToolStarted"/> reports as <c>AwaitingApproval</c>), so only the asking branch is left here.
+    /// </summary>
+    private async ValueTask<bool> IsApprovedAsync(ApprovalMode mode, ApprovalRequest request, CancellationToken ct)
     {
-        var mode = services.Policy.Evaluate(request);
         if (mode != ApprovalMode.Ask)
         {
             return mode == ApprovalMode.Allow;

@@ -2811,6 +2811,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 Interlocked.Exchange(ref runningTools, 0);
             }
         }
+        else if (value is AgentApprovalDenied)
+        {
+            // A denied call is terminal on its own (no finished follows it), so its in-flight counter leaves here too.
+            if (Interlocked.Decrement(ref runningTools) < 0)
+            {
+                Interlocked.Exchange(ref runningTools, 0);
+            }
+        }
 
         switch (value)
         {
@@ -2969,11 +2977,20 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 FinishSubAgent(subFinished);
                 break;
             case AgentToolStarted started:
-                // The row always appears; the live state only for a call that may still be running (see TrackTool: the session's
-                // own agent needs a turn, a live child does not). The session clock reads the tail, so nothing is dispatched.
-                if (Card(started.AgentId)?.AddTool(started.Call) is { } row && TrackTool(started.AgentId, started.Call) is { } activity)
+                // The row always appears, before the approval gate even runs; the live state only for a call that may still be
+                // running (see TrackTool: the session's own agent needs a turn, a live child does not). A call the policy asked
+                // about wears the waiting mark instead and gets its live state on AgentToolRunning, so a stop is only offered
+                // once there is something to stop. The session clock reads the tail, so nothing is dispatched here.
+                if (Card(started.AgentId)?.AddTool(started.Call) is { } row)
                 {
-                    row.AttachLive(activity);
+                    if (started.AwaitingApproval)
+                    {
+                        row.SetAwaitingApproval(true);
+                    }
+                    else if (TrackTool(started.AgentId, started.Call) is { } activity)
+                    {
+                        row.AttachLive(activity);
+                    }
                 }
 
                 // The child's per-turn tool count lives here, on the dispatcher, where the events arrive in order: counting on
@@ -2981,6 +2998,18 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 if (!string.Equals(started.AgentId, "root", StringComparison.Ordinal))
                 {
                     subAgentToolCalls.AddOrUpdate(started.AgentId, 1, static (_, count) => count + 1);
+                }
+
+                break;
+            case AgentToolRunning running:
+                // The user said yes: the same row stops waiting and picks up its live state (tail, stop, elapsed).
+                if (Card(running.AgentId)?.RowOf(running.Call.Id) is { } runningRow)
+                {
+                    runningRow.SetAwaitingApproval(false);
+                    if (TrackTool(running.AgentId, running.Call) is { } runningActivity)
+                    {
+                        runningRow.AttachLive(runningActivity);
+                    }
                 }
 
                 break;
@@ -3029,8 +3058,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     isError: false);
                 break;
             case AgentApprovalDenied denied:
-                Card(denied.AgentId)?.AddNotice(
-                    SessionStrings.Denied(denied.Call.Name), isError: true, kind: TimelineNodeKind.Approval);
+                // The card the call already has is closed with the refusal (the matching ✗ a replayed transcript shows); only a
+                // refusal whose call never opened a row becomes the notice about it. The live entry goes too: a policy that answers
+                // Deny outright denies a call that was already tracked.
+                FinishTool(denied.AgentId, denied.Call.Id);
+                Card(denied.AgentId)?.DenyTool(denied.Call, SessionStrings.ToolDenied(denied.Call.Name));
                 break;
             case AgentCompacted compacted:
                 Card(compacted.AgentId)?.AddNotice(SessionStrings.Compacted(compacted.TokensBefore, compacted.TokensAfter));

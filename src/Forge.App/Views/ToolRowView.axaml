@@ -45,10 +45,15 @@
                   ToolTip.Tip="{Binding Headline}">
             <TextBlock Classes="caption" Text="{Binding Headline}" TextDecorations="Underline" TextTrimming="CharacterEllipsis" />
           </Button>
-          <!-- The call's status: the ✓/✗ of a returned call, and the same turning glyph the cards wear while it has not
-               returned yet. -->
+          <!-- The call's status: the ✓/✗ of a returned call, the still clock of a call the policy asked about, and the same
+               turning glyph the cards wear while it has not returned yet. -->
           <Panel Grid.Column="3" VerticalAlignment="Center">
-            <TextBlock Classes="caption" Text="{Binding Status}" IsVisible="{Binding !IsRunning}" />
+            <TextBlock Classes="caption" Text="{Binding Status}" IsVisible="{Binding ShowStatusText}" />
+            <wc:FluentIcon Data="{StaticResource IconClock}"
+                           Width="12"
+                           Height="12"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           IsVisible="{Binding IsAwaitingApproval}" />
             <views:WaitingGlyph Data="{StaticResource IconRefresh}"
                                 Width="12"
                                 Height="12"

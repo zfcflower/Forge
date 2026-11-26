@@ -38,6 +38,7 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     private bool isError;
     private bool isExpanded;
     private bool isRunning = true;
+    private bool isAwaitingApproval;
     private LiveToolViewModel? live;
 
     public string Name { get; } = name;
@@ -51,7 +52,7 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     /// it - so the text stays "…" only as the placeholder a call without input falls back to (<see cref="OutputLine"/>).
     /// Derived from the state it reports, never stored, so a status text can never disagree with <see cref="IsRunning"/>.
     /// </summary>
-    public string Status => IsRunning ? "…" : isError ? "✗" : "✓";
+    public string Status => IsRunning || isAwaitingApproval ? "…" : isError ? "✗" : "✓";
 
     /// <summary>The tool's answer in the current language; null until it returned something.</summary>
     public string? Result => hasResult ? result.Resolve() : null;
@@ -64,8 +65,40 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         private set => Set(ref isError, value);
     }
 
-    /// <summary>True until the call returns; the timeline draws a running node (accent, filled, pulsing) while it is.</summary>
-    public bool IsRunning => isRunning;
+    /// <summary>
+    /// True while the call itself runs; the timeline draws a running node (accent, filled, pulsing) while it is. A call the
+    /// policy asked about is not running yet: it waits on the user, wearing the waiting mark, with no live state attached.
+    /// </summary>
+    public bool IsRunning => isRunning && !isAwaitingApproval;
+
+    /// <summary>True while the policy asked and the user has not answered yet; the card says so instead of claiming to run.</summary>
+    public bool IsAwaitingApproval => isAwaitingApproval;
+
+    /// <summary>Whether the row shows its status as text (the ✓/✗/… glyph of a call that is neither waiting nor running).</summary>
+    public bool ShowStatusText => !IsRunning && !isAwaitingApproval;
+
+    /// <summary>
+    /// Moves the card into or out of the waiting-for-approval state: true when the call turns out to need the user's answer,
+    /// false once the gate lets it through (the session clears it on <c>AgentToolRunning</c>). A call that needs no approval
+    /// never enters this state.
+    /// </summary>
+    internal void SetAwaitingApproval(bool value)
+    {
+        // Only a live call can be waiting: a row that already has its result (its turn ended while the event trailed behind it)
+        // stays closed instead of putting a waiting mark on a finished call.
+        if (isAwaitingApproval == value || !isRunning)
+        {
+            return;
+        }
+
+        isAwaitingApproval = value;
+        OnPropertyChanged(nameof(IsAwaitingApproval));
+        OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(ShowStatusText));
+        OnPropertyChanged(nameof(Status));
+        OnPropertyChanged(nameof(IsSucceeded));
+        OnPropertyChanged(nameof(CardBody));
+    }
 
     public bool IsExpanded
     {
@@ -98,7 +131,8 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     /// The card's one body line: what went in, or — for a call that carries no input — what came out. The status is never
     /// this line: the card's own status icon already says it.
     /// </summary>
-    public string CardBody => IsQuestionCard ? QuestionSummary
+    public string CardBody => isAwaitingApproval ? SessionStrings.ToolAwaitingApproval.Resolve()
+        : IsQuestionCard ? QuestionSummary
         : IsRunning && HasLiveOutput ? LiveTailLine
         : HasInput ? Headline
         : OutputLine;
@@ -130,7 +164,7 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     }
 
     /// <summary>True once the call returned without failing; the card's check. An empty answer still returned.</summary>
-    public bool IsSucceeded => !IsRunning && !isError;
+    public bool IsSucceeded => !IsRunning && !isAwaitingApproval && !isError;
 
     /// <summary>The question itself for an <c>ask_user</c> card, in place of the arguments JSON nobody answers.</summary>
     private string QuestionSummary
@@ -381,10 +415,14 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         result = content;
         hasResult = !string.IsNullOrEmpty(content.Resolve());
         // The state moves first, the binding notifications follow: every derived mark (Status, IsSucceeded) reads the new
-        // state when the view asks for it.
+        // state when the view asks for it. A call completed while it was still waiting (the user refused it) leaves that
+        // state too, so no card can keep a waiting mark after its result is in.
         isRunning = false;
+        isAwaitingApproval = false;
         IsError = isError;
         OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(IsAwaitingApproval));
+        OnPropertyChanged(nameof(ShowStatusText));
         OnPropertyChanged(nameof(Status));
         OnPropertyChanged(nameof(IsSucceeded));
         OnPropertyChanged(nameof(Result));
@@ -403,6 +441,7 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         OnPropertyChanged(nameof(ResultNote));
         OnPropertyChanged(nameof(ResultToggleText));
         OnPropertyChanged(nameof(HasResult));
+        OnPropertyChanged(nameof(CardBody));
         RaiseQuestionCard();
         OnPropertyChanged(nameof(LiveElapsedText));
     }

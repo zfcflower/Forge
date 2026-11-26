@@ -11,7 +11,19 @@ public sealed record AgentDefinition(
 public abstract record AgentEvent(string AgentId);
 public sealed record AgentTextDelta(string AgentId, string Text) : AgentEvent(AgentId);
 public sealed record AgentThinkingDelta(string AgentId, string Text) : AgentEvent(AgentId);
-public sealed record AgentToolStarted(string AgentId, ToolCall Call) : AgentEvent(AgentId);
+/// <summary>
+/// The agent has committed to a call: emitted before the approval gate, so a card exists while a call still waits for the
+/// user. <see cref="AwaitingApproval"/> says which half it is in; a call that had to ask carries <see cref="AgentToolRunning"/>
+/// once the gate lets it through.
+/// </summary>
+public sealed record AgentToolStarted(string AgentId, ToolCall Call, bool AwaitingApproval = false) : AgentEvent(AgentId);
+
+/// <summary>
+/// The approval gate let a call through and it is about to be invoked. Emitted only for a call that started with
+/// <see cref="AgentToolStarted.AwaitingApproval"/>, so a caller can flip its card from "waiting for you" to "running".
+/// </summary>
+public sealed record AgentToolRunning(string AgentId, ToolCall Call) : AgentEvent(AgentId);
+
 public sealed record AgentToolFinished(string AgentId, ToolCall Call, ToolResult Result) : AgentEvent(AgentId);
 
 /// <summary>

@@ -219,7 +219,14 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 **工具进度。** `ToolContext.Progress`(`Action<string>?`)收到的是长任务实时输出的**最新尾部快照**(不是增量);`AgentLoop` 为每次调用派生独立 context,把它转成 `AgentToolProgress(AgentId, Call, Tail)`,夹在 `AgentToolStarted`/`Finished` 之间,不落库。监听者必须不阻塞(生产者在持锁时调用它以保证有序)。目前只有 `bash` 产出。**App 侧已消费(wave W8)**:`SessionWorkspace` 在工具执行线程上直接把快照写进该调用的实时条目(不派发、不落库),工具行的实时尾部与资源检查器在 UI 线程按自己的 tick 读最新快照;开始/结束仍走 coalescer,详见 `Forge.App/SPEC.md`「资源检查器」。
 
-**单个工具调用的取消(W8 follow-up)。** `AgentLoop` 给每次工具调用派生一个链到回合令牌的 `CancellationTokenSource`,登记在 `ToolCallCancellations`(`ConcurrentDictionary<(AgentId, CallId), CTS>`,整棵树——根与所有子 Agent——共用一份,因为它们共用一个 `AgentLoop`),在 `AgentToolStarted` 发出**之前**登记、调用返回后在 `finally` 里注销并释放(`TryRemove(KeyValuePair)`:只摘掉自己那一项,重复 id 的另一条调用不受影响)。
+**工具调用的生命周期事件。** 顺序固定为四步,UI 的卡片状态就按它翻牌:
+
+1. `AgentToolStarted(AgentId, Call, AwaitingApproval)`——循环确定要调这个工具就发,**先于审批**;`AwaitingApproval` 为真表示策略答 `Ask`、这一调用要等用户。发的时机因此是“模型的 tool_use 块已完整”那一刻,不再晚于审批。
+2. `AgentToolRunning(AgentId, Call)`——**只在** `AwaitingApproval` 的调用被放行后发一次,让界面把卡片从“等你”翻成“在跑”;免问的调用没有这条,热路径上不多一个事件。
+3. `AgentToolFinished(AgentId, Call, Result)`——每个真正执行过的、**没有被回合取消中途截断**的调用的最后一条:回合取消时循环不再为在跑的调用补发 finished,App 靠回合边界清零自己的在飞计数。
+4. `AgentApprovalDenied(AgentId, Call)`——被拒调用的**终局事件**:它从不执行,因此不发 `AgentToolFinished`。所以“在飞工具数”在常规路径上由 `AgentToolStarted` 与 `AgentToolFinished`/`AgentApprovalDenied` 成对收口,回合被取消的那一路另靠回合边界清零(`SessionWorkspace` 在回合开始的 `runningTools = 0`)。拒绝仍给模型一个可见的错误结果 “The user denied this tool call.”(工具消息照旧写回)。
+
+**单个工具调用的取消(W8 follow-up)。** `AgentLoop` 给每次工具调用派生一个链到回合令牌的 `CancellationTokenSource`,登记在 `ToolCallCancellations`(`ConcurrentDictionary<(AgentId, CallId), CTS>`,整棵树——根与所有子 Agent——共用一份,因为它们共用一个 `AgentLoop`),在 `AgentToolRunning` 发出**之前**登记(也因此晚于 `AgentToolStarted`:一个还在等审批的调用没有被登记的东西可取消,那条路上的卡片就不给停止按钮)、调用返回后在 `finally` 里注销并释放(`TryRemove(KeyValuePair)`:只摘掉自己那一项,重复 id 的另一条调用不受影响)。
   - `AgentHost.CancelToolCall(agentId, callId)` 取消且只取消该调用:取消走 `CancelAsync`(回调在线程池上跑,UI 线程不被进程树终止阻塞),调用已结束、id 未知或已请求过取消都返回 `false`,与调用自身返回竞争时吞掉 `ObjectDisposedException` 并返回 `false`。
   - 工具因此抛出的 `OperationCanceledException`(回合令牌未取消)被循环转成错误结果 `AgentLoop.CancelledByUserResult`("Cancelled by the user: this tool call was stopped before it finished."),照常写回历史,模型继续;回合取消仍取消全部调用并照旧传播。
   - 不理会令牌、照常返回的工具保留它的真实结果。

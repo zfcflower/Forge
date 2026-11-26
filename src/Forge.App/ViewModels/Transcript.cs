@@ -222,14 +222,15 @@ internal sealed class TurnToolGroupViewModel : TurnBlockViewModel
 
     public bool HasOpen => open is not null;
 
-    /// <summary>Whether any call in the run is still running; the group's node on the axis pulses while one is.</summary>
+    /// <summary>Whether any call in the run is still running; the group's node on the axis pulses while one is. A call waiting
+    /// for the user's approval counts as live: the run has not ended, only its spinner would be a lie.</summary>
     public bool IsRunning
     {
         get
         {
             foreach (var tool in tools)
             {
-                if (tool.IsRunning)
+                if (tool.IsRunning || tool.IsAwaitingApproval)
                 {
                     return true;
                 }
@@ -295,7 +296,7 @@ internal sealed class TurnToolGroupViewModel : TurnBlockViewModel
 
     private void OnToolChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ToolRowViewModel.IsRunning) or nameof(ToolRowViewModel.IsError))
+        if (e.PropertyName is nameof(ToolRowViewModel.IsRunning) or nameof(ToolRowViewModel.IsAwaitingApproval) or nameof(ToolRowViewModel.IsError))
         {
             OnToolStateChanged();
             return;
@@ -953,6 +954,14 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         }
 
         openToolGroup.Add(row);
+        if (!IsRunning)
+        {
+            // The turn was already closed when this call arrived: a start event can trail the end of its own turn (the coalescer
+            // runs at Background, the turn's continuation does not), and nothing else would ever close the row - so it is closed
+            // the same way Finish closes the rows it finds.
+            row.Complete(SessionStrings.NoToolResult, isError: true);
+        }
+
         NotifyWorking();
         return row;
     }
@@ -971,6 +980,27 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         var late = new ToolRowViewModel(call.Name, call.ArgumentsJson);
         late.Complete(result);
         AddBlock(late);
+    }
+
+    /// <summary>The row a call still owns on this card, or null: a call that was waiting on the user is handed the same row.</summary>
+    internal ToolRowViewModel? RowOf(string callId) =>
+        toolRows.TryGetValue(callId, out var row) ? row : null;
+
+    /// <summary>
+    /// Closes a call the user refused on its own card: a replayed transcript shows the denial as that call's ✗ with the reason,
+    /// so the live one does too instead of adding a second line about the same call. A refusal whose call this card never
+    /// opened (a replayed transcript, a withdrawn turn) still gets the notice.
+    /// </summary>
+    public void DenyTool(ToolCall call, LocText reason)
+    {
+        if (toolRows.Remove(call.Id, out var row))
+        {
+            row.Complete(reason, isError: true);
+            NotifyWorking();
+            return;
+        }
+
+        AddNotice(reason, isError: true, kind: TimelineNodeKind.Approval);
     }
 
     public void AddNotice(
@@ -1042,7 +1072,9 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         NotifyWorking();
         foreach (var row in toolRows.Values)
         {
-            if (row.IsRunning)
+            // A call still waiting for the user has no result either: the turn it belonged to is over, so it is closed with
+            // the same "no result" the running ones get rather than keeping a waiting mark on a finished turn.
+            if (row.IsRunning || row.IsAwaitingApproval)
             {
                 row.Complete(SessionStrings.NoToolResult, isError: true);
             }
