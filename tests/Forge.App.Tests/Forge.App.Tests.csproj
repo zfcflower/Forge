@@ -10,5 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Forge.App\Forge.App.csproj" />
+    <ProjectReference Include="..\..\src\Forge.Scripting\Forge.Scripting.csproj" />
+    <ProjectReference Include="..\..\src\Forge.ScriptRuntime\Forge.ScriptRuntime.csproj" />
   </ItemGroup>
 </Project>
