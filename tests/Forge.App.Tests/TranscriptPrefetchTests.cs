@@ -131,6 +131,39 @@ public sealed class TranscriptPrefetchTests
         return Task.CompletedTask;
     });
 
+    /// <summary>
+    /// The behaviour learns its transcript from the list's round collection when the ItemsSource arrives - the view's own order
+    /// (attach, then the DataContext binds). A message sent after the tab is shown must still bring the reader back to the
+    /// bottom, which is the item-change path that wiring feeds; a behaviour bound only while the list was empty would silently
+    /// stop following.
+    /// </summary>
+    [Fact]
+    public Task A_message_sent_after_the_list_was_bound_still_follows_to_the_bottom() => SharedUi.RunAsync(() =>
+    {
+        var transcript = Conversation(turns: 30);
+        var (window, list, scroller, follower) = Mount(transcript, loadOlder: null);
+        try
+        {
+            Place(list, scroller, transcript.Rounds[20], 0, window);
+            Assert.False(follower.IsFollowing);
+
+            transcript.AddUserMessage("a question sent now", At);
+            transcript.BeginTurn(At, closePrevious: true).AppendText("an answer");
+            Settle(window);
+
+            Assert.True(follower.IsFollowing, "the sent message did not resume following");
+            Assert.True(
+                scroller.Offset.Y >= scroller.Extent.Height - scroller.Viewport.Height - 2,
+                $"the sent message left the list above the bottom (offset {scroller.Offset.Y}, extent {scroller.Extent.Height})");
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        return Task.CompletedTask;
+    });
+
     [Fact]
     public Task A_failed_read_stops_the_automatic_requests() => SharedUi.RunAsync(() =>
     {
@@ -160,7 +193,12 @@ public sealed class TranscriptPrefetchTests
         return Task.CompletedTask;
     });
 
-    /// <summary>The transcript list, arranged and mounted the way the session view does it.</summary>
+    /// <summary>
+    /// The transcript list, arranged and mounted the way the session view does it: the behaviour attaches first, and the rounds
+    /// arrive afterwards with the DataContext. That order is the point - a list whose ItemsSource was already set when the
+    /// behaviour attached binds its transcript in the constructor, while the real view only ever gets its ItemsSource through a
+    /// property change (see <c>SessionView</c>), and it is that path a prepend has to reach.
+    /// </summary>
     private static (Window Window, TranscriptListBox List, ScrollViewer Scroller, TranscriptFollower Follower) Mount(
         TranscriptViewModel transcript, Func<Task<bool>>? loadOlder)
     {
@@ -169,7 +207,6 @@ public sealed class TranscriptPrefetchTests
             Padding = new Thickness(12),
             SelectionMode = SelectionMode.Single,
             AutoScrollToSelectedItem = false,
-            ItemsSource = transcript.Rounds,
             ItemsPanel = new ItemsPanelTemplate
             {
                 Content = new Func<IServiceProvider?, TemplateResult<Control>?>(_ =>
@@ -181,6 +218,7 @@ public sealed class TranscriptPrefetchTests
         window.Show();
         Settle(window);
         var follower = TranscriptFollower.Attach(list, loadOlder)!;
+        list.ItemsSource = transcript.Rounds;
         Settle(window);
         var scroller = list.GetVisualDescendants().OfType<ScrollViewer>().First();
         follower.StopFollowing();
