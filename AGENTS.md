@@ -89,7 +89,7 @@ dotnet run --project src/Forge.App
 ```
 
 - 运行测试的 Shell 禁止设置 `FORGE_RUN`。
-- 遇到 `MSB3027`、`MSB3026`，先检查 `Forge.App`、`testhost`、`ExtensionHost` 是否占用文件。
+- 遇到 `MSB3027`、`MSB3026`，先检查 `Forge.App`、`testhost`、`ExtensionHost` 是否占用文件。只读审计这类自己会构建的只读任务，开工前先确认 `Forge.App`/`testhost` 未占用，冲突就直接用 §2 的独立副本——不要靠一次撞锁的失败构建来发现。
 - 确认孤儿进程后再清理；用户正在运行的进程应报告阻塞，不得擅自结束。
 - 不得通过不断切换构建输出目录掩盖文件锁问题。
 - 🧹 收工清理：删除可安全重建的缓存与本次构建产物（`bin/`、`obj/`、`artifacts/run/`），不删用户数据、用途不明的文件与 `publish` 产物；只结束自己拥有且仍在吃 CPU/内存的进程（含孤儿 `testhost`/`ExtensionHost`），用户正在运行的进程按上一条报告阻塞；清理后确认磁盘余量。

@@ -102,7 +102,9 @@ verify.
 ### Step 3: Scan for anti-patterns
 
 Check each test file against the anti-pattern catalog below. Report findings
-grouped by severity. Use extension mappings when loaded; otherwise use the
+grouped by severity. Compute every metric in one pass over the files you gathered:
+one script for the whole set, and a pattern verified on one file before it runs on
+all of them. Use extension mappings when loaded; otherwise use the
 cross-framework examples in the catalog.
 
 Before drafting the report, make a private completeness ledger with one row for

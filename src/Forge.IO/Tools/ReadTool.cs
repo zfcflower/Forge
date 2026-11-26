@@ -46,7 +46,9 @@ public sealed class ReadTool : ToolBase, IBoundedOutputTool
         "`path: lines A–B` header and the answer ends with how many files were not returned. `pattern` returns only the " +
         "lines containing that literal text, with `context` lines around each match, so a comparison arrives as three " +
         "excerpts instead of three whole files. A missing or binary file is reported in place and the other files still come " +
-        "back.";
+        "back. Every numbered line comes back as `N→text`, the number right-aligned, so a pattern that starts a line anchors " +
+        "after the arrow, not at column 1. Reading several files, leave `max_chars` at its 32000 default: a smaller budget " +
+        "cuts files that then cost a second call.";
 
     private readonly Func<ToolOptions> options;
 

@@ -47,6 +47,13 @@ API: `Tools.List()`, `Tools.Describe("name")`, `await Tools.Call("name", new { �
 `Log(value)`. Limits: 60 s by default (600 s at most), 8 inner calls in flight, 20 000 characters per inner result,
 40 000 returned.
 
+## Landmines
+
+- `Tools.Call` hands back the tool's text, not an object: a typed value comes from `Call<T>` or `Tools.Json<T>(text)`.
+- A `read` line is `N→text`, so an anchored pattern starts after the arrow, and one file is enough to try it on.
+- `System.IO` is refused except the pure `Path.*` string helpers: `File`, `Directory` and `Path.GetFullPath` do not exist here.
+- One scan computes every metric at once; a second pass over the same files pays the whole read again.
+
 ## Recipes
 
 **Inventory** — one line per item, each carrying `path:line`:
