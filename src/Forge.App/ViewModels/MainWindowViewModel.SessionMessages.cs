@@ -43,8 +43,12 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// </summary>
     private readonly ConcurrentDictionary<string, DeliveryTurnMetrics> deliveryTurns = new(StringComparer.Ordinal);
 
-    /// <summary>One <c>turn_metrics</c> row of a turn Core drove itself, as far as the App can see it.</summary>
-    private sealed record DeliveryTurnMetrics(int Turn, DateTimeOffset StartedAt, RootCounters Start, string? Provider, string? Model);
+    /// <summary>One <c>turn_metrics</c> row of a turn Core drove itself, as far as the App can see it.
+    /// <paramref name="StartSeq"/> is the session's message-stream position when the turn began (null when it could not be
+    /// read): the position the row may name, taken from the store rather than from an instance, because the delivery's
+    /// instance may not exist yet at this point.</param>
+    private sealed record DeliveryTurnMetrics(
+        int Turn, DateTimeOffset StartedAt, RootCounters Start, string? Provider, string? Model, long? StartSeq);
 
     /// <summary>Hands this window to the runtimes as their delivery seam; called once when the window is built.</summary>
     private void InitializeSessionMessages()
@@ -202,14 +206,18 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// <summary>
     /// Opens the checkpoint of a turn Core drives itself (a user session with no tab): the same numbering and the same store
     /// the session's own tab uses, so the receipt's change line is the child's own turn. The instance reading the turn's
-    /// metrics row will be measured against is taken here, before the run starts (<see cref="RecordDeliveryTurnMetricsAsync"/>).
+    /// metrics row will be measured against is taken here, before the run starts (<see cref="RecordDeliveryTurnMetricsAsync"/>),
+    /// together with the session's own stream position - read off the store, because the delivery may run on an instance this
+    /// process has not built yet, and "no instance" is not "no messages".
     /// </summary>
     public async Task<int> BeginSessionTurnAsync(string sessionId, string workingDirectory, CancellationToken ct)
     {
         var next = await composition.Checkpoints.NextTurnNumberAsync(sessionId, ct).ConfigureAwait(false);
         await composition.Checkpoints.BeginAsync(sessionId, next, workingDirectory, ct).ConfigureAwait(false);
         var reading = await ReadTurnCountersAsync(sessionId).ConfigureAwait(false);
-        deliveryTurns[sessionId] = new DeliveryTurnMetrics(next, DateTimeOffset.UtcNow, reading.Counters, reading.Provider, reading.Model);
+        var startSeq = await ReadSessionTailAsync(sessionId, ct).ConfigureAwait(false);
+        deliveryTurns[sessionId] = new DeliveryTurnMetrics(
+            next, DateTimeOffset.UtcNow, reading.Counters, reading.Provider, reading.Model, startSeq);
         return next;
     }
 
@@ -241,6 +249,23 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     }
 
     /// <summary>
+    /// The session's own message-stream position, or null when it cannot be read: a row that cannot prove where its turn
+    /// began names no position instead of guessing one.
+    /// </summary>
+    private async Task<long?> ReadSessionTailAsync(string sessionId, CancellationToken ct)
+    {
+        try
+        {
+            return await composition.Sessions.LastSeqAsync(sessionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            AppLogs.Usage.ZLogWarning($"delivered turn: last seq of '{sessionId}' not read: {exception.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Hands one delivered turn's row to the app's background metrics writer.
     /// <para><b>What this seam knows.</b> Core runs the turn and calls <see cref="EndSessionTurnAsync"/> with the outcome the
     /// run reached, so the row records that outcome instead of assuming a completed turn, and its error column gets the
@@ -248,6 +273,11 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
     /// know about a turn it never watched is left out rather than zeroed: tool calls stay null and a turn that did not
     /// complete keeps its token columns null. The streaming time is still written on every row, as the difference of the
     /// instance's own two readings clamped at zero (a counter that went backwards is not negative streaming).</para>
+    /// <para><b>The position.</b> Core hands over the <em>instance's</em> last seq, not this turn's, so the row names it only
+    /// when the stream moved past where the turn began - a zero-write delivery (refused, or failed before its input landed)
+    /// names nothing. The comparison is between two positions in one stream, which is why it no longer requires the end
+    /// instance to be the one held at the start: a delivery is exactly the case where the instance appears only once the
+    /// run begins, and demanding the same object there is what left those rows positionless.</para>
     /// </summary>
     private async Task RecordDeliveryTurnMetricsAsync(string sessionId, int turn, SessionReplyStatus status, string? reason, long lastSeq)
     {
@@ -282,7 +312,10 @@ internal sealed partial class MainWindowViewModel : ISessionMessageEndpoint
                 started.Provider,
                 started.Model,
                 effort: null,
-                lastSeq: TurnMetricsRowFactory.TurnLastSeq(lastSeq, started.Start.LastSeq, same)));
+                // Positions, not instances: the seam's last seq is the instance's tail, the baseline is the store's tail
+                // when the turn began. Both index the session's one message stream, so a moved stream is this turn's write
+                // whatever instance carried it - and an unmoved one belongs to no card.
+                lastSeq: started.StartSeq is { } startSeq && lastSeq > startSeq ? lastSeq : null));
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
