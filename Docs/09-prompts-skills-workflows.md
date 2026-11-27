@@ -19,7 +19,7 @@
 
 - 内置命令 4 个：`review`、`explain`、`tests`、`fix`。
 - 内置 Agent 4 个：`scout`、`worker`、`plan`、`reviewer`（名称是身份：内置 Agent 的覆盖文件不得改名；用户 Agent 不得占用内置名或内置 id；空 `tools` 列表无效，不当作“全部工具”）。
-- Core 槽位：`system`、`compaction.summarizer`、`handover.summary`。
+- Core 槽位：`system`、`handover.summary`。（`compaction.summarizer` 随摘要级压缩一起删除，见 [16-context-compaction.md](16-context-compaction.md)。）`turn.completion`（终结模板）已随"回复自由格式"整条删除：模型不再被要求任何结尾格式，也就没有可覆盖的契约槽位。
 - App 槽位：`pr.workflow.<阶段>`（六段 PR 流程文本）、`automations.quota.continue`、`automations.ci.scout`（占位符 `{pr}` `{branch}` `{failures}`）、`automations.ci.fix`（`{pr}` `{analysis}`）。这三条自动化提示词是固定英文（模型输入，不随界面语言变）。
 - 占位符是单花括号小写标识符、单次替换；声明了占位符的槽位里出现未声明的 `{名字}` 判为无效；未声明占位符的槽位不做替换与检查（PR 文本里的 JSON/URL 花括号原样保留）。
 - 新建 Agent 时正文、模型与思考强度来自模板；`settings.json` 的 `agents` 段键是模板 id（文件名），不从名称推导。

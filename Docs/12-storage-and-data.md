@@ -33,7 +33,7 @@
 
 ## 12.2 `forge.db`
 
-- `PRAGMA user_version` 是 schema 阶梯，当前 **15**。每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写版本号，事务内重读版本防止多进程重复迁移；读到更高版本立即 `InvalidDataException`，不降级不写库。
+- `PRAGMA user_version` 是 schema 阶梯，当前 **17**。每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写版本号，事务内重读版本防止多进程重复迁移；读到更高版本立即 `InvalidDataException`，不降级不写库。
 - 阶梯要点：
   - 1：工作台表。
   - 2：`todos` 加 `commit_subject`/`summary`/`verification`/`commit_id`/`commit_error` 五列 + `plan_summaries(session_id PK, text, updated_at)`。
@@ -42,6 +42,8 @@
   - 5：会话占用键回填 + `ux_sessions_occupancy`（`status='Active' AND parent_session_id IS NULL`）唯一索引；按键去重保留 `last_active_ticks` 最大者，被归档者写 `storage_notices`（`dedupe-archived`）。
   - 6：`deleted_at`。7：`projects.closed_at`（软关闭，同路径再添加复活原 id）。8：`fork_of_branch`/`fork_base_sha`。9：`lineage_root_id`（回填自身）/`origin_kind`（回填 `cold`）/`prefix_fingerprint`（继承的两列曾在这一步加入，已由 15 号步骤删除）。15：删 `inherits_from_session_id`/`inherits_up_to_seq` 与 `ix_sessions_inherits`，并把 `origin_kind='full'` 折回 `cold`（完整继承整个能力取消）。
   - 10：`automation_runs`、`automation_state`、`sessions.automation_id`/`automation_run_id`。
+  - 16：`turn_ledger` + 其全文索引（见下）。空的 15 号之后新增，无回填：旧会话没有轮次行就是“还没开始记录”，读取按无行处理。
+  - 17：`turn_ledger.folded INTEGER NOT NULL DEFAULT 0`（托管上下文里是否已被折进指针块）。只 0→1 单向，所以“折叠到第几轮”= 已折行的最大 `turn_sequence`；旧库补列时置 0 即“什么都没折”。
   - 11：`plan_summary_revisions(id 自增 PK, session_id, text, replaced_at)` + `ix_plan_summary_revisions_session(session_id, id DESC)`。
   - 12：`sessions.title_source TEXT`（NULL = 仍是创建默认标题，`derived`/`agent`/`user` 见 [01-sessions-and-workspaces.md](01-sessions-and-workspaces.md)），无回填——旧行读作“未命名”。它**走阶梯**而不是像 `child_driver` 那样直带建表脚本：NULL 对历史行有确切含义（还没人给它起名），补一列即可，不需要删库。
   - 13：`turn_metrics.effort TEXT NULL`（每轮实际跑的推理档，小写 `off`…`max`；旧行 NULL 即未知、不回填），只在表存在时补列——`turn_metrics` 的表仍由 V1 脚本直带，见下条。
@@ -52,6 +54,8 @@
 - 时间戳只存 `ToString("O")` 形状（带 offset、固定 7 位小数）的文本，读取严格；3 号步骤先就地规范化（有 Z 或 ±hh:mm 且能解析出唯一时刻的改写为规范形状，时刻与 offset 不变；无 offset/不可解析原样保留，由严格读取指名报错）。规范化后给 15 张表 23 个时间戳列建 `BEFORE INSERT`/`BEFORE UPDATE` 触发器（`turn_metrics.started_at`/`ended_at` 随 V1 建表 + `TimestampColumns` 登记，新库在 3 号步骤装上守卫），任何写者都写不进非规范文本（可空列仍允许 NULL）。新增时间戳列必须登记进 `StorageSchema.TimestampColumns`，否则既不会被规范化也没有守卫。`artifacts` 由 owner 在阶梯外自建，其 `at` 列经 `EnsureOwnedTimestampsAsync` 装同一份守卫；`sub_agent_state` 同样在阶梯外、每次打开库时以 `CREATE TABLE IF NOT EXISTS` 建出（产品未投产，不设迁移步），其 `finished_at` 在同一个创建点装守卫。
 - 索引刷新：`Artifact` 内容存文件、`forge.db` 只存行；`FileArtifactStore` 按会话删除目录。
 - 全文索引：`messages_fts`（FTS5）与阶梯解耦（可用性取决于 SQLite 编译选项），首次建表与回填同事务；建过 FTS5 的库被无 FTS5 的构建打开时补建 `messages_text` 回退表并回填，写与搜索都落到回退表；换回能读 FTS5 的构建时反向回填缺失行，并按 `messages` 修剪降级期留下的孤儿索引行。
+- **`turn_ledger`（16 号步骤）**：每任务轮一行，PK `(session_id, turn_sequence)`，列 `status`（`pending`/`settled`）、`task_text`、`answer_text`、`conclusion_text`、`read_files_text`/`changed_files_text`、`specs_text`、`from_seq`/`to_seq`/`answer_seq`、`provider`/`model`/`agent_kind`/`agent_depth`、`created_at`/`updated_at`、`folded`。三个文本列都是按行分隔的纯文本（路径与 id 不含换行），不走 JSON；文件分成"读过"与"改过"两份，后续轮要复核的是后者：读写都不需要反射，AOT 下零成本，也不会因源生成上下文缺一项而报错。同一行先写 `pending`、轮末原地 settle，所以一轮永远只有一行（崩溃留下的 pending 行就是诚实的“不知道”）。它与 `summaries` 不同：**它就是模型读到的托管上下文**（见 [16-context-compaction.md](16-context-compaction.md)），每个回合开头由它重建历史区；没有它时（`AgentHostOptions.TurnLedger` 为空）会话退回摘要视图 + 原始尾部，不阻塞会话。
+- `turn_ledger_fts`（FTS5）与 `turn_ledger_text` 回退表复制 `messages_fts` 那套：可用性取决于 SQLite 编译选项，首次建表与回填同事务，降级/恢复两个方向都回填。索引的是 `task_text` + `conclusion_text` + `unresolved` + `next_action`（**不**索引 `answer_text` 全文：结论已包含人类可读的那部分，全文会让每条轮次在索引里重一倍）。`turn_ledger` 与索引同事务写；会话移除时随 `PurgeAsync` 一并删。
 - 写模型：`SqliteSessionStore` 一个写队列，一个批次一个 `BEGIN IMMEDIATE`；可能业务冲突的操作（`UsesSavepoint`，如占用冲突）包在 `SAVEPOINT forge_op` 里，单个冲突只回滚到自己的保存点并以异常交还调用方，同批其它操作照常提交；其余操作失败仍连坐整批。返回 seq 时已落盘，提交后的取消不会让调用方误判失败。
 - 每轮指标（`turn_metrics`）：PK `(session_id, turn)`，一行一轮（失败/取消/超限也留行，token 列全 NULL、未上报不补 0；`stream_ms INTEGER NOT NULL` 记模型流式生成时长——首个输出增量→流结束、回合内多次调用累加，零输出为 0，非空、绝不回退墙钟，失败轮也必带；`effort TEXT NULL` 记该轮实际跑的推理档，小写 `off`…`max`，根轮取回合开始时的快照、Agent 会话轮取该轮 definition，子 Agent 轮与加列之前的旧行留 NULL 即未知，读取时行末就不写 `:级别`）；表只记转录算好的轮号、不发号（发号取 `MAX(turn_checkpoints, turn_metrics)+1`，General 会话重开不再从 1 重数）。Agent 会话按自己的会话 id 写行、轮次从 1 独立编号，指标取自己实例的累计计数。写入走 App 级后台记录器——轮末一次有界通道入队（零分配、永不抛、满则丢行），单消费者逐行 `BEGIN IMMEDIATE` upsert，短 busy timeout，失败全吞，关闭时 drain ≤2 秒后放弃；**绝不进会话历史批队列**。换手/分叉不复制（指标属于原会话）；`PurgeAsync` 对它先探表存在再删（缺表跳过，旧库删会话不受影响）。派生量（成本、缓存命中率、tok/s）不入库，读取时算。
 - 读写连接：工作台各 store 每个一条长连接 + `SemaphoreSlim` 串行 + 每写一个 `BEGIN IMMEDIATE`（deferred 读后升级会静默丢更新），读用池化短连接；`synchronous=NORMAL`（体验数据）。**关闭不阻塞在飞的写**：拿得到写闸才关那条长连接，拿不到就把连接交给最后那次写在自己的 `finally` 里关（闸不 `Dispose`）——否则关连接会把写线程的 `BEGIN IMMEDIATE` 在它脚下回滚，同一个事务被两个线程各完成一次，抛的是库里的 `NullReferenceException`（见 `src/Forge.Core/SPEC.md`「工作台存储」）。

@@ -56,7 +56,7 @@
   - 托管 `grep` 10k 文件 114 ms（命中）vs ripgrep 103–105 ms（慢 11–15%，命中数相同）。
   - `ProcessRunner` 100 MiB 子进程输出 69.8 ms（1.40 GB/s）、分配 1.39 MB、工作集增量 <6 MiB。
   - 限速器：0 字节/次、无争用 p50 <100 ns、8 线程共享一个桶时每次都授权。
-- 运行约定：`Forge.App` 必须通过 `FORGE_RUN=1` 启动，运行输出统一到 `artifacts/run/`；运行测试的 shell 禁止设置 `FORGE_RUN`；遇到 `MSB3027`/`MSB3026` 先检查 `Forge.App`、`testhost`、`ExtensionHost` 是否占用文件，确认孤儿进程后再清理，用户正在运行的进程报告阻塞而不是擅自结束；不通过切换输出目录掩盖文件锁。
+- 运行约定：`Forge.App` 必须通过 `FORGE_RUN=1` 启动，运行输出统一到 `artifacts/run/`；运行测试的 shell 禁止设置 `FORGE_RUN`；遇到 `MSB3027`/`MSB3026` 先检查 `Forge.App`、`testhost`、`ExtensionHost` 是否占用文件，确认孤儿进程后再清理，用户正在运行的进程报告阻塞而不是擅自结束；不通过切换输出目录掩盖文件锁。Forge 崩溃或被强杀后，Host、语言服务器与 MCP 服务器由 OS 回收（`KillOnParentExit`，Windows 上连带 Host 的 Worker 与终端树），只有优雅退出路径由主程序自己收尾；`testhost` 与用户自己启动的进程仍是孤儿的主要来源。
 - **Avalonia 构建统计任务**：Avalonia 12.2.0 带来的 `Avalonia.BuildServices` 12.0.0 在每次非设计时构建前跑 `AvaloniaStats`（`BeforeTargets=CoreCompile`，`ContinueOnError`），会打印 “Avalonia Trial requires telemetry…” 并向 Avalonia 上报构建记录（11.3.2 时代同一个任务已在跑，只是提示文案不同）。`AVALONIA_TELEMETRY_OPTOUT=1` 能关掉上报，但**只在机器上没有付费/试用许可证时生效**（包的 README：Trial 与 Community 许可证不允许退出，本机登了 Avalonia 账号、带 Trial 票，实测该变量无效）；CI 里没有许可证，所以 `.github/workflows/ci.yml` 已在 workflow 级设了它。那行提示是 Normal 重要级的 MSBuild 消息，本地要不见它只能用 `-v:q`，或者拿到付费许可证。构建结果不受影响（Debug/Release/AOT 均 0 警告）。
 
 ## 13.7 发布形态

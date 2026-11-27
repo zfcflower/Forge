@@ -89,7 +89,7 @@ Forge.App（Native AOT，Avalonia UI，唯一知道全部主程序项目）
 | [13-operations-and-tooling.md](13-operations-and-tooling.md) | 单实例、诊断日志、自动更新、CI、基准 | 三 OS 构建与全量测试 + Windows AOT 冒烟 |
 | [14-limitations.md](14-limitations.md) | 未实现、未接线、未验证、已实现但有缺口、明确的取舍 | macOS 分支未验证；插件面板渲染未做 |
 | [15-appendix.md](15-appendix.md) | 工具总表、设置分区表、数据文件表、常量表、术语表 | 速查 |
-| [16-context-compaction.md](16-context-compaction.md) | 上下文压缩算法（用户可读版）：符号表、两级回收、切点与预算、收据、找回原文 | 触发 85% / 紧急 95%；裁剪 0 token；原文一条不删 |
+| [16-context-compaction.md](16-context-compaction.md) | 托管上下文与确定性折叠（用户可读版）：entry 形状、折叠块、轮内不受影响、找回原文 | 触发 85% / 紧急 95%；折叠 0 模型调用；原文一条不删 |
 
 ## 阅读建议
 

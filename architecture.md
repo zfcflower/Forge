@@ -85,6 +85,7 @@ depends-on: [forge-goal]
 - **Linux/macOS。** 进程组改由 Host 侧 `posix_spawn` + `POSIX_SPAWN_SETPGROUP(0)` 建立:组在 spawn 系统调用内原子创建,子进程执行第一条指令前就已是自成一组的组长,因此事后 `setpgid` 那个(实测必然 `EACCES` 的)窗口不存在,`kill(-pgid)` 恒有效,执行器也自动获得自己的组。收割循环是必需的(BCL 不收割非自己启动的子进程,僵尸会让 `HasExited` 永远为假),顺序为 `waitid(WNOWAIT)` 观察退出 → `kill(-pgid)` 趁 pid 未被释放时扫组 → `waitpid` 释放 pid,以免收割放大 pid 复用窗口。
 - **验证状态。** Linux 已在 WSL2 上验证(见 `forge-extension-host`);macOS 的 `pipe`+`fcntl`(无 `pipe2`)、`WNOWAIT` 常量与 `siginfo` 偏移分支**完全未验证**,须由 CI 的 macOS runner 确认,不得据此声称 macOS 已支持。
 - **不是硬边界。** 进程组不防逃逸:后代自己 `setsid`/`setpgid` 即可脱离,POSIX 也没有 KILL_ON_JOB_CLOSE 的等价物——Host 被强杀时 Worker 只靠管道断开自行退出,其残留后代不被清理,因此不得宣称与 Windows Job 等价。操作系统权限沙箱及 CPU/内存/活动进程限制须另行确认威胁模型,不因进程隔离而视为已实现。
+- **主程序拉起的子进程按父进程寿命回收。** Host、语言服务器、MCP stdio 服务器都用 `ProcessStartInfo.KillOnParentExit` 启动(Windows `KILL_ON_JOB_CLOSE` Job、Linux `PR_SET_PDEATHSIG`,由 `OperatingSystem.IsWindows() || IsLinux()` 守卫),所以 Forge 崩溃、被任务管理器结束或 `kill -9` 时不留下孤儿,Windows 上 Host 那个 Job 再带走它自己的 Worker/执行器/终端树。macOS 无等价机制,不加此标志(仓库不声明支持 macOS)。这只是崩溃兜底,不替代 Host 自己的作业归属:Linux 的 `PR_SET_PDEATHSIG` 只作用于直接子进程,Host 被强杀时其 Worker 仍按上一条逃逸。必须活过主程序的进程(更新应用器)不得开启。
 - **PTY 同属这个类。** 交互终端(Windows ConPTY、POSIX `posix_openpt` + `posix_spawnp(SETSID)`)放在 `WorkerProcessOwnership.Pty.cs`,不新增原生类;终端 shell 在 Windows 上也进私有 Job,在 POSIX 上按会话扫树(见 `forge-extension-host`“交互终端”)。
 
 **评审。** 评审意见属于工作区,按行/块锚定到 Diff;支持草稿批量发送和单条发送。评审方式可配置为 Reviewer SubAgent 一次评审或人工逐行评审。

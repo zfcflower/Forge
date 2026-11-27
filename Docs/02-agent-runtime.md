@@ -42,7 +42,9 @@
 | | `request_review` | 只读 | 派生 Reviewer 评审变更集，返回结论行 + 原文；结论落 `reviews.db`（见 2.7） |
 | | `models` | 只读 | 列已连接提供商的模型与各自接受的思考档位（隐藏模型不列，`provider` 可收窄，单次上限 400 行） |
 | 检索 | `search_history` | 只读 | 全文检索历史消息（FTS5，缺失时回退表） |
-| | `read_history` | 只读 | 取回**已不在上下文里**的原文（被摘要压掉或被裁成收据）；近期对话直接读上下文，不要回放；输出 200k 字符封顶，超出转 Artifact 分片读 |
+| | `read_context` | 只读 | 按轮区间取回**托管上下文的 entry 原文**（折叠块的 `retrieve:` 行即用法）；上限 50 轮/次 |
+| | `search_context` | 只读 | 全文检索历史轮的状态事实（task/结论/unresolved/next），命中给轮号与摘要 |
+| | `read_history` | 只读 | 按 seq 区间取回**原始消息**（entry 的 `seq:` 行或折叠块的 `originals:` 行即用法）；输出 200k 字符封顶，超出转 Artifact 分片读 |
 | | `read_artifact` | 只读 | 读回超长输出转存的 Artifact（不可关闭） |
 | Web | `web_fetch` | 只读 | 只取 http/https；默认拒绝回环/私网/链路本地；手动跟随最多 5 跳、每跳重查；正文上限 5 MB、30 秒超时；HTML 转纯文本 |
 | | `web_search` | 只读 | 后端 Exa（无密钥走公共 MCP，默认）/ Tavily / DeepSeek（可用模型提供商的密钥）/ Brave / SearXNG；无可用后端时工具不注册；后端工厂每次调用现取 |
@@ -91,20 +93,19 @@
 - 附件随插话一起送达；未送达的插话连同附件回到队首。
 - **等待期可撤回编辑**：排队小片与尚未送达的插话小片都带「撤回并编辑」按钮——从队列/待送达列表里取掉，文字接在已有草稿之后、附件放回输入框，绝不覆盖正在写的内容。插话一旦被循环在工具批次边界取走就不可撤回（`AgentInstance.Withdraw` 返回 false），小片随 `AgentInterjected` 自行消失并提示“已送达模型”；排队消息撤回收到了评审面板交办的那种消息时同时通知来源方“已撤回”。
 
-## 2.5 上下文压缩与摘要
+## 2.5 托管上下文与确定性折叠
 
-- 触发以**本次会话自身的模型窗口 W** 为基准：先取请求实际携带的输出上限 `wireMax`，否则 `R = min(maxOut, ⌊0.2W⌋)`（`maxOut` 未知时取 `⌊0.2W⌋`），再抬到至少 `min(4096, W/2)`；`R ≥ W` 时自动压缩不启用。可用预算 U = W − R；触发线 = ⌊U × triggerPercent⌋（默认 85%，范围 50–95），目标 = max(1, ⌊U × targetPercent⌋)（默认 50%），再生长量 ⌊0.1U⌋。**触发线只用于回合的第一个请求**：同一回合内工具结果还在累积，改用紧急线 ⌊U × emergencyPercent⌋（默认 95%，范围 90–99 且高于触发），否则一个回合会把自己刚收集的证据压成摘要。
-- 当前上下文 C：模型与历史版本未变时用上次真实输入 token + 新增消息估算；否则全量估算（历史 + 稳定前缀 + 可见工具定义，每个定义另加 8 token）。
-- 迟滞：压缩后仍不低于触发线即“无效尝试”，要等实例自有内容再长 0.1U；连续两次无效标记 Stalled 并发一次 `AgentCompactionStalled`，直到手动压缩、换模型或一次把上下文带回线下的裁剪。
-- 切点只落在下标 ≥1 的 user/assistant 消息上，不拆开工具调用与结果；保留近期原文 keepRecent = 设置的 `keepRecentTokens`，缺省 max(1, min(20000, ⌊0.2U⌋))（设置值夹在 [min(1000,U), U/2]；自动与溢出路径再夹到不超过目标的一半，手动压缩只夹前者）。
-- 摘要格式固定六节：Goal / Constraints & Preferences / Progress(Done / In Progress / Blocked) / Key Decisions / Next Steps / Critical Context。消息序列化时 thinking 不写、工具结果截到 2000 字符、图片/文件只写占位；超预算分批，工具调用与其结果绝不分开；长回合被切开时另发一次 TURN-PREFIX 摘要并合并成 `Turn Context (split turn)`。
-- 文件追踪：`CompactionFiles` 把 `read` 的路径与**实际显示的行范围**（`Shown lines X–Y` 或 `path: N lines` 从 offset 起算）合进 `<read-files>`，同一文件的重叠/相邻区间合并（`1-420` + `421-840` → `1-840`），无 limit 记 `500-`，整文件读记裸路径；修改类只记路径，读后又改的只出现在 `<modified-files>`；与上一份摘要里的清单合并后排序追加。
-- 摘要被拒（MaxTokens 截断、发起工具调用、提供商报错、空正文）即整次压缩失败、什么也不写；自动与溢出路径把它当作“没腾出空间”，不让回合失败。
-- **溢出兜底**：流里还没收到任何内容时，强制压缩一次再重发一次；第二次仍溢出或没腾出空间就以原错误失败。
-- **手动压缩**：`/compact [关注点]` 或点击上下文量规，目标 1、无视触发线与开关，保留 keepRecent 近期原文，并重置迟滞；关注点作为 `Additional focus` 追加到摘要指令；回合进行中拒绝，压缩期间禁止发送。
-- 每次模型请求后与每次压缩后发 `AgentContextMeasured(AgentId, ContextTokens, UsableTokens, TriggerTokens, CacheTtl, Usage)`；composer 的量规、缓存小片与用量读数读它（根 Agent 计数，子 Agent 忽略）。`Usage` 是该实例的累计用量，取值在该请求的用量加到计数器之后，所以外壳只做差分就能每请求更新一次统计（裁剪与自动压缩这类不新增开销的测量报当时已有的数，差分即为零）。
-- **模型自己也能读到这条读数**：`preferences.chatContextBudget` 默认开，App 把量规的一行文本（`Context 62k/170k (36%); auto-compaction at 145k.`，窗口未知时只报 C）经 `AgentHostOptions.DynamicContext` 作为**尾部动态后缀**追加到每次请求——不进存储、不进历史、不改变稳定前缀（缓存断点落在倒数第二条消息，动态尾不入缓存）。正文两端带 `<forge-context>` / `</forge-context>` 标记：那条消息不落库，读 `.log/` 原始请求的人（和模型）只有这对标记能把 harness 文本与用户输入分开——按“最后一条非该标记的 user 消息”定轮次边界。关掉后模型只能从工具输出的截断推断剩余空间。
-- 计划摘要（`plan_summaries`）另存：每次替换把旧文本记一条修订，每会话保留最新 50 条，`ListPlanRevisionsAsync` 按 id 倒序；复制会话一并复制、清理会话一并删除。
+模型的历史区不是原始对话流水，而是**每轮一条 entry** 的累加，一条 entry 拆成两条消息（任务发 `user`、报告发 `assistant`）：`**Conclusion**:` + 回复正文 + `**Evidence**:` + `- turn:` / `- files:` / `- spec:` / `- seq:`。每个回合开始时由 `turn_ledger` 重建一次历史区（折叠块 + 未折叠轮的 entry）；**回合内不受影响**——本回合的每一次请求都带着本回合的真实交换（工具调用与结果全在），不裁剪、不收据、不摘要。完整算法与找回路径见 [16-context-compaction.md](16-context-compaction.md)。
+
+- 缓存:兼容/Responses 协议的请求默认带 `prompt_cache_key`(lineage 根)与 `prompt_cache_retention`;拒绝这两个字段的端点由适配器一次性降级记住,之后不再发。
+- 触发与目标沿用同一套预算：`U = W − R`，回合首请求用触发线（默认 85%），回合内用紧急线（默认 95%），目标线默认 50%。
+- 过线时把最旧的**已结算**轮折进指针块，直到降到目标线下，永远保留最新 3 轮不折。折叠 = 一次单调 `folded` 标记 + 一次重渲染，**零模型调用、零摘要**。
+- 指针块固定四行：`[compacted: turns a–b · seq x–y · n turns]` / `open:`（被折轮 unresolved 去重，最多 5 项）/ `retrieve: read_context(from_turn, to_turn)` / `originals: read_history(from_seq, to_seq)`。`open:` 只聚合未解决项，**不聚合“做完了什么”**——那会变成变相摘要。
+- 回合内撞窗口：加大折叠后重发一次；仍不够（本回合自身超窗口）按原错误失败。没有第二级压缩。
+- 手动 `/compact`：折叠到只剩最新 3 轮，忽略阈值与开关，不再接受“关注点”（折叠是确定性的，没有可steer的余地）。
+- 找回：entry 的 `seq:` 与折叠块的 `originals:` 指向 `read_history`；超长工具输出（>32k）仍在 artifact 里，用 `read_artifact`。`read_context` 取回被折叠轮的 entry，`search_context` 查 `turn_ledger` 的全文索引。
+- 旧会话（无 ledger 行，或宿主没配 ledger）继续走 `summaries` 摘要视图 + 原始尾部；新会话不再写摘要。摘要级与收据级的代码、`compaction.summarizer` 槽位都随本变更删除。
+- 计划摘要（`plan_summaries`）与此无关，另存：每次替换把旧文本记一条修订，每会话保留最新 50 条。
 
 ## 2.6 计划与 TODO
 
@@ -193,3 +194,19 @@
 - 界面：会话视图输入框上方显示附着运行横幅（等待额度并倒计时 / 等待空闲 / 执行中）与“取消”；自动化创建的会话行带闪电标记；设置页列出定义（启停、立即运行、编辑、删除需确认）与运行历史（点运行可打开其会话）。
 
 相关文档：[07-workbench-ui.md](07-workbench-ui.md)（composer、转录、面板）、[03-providers-and-network.md](03-providers-and-network.md)（提供商与限速设置）、[04-git-diff-pr.md](04-git-diff-pr.md)（步骤提交与 PR）、[15-appendix.md](15-appendix.md)（工具与常量速查）。
+
+## 2.13 Turn Ledger
+
+**回复是自由格式**：没有任何模板要模型遵守，答案就是它写的那段话；账本只记录这一轮的任务、回复、证据与 seq，从不评判回复的形状。不声明终结工具——工具面字节不变、无 JSON 参数开销，轮末判定用的就是既有的“assistant 消息无工具调用”。
+
+- **没有契约节**：模型回复是自由格式，稳定前缀里只有 `# System` → 全局/项目 Agent → `# Role`，账本不再往前缀里追加任何模板。
+- **答案不被改写**：模板只决定 ledger 行的状态。模板缺失或不合法时答案照原样交付、不回退重生成；ledger 行分别标 `missing`/`invalid`，不晋升任何状态。
+- **证据由 harness 生成**：`files` 从本轮文件类工具的 `path` 参数抽取，`spec` 从 `spec_get` 参数与读过带规格 frontmatter 的文件里取，指针是轮首 user 消息 seq → 轮末 assistant 消息 seq，展示为 `seq: <a>-<b>`（与 `read_history` 的 `from_seq`/`to_seq` 同源，不用模型去猜它是什么）。模型看不到也写不了 seq，所以证据节整节由代码生成；不写行号（seq 不变，行号会漂）。
+- **账本不存判定**：进度状态的权威源是 TODO 面板的 `todos` 表；账本的状态只有"轮在跑/轮已结束"，再存一份进度或一个自评词只会与面板分叉。
+- **一轮一行**：轮开始写 `pending`，轮末原地 settle；`(session_id, turn_sequence)` 是主键。异常轮（取消、失败、无进展收尾、轮次上限）由 harness 按轮结局写终态，不要求模型配合。
+- **台账即上下文**：ledger 不再是旁路记录——模型的历史区就是它的渲染结果（见 2.5）。异常轮（`missing`/`invalid`）照旧交付答案、不晋升状态，但它们的 entry 仍进上下文，那是模型那一轮实际说过的话。遵从率按（提供商 × 模型 × Agent 种类 × 任务类型）计数，是 ledger 字段的派生查询。
+- **动态尾**：`<forge-context>` 每请求临时（不落库、不入历史），今天只载会话命名提示；它前面永远压一条固定的 assistant 承载消息让它独占一块——否则它会和开场提问并成同一块，下一次请求就在第一块断开、整段提示词重读。
+- **两个观察窗**：转录里每轮回复卡下方的复制按钮旁一枚图标按钮弹出该轮的 ledger entry，输入区工具条一枚图标按钮弹出整个会话的 ledger 时间线（见 [07-workbench-ui.md](07-workbench-ui.md)）。
+- **子 Agent 回执**：回执的“报告”行取该子 Agent 的「结论」节，头行、改动行、状态行形状不变。
+
+相关文档：[07-workbench-ui.md](07-workbench-ui.md)（两个观察窗）、[12-storage-and-data.md](12-storage-and-data.md)（`turn_ledger` 表与索引）、[16-context-compaction.md](16-context-compaction.md)（压缩，本期未改）。
