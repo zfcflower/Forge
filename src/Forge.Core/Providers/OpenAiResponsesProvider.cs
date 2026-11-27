@@ -34,38 +34,68 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
         : base(config, http, idleTimeout, options)
     {
         var knobs = options ?? ProviderOptions.Default;
-        // Same rule as the Chat Completions adapter: DeepSeek caches by prefix on its own, so nothing cache-shaped is sent to it.
-        var tunable = !OpenAiCompatibleProvider.IsDeepSeek(config.BaseUrl);
-        sendPromptCacheKey = knobs.SendPromptCacheKey && tunable;
-        sendPromptCacheRetention = knobs.SendPromptCacheRetention && tunable;
+        // Same rule as the Chat Completions adapter: what the host asked for is what is sent, and an endpoint that refuses a
+        // field is remembered instead of being guessed at by host name.
+        sendPromptCacheKey = knobs.SendPromptCacheKey;
+        sendPromptCacheRetention = knobs.SendPromptCacheRetention;
         downgraded = ProviderDegradations.Contains(DegradationKey);
+        capDegraded = ProviderDegradations.Contains(CapDegradationKey);
     }
 
     private readonly bool sendPromptCacheKey;
     private readonly bool sendPromptCacheRetention;
     private bool downgraded;
 
+    /// <summary>This endpoint refused the output cap; remembered on its own key, so the cache fields survive that refusal.</summary>
+    private bool capDegraded;
+
+    /// <summary>Set by <see cref="CanDegrade"/> when the refusal named the output cap rather than a cache field.</summary>
+    private bool refusedCap;
+
     /// <summary>Identity under which "this endpoint refused the cache fields" is remembered for the rest of the process.</summary>
     private string DegradationKey => Id + "|responses|" + Config.BaseUrl;
+
+    /// <summary>Identity under which "this endpoint refused the output cap" is remembered, apart from the cache key.</summary>
+    private string CapDegradationKey => Id + "|responses|cap|" + Config.BaseUrl;
 
     /// <summary>
     /// A 400 naming a cache field means this model or gateway does not know it (a third-party Responses server that only
     /// implements the core fields): the answer is to send less, not to fail the turn.
     /// </summary>
-    protected override bool CanDegrade(ProviderException failure) =>
-        failure.StatusCode == 400
-        && (failure.Message.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
-            || failure.Message.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase));
+    protected override bool CanDegrade(ProviderException failure)
+    {
+        if (failure.StatusCode != 400)
+        {
+            return false;
+        }
+
+        var text = failure.Message;
+        refusedCap = text.Contains("max_output_tokens", StringComparison.OrdinalIgnoreCase)
+                     || text.Contains("max_tokens", StringComparison.OrdinalIgnoreCase);
+        return refusedCap
+               || text.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase);
+    }
 
     protected override void Degrade()
     {
+        if (refusedCap)
+        {
+            // A gateway that does not know the cap keeps the cache fields it did accept: only the cap goes.
+            capDegraded = true;
+            ProviderDegradations.Add(CapDegradationKey);
+            return;
+        }
+
         downgraded = true;
         ProviderDegradations.Add(DegradationKey);
     }
 
-    protected override string? DegradationNotice =>
-        "This model or gateway refused the prompt-cache fields, so the request was resent without them. The answer is unaffected; "
-        + "caching is then whatever the provider does on its own.";
+    protected override string? DegradationNotice => refusedCap
+        ? "This model or gateway refused the output cap, so the request was resent without it. The answer is unaffected; the "
+          + "output reserve stays at the figure the cap implied until the setting changes or the refusal is forgotten."
+        : "This model or gateway refused the prompt-cache fields, so the request was resent without them. The answer is unaffected; "
+          + "caching is then whatever the provider does on its own.";
 
     protected override string Endpoint => "responses";
 
@@ -100,7 +130,7 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
             WriteTools(writer, request.Tools);
         }
 
-        if (request.Model.MaxOutputTokens is { } maxOutputTokens)
+        if (request.Model.MaxOutputTokens is { } maxOutputTokens && !capDegraded)
         {
             writer.WriteNumber("max_output_tokens", maxOutputTokens);
         }

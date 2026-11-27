@@ -56,6 +56,13 @@ internal interface ISessionInstrumentSources
     /// boundaries (elapsed time, tool count, outcome) from it — live turns never read it. Null in a standalone view.
     /// </summary>
     ITurnMetricsStore? TurnMetrics { get; }
+
+    /// <summary>
+    /// The session's turn ledger, when the app has one: the two observation windows read it (the reply card's turn entry
+    /// and the session ledger dialog), and the transcript replay pairs its rows with the replayed rounds. Null in a
+    /// standalone view; the managed history is rendered from the same rows by the loop.
+    /// </summary>
+    ITurnLedgerStore? TurnLedger { get; }
 }
 
 /// <summary>
@@ -200,6 +207,9 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
     /// <summary>Composition owns the store; a standalone view has none, and replay then simply shows "—" for the values
     /// only the metrics table knows.</summary>
     public ITurnMetricsStore? TurnMetrics => composition.TurnMetrics;
+
+    /// <summary>Composition owns the store; a standalone view has none, and the observation windows then stay hidden.</summary>
+    public ITurnLedgerStore? TurnLedger => composition.TurnLedger;
 
     public string? PromptCacheTtl(string? providerId) => composition.Providers.Catalog.Providers
         .FirstOrDefault(provider => string.Equals(provider.Id, providerId, StringComparison.Ordinal))
@@ -400,4 +410,6 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
     public TurnMetricsRecorder? TurnMetricsRecorder => null;
 
     public ITurnMetricsStore? TurnMetrics => null;
+
+    public ITurnLedgerStore? TurnLedger => null;
 }

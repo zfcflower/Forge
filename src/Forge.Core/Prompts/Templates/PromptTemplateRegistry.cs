@@ -10,9 +10,6 @@ public static class PromptSlotIds
     /// <summary>The first layer of every agent prompt (<see cref="BuiltInPrompts.System"/>).</summary>
     public const string System = "system";
 
-    /// <summary>The context compactor's summarizer (<see cref="SummaryCompactor.SummarizerPrompt"/>).</summary>
-    public const string CompactionSummarizer = "compaction.summarizer";
-
     /// <summary>The handover note writer (<see cref="HandoverSummary.Prompt"/>).</summary>
     public const string HandoverSummary = "handover.summary";
 }
@@ -104,11 +101,6 @@ public sealed class PromptTemplateRegistry
             "System",
             "The first layer of every agent prompt, before the global and project AGENTS.md.",
             BuiltInPrompts.System);
-        yield return Slot(
-            PromptSlotIds.CompactionSummarizer,
-            "Compaction summarizer",
-            "System prompt of the summarizer that turns older conversation into a structured checkpoint when the context window fills up.",
-            SummaryCompactor.SummarizerPrompt);
         yield return Slot(
             PromptSlotIds.HandoverSummary,
             "Handover summary",

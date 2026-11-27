@@ -28,8 +28,6 @@ internal static class CompactionStrings
     public const string SettingsEmergencyInvalidKey = "compaction.settings.emergencyInvalid";
     public const string SettingsTargetKey = "compaction.settings.target";
     public const string SettingsHintKey = "compaction.settings.hint";
-    public const string SettingsBudgetKey = "compaction.settings.budget";
-    public const string SettingsBudgetHintKey = "compaction.settings.budgetHint";
     public const string SettingsTriggerInvalidKey = "compaction.settings.triggerInvalid";
     public const string SettingsTargetInvalidKey = "compaction.settings.targetInvalid";
     public const string SettingsSaveFailedKey = "compaction.settings.saveFailed";
@@ -74,10 +72,6 @@ internal static class CompactionStrings
 
     public static string SettingsHint => Loc.Instance[SettingsHintKey];
 
-    public static string SettingsBudget => Loc.Instance[SettingsBudgetKey];
-
-    public static string SettingsBudgetHint => Loc.Instance[SettingsBudgetHintKey];
-
     public static string SettingsTriggerInvalid => Loc.Instance.Format(SettingsTriggerInvalidKey, 50, 95);
 
     public static string SettingsTargetInvalid => Loc.Instance[SettingsTargetInvalidKey];
@@ -109,17 +103,9 @@ internal static class CompactionStrings
         Loc.Register(SettingsTriggerKey, "触发线（可用窗口的 %）", "Trigger (% of the usable window)");
         Loc.Register(SettingsTargetKey, "压缩目标（可用窗口的 %）", "Target (% of the usable window)");
         Loc.Register(
-            SettingsBudgetKey,
-            "把上下文用量告诉模型",
-            "Tell the model its context usage");
-        Loc.Register(
-            SettingsBudgetHintKey,
-            "每轮在末尾追加一行「已用/可用（百分比）· 自动压缩触发线」，约 25 token。关掉后模型只能从工具输出的截断自己推断还剩多少空间。",
-            "Appends one line per request — used/usable (percent) and the automatic-compaction line — about 25 tokens. Off, the model can only infer its remaining room from truncated tool output.");
-        Loc.Register(
             SettingsHintKey,
-            "用量达到「触发线 × 可用输入」就压 → 压到「目标 × 可用输入」；最新的原文不动，更早的只留摘要（原文仍可用 search_history 取回）。可用输入 = 模型窗口 − 输出预留。",
-            "Reaching trigger × usable input compacts down to target × usable input; the newest messages stay raw, older ones become a summary (still retrievable with search_history). Usable input = window − output reserve.");
+            "用量达到「触发线 × 可用输入」就把最旧的轮折成一行指针 → 折到「目标 × 可用输入」；最新 3 轮不动，折叠只是不再带进请求，原文仍在库里（read_context / read_history 取回）。可用输入 = 模型窗口 − 输出预留。",
+            "Reaching trigger × usable input folds the oldest turns into one pointer line, down to target × usable input; the newest 3 turns stay verbatim and nothing is lost — a folded turn is still in the store (read_context / read_history). Usable input = window − output reserve.");
         Loc.Register(
             SettingsTriggerHintKey,
             "上下文用到可用输入的这么多时开始压缩。调低=更早压、原文更少；调高=压缩次数更少，但更容易撞上溢出重试。建议 80–90；中文或长文档会话建议 75。",
@@ -153,13 +139,13 @@ internal static class CompactionStrings
         Loc.Register(CommandDescriptionKey, "压缩上下文（保留最近的原文；可在后面写关注点）", "Compact the context (keeps the recent messages; add text to set a focus)");
         Loc.Register(
             StalledKey,
-            "上下文仍高于触发线（{0} tokens，触发线 {1}），已停止自动摘要；旧的工具输出仍会被自动裁剪回收，也可用 /compact 手动压缩或换模型",
-            "The context is still above the trigger line ({0} tokens, trigger {1}); automatic summarization is off. Old tool output is still reclaimed as receipts; /compact or another model restarts it.");
+            "上下文仍高于触发线（{0} tokens，触发线 {1}），已没有可折叠的旧轮；可用 /compact 手动折叠或换一个窗口更大的模型",
+            "The context is still above the trigger line ({0} tokens, trigger {1}) and there is nothing left to fold; /compact or a model with a larger window is the way forward.");
         Loc.Register(
             BlockedKey,
-            "不可压缩的部分太多（{0} tokens，触发线 {1}）：继承前缀、系统前缀与工具定义已经占满窗口，摘要无法让上下文降到线下，所以这次没有调用摘要器；换一个窗口更大的模型或减少工具才能继续",
-            "Too much of the window is beyond compaction ({0} tokens, trigger {1}): the inherited prefix, the system prefix and the tool definitions already exceed the line, so no summary could help and none was requested; a model with a larger window, or fewer tools, is the way forward.");
-        Loc.Register(NothingKey, "没有可压缩的内容", "Nothing to compact.");
+            "无可折叠的部分（{0} tokens，触发线 {1}）：系统前缀、工具定义与最新几轮本身已经占满窗口，折叠旧轮也降不到线下；换一个窗口更大的模型或减少工具才能继续",
+            "Nothing left to fold ({0} tokens, trigger {1}): the stable prefix, the tool definitions and the newest turns already exceed the line, so folding older turns cannot help; a model with a larger window, or fewer tools, is the way forward.");
+        Loc.Register(NothingKey, "没有可折叠的内容", "Nothing to fold.");
         Loc.Register(BusyKey, "当前轮次运行中，无法压缩", "Cannot compact while a turn is running.");
         Loc.Register(FailedKey, "压缩失败：{0}", "Compaction failed: {0}");
         Loc.Register(GaugeTooltipKey, "点击压缩上下文", "Click to compact the context");

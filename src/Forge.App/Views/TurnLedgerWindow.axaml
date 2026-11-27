@@ -1,0 +1,55 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Forge.App.ViewModels"
+        x:Class="Forge.App.Views.TurnLedgerWindow"
+        x:DataType="vm:TurnLedgerWindowViewModel"
+        Title="{Binding Title}"
+        Width="640"
+        Height="560"
+        MinWidth="440"
+        MinHeight="320"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource WindowBackgroundBrush}">
+  <Window.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
+    <!-- One entry of the timeline: the excerpt lines are the entry's own text, exactly as the turn's flyout shows them. -->
+    <Style Selector="TextBlock.ledger-excerpt">
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="MaxLines" Value="3" />
+    </Style>
+    <Style Selector="TextBlock.ledger-detail">
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
+    </Style>
+  </Window.Styles>
+  <Grid RowDefinitions="*,Auto" Margin="18,16">
+    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="12" AutomationProperties.AutomationId="session-ledger-list">
+        <ItemsControl ItemsSource="{Binding Rows}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:TurnLedgerEntryViewModel">
+              <StackPanel Spacing="3" Margin="0,0,0,12" AutomationProperties.Name="{Binding Header}">
+                <TextBlock Text="{Binding Header}" FontWeight="Medium" />
+                <StackPanel Spacing="1">
+                  <TextBlock Classes="ledger-detail" Text="{Binding TaskHeading}" />
+                  <TextBlock Classes="ledger-excerpt" Text="{Binding TaskText}" />
+                </StackPanel>
+                <TextBlock Classes="ledger-excerpt" Text="{Binding ConclusionText}" IsVisible="{Binding ConclusionText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </ScrollViewer>
+    <Border Grid.Row="1"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,1,0,0"
+            Padding="0,10,0,0"
+            Margin="0,12,0,0">
+      <TextBlock Classes="caption" Text="{Binding FooterText}" AutomationProperties.AutomationId="session-ledger-footer" />
+    </Border>
+  </Grid>
+</Window>

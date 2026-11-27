@@ -17,6 +17,7 @@ public interface IToolSideEffectResolver
 public sealed class ToolRegistry : IToolRegistry
 {
     private readonly Dictionary<string, ITool> byName;
+    private readonly ITool[] hidden;
 
     public ToolRegistry(IEnumerable<ITool> tools)
         : this(tools, preserveOrder: false)
@@ -26,8 +27,22 @@ public sealed class ToolRegistry : IToolRegistry
     /// <param name="tools">The tools; for a repeated name the last one wins.</param>
     /// <param name="preserveOrder">True keeps the order of <paramref name="tools"/> (a repeated name stays at its first position); false sorts by name.</param>
     public ToolRegistry(IEnumerable<ITool> tools, bool preserveOrder)
+        : this(tools, [], preserveOrder)
+    {
+    }
+
+    /// <param name="tools">The tools the model is offered; for a repeated name the last one wins.</param>
+    /// <param name="hidden">
+    /// Tools that are callable but never offered: they resolve by name and are left out of <see cref="Definitions"/>. A tool the
+    /// model has no business calling yet must still answer if it does - a receipt exchange it copies out of its own history is
+    /// exactly that, and "unknown tool" would teach it nothing.
+    /// </param>
+    /// <param name="preserveOrder">True keeps the order of <paramref name="tools"/> (a repeated name stays at its first position); false sorts by name.</param>
+    public ToolRegistry(IEnumerable<ITool> tools, IEnumerable<ITool> hidden, bool preserveOrder)
     {
         ArgumentNullException.ThrowIfNull(tools);
+        ArgumentNullException.ThrowIfNull(hidden);
+        this.hidden = [.. hidden];
         byName = new Dictionary<string, ITool>(StringComparer.Ordinal);
         var firstSeen = new List<string>();
         foreach (var tool in tools)
@@ -55,6 +70,10 @@ public sealed class ToolRegistry : IToolRegistry
 
         Tools = ordered;
         Definitions = Array.ConvertAll(ordered, static tool => tool.Definition);
+        foreach (var tool in this.hidden)
+        {
+            byName[tool.Definition.Name] = tool;
+        }
     }
 
     public IReadOnlyList<ITool> Tools { get; }
@@ -124,7 +143,7 @@ public sealed class ToolRegistry : IToolRegistry
             }
         }
 
-        return new ToolRegistry(selected, preserveOrder: true);
+        return new ToolRegistry(selected, hidden, preserveOrder: true);
     }
 
     private static bool IsExtensionTool(string name) =>
@@ -179,6 +198,7 @@ internal sealed record ToolSet(int Version, ToolRegistry Tools);
 public sealed class ToolSurface
 {
     private readonly ToolRegistry builtIns;
+    private readonly IReadOnlyList<ITool> hidden;
     private readonly HashSet<string> builtInNames;
     private readonly Lock publishGate = new();
     private ToolSet current;
@@ -187,9 +207,12 @@ public sealed class ToolSurface
     private ITool[] externalOther = [];
     private HashSet<string> disabled = new(StringComparer.Ordinal);
 
-    public ToolSurface(IEnumerable<ITool> builtIns)
+    /// <param name="builtIns">The tools the model is offered.</param>
+    /// <param name="hidden">Tools that are callable but never offered to the model (see <see cref="ToolRegistry"/>).</param>
+    public ToolSurface(IEnumerable<ITool> builtIns, IEnumerable<ITool>? hidden = null)
     {
         ArgumentNullException.ThrowIfNull(builtIns);
+        this.hidden = hidden is null ? [] : [.. hidden];
         builtInNames = new HashSet<string>(StringComparer.Ordinal);
         var list = new List<ITool>();
         foreach (var tool in builtIns)
@@ -201,7 +224,7 @@ public sealed class ToolSurface
             }
         }
 
-        this.builtIns = new ToolRegistry(list, preserveOrder: true);
+        this.builtIns = new ToolRegistry(list, this.hidden, preserveOrder: true);
         current = new ToolSet(0, this.builtIns);
     }
 
@@ -315,7 +338,7 @@ public sealed class ToolSurface
         AddEnabled(merged, sortedByName: false, builtIns.Tools, externalFixed);
         AddEnabled(merged, sortedByName: true, externalConditional);
         AddEnabled(merged, sortedByName: true, externalOther);
-        Volatile.Write(ref current, new ToolSet(unchecked(current.Version + 1), new ToolRegistry(merged, preserveOrder: true)));
+        Volatile.Write(ref current, new ToolSet(unchecked(current.Version + 1), new ToolRegistry(merged, hidden, preserveOrder: true)));
     }
 
     /// <summary>

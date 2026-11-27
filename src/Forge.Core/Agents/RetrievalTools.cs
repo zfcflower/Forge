@@ -168,7 +168,7 @@ public sealed class ReadHistoryTool : ITool
     private const int MaxOutputChars = 200_000;
 
     private const string SchemaJson =
-        """{"type":"object","properties":{"from_seq":{"type":"integer","description":"First sequence number to read."},"to_seq":{"type":"integer","description":"Last sequence number to read; defaults to the newest message."}},"required":["from_seq"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"from_seq":{"type":"integer","description":"First sequence number to read: the first number of a receipt line's seq= range."},"to_seq":{"type":"integer","description":"Last sequence number to read; defaults to the newest message."}},"required":["from_seq"],"additionalProperties":false}""";
 
     private readonly ISessionStore store;
 
@@ -180,9 +180,9 @@ public sealed class ReadHistoryTool : ITool
 
     public ToolDefinition Definition { get; } = new(
         Name,
-        "Read earlier messages back by sequence range: the ones no longer in the context, compressed into a summary or cut down " +
-        "to a receipt. Sequence numbers come from search_history or from a receipt line. The recent conversation is already in " +
-        "the context - do not replay it.",
+        "Read earlier messages back by sequence range: the ones no longer in the context, folded or cut down to a receipt. " +
+        "Sequence numbers come from a receipt line's seq= or from search_history. The recent conversation is already in the " +
+        "context - do not replay it.",
         SchemaJson);
 
     public ToolSideEffect SideEffect => ToolSideEffect.ReadOnly;

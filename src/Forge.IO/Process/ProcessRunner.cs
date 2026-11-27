@@ -125,9 +125,13 @@ public sealed class ProcessRunner : IProcessRunner
             using var killOnCancel = linked.Token.Register(static state => TryKill((Process)state!), process);
 
             var killed = false;
+            ProcessExitStatus? status = null;
             try
             {
-                await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
+                // The handle, not the Process, is what reports the signal on POSIX: an exit code alone cannot tell a
+                // SIGKILL from a program that exited with 137. Cancellation is the same as before - the registration above
+                // has already killed the tree by the time this throws.
+                status = await process.SafeHandle.WaitForExitAsync(linked.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -140,7 +144,7 @@ public sealed class ProcessRunner : IProcessRunner
             {
                 // Wait until the exit is really visible; the tree kill was already requested above.
                 TryKill(process);
-                await WaitForExitQuietlyAsync(process, ExitGrace).ConfigureAwait(false);
+                status = await WaitForExitQuietlyAsync(process, ExitGrace).ConfigureAwait(false) ?? status;
             }
 
             // A child that leaves a grandchild holding the pipe keeps stdout open past its own exit; the grace period is
@@ -162,7 +166,7 @@ public sealed class ProcessRunner : IProcessRunner
                 // The caller's cancellation wins over the timeout: after the tree is gone the call is simply cancelled.
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var exitCode = ExitCodeOf(process);
+                var exitCode = status?.ExitCode ?? ExitCodeOf(process);
                 return new ProcessResult(
                     exitCode,
                     capturedOut.Text,
@@ -172,7 +176,8 @@ public sealed class ProcessRunner : IProcessRunner
                     capturedOut.Truncated,
                     capturedError.Truncated,
                     killed ? ProcessEndReason.TimedOut : ProcessEndReason.Exited,
-                    stopwatch.Elapsed);
+                    stopwatch.Elapsed,
+                    status?.Signal);
             }
             finally
             {
@@ -323,18 +328,17 @@ public sealed class ProcessRunner : IProcessRunner
         }
     }
 
-    private static async Task WaitForExitQuietlyAsync(Process process, TimeSpan grace)
+    private static async Task<ProcessExitStatus?> WaitForExitQuietlyAsync(Process process, TimeSpan grace)
     {
+        using var bounded = new CancellationTokenSource(grace);
         try
         {
-            await process.WaitForExitAsync(CancellationToken.None).WaitAsync(grace).ConfigureAwait(false);
+            return await process.SafeHandle.WaitForExitAsync(bounded.Token).ConfigureAwait(false);
         }
-        catch (TimeoutException)
+        catch (Exception exception) when (exception is OperationCanceledException or InvalidOperationException or ObjectDisposedException)
         {
-        }
-        catch (InvalidOperationException)
-        {
-            // The process never started or has been disposed; there is nothing left to wait for.
+            // Still running after the grace period, or never started / already disposed: the caller reports what it has.
+            return null;
         }
     }
 

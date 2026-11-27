@@ -135,6 +135,13 @@ public sealed class StdioTransport : IMcpTransport
             StandardErrorEncoding = Utf8,
         };
 
+        // A Forge that dies without unwinding (a crash, Task Manager, kill -9) must not leave the server behind: the OS
+        // reclaims it. macOS has no parent-death equivalent, so a crash there still leaves it running.
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+        {
+            startInfo.KillOnParentExit = true;
+        }
+
         foreach (var argument in options.Args)
         {
             startInfo.ArgumentList.Add(argument);

@@ -23,6 +23,7 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 
 **每家厂商的缓存旋钮各按它的文档给(`ProviderCacheWiring`)。** 缓存策略不可移植:Anthropic 是显式断点 + 寿命,OpenAI 是 `prompt_cache_key` 路由 + `prompt_cache_retention`(`in_memory`/`24h`,由 `CacheHint.Ttl` 映射,`5m`→`in_memory`,其余→`24h`),xAI 只认 `x-grok-conv-id`(自动缓存加命中率),**GitHub Copilot 的缓存按 `X-Interaction-Id` 分桶**——不填这个头(或填空)的客户端在它服务的那批 Claude 模型上几乎拿不到缓存命中,所以 `CacheWiring.Copilot` 会把路由键(会话 lineage 根)发过去;它和 `Copilot-Integration-Id` 是两回事,后者决定配额桶与模型白名单(适配器本来就发)。
   - 两个缓存头都取 `CacheRoutingKey ?? SessionId`,所以交接/分叉之后仍然命同一批条目;降级后一律不发。
+  - **默认发,按端点自愈(2026-11-27)**:`prompt_cache_key` 与 `prompt_cache_retention` 现在对兼容与 Responses 协议**默认发送**(提供商条目写 `sendPromptCacheKey: false` 才关),不再按 host 名单挑厂商——实测 DeepSeek 与 opencode 网关都接受这两个字段(200),拒绝的一端由一次性降级记住并此后不发。DeepSeek 的旧注释("它拒未知字段")是厂商文档误读,实测已纠正为"接受但无效果"。
   - 另注意 Copilot 的 OpenAI 兼容面会把缓存写入摊进 `prompt_tokens`、只在 `prompt_tokens_details.cached_tokens` 报读取,所以那里的成本读数会把写入按普通输入价计——字段不存在,我们不做估算。
   - DeepSeek/Kimi/Meta/OpenRouter/自定义只有自动前缀缓存、没有任何请求级旋钮。
   - 于是预设携带 `CacheWiring`,只有声明了的那家才被发对应字段;DeepSeek 无论选项如何都不发(它按前缀自动缓存,且拒未知字段);用户仍可用 `provider.sendPromptCacheKey` 给接受该字段的网关打开路由键。
@@ -30,13 +31,13 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
   - 实测(2026-11-18):DeepSeek 的 Responses 端点接受并忽略这两个字段与任意未知字段、用量里 `input_tokens_details.cached_tokens` 能被正确读到,所以降级路径只由桩测试覆盖,未对真实的严格网关验证。
   - 被 400 拒的旋钮走与 Anthropic 同一条一次性降级路径(共享 `ProviderDegradations` 记忆:降级一次、记住这个端点、以 `MessageCompleted.Notice` 告知用户;该记忆 1 小时后过期再试完整形状,因为键里没有模型名,某个模型的拒绝不应让同网关的其它模型永久退回精简形状)。
 
-**缓存纪律。** 请求的系统提示词只含稳定前缀(系统 → 全局 Agent → 项目 Agent → 角色,字节稳定);工具定义分三段、顺序固定且同类 Agent 一致:内置固定段按**声明顺序**(Core 自己的工具在前,宿主永远在场的工具在后:`read`、`write`、`edit`、`ls`、`find`、`grep`、`copy`、`move`、`delete`,shell 工具 `bash` 排在这些文件操作之后) → 内置条件段(按名称排序;`ask_user`/`set_title` 由宿主能力决定,`request_review`/git/PR/spec 等按会话条件决定) → 外部段(MCP/插件,按名称排序);外部工具的增减只改尾部、不动前两段字节;动态信息只作为末尾的一条临时 user 消息,正文两端带 `<forge-context>`/`</forge-context>` 标记(不落库、不进历史)。**这段头部对所有提供商是同一份字节,任何厂商适配都不许写进它**:各家缓存策略不同(Anthropic 是显式断点 + TTL,OpenAI 兼容是自动前缀缓存加路由键,再往后的厂商又是别的),所以能共享的只有头部本身;`ProviderConfig.SystemPromptPreamble`(Claude 的身份句)与 billing 块只在 `AnthropicProvider` 里加、只在 `Wire` 生效时加,不进 `ComposedPrompt.StablePrefix`,也不进 `PromptFingerprint`——否则切换开关会顺带改掉会话的缓存/回放身份。这是一条回归契约(头部不含厂商身份、指纹与开关无关、断言行数不变、别家适配器拿不到身份块)。缓存断点落在已持久化历史的倒数第二条。压缩只追加一条新的会话级摘要并把切点前的原文替换成摘要视图,切点后的近期原文(至少 keepRecent)与继承前缀逐字节不变。
+**缓存纪律。** 请求的系统提示词只含稳定前缀(系统 → 全局 Agent → 项目 Agent → 角色,字节稳定);工具定义分三段、顺序固定且同类 Agent 一致:内置固定段按**声明顺序**(Core 自己的工具在前,宿主永远在场的工具在后:`read`、`write`、`edit`、`ls`、`find`、`grep`、`copy`、`move`、`delete`,shell 工具 `bash` 排在这些文件操作之后) → 内置条件段(按名称排序;`ask_user`/`set_title` 由宿主能力决定,`request_review`/git/PR/spec 等按会话条件决定) → 外部段(MCP/插件,按名称排序);外部工具的增减只改尾部、不动前两段字节;动态信息只作为末尾的一条临时 user 消息,正文两端带 `<forge-context>`/`</forge-context>` 标记(不落库、不进历史),**它前面永远压着一条固定的 assistant 承载消息**(`AgentLoop.ContextCarrier`,同样是固定字节)——见「缓存的实测事实」里为什么它必须独占一块。**这段头部对所有提供商是同一份字节,任何厂商适配都不许写进它**:各家缓存策略不同(Anthropic 是显式断点 + TTL,OpenAI 兼容是自动前缀缓存加路由键,再往后的厂商又是别的),所以能共享的只有头部本身;`ProviderConfig.SystemPromptPreamble`(Claude 的身份句)与 billing 块只在 `AnthropicProvider` 里加、只在 `Wire` 生效时加,不进 `ComposedPrompt.StablePrefix`,也不进 `PromptFingerprint`——否则切换开关会顺带改掉会话的缓存/回放身份。这是一条回归契约(头部不含厂商身份、指纹与开关无关、断言行数不变、别家适配器拿不到身份块)。缓存断点落在已持久化历史的倒数第二条。压缩只追加一条新的会话级摘要并把切点前的原文替换成摘要视图,切点后的近期原文(至少 keepRecent)与继承前缀逐字节不变。
 
 ### Agent 循环与工具面
 
 **可选字符串的空白等于省略。** 每个工具的可选字符串参数里,缺省、`null` 与空白一律按“没给”读,取 schema 自己写的默认值——模型常把没用到的可选字段填成 `""` 而不是省略它,把空串当输入只让它白丢一回合,并收到一句 .NET 参数守卫的原话(点名内部形参、不给下一步)。落在各模块:`Forge.IO` 的 `path`/`workdir`/`glob`/`pattern` 走 `ToolJson.OptionalPath`,Core 的 `spawn_agent.resume_id` 与 `todo` 的 `after_id`/`title` 走 `JsonArguments.OptionalText`,`git_diff.base`/`git_fetch.remote`/`git_log.revision`/`git_sync.onto`·`remote`/`pr_create.base`·`body`/`screenshot.base`/`spec_graph.direction`·`edge` 在各自读取处归一。**例外只能本身就是有意义的空值**:`edit.new_string`、`write.content`(空串 = 删除/空文件)与 `todo.update` 的 `note`/`summary`/`commit_subject`/`verification`(空串 = 清除)——这些绝不能归一。
 
-**循环。** 流式一轮 → 审批 → 执行 → 回写。连续只读工具并发,有副作用工具依序逐个执行;结果按调用顺序写成一条 Tool 消息。取消时每个待决调用都补一条"已取消"结果,保证历史始终合法。超长工具输出(>32,000 字符)转存 Artifact,上下文里留“头+尾”预览和 id;已自限长度的工具(`IBoundedOutputTool`:read/ls/find/grep)与 `read_artifact` 不再转存。bounded 工具的输出不经 spill,由上下文裁剪级在判定线处回收:越过触发线(或回合内的紧急线)时(`AgentLoop.CompactIfNeededAsync` 的裁剪分支)把 keepRecent 窗口之外的旧 `ToolResultBlock` 换成收据(`ContextReceipt` 一行,固定部分永不截断:`read_history <seq>` 是找回入口,只缩路径/命令段;错误结果、短于 512 字符的结果、纯收据块不再动,所以投影是定点);继承前缀一条不碰,keepRecent 窗口内不碰;收据总长与留头留尾受常量对约束(96/150/150,之和加标记余量 < 512);裁剪目标取触发线与摘要目标的中点(推导值,零新参数)。裁剪零模型成本:降到判定线下即发 `AgentContextReduced`(随后的 `AgentContextMeasured` 报判定线——回合首请求为触发线、回合内为紧急线)并复位迟滞,仍超线才走摘要。`read_history` 是该收据的唯一找回入口,所以它不设低上限:输出 200,000 字符封顶,越 32,000 字符照旧落 Artifact、按 `read_artifact` 的 `offset`/`length` 分片读回(收到 32,000 以下会让 >32k 的原文永久不可读——它只有 `from_seq`/`to_seq`,"narrow the range" 切不开单条消息);描述写明它只用于回取**已不在上下文里**的原文,近期对话直接读上下文、不要回放。
+**循环。** 流式一轮 → 审批 → 执行 → 回写。连续只读工具并发,有副作用工具依序逐个执行;结果按调用顺序写成一条 Tool 消息。取消时每个待决调用都补一条"已取消"结果,保证历史始终合法。超长工具输出(>32,000 字符)转存 Artifact,上下文里留“头+尾”预览和 id;已自限长度的工具(`IBoundedOutputTool`:read/ls/find/grep)与 `read_artifact` 不再转存。超长工具输出只搬文本，图片随结果留下；`read_history` 仍是回取原始消息的入口（输出 200,000 字符封顶，越 32,000 字符落 Artifact、按 `read_artifact` 的 `offset`/`length` 分片读回）。旧版在这条路径上的"裁剪级"（把旧工具输出换成收据）已随托管上下文删除：跨轮上下文里不再有工具结果，收据也没有对象可裁；回合内的交换逐字保留，不裁。
 
 **SubAgent。** `spawn_agent` 拒绝没有 `tools` 列表的 Agent(否则它会拿到全部工具):返回错误,提示模型用 `ask_user` 让用户选角色并给出推荐清单,agent 文件改动从下个会话起生效(Agent 种类是每次建 host 的快照);内置 Scout/Worker/Plan/Reviewer 自带清单。Scout/Worker/Plan 的清单含 `web_search`/`web_fetch`(无可用搜索后端时 `web_search` 本就不注册;两者只读、免问),Reviewer 不含——它只判仓库内的变更,抓来的网页是不可信输入,不得进结论。
 - **四个内置 Agent 都能用 `run_code`(2026-11-25),但子 Agent 的脚本只能调只读工具。** 白名单各自加上 `run_code`,与它们原有的只读侦察/实现/规划/评审职责一致:扇出阅读后返回一份小报告,正是脚本唯一比直连省回合的形状。**权限不放大的落点不在白名单而在脚本面**:可调集 = **调用者持有 ∩ 脚本面**(`ToolContext.Tools`,即该 Agent 的白名单叠加用户开关),`Tools.List()`/`Tools.Describe()` 因此只列出它真能调的那些;`Tools` 为 null 时一律为空。提示词里对每个 Agent 点名“脚本只能调它持有的只读工具,`bash`/`edit`/`write`/`git` 永远不可调”,因为持有 `bash` 的 Worker 会照字面去试而白烧一个回合。按副作用过滤是不对的:Reviewer 的白名单刻意不含 web 工具(抓来的网页是不可信输入),而 `web_fetch` 是只读的,按只读放行等于把它的白名单绕过。调用者不是 agent loop(`Tools` 为 null:插件桥、工作流步、测试)时一律为空(fail closed),不留第二套规则。脚本面本身不含 `bash`/`write`/`edit`/git/PR,所以 `Reviewer` 的脚本也调不到 `git_diff`(它仍以直连方式用)。
@@ -130,7 +131,7 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 
 **forge.db 版本阶梯。** v5 的归档与通知写入在同一个事务里:一次注入的失败(通知写入缺列)回滚到 v4、两条会话都还是 Active、`occupancy_key` 也随 DDL 一起消失,去掉障碍后同一步可重跑并爬到 v9。
   - `PRAGMA user_version` 是唯一权威(0 = 无标记旧库,1 = 工作台表,2 = `todos` 加 `commit_subject`/`summary`/`verification`/`commit_id`/`commit_error` 五列 + 新表 `plan_summaries(session_id PK, text, updated_at)`;3 = 一次性规范化历史时间戳,并为每个时间戳列装写守卫;4 = `todo_groups(id PK, session_id, title, order_index, updated_at)` 与 `todos.group_id`/`todos.origin` 两列,旧行的 `group_id` 保持 NULL 即待排区、`origin` 默认 `agent`,无需回写;5–10 见下两段;11 = `plan_summary_revisions(id 自增 PK, session_id, text, replaced_at)` + `ix_plan_summary_revisions_session(session_id, id DESC)` 索引,无回填,写守卫覆盖新表的 `replaced_at`;12 = `sessions.title_source TEXT`,无回填——NULL 就是“仍是创建默认标题”,见「会话标题来源」;13 = `turn_metrics.effort TEXT NULL`,每轮跑的推理档(小写 `off`…`max`,与 `settings.json`/`composer.json` 同一套名字),旧行 NULL 即未知、不回填;14 = 版本号直跳、**无结构步骤**:`last_seq INTEGER NULL` 直接改入 V1 建表脚本(转录重放的精确配对键,见 forge-app),case 13 只是把版本号爬到 14(fresh 库逐级爬梯必经此级;未投产不设 ALTER——旧 13 号开发库无声跳到 14 后缺列,由记录器形状探针把特性旁路,重建库即恢复全部功能)。
-  - `turn_metrics` 的表由 V1 建表脚本直带、表本身不进阶梯;新列 13 号走步骤只在表存在时 `ALTER`(表不存在就什么都不做,整条特性仍旁路,见「工作台存储」),14 号起未投产即不再积累升级步骤——新列直接改建表脚本、版本号照跳。侧表 `sub_agent_state`(子 Agent 重启续跑用)不进阶梯也不改版本号:它的 `CREATE TABLE IF NOT EXISTS` 在每次打开库时幂等执行(`StorageSchema.EnsureSubAgentStateAsync`),旧开发库无声得到该表;`finished_at` 登记进 `TimestampColumns` 并由这个创建点自己装规范化与写守卫(`EnsureOwnedTimestampsAsync`,与 `artifacts` 同一做法——阶梯装守卫时它还不存在)。
+  - `turn_metrics` 的表由 V1 建表脚本直带、表本身不进阶梯;新列 13 号走步骤只在表存在时 `ALTER`(表不存在就什么都不做,整条特性仍旁路,见「工作台存储」),14 号起未投产即不再积累升级步骤——新列直接改建表脚本、版本号照跳。**16 号步骤建出 `turn_ledger` 与它的全文索引**（17 号步骤补 `folded` 列，见「托管上下文与确定性折叠」；18、19 号步骤先后去掉 `outcome` 与 `unresolved`/`next_action`/`validation_detail` 三列，都是空级跳——列原本可空、无读写者）(见「Turn Ledger」):INSERT OR IGNORE 的 pending 行 + 原地 settle,`(session_id, turn_sequence)` 主键,新建表所以不需要回填。侧表 `sub_agent_state`(子 Agent 重启续跑用)不进阶梯也不改版本号:它的 `CREATE TABLE IF NOT EXISTS` 在每次打开库时幂等执行(`StorageSchema.EnsureSubAgentStateAsync`),旧开发库无声得到该表;`finished_at` 登记进 `TimestampColumns` 并由这个创建点自己装规范化与写守卫(`EnsureOwnedTimestampsAsync`,与 `artifacts` 同一做法——阶梯装守卫时它还不存在)。
   - 每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写入版本号,事务内重读版本防止多进程重复迁移;读到更高版本立即 `InvalidDataException`,不降级不写库。
   - 旧会话回填 Active 与最后活动 = 创建时间(严格解析,失败整步回滚)。
   - 排序用 `last_active_ticks`(UTC ticks)而非 ISO 文本。
@@ -156,62 +157,73 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
   - 检查点以 (session, turn) 为主键,已完成轮次不被再次 Begin 改写。
   - `synchronous=NORMAL`:这些是体验数据,丢失不影响安全(审批库用 FULL)。
 
-**会话生命周期与工作区占用(v5–v9)。** 状态 `Active`/`Archived`/`Deleted`。占用键 `occupancy_key` = `OccupancyKey.Compute(worktree_path, workspace_path)`(`Path.GetFullPath` + 去尾分隔符,Windows 再大写;与 `WorkspacePath.Normalize` 同语义),由存储层在每次写路径时计算,调用方不传;部分唯一索引 `ux_sessions_occupancy`(`status='Active' AND parent_session_id IS NULL`)保证一个工作区同一时刻一个活动根会话,冲突映射为 `WorktreeOccupiedException(HolderSessionId)`。App 内把会话置 `Active` 只走条件插入、`ActivateAsync`、`HandoverAsync`;`SetStatusAsync` 是只受索引把关的原始写入。v5 迁移逐行在 C# 回填键,按键去重(保留 `last_active_ticks` 最大者,平局按 id 大者),被归档者写进 `storage_notices`(`dedupe-archived`);v6 `deleted_at`,v7 `projects.closed_at`(软关闭,`AddAsync` 同路径复活原 id),v8 `fork_of_branch`/`fork_base_sha`,v9 `lineage_root_id`(回填为自身)/`origin_kind`(回填 `cold`)/`prefix_fingerprint`(继承两列曾在这一步加入,v15 删掉);v15 删 `inherits_from_session_id`/`inherits_up_to_seq` 与 `ix_sessions_inherits`,并把 `origin_kind='full'` 折回 `cold`——完整继承整个能力取消。当前版本 15。
+**会话生命周期与工作区占用(v5–v9)。** 状态 `Active`/`Archived`/`Deleted`。占用键 `occupancy_key` = `OccupancyKey.Compute(worktree_path, workspace_path)`(`Path.GetFullPath` + 去尾分隔符,Windows 再大写;与 `WorkspacePath.Normalize` 同语义),由存储层在每次写路径时计算,调用方不传;部分唯一索引 `ux_sessions_occupancy`(`status='Active' AND parent_session_id IS NULL`)保证一个工作区同一时刻一个活动根会话,冲突映射为 `WorktreeOccupiedException(HolderSessionId)`。App 内把会话置 `Active` 只走条件插入、`ActivateAsync`、`HandoverAsync`;`SetStatusAsync` 是只受索引把关的原始写入。v5 迁移逐行在 C# 回填键,按键去重(保留 `last_active_ticks` 最大者,平局按 id 大者),被归档者写进 `storage_notices`(`dedupe-archived`);v6 `deleted_at`,v7 `projects.closed_at`(软关闭,`AddAsync` 同路径复活原 id),v8 `fork_of_branch`/`fork_base_sha`,v9 `lineage_root_id`(回填为自身)/`origin_kind`(回填 `cold`)/`prefix_fingerprint`(继承两列曾在这一步加入,v15 删掉);v15 删 `inherits_from_session_id`/`inherits_up_to_seq` 与 `ix_sessions_inherits`,并把 `origin_kind='full'` 折回 `cold`——完整继承整个能力取消。当前版本 20。
 
 **写入不连坐。** 会话写队列一个批次一个 `BEGIN IMMEDIATE` 事务,**可能业务冲突的操作**(`UsesSavepoint`,如占用冲突)包在 `SAVEPOINT forge_op` 里:单个操作冲突只回滚到自己的保存点并以异常交还调用方,同批其它操作照常提交;其余操作(Append/PutSummary 等)不包保存点,失败仍连坐整批。
   - `HandoverAsync` 单事务:先条件归档旧会话(受影响行 ≠ 1 抛 `SessionNotActiveException`),再条件插入新会话(继承 `fork_*`/`lineage_root_id`,同事务写 `InitialMessages`,按开关复制 todos / todo_groups / plan_summaries)或恢复目标会话(只改状态),接手会话成为 root 后,旧 root 与该分支旧库残留的非 Active root 行一律降级为它名下的归档 Agent 会话、其 Agent 家族(含归档/已移除)一并改挂(新建路径 `AdoptPriorRoots` 直接扫,恢复路径随 `ActivateAsync` 同规则)——旧 root 留着 root 行会让「历史」组列出多个 root 会话,违背分支一根规则(2026-02 用户复报);任一步失败整体回滚。
   - `SoftDeleteAsync` 级联子会话;`PurgeAsync` 删 `Archived` / `Deleted` 会话(拒绝 `Active`,先归档)及其子会话在 forge.db 内所有以 `session_id` 为键的行(两张搜索表 `messages_fts`/`messages_text` 各按存在性清理;无 FTS5 模块的构建只清 `messages_text`,它清不到的 `messages_fts` 残留行由下一个能读该索引的构建按 `messages` 反向修剪),没有任何继承守卫(完整继承取消后不存在继承者)。常规查询排除 `Deleted`,`ListHistoryAsync` 包含之。
   - `HealMissingDirectoriesAsync` 把目录缺失而项目根仍在的 `Active`/`Archived` 根会话(级联)置 `Deleted`,写 `heal-deleted` 通知(只列根 id);`ReadNoticesAsync`/`AcknowledgeNoticesAsync` 供 App 启动时通知一次。
 
-**会话上下文与提供商缓存。** `SessionHistory.LoadAsync` 只读本会话自己的“摘要视图 + 尾部”(与 `ResumeRootAsync` 同一裁剪函数);上下文没有跨会话引用——接手/分叉只有摘要或空白两种起步,摘要经 `HandoverSummary.GenerateAsync`(交接专用提示词,不复用压缩器)生成一条用户消息。压缩只摘要本会话自己的消息。每次合成后计算 system + tools 的 `PromptFingerprint`,仅变化时写回 `prefix_fingerprint`。`ChatRequest.CacheRoutingKey` = `lineage_root_id`:OpenAI 兼容按 `ProviderOptions.SendPromptCacheKey`(`settings.json` 的 `provider.sendPromptCacheKey`,默认关)发 `prompt_cache_key`,DeepSeek 一律不发;DeepSeek 用量 `prompt_cache_hit_tokens` 计缓存读取(与 `cached_tokens` 同时出现时以后者为准)。每会话首个请求的缓存用量连同 `origin_kind`、提供商、模型写一条诊断日志。`AgentOptions.CacheTtl`(`provider.promptCacheTtl`)经 `AgentLoop.ResolveCacheTtl` 填进 `CacheHint.Ttl`,Anthropic 适配器遵循它(`5m`/`1h` 直用、`auto`/null 按 `CacheTtlPromotionGap` 自动升档,见「官方身份」)。
+**会话上下文与提供商缓存。** `SessionHistory.LoadAsync` 读的是**托管上下文**(见「托管上下文与确定性折叠」):折叠块 + 每个已结算轮一条 entry + 最后一条 entry 之后仍存着的 user 消息(空闲期送达的回执/插话),与 `ResumeRootAsync` 走同一渲染器,所以重开标签与同一进程看到同一份历史。没有 ledger 行的会话退回旧的「摘要视图 + 尾部」。上下文没有跨会话引用——接手/分叉只有摘要或空白两种起步,摘要经 `HandoverSummary.GenerateAsync`(交接专用提示词)生成一条用户消息。每次合成后计算 system + tools 的 `PromptFingerprint`,仅变化时写回 `prefix_fingerprint`。`ChatRequest.CacheRoutingKey` = `lineage_root_id`,兼容/Responses 协议**默认**把它写成 `prompt_cache_key` 并附 `prompt_cache_retention`(提供商条目写 `sendPromptCacheKey: false` 才关,拒绝的端点由一次性降级记住);DeepSeek 的用量用 `prompt_cache_hit_tokens` 计缓存读取(与 `cached_tokens` 同时出现时以后者为准)。每会话首个请求的缓存用量连同 `origin_kind`、提供商、模型写一条诊断日志。`AgentOptions.CacheTtl`(`provider.promptCacheTtl`)经 `AgentLoop.ResolveCacheTtl` 填进 `CacheHint.Ttl`,Anthropic 适配器遵循它(`5m`/`1h` 直用、`auto`/null 按 `CacheTtlPromotionGap` 自动升档,见「官方身份」)。
 
-### 上下文压缩
+### 托管上下文与确定性折叠
 
-**压缩触发(`CompactionPolicy`)。** 以实例自身模型的上下文窗口 W 为基准,不再用绝对 token 阈值。
-  - 预留输出 R 取请求真正携带的输出上限:`WireMaxOutputTokens` 有值时就取它(不夹 0.2W——夹了正是让触发线越过真实输入上限的原因,`0.85·(W−R)` 必须始终低于 `W−wireMax`),否则取 min(maxOut, ⌊0.2W⌋)(maxOut 未知时取 ⌊0.2W⌋),再一律抬到至少 min(4096, W/2);可用预算 U = W − R,`R ≥ W`(输出上限填满整个窗口)时没有可用预算,不自动压缩(溢出兜底仍在)。
-  - 触发线 ⌊U·TriggerRatio⌋(默认 0.85),同回合内的紧急线 ⌊U·EmergencyRatio⌋(默认 0.95),目标 max(1, ⌊U·TargetRatio⌋)(默认 0.5),再生长量 ⌊0.1U⌋。
-  - 两条线的分工:回合的**第一个**模型请求前用触发线判断(此时上下文是上一回合留下的,压掉不影响本回合证据);同一回合后续请求只用紧急线,除非接近窗口否则不压——所以一个回合不会把自己正在收集的工具结果压掉。
-  - `Compaction.Validate()` 要求 0 < target < trigger < emergency ≤ 1。
-  - maxOut 取 `model.MaxOutputTokens`,否则取解析器(解析器在 App 侧按「模型目录 `limit.output` → provider 上报 → `modelMeta[模型].maxOutputTokens` → 提供商级 `providers[].maxOutputTokens`」解析;全未知则 R = ⌊0.2W⌋);窗口、maxOut 与线上的真实输出上限都由 `CompactionPolicy` 的解析器给出(App 接模型目录),解析器抛异常按未知处理。
-  - `WireMaxOutputTokens` 回答的是「这个请求实际会写进 `max_tokens` 的数字」:只有 Anthropic 协议总是带一个(它自己的 8192 默认,或 thinking 预算达到它时抬到的 `预算 + 4096`,见 `Providers/OutputCeiling`),兼容与 Responses 协议不 pin 就不发,所以那里没有图数、按 maxOut 那条走。
-  - 适配器与预算共用 `OutputCeiling.Wire` 这一份规则,任何一方改动都必须让另一方跟上——否则预留与实际参数会再次分岔。
-  - 当前上下文 C:模型 key 与历史版本都与上次请求一致时,C = 上次真实 `InputTokens`(各适配器已含缓存读写,不再重复相加)+ 此后新增消息的估算;否则 C = 历史全量估算 + 稳定前缀 + 本实例可见工具定义的估算(每个定义按名称、描述、参数 schema 计数另加 8 token;按工具集发布版本缓存在实例上,版本不变时不重算、不分配)。
-  - 调摘要器之前先算不可压缩下界 `floor = 继承前缀 + 稳定前缀 + 工具定义 + min(keepRecent, 自有消息)`(摘要按 0 计:它总能被重写得更小,把它算成下界会让本可奏效的实例提前放弃);`floor ≥ 本次实际使用的线`(新回合 τ、同回合 ε)时不调摘要器,直接标记 Stalled 并发一次 `AgentCompactionStalled(Reason=Irreducible)`——那种情况下摘要不可能把 C 降到线下。
-  - `floor > 目标` 但低于线时照常压缩,目标达不到不是放弃的理由。
-  - 迟滞:一次摘要后 C 仍不低于触发线即为“无效尝试”,下一次要等实例自有(非继承)内容再长 0.1U;连续两次无效后标记 Stalled 并发一次 `AgentCompactionStalled(Reason=Ineffective)`,直到手动压缩、换模型或一次把 C 带回线下的裁剪。
-  - 两个原因分开:Irreducible 与 Ineffective 都能由换模型、手动压缩或一次把 C 带回线下的裁剪解除;Irreducible 另可在记录的判定线抬高或工具定义 token 变小时自动重试,Ineffective 不因这两项数值变化自动重试。
-  - 阻断时的线与工具定义 token 记在实例上,只有它们真的变了才重算,所以被阻断的实例不会每轮重发通知。
-  - 策略关闭、压缩器为 `NoopCompactor`、W 未知时两级都不动;Stalled 只停摘要级,裁剪级照跑(见「循环」段的裁剪级:先裁后摘要,仍超线才调摘要器);子 Agent 各按自己的模型窗口计算。
-  - 保留量 keepRecent 默认 max(1, min(20000, ⌊0.2U⌋));策略上的 `KeepRecentTokens` 有值时取它(夹到 [min(1000, U), U/2]),经 `CompactionRequest` 传给压缩器;自动与溢出路径再把它夹到不超过目标的一半,保证仍能压到目标。
-  - 切分规则:目标原文量 goal = max(keepRecent, 目标 − 继承前缀 − 现有摘要),保留不超过 goal 的最长合法后缀;一条都放不下时只留最新的合法切点之后的部分。
-  - 消息按整条保留,所以单条消息跨越边界时实际保留量可能低于 keepRecent。
-  - `AgentHost` 构造时 `Compaction.Validate()` 拒绝非法比例。
-  - `AgentOptions.Compaction` 只是初始策略:`AgentHost.SetCompactionPolicy(policy)` 先校验(非法抛异常、原策略保留),再以 volatile 写替换生效策略(`AgentHost.CompactionPolicy` 读出),根与全部子 Agent 共用;循环在每次模型请求前、溢出兜底与手动压缩时各读一次,所以正在跑的回合从下一次请求起按新策略判断。
-  - 替换不改请求内容、不重置迟滞与上次提示词大小,提示词缓存不受影响。
-  - **上下文读数**:每次模型请求落盘后、每次自动/溢出/手动压缩(`AgentCompacted` 之后)各发一条 `AgentContextMeasured(AgentId, ContextTokens, UsableTokens, TriggerTokens)`;同一条事件还带 `Usage` = 该实例此刻的累计用量(在该请求自身的用量加到计数器之后取值;裁剪/压缩这类不新增开销的测量报当时已有的数,读者差分即为零),外壳据此按自己的基线差分,所以用量统计能在一个回合内逐请求更新而不是等回合结束;`AgentTurnCompleted.Usage` 仍是同一计数器的轮末读数,两者按差分衔接、不重复计——C 即上文的当前上下文,U 与触发线按当时生效的策略计算,W 未知时两者为 null;手动压缩只在传了 sink 且确有压缩时发。
+**模型的历史区就是托管上下文。** 请求里的历史部分不是 `messages` 表的累加，而是每轮一条 entry 的累加，且**一条 entry 是三条消息**：任务文本发 `user`（`ManagedContext.RenderTask`，原样不截断），回复发 `assistant`（`ManagedContext.RenderReply`，原样、前面不加任何标题或粗体标签），收据发 `tool`——一个 synthetic 的 `evidence_receipt` 调用（参数只有 `turn`）加它的结果（`ManagedContext.RenderReceipt` 的 JSON）。
 
-**上下文溢出兜底。** `ProviderErrors.IsContextOverflow` 判定溢出(显式 Data 标记或 413;否则按短语匹配,但可重试错误与 429 一律不算)。仅当流里尚未收到任何内容时:强制压缩一次(目标 min(C·TargetRatio, 预算目标)),再重发一次(keepRecent 按预算计算,W 未知时取 20000,同样夹到目标一半以内);第二次溢出或压缩没腾出空间时以原错误失败。W 未知时也生效;策略关闭或 Noop 压缩器时不生效。
+**为什么收据走 `tool`。** entry 里出现什么形状，模型就照着抄什么：实测两轮，先是它把 `**Conclusion**: … **Evidence**:` 抄回去、把 `turn:`/`seq:` 编出来，改成反尖括号的 `<evidence …>` 行之后又照抄那行、`seq` 依然编。`tool` 是协议里**模型写不出来**的角色，收据放在它的结果里结构上不可能被模仿；wire 上与真实工具结果同形（`assistant(tool_calls)` → `tool`），所有适配器不需要改动，网关也接受（2026-11-27 实测）。这条调用不对模型声明（`ToolSurface` 的 dispatch-only 工具：能按名解析、不进 `Definitions`），但**真的实现了**——模型若把它从历史里抄出来调用，拿到的是这一轮真实的收据 JSON（`evidence_receipt`，`turn` 可省 = 最近一轮），而不是"未知工具"。这样一次照抄反而变成一次正确的溯源入口。
 
-**手动压缩。** `AgentHost.CompactAsync(instance, sink, [instructions,] ct)` 以目标 1 压缩、无视触发线与 `Enabled` 开关,并重置迟滞;保留 keepRecent(W 未知时 20000)的近期原文,不再只留最新一条。`instructions` 非空时作为 `
+**收据的键就是工具参数的键。** `{"turn":3,"seq":"9-14","reads":[…],"writes":[…],"specs":[…]}`：`turn` 是 `read_context` 的 `from_turn`，`seq` 是 `read_history` 的 `from_seq`/`to_seq`，`reads`/`writes` 分别是这一轮读过与改过的文件（同一路径只进 `writes`，后续轮要复核的是改动），`specs` 是它碰过的 spec；列表为空时整键省略。列表用复数键名，因为它们本来就可能是多个。账本不再有"校验状态"这类东西（回复是自由格式，没有可校验的形状）；不再有 `[Turn N · …]` 表头，也没有 `# 任务` 标签。`RenderEntry` = 任务 + 回复 + 收据三段的拼接，是 `read_context` 与折叠测量用的唯一整条文本。原始执行照旧存 `messages`（工具结果仍按 32k 阈值转 artifact），只作为证据，不再进跨轮上下文。
 
-Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被拒时抛 `CompactionFailedException`,由调用方显示失败。调用方须保证同一实例没有回合在跑。无会话存储时压缩不生效。
+**轮内不受托管化影响。** 一个回合从第一个请求到最后一个请求，模型看到的都是本回合的真实交换（user、assistant+tool_calls、每个工具结果、插话与 steering），逐字完整：不裁剪、不收据、不摘要。托管上下文只替换**已经结束的轮**的呈现；轮末进入累加历史的只有本轮那两条消息。
 
-**压缩内容(`SummaryCompactor`)。** 系统提示词是 `compaction.summarizer` 槽位(默认 `SummarizerPrompt`),规定结构化检查点格式:Goal / Constraints & Preferences / Progress(Done / In Progress / Blocked)/ Key Decisions / Next Steps / Critical Context。
-  - 待摘要的消息序列化成一条 user 消息:`<conversation>` 内逐条写 `[User]:`、`[Assistant]:`、`[Assistant tool calls]: name(k=v, …)`、`[Tool result]:`(错误结果标 `(error)`),thinking 块不写,工具结果截到 2000 字符并加 `[… N chars truncated]`,图片与文件只写占位。
-  - 首次用初始指令;已有摘要时用 `<previous-summary>` 包住上一份摘要正文(会话摘要在前、旧阶段摘要随后,文件标签已剥离)并用 UPDATE 指令增量更新。
-  - 待摘要范围分批:每个请求的对话文本预算 = (W − min(摘要输出上限, W/2))·0.6 个 token 按 4 字符/token 折算,再扣系统提示词、上一份摘要、指令与焦点的长度,夹在 [4000, 400000] 字符之间(W 未知时取 400000);以“一条 user/assistant 消息 + 其后的工具结果”为不可拆单元贪心装批,工具调用与其结果绝不分开;单个单元超过预算时从中间截断并插入 `[… N chars omitted …]`。
-  - 第一批用初始(或已有摘要时的 UPDATE)指令,之后每批都用 UPDATE 指令、以上一批的输出作 `<previous-summary>`,最后一批的输出即历史摘要;不再有静默丢弃。
-  - 文件追踪(`CompactionFiles`):`read` 记路径**与它实际显示的行范围**——取回答里 `Shown lines X–Y`(被截断)或首行 `path: N lines`(从 `offset` 起算),**不取请求的 limit**(工具还会按字节截);回答失败时这条不记,没有回答时退回请求的窗口。
-  - 同一文件多次读的行范围相交或相邻就合并(`1-420` + `421-840` → `1-840`,`offset` 无 `limit` 记 `500-`),整文件读(`path` 无 `offset`/`limit`)吞掉所有范围并渲染成裸路径。
-  - 修改类(`edit`/`write`/`delete`/`copy`/`move`)只记路径,读过的文件被改后只出现在 modified 下。
-  - 两份清单都与上一份摘要里的同名清单合并(区间累加,不重复),再按字符硬预算渲染后追加在存储的摘要末尾(读取 4000、修改 8000,标签与换行算在内):本次压缩新增的路径排在前面、其余按 Ordinal(没有时间戳可依:清单只有渲染结果能活过一轮,「最新」只能表示「本轮看见」),超出预算时保留放得下的整行并补一行 `… N more`,单条路径比整块还长时中间省略(保住文件名与行范围);从存储重建时,提示行与含 `…` 的行不再当作路径,否则清单会比它来源的那一份更长;`AddEntry` 按“最后一个冒号后是纯区间列表”才把它当范围,所以 `D:\…` 的盘符不被误拆。
-  - 拆分回合:切点落在一个仍在进行的长回合内部的 assistant 消息上时,该回合切点前的前缀单独用 TURN-PREFIX 指令摘要(Original Request / Progress So Far / Context Needed to Continue),与历史摘要并行请求,合并为 `<历史摘要>
+**每轮开头重建，且只丢"已结算轮"。** `AgentLoop` 在回合开始时（写开场消息之前）用 `ReloadManagedAsync` 从 `turn_ledger.ListAsync` 重建历史：折叠块（若有）+ 每个**已结算**轮的 entry，然后**逐字保留 seq 高于最后一条已结算轮的所有消息**——回合进行中折叠时那就是本回合的开场消息、工具调用、工具结果与 steering（折叠绝不能改写本轮已产出的东西），回合开始时那就是空闲期送达的回执/插话（否则模型永远读不到子 Agent 的报告）。`pending` 行一律不进视图：它是进行中的轮本身。同一进程与重开标签走同一条规则（`SessionHistory.LoadAsync` 的 ledger 分支），两处看到的历史逐字节一致。
 
----
+**折叠。** 过线（回合首请求用 τ、回合内用 ε）时把最旧的已结算轮折进折叠块，直到降到目标线以下，且**永远保留最新 `ManagedContext.MinRecentEntries`（3）轮**不折叠。折叠是纯代码：`MarkFoldedAsync(session, throughTurn)` 一次单调 UPDATE（折叠区间只增不减），随后一次重渲染；**零模型调用、零摘要**。折叠块固定三行：
 
-**Turn Context (split turn):**
+```
+[compacted: turns 1–30 · seq 1–18640 · 30 turns]
+retrieve: read_context(from_turn=1, to_turn=30)
+originals: read_history(from_seq=1, to_seq=18640)
+```
 
-<前缀摘要>`(无更早历史时只有后半)。前缀超出预算时同样分批,后续批用 TURN-PREFIX 的续写指令(同样三段格式、带 `<previous-summary>`)。新摘要至多含一段 Turn Context:上一份摘要带旧的 Turn Context 段时,UPDATE 指令追加"把该段并入常规各节、不再复现标题与分隔线"的要求;没有新历史但出现新拆分时,单独发一次 `(no new messages)` 的 UPDATE 请求完成合并;模型仍复现旧段时,代码把旧标题降级为 `**Earlier turn context:**`、去掉其前的 `---`,只有本次前缀带正式标题。任何一批失败即整次压缩失败(另一条链经联动取消立即停止),只在全部成功后写入唯一一条会话层摘要。摘要请求不带工具、Thinking 关闭、带 SessionId,输出上限取模型自身值(pin 未知时取策略解析的能力值)与 8192(前缀 4096)中较小者。回复以 MaxTokens 截断、发起工具调用、提供商报错、没有完成消息或正文为空时拒绝该摘要,抛 `CompactionFailedException`,什么也不写;取消照常传播。自动与溢出路径把拒绝当作"没腾出空间"(计入无效尝试,不让回合失败)。
+它**不聚合任何内容**——不聚合"做完了什么"（那是变相摘要），也不再有 `open:` 行：折叠块曾经聚合的 `unresolved` 随状态节一起去掉了，剩下的只有范围与两个指针，尺寸随时间戳位数变化、不随被折轮的内容变化。**为什么是两条消息（而非一条）：缓存单元是按消息切的。** 网关类提供商比对提示缓存的最小单位是**一条消息**（相邻同 role 的消息还会被合并成一条），所以一条 entry = 一条消息时，整段历史被拼成一个不可分的大块：新一轮多一条 entry，前 21.5k 的 system+tools 一个都不命中。实测（2026-11-27，opencode-go/hy4-flash-free）：整条 entry 都是 `user` 时跨轮首请求 **0%**，拆成 `user` 任务 + `assistant` 报告后 **84%**；同一形状在 DeepSeek（真 token 前缀缓存）上两种都是 98%，所以这是纯投影收益、不改其它 provider 的行为。推理与脚本：`artifacts/cache-exp/REPORT.md`（本地实验目录，不入仓）。
+
+**模型侧的图例（每请求一次，托管模式下）**：`AgentLoop.BuildRequest` 把 `ManagedContext.Legend` 作为请求的第一条消息，一句话说明"一轮 = 一条 user 任务 + 一条 assistant 回复 + 一条 harness 的 tool 结果（收据）"、**收据是数据，不是要写或重复的东西**、`turn`/`seq` 分别用 `read_context(from_turn, to_turn)` / `read_history(from_seq, to_seq)` 回读、`reads` 是读过的、`writes` 是改过的文件——字段名必须能从这句话或工具参数名直接读懂，不靠猜。**它属于请求、不属于视图**：放在视图里时，会话第一轮还没有 entry 可渲染，于是第一轮不带图例、第二轮突然带——写方会把相邻同 role 的消息合并成一条，这一跳就把历史第一块从"提问"变成"图例+提问"，那一轮每个请求都因此整段重读（实测 0%）。放请求层后这一块从第一个请求起就恒定；无 ledger 的宿主（脚本、测试）完全不发，字节与之前一致。图例是固定字节，改它等于一次性清掉所有人的历史前缀（可接受，不频繁）。
+
+**图例、折叠块、以及第一条任务都是 `user` 消息**，会被合并成一块：稳态下没有代价（三者都不变），只有折叠发生时这一块整体失效——与它自己失效同价，不为它另插消息。
+
+条目里结论那一节在**请求视图**中截到 1 200 字符（`read_context` 取完整正文，原文仍在库里），所以长回答不会把视图撑爆，截断也是确定性的。**任务文本不截断**：它是用户自己的话，截短等于替用户改口（超长提问会撑大后续每轮 prompt，这是明确接受的代价）。
+
+**轮内溢出。** 回合内撞窗口时走同一条折叠（加大折叠区间、降到 1），重试那一次请求一次；折完仍不够（本回合自身就超窗口）才以原 provider 错误失败。没有第二级"压缩后重发"的救兵。
+
+**检索。** 托管上下文有自己的两个工具：`read_context(from_turn, to_turn)` 按轮取回 entry 原文（同一次渲染）、`search_context(query)` 走 `turn_ledger_fts`。原始证据另走 `read_history(from_seq, to_seq)` / `read_artifact`：entry 的 `seq:` 与折叠块的 `originals:` 就是入口。请求开头的图例（每请求一次）同时点名两者。
+
+**旧会话。** 没有 ledger 行的会话（功能上线前建的库）继续走 `summaries` 摘要视图 + 原始尾部；新会话不再写摘要，`summaries` 只读。摘要级（`SummaryCompactor`）与收据级（`ToolResultReduction`/`ContextReceipt`）已随本变更删除，`/compact` 与溢出兜底都改走折叠。
+
+### Turn Ledger
+
+**回复是自由格式（2026-11-27 起）。** 没有任何终结模板：`turn.completion` 槽位、`# Turn Completion` 固定节、`**Status**:` 那一节、以及解析它的 `TurnLedgerParse` 全部删除。模型只被要求好好回答，账本只记录这一轮**是什么、产出了什么**，不评判回复的形状——它需要的字段都来自 harness（任务原文、回复原文、证据、seq），不来自模型的配合。理由是被实测说服的：模板要么让模型把历史里 entry 的形状抄回来（第 1 轮干净、第 2 轮开始自带 `**Conclusion**:` 与编造的 `**Evidence**:`/`seq:`），要么得靠不断加禁令去压，而它带来的那两个字段（`unresolved`/`next`）与 `todos` 表本来就重复。**结论**取回复正文本身：`TurnReportTemplate.UnwrapConclusion` 只做一件事——模型若照抄了它在历史里读到的结论标签（`**Conclusion**:`、旧的中文标签或 `## 结论` 标题），把那一行剥掉，免得同一段话顶着两个标题。
+
+**证据由 harness 生成。** 文件分两份：**读过**的取自 `read` 的 `path` **与 `paths` 数组**，**改过**的取自 `edit`/`write`/`delete` 的 `path`、`copy`/`move` 的 `to`（复用 `CompactionFiles` 的路径归一）；一个路径既读又改只进 `wrote=`——后续轮要复核的是改动，两列都出现会被读成两个不同文件。；`spec` 取自 `spec_get` 的 `id` 参数，**不读盘**：`read` 结果以带 `id:` 的 YAML frontmatter 开头时从**结果文本**里取，多文件 `read` 不扫。指针是轮首 user 消息 seq → 轮末 assistant 消息 seq，**展示名为 `seq: <a>-<b>`**（不加 `#`：`#4201` 会被读成 issue 号；`seq` 与 `read_history` 的 `from_seq`/`to_seq` 同源，模型不用推断它是什么）。模型看不到也不能写 seq（由 harness 落库时分配），所以证据节整节由代码生成——这同时消灭了“编造证据指针”那一类失败。不写行号：seq 指向历史消息永不失效，行号会随后续改动漂移；证据收集也**不做任何文件 IO**（否则会在工具批次里同步开文件、且取消不可中断）。
+
+**写库。** 轮开始写 pending 行（`ITurnLedgerStore.BeginAsync`），轮末在同一条行上 settle（`CompleteAsync`）；`(session_id, turn_sequence)` 是主键，数据库约束保证一轮一行。轮号：调用方有自己号的（App 的回合，与它的 checkpoint/metrics 行同号）直接传入；没有号的（子 Agent run）由 `BeginAsync` **在同一条 INSERT 里分配并占用**——分开“先读 MAX+1”与“再插入”两步是两个写者拿到同一个号的原因，不允许。begin 失败时 settle 以 `TurnSequence = null` 补建终态行（store 自己分配号），并先重试一次 begin 把任务文本与归属补上；重试也失败时 `TurnLedgerCompletion.Opened` 带着 begin 记录走，store 在补建时用它的任务文本、provider/model/kind/depth 与 from-seq 写入——两次 begin 都失败也要得到一行带身份的记录，而不是空任务行。异常轮（取消、失败、无进展收尾、轮次上限）同样 settle 成 `settled`，答案文本只存本轮真实流出的部分。**settle 必须在 `AgentTurnCompleted` 事件之前发出**：转录收到轮末事件时就要能看到这一轮有台账行。
+
+**harness 结束的轮不得冒名。** settle 只取**本轮自己流出的文本**——是该轮整个 run 内全部已流出文本（一轮内可能有多个请求，每请求的展示缓冲会被清空，不能用它），不是最后一次请求的缓冲，也不是历史本轮之前的内容。`AgentInstance.PartialText` 在零输出时会回退到上一轮已提交的答案（展示用途），拿它会让一个被取消的轮把上一轮的话记成本轮的答案。所以 harness 终止的路径（取消、失败、轮次上限、无进展收尾）不看回退文本，答案文本只存本轮真实流出的部分（可能为空）。
+
+**写失败永不连累回合。** ledger 是旁路记录：`BeginAsync`/`CompleteAsync` 的任何异常（**含 `OperationCanceledException`**——这两个调用带 `CancellationToken.None`，从它们抛出的取消只能来自存储自身）一律吞掉，回合照常跑完、答案照常交付，行停在上一个状态（`CompleteAsync` 失败则停 `pending` 即“未知”）。不重试——存储故障不该在回合末尾多一轮写入。这也是 store 用**自己的连接与写闸、不进会话历史写队列**的理由：两边堵了一边不连累另一边。
+
+**性能与预算（`tools/Forge.Bench/TurnLedgerScenarios.cs`）。** 两条路径分开要求：请求构造路径（`BuildRequest`/`DynamicText`/压缩测量）不得因 ledger 增加**每个请求**的分配——稳态实测增量必须 **≤ 1 KiB/请求**；轮级写库 ≤ **5 ms/轮**（含 FTS 写）。bench 行：只有 `agentloop.dynamic`（带/不带 ledger 的同一宿主编排与脚本供应商）给硬 Check，`turnledger.write`、`turnledger.evidence`、`prompt.compose` 只报告并注明预算（`turnledger.parse` 随解析器一起删除）。**实测（2026-11-26，win-x64，Release，多轮复现）：** `turnledger.evidence` 0.053–0.058 ms/op、16,896 B/op（40 次调用）；`turnledger.write` 0.13–0.24 ms/op（含 begin 分配+占用号、settle、FTS，预算 5 ms）；`agentloop.dynamic` 稳态 **+640–740 B/请求**、+7–9% 耗时（进程级分配计数的跑间噪声就是 ~70 B，所以只能读量级；初版 1,814 B 超出门槛，把每轮 `Text(assistant)` 提到一次并给 `Text()` 加单文本块快路径后才过）。注意 `agentloop.dynamic` 是一轮一请求的场景，所以那 638 B 含该轮的解析与证据开销，这两项另有自己的行与预算。
+
+**台账即上下文。** ledger 不再是旁路记录：模型的历史区就是它的渲染结果（见「托管上下文与确定性折叠」）。状态只有 `pending`（轮在跑）与 `settled`（轮已结束）两种，没有"回复合不合规范"这类判定——那是这个字段过去在做、现在不做的事。
+
+**缓存的实测事实（2026-11-27，打真实端点，非推断）。**
+- **opencode 网关（OpenAI 兼容）的缓存单元是「消息块」**（2026-11-27 复测，236 次真实请求，模型 `hy4-flash-free`）：块 0 = system+tools，此后**每条消息一块，相邻同 role 的消息被网关用单个 `\n` 拼成一块**；复用 = 从块 0 起**连续匹配的完整块**，命中数按 256 向下去整（22 个非零命中值 22/22 是 256 倍数）。**块 0 单独不计数**：system 之后那条消息一变，`cached_tokens` 就是 0，哪怕 21.5k 的 system+tools 逐字节没变。所以“token 前缀相同就能命中”对它不成立：同行前提、只改最后一句 = **0**；追加 assistant（或 assistant+user）= 命中；**紧跟 user 再追加 user = 0**（并进同一块）；改中间只保留分歧点之前的完整块。`prompt_cache_key` 切命名空间（同 body 换 key → 0），`x-opencode-session` 与缓存无关（换 session 仍 99%）；写入同步（间隔 0ms 也命中90%+）；`prompt_cache_retention: 24h` 被接受但**不等于生效**（同一 body +25 分钟仍命中，`cache_write_*` 恒 0）。
+- **DeepSeek 是真前缀缓存**：同一 prompt 第二次 `prompt_cache_hit_tokens` 2304/2447；**共享前缀、尾部不同也命中 2304**（与 opencode 相反）；`prompt_cache_key`/`prompt_cache_retention`/`max_completion_tokens` 全部接受（200）但**对命中毫无影响**（带/不带两组 hit/miss 完全相同），所以本仓对它一律不发——理由已从"它会拒未知字段"更正为"发了也没有收益"。`deepseek-v4-pro` 同样接受这些字段。
+- 由这两组数据可知："每轮首请求 0 命中"不是托管上下文的必然代价，而是**投影形状**造成的——一条 entry 一条消息时整个历史被拼成一块，新 entry 一来就全废；**一条 entry 拆成 `user` 任务 + `assistant` 报告（现行实现）后实测跨轮首请求 84%**，不需要放弃托管上下文或折叠。轮内与跨轮的剩余损失靠**承载消息**消掉（2026-11-27 实测后实施）：动态尾前面压一条固定 assistant 消息（`AgentLoop.ContextCarrier`）独占一块。理由是写方会把相邻同 role 的消息合并成一条 wire 消息，于是尾直接跟在开场提问后面时两者是**同一块**；下一个请求里尾落在工具结果之后，那一块就变回提问本身——前缀在第一块处断掉，而块 0 单独不计数（实测该请求 `cached_tokens = 0`，21k 的 system+tools 全量重读）。加了 role 切换后，被隔开的形状实测轮内第二请求从 0% 到 55%（那次 system 只占 5.1k/9.2k，按本仓比例约 95%）。承载消息**只在确实有动态尾的请求里**出现（新会话头 1–2 个请求、纠正 nudge 的那一轮），其余请求的字节与之前逐字节相同，成本 = 每个带尾请求约 4 token。承载消息文本是固定常量（会变的承载消息只是把同一个问题往后挪一条消息）。把尾改成末尾 `system` 消息这条路仍然封着：`AnthropicProvider.BuildMessages` 写 wire 时跳过列表里的 system 消息，模型会完全收不到尾。
+
+**历史区字段命名的规矩（阶段 2 用）。****历史区字段命名的规矩（阶段 2 用）。** 每个字段名要么直接映射到模型已知的概念或某次工具调用的参数名，要么必须在投影开头出现一次图例——不能指望“单词拆开看还挺像”。投影开头固定一行：`seq: <a>-<b> are message sequence numbers in this session — read them with read_history(from_seq, to_seq); files/spec name what that turn touched.` 它每请求只出现一次（动态区），不随轮数增长。
+
+**子 Agent 与回执。** 契约在共享的 system 层，所以根会话、用户驱动 Agent 会话与四个内置子 Agent 都遵循；子 Agent 回执的报告行改取该子 Agent 的「结论」节（回执头行、改动行、状态行形状不变）。
 
 ### 工具结果、取消、图片与附件
 
@@ -281,7 +293,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
   - 每次模型调用的 `MessageCompleted` 必带 `StreamElapsed`(首个输出增量→流结束,适配器读循环里以 `Stopwatch.GetTimestamp` 对采集,零分配;零输出为 0;一次性降级重发同样产出——它仍走流式路径,被拒的那次没有任何增量也不产出完成;缺失即适配层缺陷,不存在「未知」,绝不回退墙钟)。
   - `AgentLoop` 把它逐次累加进 `AgentInstance.StreamElapsed`(与 `Usage` 同型实例累计,`AgentTurnCompleted` 带累计值,轮份额 = 起止快照差分),并把该轮的墙钟 `StartedAt`(取得运行槽之后起表,排队等待不进任何一轮的耗时)/`EndedAt` 一并带上——App 侧**子代理**每轮分隔行的耗时与子会话 `turn_metrics` 行的起止列来自它们(根仍用自己的发送墙钟);存储层落 `turn_metrics.stream_ms`。
   - 事件另带 **`LastSeq`**(该轮末一条消息的 seq,`PersistAsync` 刚 await 完的落库值,无存储为 0)——它是转录重放的精确配对键(见 forge-app),不是事后查库的 `MAX(seq)`。
-  - `ProviderConfig.Headers` 经 `ProviderHeaders.Apply` 写入每个请求(覆盖同名头),值中的 `{session}` 取 `ChatRequest.SessionId`(`AgentLoop` 填本会话 id,不是 lineage 根);无会话时该头不发,模型列表请求同样不发。
+  - `ProviderConfig.Headers` 经 `ProviderHeaders.Apply` 写入每个请求(覆盖同名头),值中的 `{session}` 取 `ChatRequest.CacheRoutingKey ?? SessionId` = 会话 lineage 根(换手/分叉后网关亲和桶不变);无会话时该头不发,模型列表请求同样不发。
   - `ProviderException` 的 Retry-After 暂存于 `Exception.Data`(契约缺口,未确认是否正式化)。
   - 非 2xx 的响应体由 `ProviderErrors.FromStatus` 经 `ProviderErrorBody.Describe` 读成一句人话(`error.message` → `message` → 字符串 `error` → 折成一行的原文,再补 `(param: …)`/`(use: …)`/非泛型 `(type: …)`),原始体存 `Exception.Data[ProviderErrors.ErrorBodyKey]`;短语规则(上下文溢出、两处一次性降级)一律用 `ProviderErrors.MatchText`(可读句 + 原始体)匹配,因为字段名常常只出现在 `error.param` 里。
   - OpenAI 兼容适配器在写 wire 消息时合并相邻的同角色 `user`/`assistant` 消息:文本按序拼接、段落间空一行,`tool_calls` 保持顺序;`tool` 角色消息不合并,`system` 保持现状(系统提示词在最前,历史中的 system 消息按原位置逐条写出)。
@@ -320,6 +332,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
   - 实测(2026-11-13)那次 429 的正文不含任何标记短语,旧逻辑只靠 `retry-after: 3240` 兜住——若某次 429 不带 `Retry-After`,旧逻辑会把它当瞬时限流重试。
 - **官方身份(`AnthropicWire`、`ProviderConfig.Wire`)。** 订阅请求默认声称自己就是官方客户端,四件事一起做才自洽:`system[0]` 是 `x-anthropic-billing-header: cc_version=<版本>.<构建>; cc_entrypoint=<入口>;`(无 cache 断点)、`system[1]` 是官方身份句 `You are a Claude agent, built on Anthropic's Claude Agent SDK.`、`user-agent: claude-cli/<版本> (external, <入口>)`、`x-app: cli` 加 SDK 传输头(`x-stainless-*`、`anthropic-dangerous-direct-browser-access`、`x-claude-code-session-id`)与 `?beta=true`;`anthropic-beta` 用官方的 17 项列表而不是 OAuth 必需的 3 项。
   - **入口值同时出现在 billing 块与 UA 里**,只给一处是自相矛盾的指纹。
+  - **消息侧两个断点(2026-11-27)**:`CacheHint.StableBoundaryIndex` = 托管历史最后一轮的索引(折叠块与已完成轮的 entry,每次请求字节相同),`CacheThroughMessageIndex` = 请求自身历史的倒数第二条（在承载消息与动态尾加进来**之前**就算定，所以承载消息、动态尾、以及它们前面那一条都不在断点内——与引入承载消息之前的位置逐字节相同）。前者是换轮后唯一还稳定的字节边界——没有它,新的一轮找不到可读回的缓存点。两个消息断点 + system 一个断点,仍在 Anthropic 的四个上限内。
   - 缓存形状也对齐实测:identity 块与主 system 块各带一个 **`ttl: "1h"`** 的断点(官方就是 1 小时;5 分钟的断点会在一轮对话的两次请求之间过期,等于把同一前缀的写入付两遍),**工具数组不带断点**(官方不在那里打点,它在两个 system 块上打),消息断点仍是最后一条;billing 块永远无断点。
   - `anthropic-beta` 取**本机 CLI 自己报的那一份**(见下),因为这份表本身随版本与特性开关变——同一台机器连跑三次,官方自己报出 12/13/14 项不等,冻结一份必然会与我们声称的版本不一致;`accept: application/json` 也对齐。
   - **缓存形状只有一套,与凭据无关**:两个 system 块 1 小时、工具数组不带断点(断点即前缀,最后那个 system 断点已经把工具一起缓存了,官方也不在那里打点)、消息末块 1 小时;API 密钥请求为此声明 `extended-cache-ttl-2025-04-11` 这一个 beta(它不声称客户端身份,但同样要声明自己真正用到的长缓存);**寿命由 `CacheHint.Ttl` 一处决定**(`null`/`"1h"` → 1 小时,`"5m"` → 不写该字段、用服务端默认),system 块与消息块永远取同一个值——两边取不同值只会让同一段前缀按两种价格各写一次。
@@ -371,7 +384,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 ### 提示词模板
 
-- **提示词模板(`Prompts/Templates/`)。** `PromptTemplateRegistry` 收编译期内置模板(Core 的四个 Agent、四个命令、`system`/`compaction.summarizer`/`handover.summary` 三个槽位;组合根可 `With` 追加自己的槽位),`PromptTemplateStore` 按 内置 → `~/.forge` → `<工作区>/.forge` 分层读写 `<种类目录>/<id>.md`,`Resolve` 得到不可变的 `PromptTemplateSet`(命令、Agent 定义、槽位文本;`FormatSlot` 单次替换 `{名字}`,`TryExpandCommand` 展开 `/名称 参数`)。frontmatter 由手写的 `PromptFrontmatter` 解析(无 YAML 库,AOT 安全)。`AgentHostOptions.Templates` 给默认压缩器提供 `compaction.summarizer`,`HandoverSummary.GenerateAsync` 可传入 `handover.summary`;`PromptComposer` 把 `PromptLayers.System` 当作完整系统层(即生效的 `system` 槽位),空时回落 `BuiltInPrompts.System`——此前它总把内置文本再拼在前面,调用方又传了同一段内置文本,系统层重复了两次。Agent 以名称派生,名称即身份:内置 Agent 的覆盖文件不得改名,用户 Agent 不得占用内置名或内置 id,空 `tools` 列表无效;`PromptTemplateSet.ResolvedAgents` 给出每个 Agent 的模板 id(设置键)与 `thinking` 是否由文件显式给出。`Read` 对超限或非 UTF-8 文件抛 `IOException`。
+- **提示词模板(`Prompts/Templates/`)。** `PromptTemplateRegistry` 收编译期内置模板(Core 的四个 Agent、四个命令、`system`/`handover.summary` 两个槽位;组合根可 `With` 追加自己的槽位),`PromptTemplateStore` 按 内置 → `~/.forge` → `<工作区>/.forge` 分层读写 `<种类目录>/<id>.md`,`Resolve` 得到不可变的 `PromptTemplateSet`(命令、Agent 定义、槽位文本;`FormatSlot` 单次替换 `{名字}`,`TryExpandCommand` 展开 `/名称 参数`)。frontmatter 由手写的 `PromptFrontmatter` 解析(无 YAML 库,AOT 安全)。`AgentHostOptions.Templates` 提供 `handover.summary`（终结模板与摘要级压缩都已退役，不再有 `turn.completion`/`compaction.summarizer`）;`PromptComposer` 把 `PromptLayers.System` 当作完整系统层(即生效的 `system` 槽位),空时回落 `BuiltInPrompts.System`——此前它总把内置文本再拼在前面,调用方又传了同一段内置文本,系统层重复了两次。Agent 以名称派生,名称即身份:内置 Agent 的覆盖文件不得改名,用户 Agent 不得占用内置名或内置 id,空 `tools` 列表无效;`PromptTemplateSet.ResolvedAgents` 给出每个 Agent 的模板 id(设置键)与 `thinking` 是否由文件显式给出。`Read` 对超限或非 UTF-8 文件抛 `IOException`。
 
 ### 模型名解析
 

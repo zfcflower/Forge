@@ -15,6 +15,7 @@ public sealed class AgentInstance
     private readonly List<AgentMessage> history = [];
     private readonly Lock historyGate = new();
     private readonly StringBuilder streaming = new();
+    private readonly StringBuilder runText = new();
     private readonly Lock interjectionGate = new();
     private List<Interjection>? interjections;
     private int pendingInterjections;
@@ -135,6 +136,14 @@ public sealed class AgentInstance
     internal SubAgentRun? Control { get; set; }
 
     /// <summary>
+    /// This turn's number in the session's turn ledger, set by the caller that allocated it (the App's root turn, a
+    /// delivered user-session turn) before the run starts; null when the caller has no number of its own, and the loop
+    /// then takes the store's own next one. The ledger's <c>(session_id, turn_sequence)</c> is the one row one turn
+    /// guarantee, so two turns of one session must never share a number - whoever provides it owns its correctness.
+    /// </summary>
+    public long? TurnSequence { get; set; }
+
+    /// <summary>
     /// A run is driving this instance right now. Roots have no <see cref="Control"/> and a finished sub-agent has none either,
     /// so this answers for the instances that carry a run. It is attached a moment after the run takes the instance, so a caller
     /// that has to wait for a run uses the gate itself (<see cref="IsAcquired"/>) - <see cref="SessionMessenger"/> does.
@@ -149,6 +158,21 @@ public sealed class AgentInstance
 
     /// <summary>Text produced by this instance so far: the turn in progress when it is streaming, else the last finished turn.</summary>
     internal string PartialText => streaming.Length > 0 ? streaming.ToString() : lastText;
+
+    /// <summary>
+    /// Everything the run has streamed so far, across all of its model requests: the display buffers are cleared between
+    /// requests (<see cref="BeginText"/>), so this is the only copy that spans the whole run. The run reads it at its start
+    /// (<see cref="BeginRunText"/>) and on every delta; a settle of a harness-terminated turn answers it, and a normal end
+    /// never does - the reply the run ended on is its answer.
+    /// </summary>
+    internal string RunText => runText.ToString();
+
+    /// <summary>
+    /// How many leading messages of <see cref="Messages"/> are the managed history - the fold block and the finished turns'
+    /// entries - rebuilt from the ledger. Everything after them is the turn in flight. The request puts a cache breakpoint on
+    /// this boundary, so the part that never changes is the part that is always re-read.
+    /// </summary>
+    internal int ManagedCount { get; set; }
 
     /// <summary>Snapshot of the persisted context, for diagnostics and retrieval; the loop reads <see cref="Messages"/>.</summary>
     public IReadOnlyList<ChatMessage> History => [.. history.Select(static entry => entry.Message)];
@@ -330,6 +354,11 @@ public sealed class AgentInstance
     internal int HistoryVersion { get; private set; }
 
     internal void BeginText() => streaming.Clear();
+
+    /// <summary>Empties <see cref="RunText"/>: a run starts with no text of its own, never the previous run's.</summary>
+    internal void BeginRunText() => runText.Clear();
+
+    internal void AppendRunText(string text) => runText.Append(text);
 
     internal void AppendText(string text) => streaming.Append(text);
 

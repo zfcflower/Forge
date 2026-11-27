@@ -55,6 +55,14 @@ public sealed record AgentHostOptions
     public ITodoStore? Todos { get; init; }
 
     /// <summary>
+    /// The per-turn state facts (forge-core "终结模板与 Turn Ledger", stage one): one row per task turn, opened when the
+    /// turn's user message lands and settled when it ends - and the model's whole history is rendered from it. The
+    /// completion template (<c># Turn Completion</c>) is composed into the stable prefix only when this is set. Null means
+    /// the feature is entirely absent: no section, no rows, and the composed prefix byte-identical to a host without it.
+    /// </summary>
+    public ITurnLedgerStore? TurnLedger { get; init; }
+
+    /// <summary>
     /// Commits a checklist step when the <c>todo</c> tool marks it done (only used together with <see cref="Todos"/>).
     /// Null leaves step commits to the host application, such as the TODO panel.
     /// </summary>
@@ -99,13 +107,11 @@ public sealed record AgentHostOptions
 
     /// <summary>
     /// The prompt templates this host was built from (<see cref="Prompts.Templates.PromptTemplateStore.Resolve"/>). The
-    /// default compactor takes its summarizer prompt from the <c>compaction.summarizer</c> slot. Null = compiled-in texts.
+    /// completion contract (stage 1 of the markdown ledger) is read from the <c>turn.completion</c> slot.
     /// The system slot is not read from here: it is <see cref="Layers"/>' <see cref="PromptLayers.System"/>.
     /// </summary>
     public Prompts.Templates.PromptTemplateSet? Templates { get; init; }
 
-    /// <summary>Overrides the default <see cref="SummaryCompactor"/> (used when a store is configured).</summary>
-    public IContextCompactor? Compactor { get; init; }
 
     public ITokenCounter TokenCounter { get; init; } = new ApproximateTokenCounter();
 
@@ -177,6 +183,14 @@ public sealed class AgentHost
     private readonly SessionMessenger messenger;
 
     /// <summary>
+    /// The turn completion section every prompt of this tree carries, resolved from the <c>turn.completion</c> slot; null
+    /// when the host runs without a turn ledger, which is what keeps those hosts' prefix bytes unchanged.
+    /// </summary>
+
+    /// <summary>The session ledger this host writes its turns into and rebuilds the managed history from; null = no ledger.</summary>
+    private readonly ITurnLedgerStore? turnLedger;
+
+    /// <summary>
     /// The root session this host belongs to, recorded when the root agent is created or resumed: user-driven sessions
     /// start under it, and their start events name it as the parent. One host carries one main session.
     /// </summary>
@@ -204,6 +218,9 @@ public sealed class AgentHost
         layers = options.Layers;
         composer = options.Composer;
         store = options.Store;
+        // The completion contract is resolved once, when the host is built: the section is bytes of the cached prefix,
+        // so it must not move under a running turn. Only a host with a ledger gets one.
+        turnLedger = options.TurnLedger;
 
         var builtIns = new List<ITool>();
         if (options.IncludeRetrievalTools)
@@ -212,6 +229,14 @@ public sealed class AgentHost
             {
                 builtIns.Add(new SearchHistoryTool(store));
                 builtIns.Add(new ReadHistoryTool(store));
+            }
+
+            // The managed context's own two tools: what earlier turns concluded (the default way back to history), beside
+            // the two above, which stay as the evidence-level path down to raw messages and artifacts.
+            if (turnLedger is { } ledger)
+            {
+                builtIns.Add(new SearchContextTool(ledger));
+                builtIns.Add(new ReadContextTool(ledger));
             }
 
             if (options.Artifacts is { } artifacts)
@@ -244,7 +269,7 @@ public sealed class AgentHost
             builtIns.Add(new SetTitleTool(renameSession));
         }
 
-        scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);
+        scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options, turnLedger);
         builtIns.Add(new SpawnAgentTool(scheduler, catalog.All, options.SpawnModels, options.SessionEvents));
         builtIns.Add(new SubAgentSteerTool(scheduler.ModelControl));
         builtIns.Add(new SubAgentFollowUpTool(scheduler.ModelControl));
@@ -276,17 +301,11 @@ public sealed class AgentHost
                 scheduler, reviews, options.Todos, options.ReviewLimits, options.ReviewConclusions, stepReviews, options.ReviewFix, options.StepChanges));
         }
 
-        var compactor = options.Compactor
-                        ?? (options.Store is { } summaryStore
-                            ? new SummaryCompactor(
-                                summaryStore,
-                                options.Providers,
-                                options.TokenCounter,
-                                summarizerPrompt: options.Templates?.FindSlot(Prompts.Templates.PromptSlotIds.CompactionSummarizer),
-                                policy: options.Options.Compaction)
-                            : NoopCompactor.Instance);
-
-        toolSurface = new ToolSurface(builtIns);
+        // Dispatch-only: a turn's receipt exchange is in the model's history, so a call it copies must resolve. The tool is
+        // never offered, and its definition therefore never reaches the prompt.
+        toolSurface = new ToolSurface(
+            builtIns,
+            turnLedger is { } receiptLedger ? [new EvidenceReceiptTool(receiptLedger)] : []);
         if (options.ToolSegments is { } segments)
         {
             toolSurface.ReplaceExternal(segments);
@@ -308,12 +327,12 @@ public sealed class AgentHost
             options.Store,
             SessionCatalogs.From(options.Store),
             options.Artifacts,
-            compactor,
             options.TokenCounter,
             this.options,
             SubAgentTools.Names,
             options.DynamicContext,
-            options.CacheDiagnostics));
+            options.CacheDiagnostics,
+            options.TurnLedger));
         scheduler.Runner = loop.RunAsync;
     }
 
@@ -670,7 +689,7 @@ public sealed class AgentHost
             sessionId,
             directory,
             0,
-            composer.Compose(new PromptInput(layers, kind.Prompt, null)));
+            ComposePrompt(kind.Prompt));
         // The host now knows its main session: a user-driven child session is started under this one.
         Volatile.Write(ref rootSession, new RootSession(sessionId, directory));
         Volatile.Write(ref rootInstance, root);
@@ -682,6 +701,9 @@ public sealed class AgentHost
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
         return CreateRoot(sessionId, workingDirectory, catalog.Get(kind), id);
     }
+
+    /// <summary>The prompt of one agent of this tree: the host's layers and role, through the host's own composer.</summary>
+    private ComposedPrompt ComposePrompt(string? role) => composer.Compose(new PromptInput(layers, role));
 
     /// <summary>
     /// Root agent of a stored session, with its history rebuilt from the store the way the compactor leaves it
@@ -700,23 +722,23 @@ public sealed class AgentHost
             return root;
         }
 
-        root.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, sessionId, ct).ConfigureAwait(false));
+        root.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, sessionId, ct, turnLedger).ConfigureAwait(false));
         return root;
     }
 
     /// <summary>
     /// Manual compaction of <paramref name="instance"/> (the <c>/compact</c> command): ignores the threshold and whether
-    /// automatic compaction is enabled, summarizes everything but the newest keepRecent tokens, then re-enables automatic
+    /// automatic compaction is enabled, folds every settled turn but the newest few into the managed view, then re-enables automatic
     /// compaction for the instance. The caller must not run a turn of the same instance concurrently. Null when there was
     /// nothing to compact; <see cref="AgentCompacted"/> is reported through <paramref name="sink"/> when it did; throws
-    /// <see cref="CompactionFailedException"/> when the summary could not be produced (nothing changed then).
+    /// null when there was nothing to fold.
     /// </summary>
     public Task<CompactionResult?> CompactAsync(AgentInstance instance, IAgentEventSink? sink, CancellationToken ct) =>
         CompactAsync(instance, sink, null, ct);
 
     /// <summary>
     /// <see cref="CompactAsync(AgentInstance, IAgentEventSink?, CancellationToken)"/> with the user's focus text
-    /// (<c>/compact &lt;text&gt;</c>), appended to the summarizer prompts as "Additional focus".
+    /// (folding is deterministic, so the focus text a caller passes has no effect).
     /// </summary>
     public Task<CompactionResult?> CompactAsync(AgentInstance instance, IAgentEventSink? sink, string? instructions, CancellationToken ct)
     {

@@ -62,6 +62,7 @@ internal sealed class AppComposition : IAsyncDisposable
     private readonly SqliteUiStateStore uiState;
     private readonly SqliteTurnCheckpointStore turnCheckpoints;
     private readonly SqliteTurnMetricsStore turnMetrics;
+    private readonly SqliteTurnLedgerStore turnLedger;
     private readonly TurnMetricsRecorder metricsRecorder;
     private readonly AgentRuntimeManager runtimes;
     private readonly PreferencesStore preferences;
@@ -93,6 +94,7 @@ internal sealed class AppComposition : IAsyncDisposable
         SqliteUiStateStore uiState,
         SqliteTurnCheckpointStore turnCheckpoints,
         SqliteTurnMetricsStore turnMetrics,
+        SqliteTurnLedgerStore turnLedger,
         TurnMetricsRecorder metricsRecorder,
         TurnCheckpointService checkpoints,
         WorktreeService worktrees,
@@ -123,6 +125,7 @@ internal sealed class AppComposition : IAsyncDisposable
         this.uiState = uiState;
         this.turnCheckpoints = turnCheckpoints;
         this.turnMetrics = turnMetrics;
+        this.turnLedger = turnLedger;
         this.metricsRecorder = metricsRecorder;
         Checkpoints = checkpoints;
         Worktrees = worktrees;
@@ -241,6 +244,12 @@ internal sealed class AppComposition : IAsyncDisposable
     public IUiStateStore UiState => uiState;
 
     public ITurnCheckpointStore TurnCheckpoints => turnCheckpoints;
+
+    /// <summary>
+    /// The per-turn state facts (<c>turn_ledger</c>): the two observation windows read it (the reply card's turn entry and
+    /// the session ledger dialog); the loop writes it and the model's managed history is rendered from it.
+    /// </summary>
+    public ITurnLedgerStore TurnLedger => turnLedger;
 
     /// <summary>
     /// The per-turn metrics store (<c>turn_metrics</c>): the strip's turn history reads it, and the recorder writes it. A
@@ -609,6 +618,9 @@ internal sealed class AppComposition : IAsyncDisposable
         // metrics write can never hold up the session store, and its own existence probe (an old database has no table, and
         // the whole feature then bypasses itself to a no-op).
         var turnMetrics = new SqliteTurnMetricsStore(paths.UserDataDirectory);
+        // The turn ledger's own store and its own writer on the same forge.db: a ledger write is a side observation and
+        // must never sit in the session store's history write queue, nor delay it.
+        var turnLedger = new SqliteTurnLedgerStore(paths.UserDataDirectory);
         var metricsRecorder = new TurnMetricsRecorder(turnMetrics);
 
         // The update checker (wave W10b): its own client through the one network stack, staged under <data>/updates, and
@@ -761,6 +773,7 @@ internal sealed class AppComposition : IAsyncDisposable
         var reviewStore = workspace?.Reviews ?? new ReviewStore(paths.ReviewsDirectory);
         runtimeServices.ReviewConclusions = new ReviewConclusionStore(reviewStore);
         runtimeServices.StepReviewStore = new StepReviewLedgerStore(reviewStore);
+        runtimeServices.TurnLedger = turnLedger;
         runtimeServices.Mcp = mcp;
         runtimeServices.ToolRouter = toolRouter;
         runtimeServices.Artifacts = artifacts;
@@ -803,6 +816,7 @@ internal sealed class AppComposition : IAsyncDisposable
             uiState,
             turnCheckpoints,
             turnMetrics,
+            turnLedger,
             metricsRecorder,
             checkpoints,
             worktrees,
@@ -1110,6 +1124,7 @@ internal sealed class AppComposition : IAsyncDisposable
         // go away. Reverse construction order otherwise.
         await metricsRecorder.DisposeAsync().ConfigureAwait(false);
         await turnMetrics.DisposeAsync().ConfigureAwait(false);
+        await turnLedger.DisposeAsync().ConfigureAwait(false);
         await turnCheckpoints.DisposeAsync().ConfigureAwait(false);
         await uiState.DisposeAsync().ConfigureAwait(false);
         await todos.DisposeAsync().ConfigureAwait(false);
@@ -1156,7 +1171,8 @@ internal sealed class AppComposition : IAsyncDisposable
 
     /// <summary>
     /// Last-resort teardown from <see cref="AppDomain.ProcessExit"/>, where nothing can be awaited. Bounded, and only the
-    /// child process matters: an orphaned extension host would outlive the window.
+    /// child process matters: an orphaned extension host would outlive the window. This covers a graceful exit only - a
+    /// crash or a forced kill never runs it, which is what <c>ProcessStartInfo.KillOnParentExit</c> on the host start is for.
     /// </summary>
     public void Abort()
     {

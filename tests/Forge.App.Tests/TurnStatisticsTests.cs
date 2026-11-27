@@ -27,6 +27,9 @@ public sealed class TurnStatisticsTests
         /// <summary>The budget line the request ended with, or null when its last message is ordinary history.</summary>
         public List<string?> TrailingLines { get; } = [];
 
+        /// <summary>The message right before the last one: the carrier, or whatever history happened to be there.</summary>
+        public List<string> SecondToLast { get; } = [];
+
         public List<int> MessageCounts { get; } = [];
 
         public async IAsyncEnumerable<ChatStreamEvent> StreamAsync(
@@ -40,6 +43,11 @@ public sealed class TurnStatisticsTests
             var text = last.Content.OfType<TextBlock>().LastOrDefault()?.Text ?? string.Empty;
             TrailingLines.Add(
                 last.Role == MessageRole.User && text.Contains("auto-compaction at", StringComparison.Ordinal) ? text : null);
+            var previous = request.Messages.Count >= 2 ? request.Messages[^2] : null;
+            SecondToLast.Add(
+                previous is null
+                    ? "<none>"
+                    : previous.Role + ": " + (previous.Content.OfType<TextBlock>().LastOrDefault()?.Text ?? "<blocks>"));
             if (call == 1)
             {
                 yield return new MessageCompleted(
@@ -103,6 +111,13 @@ public sealed class TurnStatisticsTests
         // The line went out with both requests of the turn, appended after the persisted history, marked as harness text.
         Assert.Equal([Marked(BudgetLine), Marked(BudgetLine)], provider.TrailingLines);
 
+        // And it is its own block: a fixed carrier line sits between the request's own last message and the tail, so the two
+        // never merge into one wire message. Without it the tail welded onto the opening question, and the next request -
+        // where the tail follows a tool result - left that earlier block changed, invalidating the whole cached prefix.
+        Assert.Equal(
+            ["Assistant: " + AgentLoop.ContextCarrier, "Assistant: " + AgentLoop.ContextCarrier],
+            provider.SecondToLast);
+
         // It is not history: neither the replay nor the next request's cached prefix can hold it.
         Assert.DoesNotContain(
             root.History.SelectMany(static message => message.Content).OfType<TextBlock>(),
@@ -122,6 +137,10 @@ public sealed class TurnStatisticsTests
 
         // Both requests end on ordinary history (the tool result), and the turn still reports what the provider said.
         Assert.Equal([null, null], provider.TrailingLines);
+        // No tail, no carrier: the request this turn sends is byte-identical to one from a host that never had the feature.
+        Assert.DoesNotContain(
+            provider.SecondToLast,
+            text => text.Contains(AgentLoop.ContextCarrier, StringComparison.Ordinal));
         Assert.Equal(TurnUsage, completed.Usage);
     }
 }

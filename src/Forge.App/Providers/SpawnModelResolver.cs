@@ -123,7 +123,7 @@ internal sealed class SpawnModelResolver(Func<ProviderCatalog> catalog)
         var settings = new ModelSettings(
             model,
             thinking,
-            owner?.UserMaxOutput(model),
+            owner?.WireMaxOutput(model),
             providerId);
         return SpawnModelChoice.Resolved(settings, note);
     }

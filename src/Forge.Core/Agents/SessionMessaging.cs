@@ -807,6 +807,10 @@ public sealed class SessionMessenger
             Trace.TraceWarning($"message_session: checkpoint of '{child.SessionId}' not opened: {exception.Message}");
         }
 
+        // The delivery's turn number is the one the app allocated (its checkpoint and metrics row are keyed by it); the
+        // ledger row keys by the same one. No number (the checkpoint never opened) leaves the store to pick its own.
+        child.TurnSequence = turn > 0 ? turn : null;
+
         AgentSubAgentFinished? finished = null;
         try
         {
@@ -1039,9 +1043,12 @@ public sealed class SessionMessenger
     {
         var agentId = report.AgentId;
         var reportText = report.Report ?? string.Empty;
+        // The receipt's 报告 line carries the child's report as it stands. The receipt's shape - header, change line, report -
+        // is the harness's own and does not depend on what the child wrote.
+        var line = reportText;
         try
         {
-            return SessionReplies.BuildChildReport(report.Kind, agentId, report.Status, report.Reason, report.TaskLabel, 0, 0, 0, reportText);
+            return SessionReplies.BuildChildReport(report.Kind, agentId, report.Status, report.Reason, report.TaskLabel, 0, 0, 0, line);
         }
         catch (ArgumentException)
         {
@@ -1057,7 +1064,7 @@ public sealed class SessionMessenger
                 0,
                 0,
                 0,
-                artifactId is { Length: > 0 } ? reportText : SessionReplies.Cut(reportText),
+                artifactId is { Length: > 0 } ? line : SessionReplies.Cut(line),
                 artifactId);
         }
     }

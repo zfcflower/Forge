@@ -276,7 +276,15 @@ public sealed class BashTool : ToolBase, IToolCallScope
         }
         else
         {
-            text.Append("exit: ").Append(result.ExitCode).Append("  duration: ").Append(milliseconds).Append("ms\n");
+            text.Append("exit: ").Append(result.ExitCode);
+            if (result.Signal is { } signal)
+            {
+                // A signal death and an ordinary exit code look alike otherwise (SIGKILL surfaces as 137); naming the
+                // signal is what tells the model whether the process was killed or chose that code.
+                text.Append(" (").Append(signal).Append(')');
+            }
+
+            text.Append("  duration: ").Append(milliseconds).Append("ms\n");
         }
 
         var (stdout, stdoutFolded) = OutputFold.Squeeze(result.Stdout);

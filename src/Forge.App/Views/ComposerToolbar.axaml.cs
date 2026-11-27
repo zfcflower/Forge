@@ -72,6 +72,36 @@ public partial class ComposerToolbar : UserControl
 
     private void OnModelPicked(object? sender, RoutedEventArgs e) => model.Close(restoreFocus: true);
 
+    /// <summary>
+    /// Opens the session's turn ledger window: the rows are read off the UI thread (the composer holds only the source),
+    /// then the dialog is shown over this view's window. A source that failed reads as an empty timeline rather than an
+    /// error dialog - the window is an observation, not an operation.
+    /// </summary>
+    private async void OnSessionLedgerClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ComposerViewModel { SessionLedger: { } read } composer)
+        {
+            return;
+        }
+
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var rows = await Task.Run(() => read(CancellationToken.None)).ConfigureAwait(true);
+            await TurnLedgerWindow.ShowAsync(owner, rows).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The store is best effort here as everywhere: a failed read costs the window, not the composer.
+            System.Diagnostics.Trace.TraceWarning($"session ledger read failed: {exception.Message}");
+        }
+    }
+
     private void OnOrchestrationPicked(object? sender, RoutedEventArgs e) => orchestration.Close(restoreFocus: true);
 
     /// <summary>

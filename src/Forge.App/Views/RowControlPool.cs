@@ -54,6 +54,17 @@ internal static class RowControlPool
 
 
     /// <summary>
+    /// Empties the cache. A test that measures what a freshly built control looks like starts from an empty pool - without
+    /// this, whichever test ran first decides whether the next one rents a control built from another template, which is a
+    /// real failure that has nothing to do with the code under test. The bench never calls it: a populated pool is its subject.
+    /// </summary>
+    internal static void Reset()
+    {
+        ByKey.Clear();
+        count = 0;
+    }
+
+    /// <summary>
     /// Off for a bench half that measures what building every row costs: nothing is rented and nothing is kept, so the same
     /// binary can be timed with and without the cache.
     /// </summary>

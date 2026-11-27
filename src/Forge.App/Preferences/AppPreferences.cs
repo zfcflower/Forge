@@ -145,7 +145,6 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxChatToolImageThumbnailPixels = 1024;
     public const int DefaultChatToolImageThumbnailPixels = 256;
     public const bool DefaultChatToolImagesToModel = true;
-    public const bool DefaultChatContextBudget = true;
 
     /// <summary>How much of one command's output is kept, in kilobytes; clamped to [16, 4096] by the setter.</summary>
     public const int MinToolsBashCaptureKilobytes = 16;
@@ -326,7 +325,6 @@ internal sealed class AppPreferences : ObservableObject
     private int palettePerSourceLimit = DefaultPalettePerSourceLimit;
     private int chatToolImageThumbnailPixels = DefaultChatToolImageThumbnailPixels;
     private bool chatToolImagesToModel = DefaultChatToolImagesToModel;
-    private bool chatContextBudget = DefaultChatContextBudget;
     private int toolsBashCaptureKilobytes = DefaultToolsBashCaptureKilobytes;
     private int toolsGrepMaxResults = DefaultToolsGrepMaxResults;
     private string toolsIgnoredDirectories = DefaultToolsIgnoredDirectories;
@@ -638,7 +636,6 @@ internal sealed class AppPreferences : ObservableObject
     /// Whether every request carries one trailing line telling the model its own context usage and trigger line. On by
     /// default: the model then knows how much room is left instead of inferring it from truncated tool output.
     /// </summary>
-    public bool ChatContextBudget { get => chatContextBudget; set => Set(ref chatContextBudget, value); }
 
     /// <summary>Kilobytes of one command's output the model sees; the rest is dropped and the result says so.</summary>
     public int ToolsBashCaptureKilobytes
@@ -1057,7 +1054,6 @@ internal sealed class AppPreferences : ObservableObject
             ? Math.Clamp(chatToolImageThumbnailPixelsLoaded, MinChatToolImageThumbnailPixels, MaxChatToolImageThumbnailPixels)
             : DefaultChatToolImageThumbnailPixels;
         chatToolImagesToModel = section.ChatToolImagesToModel ?? DefaultChatToolImagesToModel;
-        chatContextBudget = section.ChatContextBudget ?? DefaultChatContextBudget;
         toolsBashCaptureKilobytes = section.ToolsBashCaptureKilobytes is { } bashCaptureLoaded
             ? Math.Clamp(bashCaptureLoaded, MinToolsBashCaptureKilobytes, MaxToolsBashCaptureKilobytes)
             : DefaultToolsBashCaptureKilobytes;
@@ -1211,7 +1207,6 @@ internal sealed class AppPreferences : ObservableObject
             PalettePerSourceLimit = palettePerSourceLimit,
             ChatToolImageThumbnailPixels = chatToolImageThumbnailPixels,
             ChatToolImagesToModel = chatToolImagesToModel,
-            ChatContextBudget = chatContextBudget,
             ToolsBashCaptureKilobytes = toolsBashCaptureKilobytes,
             ToolsGrepMaxResults = toolsGrepMaxResults,
             ToolsIgnoredDirectories = toolsIgnoredDirectories,
@@ -1661,9 +1656,6 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("chatToolImagesToModel")]
     public bool? ChatToolImagesToModel { get; set; }
-
-    [JsonPropertyName("chatContextBudget")]
-    public bool? ChatContextBudget { get; set; }
 
     [JsonPropertyName("toolsBashCaptureKilobytes")]
     public int? ToolsBashCaptureKilobytes { get; set; }

@@ -19,7 +19,19 @@ public sealed record ModelSettings(
 /// five-minute message one would just mean the same prefix is written twice. <c>null</c> = the provider's default (an hour for
 /// the claimed Claude shape), <c>"5m"</c> = ask for the short-lived default, <c>"1h"</c> = the hour.
 /// </summary>
-public sealed record CacheHint(bool CacheSystemAndTools, int? CacheThroughMessageIndex = null, string? Ttl = null);
+public sealed record CacheHint(
+    bool CacheSystemAndTools,
+    int? CacheThroughMessageIndex = null,
+    string? Ttl = null)
+{
+    /// <summary>
+    /// Index of the last message that is the same in every request of a session — the end of the managed history (the fold
+    /// block and the finished turns' entries). A provider with explicit breakpoints puts one here, so that boundary is
+    /// written and re-read every turn no matter how the turn in flight rewrites what follows it; the moving
+    /// <see cref="CacheThroughMessageIndex"/> keeps covering the tail within one turn.
+    /// </summary>
+    public int? StableBoundaryIndex { get; init; }
+}
 
 public sealed record ToolDefinition(string Name, string Description, string InputSchemaJson);
 

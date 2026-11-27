@@ -143,6 +143,13 @@ internal sealed record AgentRuntimeServices(
     public IStepReviewStore? StepReviewStore { get; set; }
 
     /// <summary>
+    /// The per-turn state facts (handed to <c>AgentHostOptions.TurnLedger</c>, which also composes the completion template
+    /// into the prefix). Null without the composition root: the session's turns then leave no ledger rows and its prompt
+    /// carries no <c># Turn Completion</c> section.
+    /// </summary>
+    public ITurnLedgerStore? TurnLedger { get; set; }
+
+    /// <summary>
     /// Where oversized tool output is stored (handed to <c>AgentHostOptions.Artifacts</c>, which also adds the tool that
     /// reads it back). Null when the runtime was assembled without the composition root: output then stays inline.
     /// </summary>
@@ -422,11 +429,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     }
 
     /// <summary>
-    /// The trailing line every request of this session carries for its model — that instance's own context budget, keyed by
-    /// agent id (a sub-agent has its own window, so it gets its own line, never the root's). Null appends nothing; read when
-    /// a host is built, so the shell sets it once the instruments exist.
+    /// The trailing line a request of this session carries, keyed by agent id - the shell's own hook, never the root's answer
+    /// for a sub-agent. Null appends nothing; read when a host is built, so the shell sets it once this session exists.
     /// </summary>
-    public Func<string, string?>? ContextBudget { get; set; }
+    public Func<string, string?>? DynamicContext { get; set; }
 
     /// <summary>
     /// Who named this session's title, as the store last accepted it: null until the first write, then the derived
@@ -570,12 +576,15 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     /// </summary>
     /// <param name="deriveTitle">Whether this turn's text may write the placeholder title. A user's message may; an automation
     /// turn may not - its session carries the automation's own name and was not created by a person typing a request.</param>
+    /// <param name="turnSequence">The number this turn already owns - the one its checkpoint and metrics row are keyed by.
+    /// Null when the caller allocated none, and the loop then takes the store's own next number.</param>
     public async Task RunTurnAsync(
         string userText,
         IReadOnlyList<ContentBlock> attachments,
         Action<AgentEvent> sink,
         CancellationToken ct,
-        bool deriveTitle = true)
+        bool deriveTitle = true,
+        long? turnSequence = null)
     {
         ArgumentNullException.ThrowIfNull(userText);
         ArgumentNullException.ThrowIfNull(attachments);
@@ -632,6 +641,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
         // way the identity proof never held, so those rows stayed positionless and read "—" on every replay.
         var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
         var (baselineUsage, baselineStream) = agent.ReadCounters();
+        // Set fresh on every turn, null included: an instance lives across turns, and a turn the caller did not number must
+        // not inherit the previous turn's number (it would settle on that turn's ledger row).
+        agent.TurnSequence = turnSequence;
         lock (gate)
         {
             activeRoot = agent;
@@ -1320,9 +1332,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     /// <summary>
     /// Manual compaction of the root context (<c>/compact [focus]</c>, the context gauge): ignores the threshold and the
     /// automatic-compaction switch, keeps the newest keepRecent tokens verbatim, passes <paramref name="instructions"/> to
-    /// the summarizer as additional focus and re-enables automatic compaction. Returns null when nothing was compacted.
+    /// deterministic folding and re-enables automatic compaction. Returns null when nothing could be folded.
     /// Throws <see cref="InvalidOperationException"/> while a turn runs (the caller offers it only when the session is
-    /// idle) and <see cref="CompactionFailedException"/> when no usable summary came back.
+    /// idle).
     /// </summary>
     public async Task<CompactionResult?> CompactNowAsync(Action<AgentEvent> sink, CancellationToken ct) =>
         await CompactNowAsync(sink, null, ct).ConfigureAwait(false);
@@ -2054,6 +2066,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 ReviewLimits = services.ReviewLimits,
                 ReviewConclusions = services.ReviewConclusions,
                 StepReviewStore = services.StepReviewStore,
+                TurnLedger = services.TurnLedger,
                 Artifacts = services.Artifacts,
                 SessionMessages = services.SessionMessages,
                 // A background child outlives the turn that started it, so its events go to the session's own sink, not only to that
@@ -2062,8 +2075,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),
                 SpawnModels = services.SpawnModels,
-                // The model's own budget line: a dynamic suffix, never part of the cached prefix or the history.
-                DynamicContext = ContextBudget,
+                // The shell's per-request line: never part of the cached prefix or the history.
+                DynamicContext = DynamicContext,
                 // set_title: the tool exists in every host this runtime builds, so the tool segment stays byte-stable.
                 RenameSession = NameSessionAsync,
                 Options = new AgentOptions

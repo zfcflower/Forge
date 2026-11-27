@@ -14,11 +14,40 @@ internal static class SessionHistory
     internal static async Task<IReadOnlyList<AgentMessage>> LoadAsync(
         ISessionStore store,
         string sessionId,
-        CancellationToken ct)
+        CancellationToken ct,
+        ITurnLedgerStore? ledger = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        // The managed context first: a session the ledger has written for reads exactly what a live one reads - the fold
+        // block plus one entry per finished turn - so reopening a tab and continuing in the same process see one history.
+        // A session with no rows (pre-ledger, or a host without a ledger) keeps the summary view and the raw tail below.
         var result = new List<AgentMessage>();
+        if (ledger is not null)
+        {
+            var rows = await ledger.ListAsync(sessionId, ct).ConfigureAwait(false);
+            if (rows.Count > 0)
+            {
+                foreach (var message in ManagedContext.Build(rows))
+                {
+                    result.Add(new AgentMessage(message, 0));
+                }
+
+                // Everything stored after the last settled turn: receipts and interjections that arrived while the session
+                // was idle. They belong to no entry yet, and without them a reopened tab would silently lose them.
+                await foreach (var stored in store.ReadAsync(sessionId, ManagedContext.LastSeq(rows) + 1, null, ct).ConfigureAwait(false))
+                {
+                    if (stored.Message.Role == MessageRole.User)
+                    {
+                        result.Add(new AgentMessage(stored.Message, stored.Seq));
+                    }
+                }
+
+                return result;
+            }
+        }
+
         await AppendLevelAsync(store, sessionId, result, ct).ConfigureAwait(false);
         return result;
     }

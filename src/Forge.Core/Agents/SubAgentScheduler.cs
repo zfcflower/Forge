@@ -71,6 +71,14 @@ public sealed class SubAgentScheduler : ISubAgentControl
     private readonly AgentCatalog catalog;
     private readonly PromptLayers layers;
     private readonly IPromptComposer composer;
+
+    /// <summary>
+    /// The turn completion section every child of this tree carries in its prefix; null when the host runs without a
+    /// turn ledger, which keeps those children's prefix bytes unchanged.
+    /// </summary>
+
+    /// <summary>The session ledger the resumed agents rebuild their managed history from; null = no ledger.</summary>
+    private readonly ITurnLedgerStore? turnLedger;
     private readonly ISessionStore? store;
     private readonly ISessionCatalog? sessions;
     private readonly AgentOptions options;
@@ -132,7 +140,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
         PromptLayers layers,
         IPromptComposer composer,
         ISessionStore? store,
-        AgentOptions options)
+        AgentOptions options,
+        ITurnLedgerStore? turnLedger = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(layers);
@@ -141,6 +150,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
         this.catalog = catalog;
         this.layers = layers;
         this.composer = composer;
+        this.turnLedger = turnLedger;
         this.store = store;
         stateStore = store as ISubAgentStateStore;
         sessions = SessionCatalogs.From(store);
@@ -1020,7 +1030,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
 
         if (store is { } sessionStore)
         {
-            instance.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, sessionId, ct).ConfigureAwait(false));
+            instance.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, sessionId, ct, turnLedger).ConfigureAwait(false));
         }
 
         return instance;
@@ -1325,7 +1335,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
             sessionId,
             workingDirectory,
             depth,
-            composer.Compose(new PromptInput(layers, definition.Prompt, null)))
+            composer.Compose(new PromptInput(layers, definition.Prompt)))
         {
             // The tool surface reads this: only a user-driven session may deliver session messages (its root may too).
             IsUserSession = owner == AgentOwner.User,
@@ -1512,8 +1522,8 @@ public sealed class SubAgentScheduler : ISubAgentControl
                     state.SessionId,
                     Path.GetFullPath(candidate.WorkingDirectory),
                     candidate.Depth,
-                    composer.Compose(new PromptInput(layers, definition.Prompt, null)));
-                instance.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, state.SessionId, ct).ConfigureAwait(false));
+                    composer.Compose(new PromptInput(layers, definition.Prompt)));
+                instance.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, state.SessionId, ct, turnLedger).ConfigureAwait(false));
                 lock (gate)
                 {
                     if (!instances.TryAdd(state.AgentId, instance))

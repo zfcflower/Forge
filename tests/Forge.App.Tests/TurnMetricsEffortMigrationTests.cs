@@ -51,7 +51,7 @@ public sealed class TurnMetricsEffortMigrationTests : IDisposable
             upgraded with { Turn = 2, Effort = ThinkingEffort.XHigh },
             CancellationToken.None);
         Assert.Equal(ThinkingEffort.XHigh, (await metrics.ListAsync(sessionId, CancellationToken.None))[1].Effort);
-        Assert.Equal(15, await ReadUserVersionAsync());
+        Assert.Equal(StorageSchema.Version, await ReadUserVersionAsync());
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public sealed class TurnMetricsEffortMigrationTests : IDisposable
         await using var metrics = new SqliteTurnMetricsStore(directory);
         await store.ListSessionsAsync(null, CancellationToken.None);
 
-        Assert.Equal(15, await ReadUserVersionAsync());
+        Assert.Equal(StorageSchema.Version, await ReadUserVersionAsync());
         Assert.False(await metrics.ExistsAsync(CancellationToken.None));
         Assert.Empty(await metrics.ListAsync("any-session", CancellationToken.None));
     }

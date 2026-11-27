@@ -37,7 +37,7 @@ public sealed class AgentDefaultsStoreTests : IDisposable
     }
 
     [Fact]
-    public void An_unpinned_model_resolves_without_a_cap_even_when_the_catalog_knows_its_capability()
+    public void An_unpinned_model_resolves_with_the_catalogue_cap_bounded_by_the_compatible_ceiling()
     {
         var store = Store("""{"agents":{"scout":{"providerId":"opencode","model":"glm-5.3","thinking":"low"}}}""");
         var catalog = fixture.Create(
@@ -47,7 +47,27 @@ public sealed class AgentDefaultsStoreTests : IDisposable
 
         var resolved = store.Resolve("scout", catalog);
 
-        Assert.Equal(new ModelSettings("glm-5.3", ThinkingEffort.Low, null, "opencode"), resolved);
+        Assert.Equal(new ModelSettings("glm-5.3", ThinkingEffort.Low, 65_536, "opencode"), resolved);
+    }
+
+    [Theory]
+    [InlineData(null, null, null)]
+    [InlineData(null, 4_096, 8_192)]
+    [InlineData(null, 32_000, 32_000)]
+    [InlineData(null, 943_718, 65_536)]
+    [InlineData(12_345, 943_718, 12_345)]
+    public void The_compatible_cap_is_the_pin_else_the_bounded_catalogue_figure(int? pinned, int? catalogue, int? expected)
+    {
+        // One place decides the wire cap for the protocols that otherwise send nothing: a pin always wins, a catalogue
+        // figure is clamped (an aggregator's derived six-figure value must never reach the wire, and a tiny one must not
+        // truncate every answer), and nothing known sends nothing.
+        Assert.Equal(expected, OutputCeiling.Compatible(pinned, catalogue));
+    }
+
+    [Fact]
+    public void An_unknown_catalogue_limit_leaves_the_cap_unset()
+    {
+        Assert.Null(OutputCeiling.Compatible(pinned: null, catalogueLimit: null));
     }
 
     [Fact]

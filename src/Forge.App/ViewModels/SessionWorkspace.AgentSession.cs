@@ -438,6 +438,9 @@ internal sealed partial class SessionWorkspaceViewModel
                 BeginAgentCounters();
                 turnNo = await BeginAgentTurnAsync(agentChildSessionId, card.Round).ConfigureAwait(true);
                 turnNumber = turnNo.Value;
+                // The child's own turn number, the one its checkpoint and metrics row are keyed by; the ledger row keys by
+                // the same one, set here before the run so the loop never has to guess.
+                child.TurnSequence = turnNo;
                 await live.RunUserChildTurnAsync(child, text, prompt.Attachments, OnAgentSessionEvent, token).ConfigureAwait(true);
             }
         }
@@ -487,6 +490,10 @@ internal sealed partial class SessionWorkspaceViewModel
                     var counters = ReadAgentCounters();
                     var stream = AgentTurnStream(counters);
                     RecordAgentTurnMetrics(childSessionId, number, definition, error, stream, counters);
+                    // The turn's own ledger row, read back at the same finalization point its metrics row is written at:
+                    // this turn ran as one run of the child, whatever way it ended, and the row pairs by its answer_seq
+                    // against the child instance's last persisted message - the same key the metrics row above uses.
+                    NoteLedgerRow(childSessionId, turnCard, counters?.LastSeq ?? 0);
                     if (!disposed && Volatile.Read(ref agentTurnCompleted) == 0)
                     {
                         // A run that stopped or failed emits no turn-completed event, so nothing has shown its spend or its

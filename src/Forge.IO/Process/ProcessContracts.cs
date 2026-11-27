@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Forge.IO;
 
 /// <summary>Why a process stopped.</summary>
@@ -49,6 +51,8 @@ public sealed record ProcessRequest
 }
 
 /// <summary>What one process run did. Output is captured as bytes with a hard cap per stream, then decoded once.</summary>
+/// <param name="Signal">The signal that ended the process when the operating system reports one; null for a normal exit
+/// and always on Windows, which has no signals - a killed child there reports only its exit code.</param>
 public sealed record ProcessResult(
     int ExitCode,
     string Stdout,
@@ -58,7 +62,8 @@ public sealed record ProcessResult(
     bool StdoutTruncated,
     bool StderrTruncated,
     ProcessEndReason EndReason,
-    TimeSpan Duration)
+    TimeSpan Duration,
+    PosixSignal? Signal = null)
 {
     public bool Success => EndReason == ProcessEndReason.Exited && ExitCode == 0;
 }

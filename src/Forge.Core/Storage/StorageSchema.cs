@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 15;
+    public const int Version = 20;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -29,6 +29,11 @@ internal static class StorageSchema
     public const string TodoDone = "Done";
     public const string TodoOriginAgent = "agent";
     public const string TodoOriginUser = "user";
+
+    /// <summary>The four states a <c>turn_ledger</c> row settles between: pending is what the loop opens a turn with, the
+    /// other three are its terminal states (forge-core "终结模板与 Turn Ledger").</summary>
+    public const string LedgerPending = "pending";
+    public const string LedgerSettled = "settled";
 
     /// <summary>
     /// The only text <c>sessions.child_driver</c> stores: a session the user opened under a root session. Every other
@@ -225,6 +230,7 @@ internal static class StorageSchema
         ("ui_state", ["key"], ["updated_at"]),
         ("turn_checkpoints", ["session_id", "turn"], ["started_at", "ended_at"]),
         ("turn_metrics", ["session_id", "turn"], ["started_at", "ended_at"]),
+        ("turn_ledger", ["session_id", "turn_sequence"], ["created_at", "updated_at"]),
         ("plan_summaries", ["session_id"], ["updated_at"]),
         ("plan_summary_revisions", ["id"], ["replaced_at"]),
         ("todo_groups", ["id"], ["updated_at"]),
@@ -253,6 +259,40 @@ internal static class StorageSchema
 
     private const string FallbackSchemaSql =
         "CREATE TABLE IF NOT EXISTS messages_text (session_id TEXT NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (session_id, seq))";
+
+    /// <summary>
+    /// The ledger's search surface, the exact mirror of the messages pair above: same shape (one text column over the
+    /// row's searchable prose - here the task, the parsed conclusion, the open problems and the next action), same FTS5
+    /// availability logic, same fallback table, same orphan pruning and back-fill. The duplication is deliberate: the
+    /// messages half is stable and every behavioural difference here would be a divergence from the one mechanism.
+    /// </summary>
+    private const string LedgerFtsSchemaSql =
+        "CREATE VIRTUAL TABLE IF NOT EXISTS turn_ledger_fts USING fts5(session_id UNINDEXED, turn_sequence UNINDEXED, text, tokenize='unicode61 remove_diacritics 2')";
+
+    private const string LedgerFallbackSchemaSql =
+        "CREATE TABLE IF NOT EXISTS turn_ledger_text (session_id TEXT NOT NULL, turn_sequence INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (session_id, turn_sequence))";
+
+    private const string AllLedgerRowsSql =
+        "SELECT session_id, turn_sequence, task_text, conclusion_text FROM turn_ledger";
+
+    /// <summary>What a ledger row does not yet have a search row for.</summary>
+    private const string UnsearchedLedgerPredicate =
+        "NOT EXISTS (SELECT 1 FROM turn_ledger_text WHERE turn_ledger_text.session_id = turn_ledger.session_id " +
+        "AND turn_ledger_text.turn_sequence = turn_ledger.turn_sequence)";
+
+    /// <summary>The rows the fallback table still lacks; a top-up reads exactly these.</summary>
+    private const string UnsearchedLedgerSql = AllLedgerRowsSql + " WHERE " + UnsearchedLedgerPredicate;
+
+    private const string UnindexedLedgerPredicate =
+        "NOT EXISTS (SELECT 1 FROM turn_ledger_fts WHERE turn_ledger_fts.session_id = turn_ledger.session_id " +
+        "AND turn_ledger_fts.turn_sequence = turn_ledger.turn_sequence)";
+
+    private const string UnindexedLedgerSql = AllLedgerRowsSql + " WHERE " + UnindexedLedgerPredicate;
+
+    /// <summary>What a row of <c>turn_ledger_fts</c> has no ledger row behind (see <see cref="OrphanedSearchRowsPredicate"/>).</summary>
+    private const string OrphanedLedgerSearchRowsPredicate =
+        "NOT EXISTS (SELECT 1 FROM turn_ledger WHERE turn_ledger.session_id = turn_ledger_fts.session_id " +
+        "AND turn_ledger.turn_sequence = turn_ledger_fts.turn_sequence)";
 
     private const string AllMessagesSql = "SELECT session_id, seq, content_json FROM messages";
 
@@ -299,7 +339,9 @@ internal static class StorageSchema
             version = await MigrateNextAsync(connection, databasePath, ct).ConfigureAwait(false);
         }
 
-        return await EnsureSearchTableAsync(connection, ct).ConfigureAwait(false);
+        var messagesSearch = await EnsureSearchTableAsync(connection, ct).ConfigureAwait(false);
+        await EnsureLedgerSearchAsync(connection, ct).ConfigureAwait(false);
+        return messagesSearch;
     }
 
     /// <summary>
@@ -446,6 +488,21 @@ internal static class StorageSchema
                 break;
             case 14:
                 await MigrateToV15Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 15:
+                await MigrateToV16Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 16:
+                await MigrateToV17Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 17:
+                await MigrateToV18Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 18:
+                await MigrateToV19Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 19:
+                await MigrateToV20Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
@@ -778,6 +835,147 @@ internal static class StorageSchema
 
         await ExecuteAsync(connection, transaction, "UPDATE sessions SET origin_kind = 'cold' WHERE origin_kind = 'full'", ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The v16 step, the turn ledger: one row per task turn (<c>(session_id, turn_sequence)</c>), opened pending at the
+    /// turn's start and settled in place at its end - no backfill, a new table, so nothing has to be carried over. Its
+    /// full-text surface is built outside the transaction by the same open-time logic the messages pair uses, because
+    /// which of the two search tables exists depends on this SQLite build's FTS5 module, not on the schema version.
+    /// </summary>
+    private const string V16SchemaSql = """
+        CREATE TABLE IF NOT EXISTS turn_ledger (
+            session_id        TEXT NOT NULL,
+            turn_sequence     INTEGER NOT NULL,
+            status            TEXT NOT NULL,
+            task_text         TEXT NOT NULL,
+            answer_text       TEXT NOT NULL,
+            conclusion_text   TEXT NOT NULL,
+            read_files_text   TEXT NOT NULL,
+            changed_files_text TEXT NOT NULL,
+            specs_text        TEXT NOT NULL,
+            from_seq          INTEGER NOT NULL,
+            to_seq            INTEGER NOT NULL,
+            answer_seq        INTEGER NOT NULL,
+            provider          TEXT NULL,
+            model             TEXT NULL,
+            agent_kind        TEXT NULL,
+            agent_depth       INTEGER NOT NULL,
+            folded            INTEGER NOT NULL DEFAULT 0,
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL,
+            PRIMARY KEY (session_id, turn_sequence)
+        ) WITHOUT ROWID;
+        """;
+
+    private static async Task MigrateToV16Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await ExecuteAsync(connection, transaction, V16SchemaSql, ct).ConfigureAwait(false);
+        // The new timestamp columns are registered in TimestampColumns, so the guards go on with the step that creates
+        // the table - the same re-install the v4 step performs for todo_groups.
+        await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The v17 step: a ledger row learns whether it has been absorbed into a folded block of the managed context
+    /// (forge-core "托管上下文"). The flag only ever goes 0 to 1, so "the fold range" is the highest folded turn and a
+    /// resumed session renders exactly the shape the live one had; it is a column rather than a side table because it
+    /// describes the row it sits on. An existing database keeps every row unfolded, which reads as "nothing folded yet".
+    /// </summary>
+    private static async Task MigrateToV17Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        // A database created by this build already carries the column (the V16 create script has it); only a database
+        // that was migrated to 16 by the previous build needs the ALTER.
+        if (await HasColumnAsync(connection, transaction, "turn_ledger", "folded", ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        await ExecuteAsync(
+            connection,
+            transaction,
+            "ALTER TABLE turn_ledger ADD COLUMN folded INTEGER NOT NULL DEFAULT 0",
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The v18 step: the ledger's <c>outcome</c> column left the completion contract (the state section is two lines, and a
+    /// verdict word nobody read was one more thing for the model to get wrong). Nothing has to be migrated - the column was
+    /// nullable, no reader or writer names it any more, and a database that still carries it reads and writes exactly like a
+    /// fresh one - so this step only carries the version forward.
+    /// </summary>
+    private static Task MigrateToV18Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>
+    /// The v19 step: the ledger stops judging a reply's shape. A reply is free-form now, so <c>unresolved</c>,
+    /// <c>next_action</c> and <c>validation_detail</c> have no writer left, and <c>status</c> keeps only <c>pending</c> and
+    /// <c>settled</c>. Nothing has to be migrated - the three columns were nullable and no reader names them any more, and a
+    /// database that still carries them reads like a fresh one (its older <c>received</c>/<c>missing</c>/<c>invalid</c> rows
+    /// read as settled) - so this step only carries the version forward.
+    /// </summary>
+    private static Task MigrateToV19Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>
+    /// The v20 step: the ledger's single file list splits into what a turn read and what it changed, so a later turn can tell
+    /// "looked at" from "touched". The old column is renamed in place rather than copied, so an existing database keeps its
+    /// rows; every one of them was a list of paths touched by a write or a read, and nothing distinguishes them any more, so
+    /// they land in the read list and the changed list starts empty.
+    /// </summary>
+    private static async Task MigrateToV20Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        if (await HasColumnAsync(connection, transaction, "turn_ledger", "read_files_text", ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        await ExecuteAsync(
+            connection,
+            transaction,
+            "ALTER TABLE turn_ledger RENAME COLUMN files_text TO read_files_text",
+            ct).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection,
+            transaction,
+            "ALTER TABLE turn_ledger ADD COLUMN changed_files_text TEXT NOT NULL DEFAULT ''",
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Whether one table already has a column; the ladder's ALTER steps are written to be safe on both shapes.</summary>
+    private static async Task<bool> HasColumnAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string table,
+        string column,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"PRAGMA table_info({table})";
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private const string V10SchemaSql = """
@@ -1380,6 +1578,203 @@ internal static class StorageSchema
             insert.Parameters.AddWithValue("$t", text);
             await insert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The ledger's copy of <see cref="EnsureSearchTableAsync"/>: same decisions, same shapes, its own tables. Returns true
+    /// when the ledger's search runs on <c>turn_ledger_fts</c>, false when it runs on the <c>turn_ledger_text</c> fallback.
+    /// </summary>
+    public static async Task<bool> EnsureLedgerSearchAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        if (await SearchTableExistsAsync(connection, "turn_ledger_fts", null, ct).ConfigureAwait(false))
+        {
+            return await ReadLedgerFtsOrDegradeAsync(connection, ct).ConfigureAwait(false);
+        }
+
+        if (await SearchTableExistsAsync(connection, "turn_ledger_text", null, ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        using var transaction = connection.BeginTransaction(deferred: false);
+        if (await SearchTableExistsAsync(connection, "turn_ledger_fts", transaction, ct).ConfigureAwait(false))
+        {
+            transaction.Rollback();
+            return await ReadLedgerFtsOrDegradeAsync(connection, ct).ConfigureAwait(false);
+        }
+
+        if (await SearchTableExistsAsync(connection, "turn_ledger_text", transaction, ct).ConfigureAwait(false))
+        {
+            transaction.Rollback();
+            return false;
+        }
+
+        var fts5 = true;
+        await using (var search = connection.CreateCommand())
+        {
+            search.Transaction = transaction;
+            search.CommandText = LedgerFtsSchemaSql;
+            try
+            {
+                await search.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (SqliteException)
+            {
+                fts5 = false;
+                search.CommandText = LedgerFallbackSchemaSql;
+                await search.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        await BackfillLedgerSearchAsync(connection, transaction, fts5, onlyMissing: false, ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return fts5;
+    }
+
+    /// <summary>The ledger's <see cref="ReadFtsOrDegradeAsync"/>: same reasons, its own tables.</summary>
+    private static async Task<bool> ReadLedgerFtsOrDegradeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        if (await CanReadLedgerFtsAsync(connection, ct).ConfigureAwait(false))
+        {
+            await PruneOrphanedLedgerSearchRowsAsync(connection, ct).ConfigureAwait(false);
+            await BackfillMissingLedgerIndexRowsAsync(connection, ct).ConfigureAwait(false);
+            return true;
+        }
+
+        await EnsureLedgerFallbackTableAsync(connection, ct).ConfigureAwait(false);
+        return false;
+    }
+
+    /// <summary>The ledger's <see cref="PruneOrphanedSearchRowsAsync"/>: rows a degraded purge left behind go here.</summary>
+    private static async Task PruneOrphanedLedgerSearchRowsAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        if (!await SearchTableExistsAsync(connection, "turn_ledger_text", null, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM turn_ledger_fts WHERE " + OrphanedLedgerSearchRowsPredicate;
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The ledger's <see cref="BackfillMissingIndexRowsAsync"/>: what a degraded build wrote while the index sat idle.</summary>
+    private static async Task BackfillMissingLedgerIndexRowsAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        if (!await SearchTableExistsAsync(connection, "turn_ledger_text", null, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (!await HasUnindexedLedgerRowsAsync(connection, null, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        using var transaction = connection.BeginTransaction(deferred: false);
+        await BackfillLedgerSearchAsync(connection, transaction, fts5: true, onlyMissing: true, ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The ledger's <see cref="EnsureFallbackTableAsync"/>: created and topped up when this build cannot read the index.</summary>
+    private static async Task EnsureLedgerFallbackTableAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        var exists = await SearchTableExistsAsync(connection, "turn_ledger_text", null, ct).ConfigureAwait(false);
+        if (exists && !await HasUnsearchedLedgerRowsAsync(connection, null, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        using var transaction = connection.BeginTransaction(deferred: false);
+        exists = await SearchTableExistsAsync(connection, "turn_ledger_text", transaction, ct).ConfigureAwait(false);
+        await ExecuteAsync(connection, transaction, LedgerFallbackSchemaSql, ct).ConfigureAwait(false);
+        await BackfillLedgerSearchAsync(connection, transaction, fts5: false, onlyMissing: exists, ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>True when <c>turn_ledger</c> holds a row the FTS index does not.</summary>
+    private static async Task<bool> HasUnindexedLedgerRowsAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        await using var command = StorageDb.Command(
+            connection, transaction, "SELECT 1 FROM turn_ledger WHERE " + UnindexedLedgerPredicate + " LIMIT 1");
+        var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return value is not null and not DBNull;
+    }
+
+    /// <summary>True when <c>turn_ledger</c> holds a row the fallback search table does not.</summary>
+    private static async Task<bool> HasUnsearchedLedgerRowsAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        await using var command = StorageDb.Command(
+            connection, transaction, "SELECT 1 FROM turn_ledger WHERE " + UnsearchedLedgerPredicate + " LIMIT 1");
+        var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return value is not null and not DBNull;
+    }
+
+    /// <summary><see cref="CanReadFtsAsync"/> against the ledger's index.</summary>
+    private static async Task<bool> CanReadLedgerFtsAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT rowid FROM turn_ledger_fts LIMIT 0";
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (SqliteException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The ledger's <see cref="BackfillSearchAsync"/>: the row's searchable prose is its task then its conclusion,
+    /// joined so one match context reads like one document.</summary>
+    private static async Task BackfillLedgerSearchAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        bool fts5,
+        bool onlyMissing,
+        CancellationToken ct)
+    {
+        await using var select = connection.CreateCommand();
+        select.Transaction = transaction;
+        select.CommandText = onlyMissing ? (fts5 ? UnindexedLedgerSql : UnsearchedLedgerSql) : AllLedgerRowsSql;
+        await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var text = LedgerSearchText(reader.GetString(2), reader.GetString(3));
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = fts5
+                ? "INSERT INTO turn_ledger_fts (session_id, turn_sequence, text) VALUES ($s, $t, $x)"
+                : "INSERT OR REPLACE INTO turn_ledger_text (session_id, turn_sequence, text) VALUES ($s, $t, $x)";
+            insert.Parameters.AddWithValue("$s", reader.GetString(0));
+            insert.Parameters.AddWithValue("$t", reader.GetInt64(1));
+            insert.Parameters.AddWithValue("$x", text);
+            await insert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The searchable prose of one ledger row; the fixed order is the row's own reading order.</summary>
+    internal static string LedgerSearchText(string taskText, string conclusionText)
+    {
+        if (taskText.Length == 0)
+        {
+            return conclusionText;
+        }
+
+        return conclusionText.Length == 0 ? taskText : string.Concat(taskText, "\n", conclusionText);
     }
 
     private static async Task ExecuteAsync(

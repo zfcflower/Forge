@@ -52,10 +52,6 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
     public string Hint => CompactionStrings.SettingsHint;
 
     /// <summary>The context-budget line's switch, which lives in <c>preferences</c> rather than the compaction section.</summary>
-    public string BudgetLabel => CompactionStrings.SettingsBudget;
-
-    public string BudgetHint => CompactionStrings.SettingsBudgetHint;
-
     public string KeepRecentLabel => CompactionStrings.SettingsKeepRecent;
 
     public string KeepRecentHint => CompactionStrings.SettingsKeepRecentHint;
@@ -105,25 +101,6 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
     }
 
     public bool HasKeepRecentError => keepRecentError is not null;
-
-    /// <summary>
-    /// Whether every request tells the model its own context usage: on by default, saved the moment it is toggled. Reads
-    /// the live preference so a change made elsewhere shows up on the next reload.
-    /// </summary>
-    public bool ShowBudgetToModel
-    {
-        get => preferences?.ChatContextBudget ?? AppPreferences.DefaultChatContextBudget;
-        set
-        {
-            if (preferences is not { } live || live.ChatContextBudget == value)
-            {
-                return;
-            }
-
-            live.ChatContextBudget = value;
-            OnPropertyChanged(nameof(ShowBudgetToModel));
-        }
-    }
 
     public bool Enabled
     {
@@ -221,8 +198,7 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
             TargetText = current.TargetPercent.ToString(CultureInfo.InvariantCulture);
             KeepRecentText = current.KeepRecentTokens?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
             EmergencyText = current.EmergencyPercent.ToString(CultureInfo.InvariantCulture);
-            OnPropertyChanged(nameof(ShowBudgetToModel));
-        }
+            }
         finally
         {
             loading = false;
@@ -291,8 +267,6 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(TargetLabel));
         OnPropertyChanged(nameof(TargetHint));
         OnPropertyChanged(nameof(Hint));
-        OnPropertyChanged(nameof(BudgetLabel));
-        OnPropertyChanged(nameof(BudgetHint));
         OnPropertyChanged(nameof(KeepRecentLabel));
         OnPropertyChanged(nameof(KeepRecentHint));
         OnPropertyChanged(nameof(EmergencyLabel));

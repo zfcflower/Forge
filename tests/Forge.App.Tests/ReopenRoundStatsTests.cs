@@ -384,5 +384,7 @@ public sealed class ReopenRoundStatsTests : IDisposable
         public TurnMetricsRecorder? TurnMetricsRecorder => null;
 
         public ITurnMetricsStore? TurnMetrics => metrics;
+
+        public ITurnLedgerStore? TurnLedger => null;
     }
 }

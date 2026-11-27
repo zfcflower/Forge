@@ -19,6 +19,26 @@ public static class OutputCeiling
     /// <summary>Room above a thinking budget for the answer itself: <c>max_tokens</c> has to exceed <c>budget_tokens</c>.</summary>
     public const int ThinkingHeadroom = 4_096;
 
+    /// <summary>Smallest cap a compatible request asks for: below this the model would cut ordinary answers short.</summary>
+    public const int CompatibleFloor = 8_192;
+
+    /// <summary>Largest cap a compatible request asks for: the catalogue's figure is a capability, not a promise the gateway honours.</summary>
+    public const int CompatibleCeiling = 65_536;
+
+    /// <summary>
+    /// The cap a compatible or Responses request carries: the user's own pin when there is one, else the catalogue's output
+    /// limit clamped into [<see cref="CompatibleFloor"/>, <see cref="CompatibleCeiling"/>], else null (send nothing). A cap
+    /// is what makes the output reserve accurate - without one the budget has to assume 20% of the window is spoken for,
+    /// which on a large window reserves six figures for a reply that never grows that far, and folds history far earlier
+    /// than it has to. A gateway that refuses the field is handled by the adapter's one-shot downgrade, not here.
+    /// </summary>
+    public static int? Compatible(int? pinned, int? catalogueLimit) =>
+        pinned is { } pin && pin > 0
+            ? pin
+            : catalogueLimit is { } limit && limit > 0
+                ? Math.Clamp(limit, CompatibleFloor, CompatibleCeiling)
+                : null;
+
     /// <summary>The extended-thinking budget a step asks for: 1k, 2k, 8k, 24k, 32k, 48k, or nothing.</summary>
     public static int ThinkingBudget(ThinkingEffort effort) => effort switch
     {

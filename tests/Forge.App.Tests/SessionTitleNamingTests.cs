@@ -171,7 +171,7 @@ public sealed class SessionTitleNamingTests : IDisposable
             new Script());
         using var http = new HttpClient();
         _ = Tab(store, runtime, http);
-        provider.SuffixOnFirstRequest = runtime.ContextBudget!;
+        provider.SuffixOnFirstRequest = runtime.DynamicContext!;
 
         await RunTurnAsync(runtime);
 

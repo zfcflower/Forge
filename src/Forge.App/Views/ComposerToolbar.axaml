@@ -305,5 +305,19 @@
       </Flyout>
     </Button.Flyout>
   </Button>
+  <!-- The session's turn ledger (stage one, shadow mode): one icon button that opens the whole timeline, oldest turn
+       first, with each row's status badge and the footer's counts. Only a session with a ledger behind it shows it. -->
+  <Button Width="26"
+          Height="22"
+          Margin="4,0,0,0"
+          Classes="ghost icon"
+          VerticalAlignment="Center"
+          IsVisible="{Binding HasSessionLedger}"
+          Click="OnSessionLedgerClick"
+          ToolTip.Tip="{Binding [session.ledger], Source={x:Static loc:Loc.Instance}}"
+          AutomationProperties.AutomationId="session-ledger"
+          AutomationProperties.Name="{Binding [session.ledger], Source={x:Static loc:Loc.Instance}}">
+    <wc:FluentIcon Data="{StaticResource IconNavigation}" Width="13" Height="13" />
+  </Button>
   </StackPanel>
 </UserControl>

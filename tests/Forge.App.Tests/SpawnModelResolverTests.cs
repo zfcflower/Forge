@@ -160,10 +160,11 @@ public sealed class SpawnModelResolverTests : IDisposable
     }
 
     [Fact]
-    public void An_unpinned_model_carries_no_cap_even_when_the_catalog_knows_one()
+    public void An_unpinned_model_carries_the_catalogue_cap_bounded_by_the_compatible_ceiling()
     {
-        // The catalog's limit is the model's capability, a display and compaction figure; loading it into the settings is
-        // what put an aggregator's derived 943718 on the wire and had every request for the 131072-cap model refused.
+        // The catalogue's limit is the model's capability, so it is used as the wire cap only through
+        // OutputCeiling.Compatible: the aggregator's derived 943 718 that once had every request refused comes out as the
+        // 65 536 ceiling, and the provider's own 131 072 entry - the one this provider actually serves - is what it clamps.
         var catalog = fixture.Create(
             "opencode",
             ProviderCatalogFixture.Snapshot(("opencode", "glm-5.3", 131_072), ("openrouter", "z-ai/glm-5.3", 943_718)),
@@ -172,7 +173,7 @@ public sealed class SpawnModelResolverTests : IDisposable
 
         var choice = Resolver(catalog).Resolve(Request(null, null, null, current));
 
-        Assert.Equal(new ModelSettings("glm-5.3", ThinkingEffort.Off, null, "opencode"), choice.Settings);
+        Assert.Equal(new ModelSettings("glm-5.3", ThinkingEffort.Off, 65_536, "opencode"), choice.Settings);
     }
 
     [Fact]

@@ -23,6 +23,15 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     private readonly bool sendConversationCacheHeader;
     private readonly bool sendInteractionId;
     private bool downgraded;
+
+    /// <summary>This endpoint refused the output cap; the process remembers it so later requests do not repeat the refusal.</summary>
+    private bool capDegraded;
+
+    /// <summary>Set by <see cref="CanDegrade"/> when the refusal named the output cap rather than a cache field.</summary>
+    private bool refusedCap;
+
+    /// <summary>Identity under which "this endpoint refused the output cap" is remembered, apart from the cache fields' key.</summary>
+    private string CapDegradationKey => Id + "|cap|" + Config.BaseUrl;
     private string? notice;
 
     /// <summary>
@@ -43,13 +52,16 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         : base(config, http, idleTimeout, options)
     {
         var knobs = options ?? ProviderOptions.Default;
-        // DeepSeek caches by prefix on its own and refuses unknown fields, so nothing cache-shaped is sent to it whatever the options say.
-        var tunable = !IsDeepSeek(config.BaseUrl);
-        sendPromptCacheKey = knobs.SendPromptCacheKey && tunable;
-        sendPromptCacheRetention = knobs.SendPromptCacheRetention && tunable;
-        sendConversationCacheHeader = knobs.SendConversationCacheHeader && tunable;
-        sendInteractionId = knobs.SendInteractionId && tunable;
+        // Nothing is suppressed by host any more: the knobs the host asked for are the knobs that are sent, and an endpoint
+        // that refuses one answers 400, which the one-shot downgrade below turns into "send less for this endpoint". Measured
+        // 2026-11-27: DeepSeek accepts prompt_cache_key and prompt_cache_retention and ignores both; the opencode gateway
+        // accepts both (prompt_cache_key only partitions its cache namespace).
+        sendPromptCacheKey = knobs.SendPromptCacheKey;
+        sendPromptCacheRetention = knobs.SendPromptCacheRetention;
+        sendConversationCacheHeader = knobs.SendConversationCacheHeader;
+        sendInteractionId = knobs.SendInteractionId;
         downgraded = ProviderDegradations.Contains(DegradationKey);
+        capDegraded = ProviderDegradations.Contains(CapDegradationKey);
     }
 
     /// <summary>Identity under which "this endpoint refused the cache fields" is remembered for the rest of the process.</summary>
@@ -68,7 +80,10 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
 
         // Both halves count: a field named in `error.param` lives only in the body, one named in the sentence lives there.
         var text = ProviderErrors.MatchText(failure);
-        return text.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
+        refusedCap = text.Contains("max_completion_tokens", StringComparison.OrdinalIgnoreCase)
+                     || text.Contains("max_tokens", StringComparison.OrdinalIgnoreCase);
+        return refusedCap
+               || text.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
                || text.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase)
                || text.Contains("x-grok-conv-id", StringComparison.OrdinalIgnoreCase)
                || text.Contains("X-Interaction-Id", StringComparison.OrdinalIgnoreCase);
@@ -76,13 +91,24 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
 
     protected override void Degrade()
     {
+        if (refusedCap)
+        {
+            // A gateway that does not know the field keeps the cache knobs it did accept: only the cap goes.
+            capDegraded = true;
+            ProviderDegradations.Add(CapDegradationKey);
+            return;
+        }
+
         downgraded = true;
         ProviderDegradations.Add(DegradationKey);
     }
 
     protected override string? DegradationNotice => notice ??=
-        "This model or gateway refused the prompt-cache fields or headers, so the request was resent without them. The answer is unaffected; "
-        + "caching is then whatever the provider does on its own.";
+        (refusedCap
+            ? "This model or gateway refused the output cap, so the request was resent without it. The answer is unaffected; "
+              + "the output reserve falls back to 20% of the window until the pin is cleared."
+            : "This model or gateway refused the prompt-cache fields or headers, so the request was resent without them. The answer is unaffected; "
+              + "caching is then whatever the provider does on its own.");
 
     /// <summary>
     /// The retention this request asks for, or null when it should not be sent: <c>in_memory</c> is the short lifetime (the default
@@ -155,7 +181,7 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     {
         writer.WriteString("model", request.Model.Model);
 
-        if (request.Model.MaxOutputTokens is { } maxOutputTokens)
+        if (request.Model.MaxOutputTokens is { } maxOutputTokens && !capDegraded)
         {
             writer.WriteNumber("max_completion_tokens", maxOutputTokens);
         }

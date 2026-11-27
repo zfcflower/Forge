@@ -67,8 +67,13 @@ internal sealed record ProviderDefinition
     /// <summary>The user's per-model metadata override, the strongest source in the metadata chain.</summary>
     public required IReadOnlyDictionary<string, ModelMetadata> Overrides { get; init; }
 
-    /// <summary>OpenAI-compatible: send <c>prompt_cache_key</c>; never for DeepSeek (the provider itself refuses it).</summary>
-    public bool SendPromptCacheKey { get; init; }
+    /// <summary>
+    /// OpenAI-compatible and Responses: send <c>prompt_cache_key</c> (the lineage root) and <c>prompt_cache_retention</c>.
+    /// Null — the default — means "send them": every vendor measured on 2026-11-27 accepts both fields, and an endpoint that
+    /// refuses one is handled by the adapter's one-shot downgrade. An explicit <c>false</c> in the provider entry turns them off
+    /// for a gateway the user knows to be strict. Anthropic ignores this: it takes <c>cache_control</c> breakpoints instead.
+    /// </summary>
+    public bool? SendPromptCacheKey { get; init; }
 
     /// <summary>
     /// The prompt-cache lifetime to ask for — <c>"auto"</c> (default), <c>"5m"</c> or <c>"1h"</c>; null reads as <c>auto</c>.
@@ -126,7 +131,7 @@ internal sealed record ProviderDefinition
         Thinking = ThinkingEfforts.Name(Thinking),
         MaxOutputTokens = MaxOutputTokens,
         ModelMeta = Overrides.Count == 0 ? null : ToMetadataDocument(Overrides),
-        SendPromptCacheKey = SendPromptCacheKey ? true : null,
+        SendPromptCacheKey = SendPromptCacheKey is false ? false : null,
         PromptCacheTtl = PromptCacheTtl,
         Headers = Headers.Count == 0 ? null : new Dictionary<string, string>(Headers, StringComparer.OrdinalIgnoreCase),
     };
@@ -314,7 +319,7 @@ internal sealed record ProviderDefinition
             MaxOutputTokens = entry.MaxOutputTokens is > 0 ? entry.MaxOutputTokens : null,
             Overrides = FromMetadataDocument(entry.ModelMeta),
             Headers = headers,
-            SendPromptCacheKey = entry.SendPromptCacheKey ?? false,
+            SendPromptCacheKey = entry.SendPromptCacheKey,
             PromptCacheTtl = ProviderDefinition.ParsePromptCacheTtl(entry.PromptCacheTtl),
         };
     }

@@ -28,13 +28,11 @@ public sealed class PromptComposer : IPromptComposer
         AppendLayer(builder, GlobalAgentHeading, layers.GlobalAgent);
         AppendLayer(builder, ProjectAgentHeading, layers.ProjectAgent);
         AppendLayer(builder, RoleHeading, input.AgentRole);
-
-        var dynamicSuffix = string.IsNullOrWhiteSpace(input.DynamicContext) ? string.Empty : input.DynamicContext;
-        return new ComposedPrompt(builder.ToString(), dynamicSuffix);
+        return new ComposedPrompt(builder.ToString());
     }
 
-    public ComposedPrompt Compose(PromptLayers layers, string? agentRole = null, string? dynamicContext = null) =>
-        Compose(new PromptInput(layers, agentRole, dynamicContext));
+    public ComposedPrompt Compose(PromptLayers layers, string? agentRole = null) =>
+        Compose(new PromptInput(layers, agentRole));
 
     /// <summary>Cache key for a composed prompt; depends only on <see cref="ComposedPrompt.StablePrefix"/>.</summary>
     public static string PrefixKey(ComposedPrompt prompt)
@@ -78,11 +76,24 @@ public sealed class PromptComposer : IPromptComposer
         AppendSection(builder, heading, body);
     }
 
-    private static void AppendSection(StringBuilder builder, string heading, string body)
+    private static void AppendSection(StringBuilder builder, string heading, string body) =>
+        AppendSection(builder, heading, body, headingInsideBody: false);
+
+    /// <summary>
+    /// One section: a blank line before it (the prefix starts clean), then the heading and the body - or, when
+    /// <paramref name="headingInsideBody"/> is set, the body alone, because it carries the heading as its first line.
+    /// </summary>
+    private static void AppendSection(StringBuilder builder, string heading, string body, bool headingInsideBody)
     {
         if (builder.Length > 0)
         {
             builder.Append("\n\n");
+        }
+
+        if (headingInsideBody)
+        {
+            builder.Append(body);
+            return;
         }
 
         builder.Append(heading).Append("\n\n").Append(body);

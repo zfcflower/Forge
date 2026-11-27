@@ -167,13 +167,6 @@
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
                  Text="{Binding Hint}" />
-      <CheckBox IsChecked="{Binding ShowBudgetToModel, Mode=TwoWay}"
-                Content="{Binding BudgetLabel}"
-                VerticalAlignment="Center"
-                AutomationProperties.AutomationId="providers-compaction-budget" />
-      <TextBlock Classes="caption"
-                 TextWrapping="Wrap"
-                 Text="{Binding BudgetHint}" />
     </StackPanel>
 
     <!-- The usage log: off by default, and the only place a user turns it on. One JSONL line per model request under the data root. -->

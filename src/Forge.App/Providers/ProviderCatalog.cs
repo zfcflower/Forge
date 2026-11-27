@@ -391,6 +391,19 @@ internal sealed class ConnectedProvider
             : Definition.MaxOutputTokens;
 
     /// <summary>
+    /// The output cap a request for this model carries. The user's pin wins; with none, the catalogue's output limit is used
+    /// for the protocols that would otherwise send nothing at all (compatible and Responses), clamped by
+    /// <see cref="OutputCeiling.Compatible"/> - an accurate reserve is worth far more than the silence it replaces. The
+    /// Anthropic protocol stays null here: its adapter always sends <c>max_tokens</c> of its own and derives it from the pin
+    /// alone, so a catalogue figure must not be slipped in underneath it.
+    /// </summary>
+    public int? WireMaxOutput(string? modelId) =>
+        UserMaxOutput(modelId)
+        ?? (Definition.Protocol == ProviderProtocol.Anthropic
+            ? null
+            : OutputCeiling.Compatible(null, MetadataFor(modelId).MaxOutputTokens));
+
+    /// <summary>
     /// The reasoning steps this model accepts: the compiled table first, because it was checked against the providers, then
     /// the fetched catalog for a model the table does not know, then Off alone. A model nobody described never gets a step
     /// it may reject.
@@ -450,15 +463,17 @@ internal sealed class ConnectedProvider
 
     /// <summary>The per-provider wire switches that are not part of the credential or the URL.</summary>
     /// <summary>
-    /// The cache knobs this provider gets: what its vendor documents, plus the user's own opt-in for a gateway that accepts the
-    /// fields (<c>sendPromptCacheKey</c> in the provider entry). Never a blanket switch, because a vendor that does not know a field
-    /// answers 400 to it.
+    /// The cache knobs this provider gets. The two body fields are sent for the protocols that define them (compatible and
+    /// Responses) unless the provider entry turns them off with <c>sendPromptCacheKey: false</c>; an endpoint that refuses a
+    /// field answers 400 and the adapter drops it for that endpoint for the rest of the process. The header-based wirings
+    /// (xAI, Copilot) stay vendor-specific, because they are not the same knob under another name.
     /// </summary>
     internal ProviderOptions Options => new()
     {
         SendPromptCacheKey = Definition.SendPromptCacheKey
-            || Definition.Preset.CacheWiring is ProviderCacheWiring.OpenAi,
-        SendPromptCacheRetention = Definition.Preset.CacheWiring is ProviderCacheWiring.OpenAi,
+            ?? Definition.Protocol is not ProviderProtocol.Anthropic,
+        SendPromptCacheRetention = Definition.SendPromptCacheKey
+            ?? Definition.Protocol is ProviderProtocol.OpenAiCompatible or ProviderProtocol.OpenAiResponses,
         SendConversationCacheHeader = Definition.Preset.CacheWiring is ProviderCacheWiring.XAi,
         SendInteractionId = Definition.Preset.CacheWiring is ProviderCacheWiring.Copilot,
         UsageRecorder = usageRecorder,

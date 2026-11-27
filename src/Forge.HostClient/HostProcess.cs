@@ -58,6 +58,14 @@ internal sealed class HostProcess : IAsyncDisposable
             RedirectStandardInput = false,
         };
 
+        // A Forge that dies without unwinding (a crash, Task Manager, kill -9) must not leave the host behind: the OS
+        // reclaims it, and on Windows the host's own kill-on-close job then takes its whole tree with it. macOS has no
+        // parent-death equivalent, so a crash there still leaves it running - the reason this is not a blanket rule.
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+        {
+            info.KillOnParentExit = true;
+        }
+
         if (string.IsNullOrWhiteSpace(connection.RuntimePath))
         {
             info.FileName = connection.HostExecutablePath;

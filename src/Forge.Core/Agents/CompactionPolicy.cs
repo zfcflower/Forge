@@ -153,29 +153,15 @@ public readonly record struct CompactionBudget(int Window, int Reserve, int Usab
     public int KeepRecentTokens => Math.Max(1, KeepRecent);
 }
 
-/// <summary>
-/// The reduction rung reclaimed context: old tool results were replaced by receipts. Emitted once per pass that
-/// actually replaced something, with the release split by the tool that produced it.
-/// </summary>
-public sealed record AgentContextReduced(
-    string AgentId,
-    int TokensBefore,
-    int TokensAfter,
-    int DroppedResults,
-    int ReadTokens,
-    int BashTokens,
-    int ImageTokens,
-    int OtherTokens) : AgentEvent(AgentId);
-
-/// <summary>Why automatic summarization stopped on an instance.</summary>
+/// <summary>Why automatic folding stopped on an instance: nothing is left to fold and the context still exceeds the line.</summary>
 public enum CompactionStallReason
 {
-    /// <summary>Two consecutive summaries left the context above the line they compacted against.</summary>
+    /// <summary>Kept for the stored/UI vocabulary; folding reports only <see cref="Irreducible"/>.</summary>
     Ineffective = 0,
 
     /// <summary>
     /// What no summary can drop — the inherited prefix, the stable prefix, the tool definitions and the newest messages the
-    /// summarizer must keep — already exceeds the line.
+    /// fold must keep the newest turns verbatim — already exceeds the line.
     /// </summary>
     Irreducible = 1,
 }
@@ -183,7 +169,7 @@ public enum CompactionStallReason
 /// <summary>
 /// Automatic summarization gave up on an instance: either <see cref="CompactionStallReason.Ineffective"/> (two attempts left the
 /// context above the trigger line) or <see cref="CompactionStallReason.Irreducible"/> (a floor no summary can get below already
-/// exceeds it, detected before any summarizer request). It stays off until a manual compaction, another model, or a context
+/// exceeds it, detected before any fold is attempted). It stays off until a manual compaction, another model, or a context
 /// reduction that brings the instance back under the line.
 /// </summary>
 public sealed record AgentCompactionStalled(string AgentId, int ContextTokens, int TriggerTokens) : AgentEvent(AgentId)

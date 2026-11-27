@@ -625,6 +625,20 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     /// <summary>The failure text the metrics table recorded; the tooltip shows it when the turn left no footnote.</summary>
     private string? seededError;
 
+    /// <summary>
+    /// The turn's ledger row, paired by the row's <c>answer_seq</c> against the round's last message seq — the same key
+    /// <c>turn_metrics</c> pairs by, so the two observations never disagree about which turn a card is. Null when no row
+    /// pairs (a turn from before the ledger, a sub-agent tab the App numbers differently): the turn entry button then does
+    /// not exist for that card, which is the honest reading rather than a disabled button.
+    /// </summary>
+    private TurnLedgerEntryViewModel? ledger;
+
+    /// <summary>The turn entry flyout reads this; null hides the turn entry button.</summary>
+    public TurnLedgerEntryViewModel? Ledger => ledger;
+
+    /// <summary>Whether this round has a ledger row behind it.</summary>
+    public bool HasLedger => ledger is not null;
+
     public TurnCardViewModel(int round, DateTimeOffset startedAt)
     {
         Round = round;
@@ -829,6 +843,22 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     /// repeated one. What the rows correct is where the page's sequence starts, once for the whole page (see
     /// <see cref="TranscriptViewModel.ShiftRoundNumbers"/>).</para>
     /// </summary>
+    /// <summary>
+    /// Pairs the turn's ledger row with this card (live at the turn's end, replayed at the page's apply). Idempotent and
+    /// one-way: a card keeps the first row it is given, so a late duplicate read cannot move a turn's entry under it.
+    /// </summary>
+    internal void SetLedger(TurnLedgerEntry? entry)
+    {
+        if (entry is null || ledger is not null)
+        {
+            return;
+        }
+
+        ledger = new TurnLedgerEntryViewModel(entry);
+        OnPropertyChanged(nameof(Ledger));
+        OnPropertyChanged(nameof(HasLedger));
+    }
+
     internal void SeedReplayMetrics(TurnMetric metric)
     {
         ArgumentNullException.ThrowIfNull(metric);

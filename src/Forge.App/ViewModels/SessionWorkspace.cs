@@ -380,6 +380,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             // default name by its shape (the store keeps no "renamed" bit), and from here on the flag alone decides.
             agentNameIsDerived = agentSession.IsDraft || TryReadDefaultName(session.Title, out agentOrdinal);
         }
+        if (instrumentSourcesResolved.TurnLedger is { } sessionLedger)
+        {
+            // The session-level observation window reads the whole timeline; the id follows the tab's own session, so an
+            // agent session's dialog lists that child's turns, not the root's.
+            Composer.SessionLedger = ct => sessionLedger.ListAsync(agentChildSessionId ?? SessionId, ct);
+        }
+
         if (sessionComposer is not null)
         {
             // A model or step the user picks is the session's selection whether or not a turn follows it: it is written as it
@@ -420,7 +427,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             // naming line rides the same per-request suffix, so neither ever enters the cached prefix. Both describe the
             // session the runtime belongs to, so an agent-session tab - which shares this runtime - never installs them:
             // otherwise whichever view was built last would decide what the root's own requests say.
-            runtime.ContextBudget = DynamicContext;
+            runtime.DynamicContext = DynamicContext;
             // The write finishes on a store thread and the model's own call runs on the agent's: the tab, the tree and the @
             // popup this lands in are all UI-owned collections.
             runtime.TitleNamed += OnTitleNamed;
@@ -559,33 +566,22 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public SessionInstrumentsViewModel Instruments { get; }
 
     /// <summary>
-    /// The trailing line a given agent reads about its own budget (the same measurement its gauge shows), or null when the
-    /// preference turned it off or that agent has no instruments yet. Called on every request, from the agent loop's thread:
-    /// the line is an immutable string, and the agent id selects the instance's own numbers.
-    /// </summary>
-    private string? BudgetLine(string agentId) =>
-        appPreferences?.ChatContextBudget == false ? null : InstrumentsOf(agentId)?.ContextBudgetLine;
-
-    /// <summary>
-    /// The trailing suffix one request carries: the instance's own budget line plus, while this session's naming window is
-    /// still open, one line saying so. Both are per-request text after the cached prefix; the line rides only the session's
-    /// first turn (<see cref="SessionRuntime.CanName"/>), so a reopened session is never told to name itself again, and the
-    /// cap keeps an ignoring model from paying for it on every request of that one turn.
+    /// The trailing line one request carries: while this session's naming window is still open, the one line telling the model
+    /// it may name the session. It rides only the session's first turn (<see cref="SessionRuntime.CanName"/>), so a reopened
+    /// session is never asked again, and the cap keeps an ignoring model from being asked on every request of that turn.
     /// </summary>
     private string? DynamicContext(string agentId)
     {
-        var budget = BudgetLine(agentId);
         if (automationTurn
             || !string.Equals(agentId, "root", StringComparison.Ordinal)
             || Info.TitleSource is not (null or SessionTitleSource.Derived)
             || runtime?.CanName != true
             || Interlocked.Increment(ref namingRequests) > 2)
         {
-            return budget;
+            return null;
         }
 
-        var naming = SessionTitles.Nudge(Info.TitleSource is null ? null : Info.Title);
-        return string.IsNullOrEmpty(budget) ? naming : budget + "\n" + naming;
+        return SessionTitles.Nudge(Info.TitleSource is null ? null : Info.Title);
     }
 
     /// <summary>
@@ -1033,7 +1029,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     HistoryPageMessages,
                     ct,
                     historyMetrics,
-                    historyTurnsBefore)
+                    historyTurnsBefore,
+                    instrumentSources.TurnLedger)
                 .ConfigureAwait(true);
             OlderLoadFailed = false;
             if (load.Page.Messages.Count == 0)
@@ -1107,10 +1104,17 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         try
         {
             var load = await TranscriptReplay
-                .ReadPageAsync(store, instrumentSources.TurnMetrics, SessionId, long.MaxValue, HistoryPageMessages, ct)
+                .ReadPageAsync(
+                    store,
+                    instrumentSources.TurnMetrics,
+                    SessionId,
+                    long.MaxValue,
+                    HistoryPageMessages,
+                    ct,
+                    turnLedger: instrumentSources.TurnLedger)
                 .ConfigureAwait(true);
             Transcript.SeedRoundCounter(load.Page.TurnsBefore);
-            Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, load.Page.Messages, load.Metrics));
+            Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, load.Page.Messages, load.Metrics, load.Ledger));
             // The clock, the stream time, the tool count, the outcome and the model are not in the stored messages: the
             // replay pairs each round with its own metrics row by the row's recorded seq, inside the one funnel every
             // loading path shares. The same rows also restore the composer's last model below.
@@ -1187,14 +1191,15 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             return TokenUsage.Empty;
         }
 
-        var load = await TranscriptReplay.ReadAllAsync(store, instrumentSources.TurnMetrics, sessionId, ct)
+        var load = await TranscriptReplay.ReadAllAsync(
+                store, instrumentSources.TurnMetrics, sessionId, ct, instrumentSources.TurnLedger)
             .ConfigureAwait(true);
         if (load.Page.Messages.Count == 0)
         {
             return TokenUsage.Empty;
         }
 
-        return TranscriptReplay.Apply(transcript, load.Page.Messages, load.Metrics);
+        return TranscriptReplay.Apply(transcript, load.Page.Messages, load.Metrics, load.Ledger);
     }
 
     /// <summary>
@@ -1808,9 +1813,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public bool CanCompactNow => !disposed && !isReadOnlyView && runtime is not null && !isRunning && !gating && !isHandingOver && !compacting;
 
     /// <summary>
-    /// Manual compaction (<c>/compact [focus]</c>, the context gauge): summarizes everything but the newest keepRecent tokens
-    /// regardless of the threshold, with <paramref name="focus"/> as additional summarizer focus, and re-enables automatic
-    /// compaction. Sending stays blocked while it runs; the outcome is a notice.
+    /// Manual folding (<c>/compact</c>, the context gauge): folds every settled turn but the newest few regardless of the
+    /// threshold - deterministic, so a focus text has nothing to steer - and re-enables automatic folding. Sending stays
+    /// blocked while it runs; the outcome is a notice.
     /// </summary>
     public async Task CompactNowAsync(string? focus = null)
     {
@@ -1862,7 +1867,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         {
             Transcript.AddNotice(CompactionStrings.Busy(), isError: true);
         }
-        catch (Exception exception) when (exception is CompactionFailedException or ProviderException or IOException or DbException or ObjectDisposedException)
+        catch (Exception exception) when (exception is ProviderException or IOException or DbException or ObjectDisposedException)
         {
             Transcript.AddNotice(CompactionStrings.Failed(exception.Message), isError: true);
         }
@@ -2420,7 +2425,10 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                     prompt.Attachments,
                     OnAgentEvent,
                     token,
-                    deriveTitle: !automationTurn)
+                    deriveTitle: !automationTurn,
+                    // The number this turn already owns - its checkpoint and metrics row are keyed by it, and the ledger
+                    // row keys by the same one.
+                    turnSequence: turnNo)
                 .ConfigureAwait(true);
         }
         catch (OperationCanceledException)
@@ -2457,6 +2465,15 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 // turn's own clock, so the summary's duration grows with the window instead of waiting for a reopen.
                 Instruments.NoteTurnEnded(turnNo, turnElapsed);
                 RecordTurnMetrics(turnNo, error);
+                // The turn's own ledger row, read back at the one point every root turn runs through - completed, failed
+                // or stopped - rather than on the completion event alone: a cancelled turn has no event, and the coalesced
+                // event may lag past the turn's end anyway. The row is keyed by the number this turn already owns and
+                // paired by its answer_seq against the root's last persisted message - the same key the metrics row above
+                // uses - so the button lands on this turn's card, never on a neighbour's.
+                NoteLedgerRow(
+                    agentChildSessionId ?? SessionId,
+                    turnCard,
+                    runtime?.ReadRootCounters().LastSeq ?? 0);
                 if (checkpoints is not null)
                 {
                     try
@@ -2838,6 +2855,20 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 turnRootFailure = failed.Error;
                 coalescer.Enqueue(value);
                 break;
+            case AgentFailed failed:
+                // The child's row is settled before this event leaves its loop, and the instance's own last persisted
+                // seq is the pairing key - read here, on the event thread, while the child's instance is still attached.
+                // The root's failed row is not read here: the turn's own finalization point reads it (see the finally in
+                // RunTurnAsync), the one path a cancelled or stopped root turn also runs through.
+                if (Find(failed.AgentId) is { } agent
+                    && agent.Transcript.Current is { } card
+                    && runtime?.TryReadAgentCounters(failed.AgentId, out var counters) == true)
+                {
+                    NoteLedgerRow(agent.ChildSessionId, card, counters.LastSeq);
+                }
+
+                coalescer.Enqueue(value);
+                break;
             case AgentQuotaExhausted quota when string.Equals(quota.AgentId, "root", StringComparison.Ordinal):
                 turnRootQuota = quota.Quota;
                 // An automation's own turn gets the quota back in its mailbox result and decides itself (the resume run
@@ -3076,18 +3107,6 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 // The same event carries the spend of the request it measured, so the readings move once per request rather
                 // than once per turn.
                 NoteLiveUsage(context.AgentId, context.Usage);
-                break;
-            case AgentContextReduced reduced:
-                // The measurement that follows settles which side of the receipts/summary split this pass counts on.
-                InstrumentsOf(reduced.AgentId)?.NoteReduction(
-                    reduced.AgentId,
-                    reduced.TokensBefore,
-                    reduced.TokensAfter,
-                    reduced.DroppedResults,
-                    reduced.ReadTokens,
-                    reduced.BashTokens,
-                    reduced.ImageTokens,
-                    reduced.OtherTokens);
                 break;
             case AgentCompactionStalled stalled:
                 Card(stalled.AgentId)?.AddNotice(
@@ -3339,6 +3358,11 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
 
         subAgentLastCards[agent.AgentId] = card;
         agent.Instruments.NoteTurnEnded(card.Round, completed.EndedAt - completed.StartedAt);
+        // The child's ledger row: its own session, its own turn number (the child's transcript round, the same key its
+        // metrics row above uses), paired by the seq this event carries - the exact position the loop settled the row's
+        // answer_seq at. The root's row is not read here: every root turn, whatever way it ended, reads its row at the
+        // turn's own finalization point instead (see the finally in RunTurnAsync).
+        NoteLedgerRow(agent.ChildSessionId, card, completed.LastSeq);
         // Consumed here whether or not a row is written: a recorder that is not listening must not let one turn's calls
         // pile onto the next turn's first row.
         var tools = subAgentToolCalls.TryRemove(agent.AgentId, out var calls) ? calls : 0;
@@ -3502,6 +3526,47 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
             SessionStrings.CacheRewriteTitle,
             SessionStrings.CacheRewriteBody(written),
             "cache-rewrite:" + SessionId);
+    }
+
+    /// <summary>
+    /// The turn that just ended reads its ledger row back for the reply card's observation button. The row is resolved
+    /// by its own <c>answer_seq</c> - the seq of the turn's last message, the same key <see
+    /// cref="TurnMetricsRowFactory.TurnLastSeq"/> pairs the metrics rows by - so the button lands on the card of the
+    /// turn that wrote the row, never on a neighbour's, and a turn whose transcript round and ledger number disagree
+    /// (a model-spawned child) still finds its own row. Best effort and off the UI thread: no row - none, or a
+    /// position two rows share - simply leaves the card without the button.
+    /// </summary>
+    private void NoteLedgerRow(string sessionId, TurnCardViewModel? card, long answerSeq)
+    {
+        var store = instrumentSources.TurnLedger;
+        if (store is null || card is null || answerSeq <= 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var row = await store.FindByAnswerSeqAsync(sessionId, answerSeq, CancellationToken.None).ConfigureAwait(false);
+                if (row is null)
+                {
+                    return;
+                }
+
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (!disposed)
+                    {
+                        card.SetLedger(row);
+                    }
+                });
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                AppLogs.Session.ZLogWarning($"turn ledger read failed: {exception.Message}");
+            }
+        });
     }
 
     private TurnCardViewModel? Card(string agentId)
@@ -3706,6 +3771,14 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         if (agent.Transcript.Current is { } openCard)
         {
             agent.Instruments.NoteTurnEnded(openCard.Round, finishedEvent.Elapsed);
+
+            // A stopped run never failed, so no AgentFailed read its row; this is the stopped turn's one finalization
+            // point. The child's instance is still attached here, so its own last persisted seq is the pairing key.
+            if (finishedEvent.Status == SubAgentStatus.Stopped
+                && runtime?.TryReadAgentCounters(finishedEvent.AgentId, out var counters) == true)
+            {
+                NoteLedgerRow(agent.ChildSessionId, openCard, counters.LastSeq);
+            }
         }
 
         agent.Finish(finishedEvent.Status, finishedEvent.Elapsed, finishedEvent.Error, finishedEvent.At);

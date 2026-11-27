@@ -97,6 +97,7 @@ parent: forge-architecture
 - **输出解码:UTF-8 优先,非法序列切到系统 OEM 代码页(仅 Windows)。** 跨平台工具(git、dotnet)写 UTF-8,Windows 原生控制台程序(ping、ipconfig、dir)写 OEM 代码页(中文系统 936),固定按 UTF-8 解码会乱码。`ProcessTextDecoding` 对实时尾部(逐流有状态解码器)与最终捕获(整块)采用同一规则:合法 UTF-8 保持 UTF-8,首个非法序列起整流改按 OEM 代码页;上限截断造成的末尾半个字符不算非法。非 Windows 无备用代码页,行为不变(非法字节替换为 U+FFFD)。不改写命令文本,不改 Shell 编码,因此不影响 BashPolicy 分析。已知限制:一条流内 UTF-8 与 OEM 混写时,首个 OEM 字节之后全按 OEM 解码;未做前后基准。
 - **stdin 重定向后立即关闭。** 等输入的命令应当立刻拿到 EOF 并退出,而不是挂到超时(这是 Agent 的非交互调用该有的样子)。
 - **超时与取消杀整棵树。** `Kill(entireProcessTree: true)` → 有界等待退出(10 s)→ 有界等待泵(3 s,再 1 s 取消读)。取消在清理完成后抛 `OperationCanceledException`;超时返回 `TimedOut` 并带回已捕获输出。进程树清理不是沙箱:后代自己 `setsid` 就能脱离。
+- **退出经句柄等待观察,信号随结果回报。** 等待用 `Process.SafeHandle.WaitForExitAsync` 而不是 `Process.WaitForExitAsync`:只有 `ProcessExitStatus` 能区分“被信号杀死”和“自己退出成 137”。`ProcessResult.Signal` 只在操作系统报告时非空:Windows 永不报告(被杀的子进程只有退出码),`PosixSignal` 也只能表示它列出的那 11 个信号，**崩溃信号(SIGSEGV/SIGABRT/SIGBUS)无法命名**,那类死亡仍只有 128+信号 的退出码。`bash` 的退出行只在 `Signal` 非空时补写信号名。
 - **启动失败是结果不是异常。** `ProcessRunner.StartFailedExitCode`(-1)加 stderr 里的原因,由 `bash` 呈现为错误结果;模型侧看到的应当是“没能启动”,而不是一次循环中断。
 - **`bash` 的描述写明会被接管的命令与谁解析命令串。** 工具描述把下一段那份接管清单写成一行,与 `BashPolicy.BuildFileOwners` 同源:拒绝本身已点名正确工具,但模型只有撞上才知道会被拒(生产库里 19 次拒绝,其中 7 次是 PowerShell 的 `Get-ChildItem`)。描述首句后另写明方言:Windows 上是 `pwsh`(缺它时 `cmd.exe`),Unix 上是 `bash`/`sh`,**与工具名无关**,并要求多行或带嵌套引号的命令先 `write` 成文件再跑——方言原本只在执行结果的 `script (pwsh)` 里出现,模型动手前就写出了 POSIX 风格的 `ls` 和被 PowerShell 吃掉的引号(真实会话里 `python -c "…"` 连撞两次 SyntaxError)。
 - **`bash` 只做没有专用工具的事(`BashPolicy`)。** 判据只有一条:**与内置工具重复的才拒绝**,没有工具覆盖的一律放行;没有工具就没有能力,bash 不是后门。
@@ -175,6 +176,8 @@ parent: forge-architecture
 - `read` 只读 100 行的分配:1 KiB → 16392 B、1 MiB → 16400 B、100 MiB → 14072 B,不随文件大小增长(整读 100 MiB 对照 756 ms、≥100 MiB 分配)。
 - `ProcessRunner` 输出 10 MiB、上限 512 KiB:退出码 0、`StdoutBytes` = 10485760、截断为真、分配 402 KB、WorkingSet +4.6 MB;100 MiB 输出 WorkingSet 增量 2.1 MB,内存与输出大小无关。
 - 超时 2 s 杀树:子进程与其 `ping` 孙进程均消失;取消(100 ms)后 176 ms 抛 `OperationCanceledException` 且无残留。
+- 信号命名只有 POSIX 有:win-x64 上超时杀树后 `Signal` 为空而 `EndReason` 仍为 `TimedOut`;`SIGKILL` 那条断言写进了 `ProcessRunnerTests`,只能在 CI 的 ubuntu 作业上确认,不得先当成已验证。
+- 等待只等进程本身不等管道 EOF:孙进程继承重定向 stdout 并持续持有管道时,`Process.WaitForExitAsync` 与 `SafeHandle.WaitForExitAsync` 都在 25–41 ms 返回,改成句柄等待因此不改变“孙进程霸占管道”场景的分类。
 - 相对裸 `Process.Start` + `BaseStream` 排空的额外开销:`dotnet --info` 20 次 p50 差值 2.3–10.1 ms(0.9–3.7 %);`cmd /c echo` 落在噪声带内(-2.6…+0.8 ms)。
 - 托管 grep 与 rg(`15.2.0`)在 fixture 仓库上 11 组查询的 `path:line` 集合逐条相等;`build/`、`drop.log`、`.git`、二进制、`work/*` + `!work/keep.txt` 两侧都被同样处理。
 - 10 万文件(100×1000)的目录:`find`(limit 10000)19 ms / 分配 3.6 MiB;全树无命中遍历 136 ms / 峰值工作集 70 MiB。

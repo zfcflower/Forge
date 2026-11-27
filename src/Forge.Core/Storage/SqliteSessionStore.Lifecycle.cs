@@ -1158,6 +1158,24 @@ public sealed partial class SqliteSessionStore
                 await DeleteSessionRowsAsync(connection, transaction, "sub_agent_state", json).ConfigureAwait(false);
             }
 
+            // The turn ledger arrives with the v16 ladder step, so a database at an older version has no table yet; the
+            // purge is then simply skipped (the rows cannot exist). Its search pair is cleaned with the same rule the
+            // messages' pair uses above: both tables, each on its own existence, and the FTS index only when this build
+            // can write it - a build without the module cannot even prepare the delete, and the orphaned rows it leaves
+            // behind are trimmed by the next capable build's open.
+            if (await TableExistsAsync(connection, transaction, "turn_ledger").ConfigureAwait(false))
+            {
+                await DeleteSessionRowsAsync(connection, transaction, "turn_ledger", json).ConfigureAwait(false);
+                string[] ledgerSearchTables = store.Fts5Available ? ["turn_ledger_fts", "turn_ledger_text"] : ["turn_ledger_text"];
+                foreach (var search in ledgerSearchTables)
+                {
+                    if (await TableExistsAsync(connection, transaction, search).ConfigureAwait(false))
+                    {
+                        await DeleteSessionRowsAsync(connection, transaction, search, json).ConfigureAwait(false);
+                    }
+                }
+            }
+
             await using (var sessions = Command(connection, transaction, "DELETE FROM sessions WHERE id IN (SELECT value FROM json_each($ids))"))
             {
                 sessions.Parameters.AddWithValue("$ids", json);

@@ -332,6 +332,10 @@ public sealed class AnthropicProvider : HttpChatProvider
     {
         var messages = BuildMessages(request.Messages);
         var cacheIndex = request.Cache?.CacheThroughMessageIndex ?? -1;
+        // The stable boundary is the end of the managed history: the same bytes in every request of the session, so its
+        // breakpoint is what a new turn reads back even though the turn in flight rewrites everything after it. Two
+        // message breakpoints plus the system one stay inside Anthropic's limit of four.
+        var stableIndex = request.Cache?.StableBoundaryIndex ?? -1;
         // The policy's own lifetime wins; the claimed-identity shape otherwise uses the hour the official client asks for, which is
         // also the only way the message breakpoint survives a pause between turns.
         var messageTtl = CacheTtl(request);
@@ -346,7 +350,8 @@ public sealed class AnthropicProvider : HttpChatProvider
             {
                 var block = message.Blocks[i];
                 var nextSource = i + 1 < message.Blocks.Count ? message.Blocks[i + 1].Source : -1;
-                WriteBlock(writer, block.Block, cacheControl: block.Source == cacheIndex && nextSource != cacheIndex, messageTtl, request.IncludeToolImages);
+                var breakpoint = (block.Source == cacheIndex || block.Source == stableIndex) && nextSource != block.Source;
+                WriteBlock(writer, block.Block, cacheControl: breakpoint, messageTtl, request.IncludeToolImages);
             }
 
             writer.WriteEndArray();

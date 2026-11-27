@@ -111,5 +111,7 @@ public sealed class FirstTurnMetricsTests
         public TurnMetricsRecorder? TurnMetricsRecorder => recorder;
 
         public ITurnMetricsStore? TurnMetrics => metrics;
+
+        public ITurnLedgerStore? TurnLedger => null;
     }
 }

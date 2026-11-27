@@ -13,8 +13,14 @@ namespace Forge.App.Tests;
 // building a new control (a tool group's row costs 5.7 ms and 1.9 MB to build, a few hundred microseconds to re-bind). Every
 // expectation here is about identity, data and the state a reused control must not carry over, so nothing depends on timings.
 [Collection("forge-app-ui")]
-public sealed class RowControlPoolTests
+public sealed class RowControlPoolTests : IDisposable
 {
+    // The cache is process-wide, so one test's leftovers are the next test's input: whichever method runs first would decide
+    // whether a later one rents a control built from a different template. Each test therefore starts and ends empty.
+    public RowControlPoolTests() => RowControlPool.Reset();
+
+    public void Dispose() => RowControlPool.Reset();
+
     private sealed record Row(string Text);
 
     [Fact]

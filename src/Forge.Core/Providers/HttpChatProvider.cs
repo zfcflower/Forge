@@ -237,7 +237,9 @@ public abstract class HttpChatProvider : IChatProvider
 
         if (_config.Headers is { Count: > 0 } headers)
         {
-            ProviderHeaders.Apply(message, headers, request.SessionId);
+            // The routing key is the session lineage root, so a handover or fork keeps the gateway cache shard;
+            // the plain session id is the fallback for hosts that carry no lineage.
+            ProviderHeaders.Apply(message, headers, request.CacheRoutingKey ?? request.SessionId);
         }
 
         return message;

@@ -9,7 +9,7 @@ public enum PromptTemplateKind
     /// <summary>An agent kind: role prompt plus optional model, thinking and tool whitelist.</summary>
     Agent,
 
-    /// <summary>A fixed, named built-in prompt (system prompt, compaction summarizer, ...). Users can override, never add.</summary>
+    /// <summary>A fixed, named built-in prompt (system prompt, turn completion, handover summary, ...). Users can override, never add.</summary>
     Slot,
 }
 

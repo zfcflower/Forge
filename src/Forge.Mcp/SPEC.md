@@ -23,6 +23,7 @@ MCP(Model Context Protocol)客户端与服务器管理。自写 JSON-RPC 与传�
 
 - **请求生命周期。** 每请求的截止期限覆盖发送与等待全程,关联调用方取消与连接生命周期;超时/取消在请求已发出后发 `notifications/cancelled`(`initialize` 除外;令牌在发送完成前就取消的预取消请求不发取消通知,因为它引用一个服务端从未见过的 id)。JSON-RPC id 按类型与值精确关联(字符串 id 不匹配数字 id)。
 - **传输健壮性。** stdio 按字节分帧,stdout 非 JSON 行记入有界诊断环且读取继续,stderr 严格有界;两者各由独立任务读取,记录到诊断日志的先后不保证。子进程退出时 `Closed` 携带的异常必须带退出码:Unix 上子进程退出先关管道、父进程稍后才被 SIGCHLD 收割,所以 stdout 读到 EOF 后先给退出 500 ms 观察窗口,进程确实没了就交给退出监控(报 `exited with code N`),仍活着才报 `closed its standard output`——否则 Linux 上退出码会稳定丢失。可流式 HTTP 按 SSE 流分别维护 Last-Event-ID,每个 POST SSE 响应流独立取消/释放,旧代际消息不完成新请求;会话 DELETE 带原始会话号并有独立关闭期限。
+- **stdio 服务器进程随主程序回收。** 服务器用 `ProcessStartInfo.KillOnParentExit` 启动(仅 Windows/Linux,由 `OperatingSystem.IsWindows() || IsLinux()` 守卫):Forge 崩溃、被任务管理器结束或 `kill -9` 时不留孤儿。macOS 无等价机制,保持现状。
 - **工具命名稳定。** 暴露名由 (serverName, toolName) 的稳定哈希消歧,不依赖列表返回顺序;同一名字在管理器生命周期内不重新绑定到别的工具。
 - **服务器管理。** 懒启动,状态 Stopped/Starting/Ready/Failed;连接或初始化失败即停止并回收传输;调用方取消不标记失败、不安排重连;崩溃后退避重连。
 - **配置原文与展开态分离。** 运行时用展开后的 `McpServerConfig`(`env`/`headers` 里 `${VAR}` 已取值),可编辑态是 `McpServerEntry`(逐字原文 + `RawNodeJson`);两者不可互相替代——写文件只能用原文态(否则用户文件里出现明文密钥),运行只能用展开态(否则变量名被当字面值传给子进程)。`McpServerConfig.Source` 记录定义该条目的文件,供界面显示与定位。

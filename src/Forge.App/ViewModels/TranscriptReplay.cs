@@ -16,10 +16,16 @@ internal static class TranscriptReplay
     /// purpose — a caller cannot build a replayed transcript without its metadata, which is the invariant that kept
     /// breaking before (every history-loading path had to remember a separate seeding call).
     /// </summary>
-    public sealed record Load(SessionPage Page, IReadOnlyList<TurnMetric> Metrics);
+    /// <summary>The replayed ledger rows of the same session, when the app runs one: paired in <see cref="Apply"/> by the
+    /// row's <c>answer_seq</c>, the same key the metrics pairing uses. Null when no store is attached.</summary>
+    public sealed record Load(SessionPage Page, IReadOnlyList<TurnMetric> Metrics, IReadOnlyList<TurnLedgerEntry>? Ledger = null);
 
     public static Task<Load> ReadAllAsync(
-        ISessionStore store, ITurnMetricsStore? turnMetrics, string sessionId, CancellationToken ct) =>
+        ISessionStore store,
+        ITurnMetricsStore? turnMetrics,
+        string sessionId,
+        CancellationToken ct,
+        ITurnLedgerStore? turnLedger = null) =>
         Task.Run(async () =>
         {
             var messages = new List<StoredMessage>();
@@ -30,7 +36,8 @@ internal static class TranscriptReplay
 
             return new Load(
                 new SessionPage(messages, 0, HasMore: false),
-                await ReadMetricsAsync(turnMetrics, sessionId, ct).ConfigureAwait(false));
+                await ReadMetricsAsync(turnMetrics, sessionId, ct).ConfigureAwait(false),
+                await ReadLedgerAsync(turnLedger, sessionId, ct).ConfigureAwait(false));
         }, ct);
 
     /// <summary>
@@ -52,7 +59,8 @@ internal static class TranscriptReplay
         int maxMessages,
         CancellationToken ct,
         IReadOnlyList<TurnMetric>? metrics = null,
-        long? turnsAboveBeforeSeq = null)
+        long? turnsAboveBeforeSeq = null,
+        ITurnLedgerStore? turnLedger = null)
     {
         // The rows are read first: where a turn began is what the page's start is aligned to, and both reads belong off the
         // UI thread (storage is synchronous under its async surface).
@@ -68,7 +76,7 @@ internal static class TranscriptReplay
                     .ConfigureAwait(false),
                 ct)
             .ConfigureAwait(false);
-        return new Load(page, rows);
+        return new Load(page, rows, await ReadLedgerAsync(turnLedger, sessionId, ct).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -177,8 +185,32 @@ internal static class TranscriptReplay
     {
         var transcript = new TranscriptViewModel(collapseOlderTurns);
         transcript.SeedRoundCounter(load.Page.TurnsBefore);
-        var usage = Apply(transcript, load.Page.Messages, load.Metrics);
+        var usage = Apply(transcript, load.Page.Messages, load.Metrics, load.Ledger);
         return (transcript, usage);
+    }
+
+    /// <summary>
+    /// The session's ledger rows, best-effort exactly like the metrics read beside it: a source a view does not have
+    /// answers null, and a read that failed answers no rows - the rows only fill blanks, they never turn into a notice
+    /// and never keep a history that would otherwise load from loading.
+    /// </summary>
+    private static async Task<IReadOnlyList<TurnLedgerEntry>?> ReadLedgerAsync(ITurnLedgerStore? turnLedger, string sessionId, CancellationToken ct)
+    {
+        if (turnLedger is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await turnLedger.ListAsync(sessionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException
+            or ObjectDisposedException or InvalidDataException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            AppLogs.Session.ZLogWarning($"turn ledger read skipped: {exception.GetType().Name}: {exception.Message}");
+            return [];
+        }
     }
 
     /// <summary>
@@ -198,7 +230,10 @@ internal static class TranscriptReplay
     /// the last row keeps the one-card-per-user-message shape and its own numbering.
     /// </summary>
     public static TokenUsage Apply(
-        TranscriptViewModel transcript, IReadOnlyList<StoredMessage> messages, IReadOnlyList<TurnMetric> metrics)
+        TranscriptViewModel transcript,
+        IReadOnlyList<StoredMessage> messages,
+        IReadOnlyList<TurnMetric> metrics,
+        IReadOnlyList<TurnLedgerEntry>? ledger = null)
     {
         var ends = metrics
             .Where(metric => metric.LastSeq is > 0)
@@ -211,8 +246,38 @@ internal static class TranscriptReplay
         }
 
         // The last message each card consumed, in seq order — a card's last consumed seq is the position its row names.
-        // Nothing is built when no row carries a position: there is nothing to pair.
-        Dictionary<TurnCardViewModel, long>? lastSeqOfCard = ends.Length > 0 ? new() : null;
+        // Nothing is built when neither table carries a position: there is nothing to pair either of them by.
+        // A position two rows claim pins nothing — the same ambiguity <c>FindByAnswerSeqAsync</c> refuses — so a row
+        // that shares its answer_seq with another is skipped entirely: that card gets no button rather than the last
+        // writer's, because no card can be proven to be the one either row ended on.
+        var ledgerRows = ledger is null ? null : new Dictionary<long, TurnLedgerEntry>(ledger.Count);
+        if (ledger is not null)
+        {
+            var contested = new HashSet<long>();
+            foreach (var row in ledger)
+            {
+                if (row.AnswerSeq <= 0)
+                {
+                    continue;
+                }
+
+                if (ledgerRows!.ContainsKey(row.AnswerSeq))
+                {
+                    contested.Add(row.AnswerSeq);
+                }
+                else
+                {
+                    ledgerRows[row.AnswerSeq] = row;
+                }
+            }
+
+            foreach (var seq in contested)
+            {
+                ledgerRows!.Remove(seq);
+            }
+        }
+
+        Dictionary<TurnCardViewModel, long>? lastSeqOfCard = ends.Length > 0 || ledgerRows is { Count: > 0 } ? new() : null;
 
         var inputTokens = 0;
         var outputTokens = 0;
@@ -289,7 +354,9 @@ internal static class TranscriptReplay
 
         // The pairing itself: a card's own last position meets the row that names it. Rows whose seq no card consumed
         // (an older page's rows, one the replay never reached) simply stay unclaimed, so the same whole-session list
-        // serves every page without slicing. A row seeds its card's readings and nothing else.
+        // serves every page without slicing. A row seeds its card's readings and nothing else. The two tables pair
+        // independently: a ledger row attaches by its own answer_seq whether or not a metrics row names the same
+        // position, so an old or metrics-less database still gets the button wherever the ledger row alone can prove it.
         //
         // The page's round numbers stay one sequence: the count the replay assigned is ordered by construction, while a
         // row's own turn number can skip (a row the recorder dropped) or repeat what a neighbour says, and adopting it
@@ -303,6 +370,11 @@ internal static class TranscriptReplay
         {
             foreach (var (card, seq) in lastSeqOfCard)
             {
+                if (ledgerRows is not null && ledgerRows.TryGetValue(seq, out var row))
+                {
+                    card.SetLedger(row);
+                }
+
                 if (!bySeq.TryGetValue(seq, out var metric) || ambiguous.Contains(metric))
                 {
                     continue;

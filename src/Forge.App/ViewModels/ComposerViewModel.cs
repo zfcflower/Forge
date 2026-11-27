@@ -559,6 +559,16 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
     }
 
     /// <summary>
+    /// The session's ledger rows for the session-level observation window (the composer's ledger button). Set once by the
+    /// view that hosts the session, on the tab's own session id; null (a standalone view, a host without the composition
+    /// root) keeps the button out of the toolbar.
+    /// </summary>
+    internal Func<CancellationToken, Task<IReadOnlyList<TurnLedgerEntry>>>? SessionLedger { get; set; }
+
+    /// <summary>Whether this session has a ledger to observe; the session-ledger button exists only then.</summary>
+    public bool HasSessionLedger => SessionLedger is not null;
+
+    /// <summary>
     /// The tab is an agent session (forge-app "Agent 会话": the kind is picked when it is created and never changes here): the
     /// orchestration chip is gone (every message runs directly), and a skill whose <c>allowed-tools</c> need a git write or a
     /// pull request tool is greyed. Set once by the view that hosts the session.
@@ -890,7 +900,7 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
             return new ModelSettings(
                 model,
                 effort,
-                provider?.UserMaxOutput(model),
+                provider?.WireMaxOutput(model),
                 providerId);
         }
     }

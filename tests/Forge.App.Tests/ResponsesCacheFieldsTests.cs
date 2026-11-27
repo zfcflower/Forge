@@ -77,11 +77,16 @@ public sealed class ResponsesCacheFieldsTests : IDisposable
     }
 
     [Fact]
-    public async Task Nothing_cache_shaped_goes_to_deepseek()
+    public async Task DeepSeek_gets_the_cache_fields_it_accepts()
     {
+        // Measured 2026-11-27: api.deepseek.com answers 200 to both fields and ignores them (hit/miss unchanged), so there is
+        // no reason to strip them - and no reason to treat its host specially either. A vendor that refuses one is handled by
+        // the one-shot downgrade, not by a hard-coded host list.
         var handler = new Handler((_, _) => Ok());
         await Drain(Provider(handler, "https://api.deepseek.com", key: true, retention: true), Request());
-        Assert.DoesNotContain("prompt_cache", handler.Bodies[0]);
+        Assert.Contains("prompt_cache_key", handler.Bodies[0]);
+        Assert.Contains("prompt_cache_retention", handler.Bodies[0]);
+        Assert.Single(handler.Bodies);
     }
 
     [Fact]

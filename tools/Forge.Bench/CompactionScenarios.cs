@@ -6,16 +6,15 @@ using Forge.Core.Storage;
 namespace Forge.Bench;
 
 /// <summary>
-/// The compaction paths a turn pays for, at the reference model the product ships against: a 1M-token window (R = 200 000
-/// with outputs unknown, so U = 800 000, trigger line 680 000, target 400 000).
+/// The compaction arithmetic a turn pays for, at the reference model the product ships against: a 1M-token window
+/// (R = 200 000 with outputs unknown, so U = 800 000, trigger line 680 000, target 400 000).
 /// <para><c>compaction.budget</c> and <c>compaction.wire</c> are the per-request arithmetic, which must stay allocation-free;
-/// <c>compaction.estimate.*</c> is the token estimate behind the context reading — the whole history on the cold path (after
-/// every compaction replaced it) and the appended tail on the hot one; <c>compaction.plan-cut</c> is the cut search over a
-/// large raw tail, run once per compaction; <c>compaction.file-list.*</c> renders the two bounded lists (a list that fits, one
-/// that is truncated with the dropped-count notice, and a re-seed from a stored rendering); <c>compaction.floor</c> is the
-/// irreducible-floor precheck added before the summarizer, which runs only when the context is already over the line.</para>
-/// <para>What these rows do not cover: the summarizer itself (a provider round trip, not our code) and
-/// <c>ToolResultReduction</c>, which is internal to Forge.Core. Run with <c>--filter compaction</c>.</para>
+/// <c>compaction.estimate.*</c> is the token estimate behind the context reading - the whole history on the cold path (after
+/// a fold replaced it) and the appended tail on the hot one; <c>compaction.plan-cut</c> is the cut search over a large raw
+/// tail.</para>
+/// <para>What these rows do not cover: folding itself (a single ledger UPDATE plus one render, measured by
+/// <c>turnledger.write</c> and <c>agentloop.dynamic</c>) and the summarizer, which no longer exists - compaction never calls a
+/// model. Run with <c>--filter compaction</c>.</para>
 /// </summary>
 internal static class CompactionScenarios
 {
@@ -33,10 +32,6 @@ internal static class CompactionScenarios
         yield return Estimate("compaction.estimate.history", HistoryMessages, warmup: 20, iterations: 200, "the whole history: the cold path after a compaction, and the floor's inherited half");
         yield return Estimate("compaction.estimate.appended", 20, warmup: 500, iterations: 20_000, "the appended tail: one request's steady-state context reading");
         yield return PlanCut();
-        yield return FileList("compaction.file-list.fits", paths: 60, warmup: 50, iterations: 2_000, "below both budgets");
-        yield return FileList("compaction.file-list.over-budget", paths: 1_200, warmup: 20, iterations: 500, "truncated, with the dropped-count notice");
-        yield return Reseed();
-        yield return Floor();
     }
 
     /// <summary>The reserve arithmetic: three inputs, no allocation, called before every model request.</summary>
@@ -155,138 +150,20 @@ internal static class CompactionScenarios
             }));
     }
 
-    /// <summary>Rendering both bounded lists, which happens once per compaction and once more for the stored summary.</summary>
-    private static BenchScenario FileList(string name, int paths, int warmup, int iterations, string note)
-    {
-        var files = Files(paths);
-        return new BenchScenario(
-            name,
-            "compaction",
-            Heavy: false,
-            token => Task.FromResult(new BenchCase
-            {
-                Warmup = warmup,
-                Iterations = iterations,
-                Note = $"{paths} read + {paths} modified paths; {note}",
-                Run = token => Task.FromResult(new OpResult(Items: paths * 2, Signature: files.Render().Length)),
-                Check = comparison => comparison.Implementation.Signature <= CompactionFiles.ReadListChars + CompactionFiles.ModifiedListChars
-                    ? new Verdict(
-                        "both blocks stay inside their budgets",
-                        $"{comparison.Implementation.Signature} chars (≤ 12 000)",
-                        true)
-                    : new Verdict("both blocks stay inside their budgets", $"{comparison.Implementation.Signature} chars", false),
-            }));
-    }
-
-    /// <summary>
-    /// Rebuilding the lists from a stored rendering — what a later compaction in the same session starts from. The rendering
-    /// carries the dropped-count notice and shortened paths, which must not come back as entries.
-    /// </summary>
-    private static BenchScenario Reseed()
-    {
-        var stored = Files(1_200).Render();
-        var rendered = Reseed(stored);
-        var names = new List<string>(200);
-        var seeded = new CompactionFiles();
-        const string open = "<read-files>";
-        var start = stored.IndexOf(open, StringComparison.Ordinal) + open.Length;
-        var end = stored.IndexOf("</read-files>", start, StringComparison.Ordinal);
-        foreach (var line in stored[start..end].Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            seeded.AddEntry(line);
-        }
-
-        var expected = seeded.Read.Count;
-        return new BenchScenario(
-            "compaction.file-list.reseed",
-            "compaction",
-            Heavy: false,
-            token => Task.FromResult(new BenchCase
-            {
-                Warmup = 20,
-                Iterations = 500,
-                Note = $"{expected} paths parsed back from a truncated 1 200-path rendering (the notice and the shortened paths drop out)",
-                Run = token =>
-                {
-                    var files = new CompactionFiles();
-                    var begin = stored.IndexOf(open, StringComparison.Ordinal) + open.Length;
-                    var finish = stored.IndexOf("</read-files>", begin, StringComparison.Ordinal);
-                    foreach (var line in stored[begin..finish].Split('\n', StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        files.AddEntry(line);
-                    }
-
-                    return Task.FromResult(new OpResult(Items: files.Read.Count, Signature: files.Render().Length));
-                },
-                Check = comparison => comparison.Implementation.Signature <= CompactionFiles.ReadListChars + CompactionFiles.ModifiedListChars
-                                                        && comparison.Implementation.ItemsPerOp == expected
-                    ? new Verdict(
-                        "a re-seed keeps what the cap kept and stays inside the budgets",
-                        $"{comparison.Implementation.ItemsPerOp} paths, {comparison.Implementation.Signature} chars",
-                        true)
-                    : new Verdict(
-                        "a re-seed keeps what the cap kept and stays inside the budgets",
-                        $"{comparison.Implementation.ItemsPerOp}/{expected} paths, {comparison.Implementation.Signature} chars",
-                        false),
-            }));
-    }
-
-    /// <summary>
-    /// The irreducible floor: two token counts (the inherited prefix and this instance's own messages) plus the stable
-    /// prefix. Runs once per request that is already over the line, so this is the cost added before deciding not to ask the
-    /// summarizer.
-    /// </summary>
-    private static BenchScenario Floor()
-    {
-        var counter = new ApproximateTokenCounter();
-        var inherited = Messages(300);
-        var own = Messages(100);
-        const string Prefix = "You are Forge, a coding agent. ";
-        return new BenchScenario(
-            "compaction.floor",
-            "compaction",
-            Heavy: false,
-            token => Task.FromResult(new BenchCase
-            {
-                Warmup = 20,
-                Iterations = 200,
-                Note = "300 inherited + 100 own messages of 10 000 chars: the two counts a stalled candidate adds per over-the-line request",
-                Run = token =>
-                {
-                    // The shape AgentLoop.IrreducibleTokens uses: walk the inherited prefix once, count it, count the own
-                    // messages, add the stable prefix and the tool definitions.
-                    var inheritedMessages = new List<ChatMessage>(inherited.Count);
-                    foreach (var message in inherited)
-                    {
-                        inheritedMessages.Add(message);
-                    }
-
-                    var floor = (long)counter.Count(inheritedMessages)
-                                + counter.Count(Prefix)
-                                + 20_000
-                                + Math.Min(80_000, counter.Count(own));
-                    return Task.FromResult(new OpResult(Items: inherited.Count + own.Count, Signature: (int)Math.Min(int.MaxValue, floor)));
-                },
-                Check = comparison => comparison.Implementation.Signature > 0
-                    ? new Verdict("the floor is computed", $"floor={comparison.Implementation.Signature} tokens", true)
-                    : new Verdict("the floor is computed", "floor=0", false),
-            }));
-    }
-
-    /// <summary>Messages of roughly <see cref="MessageChars"/> characters each, alternating user and assistant.</summary>
+    /// <summary><paramref name="count"/> user messages of <see cref="MessageChars"/> characters each.</summary>
     private static List<ChatMessage> Messages(int count)
     {
         var text = new string('x', MessageChars);
         var messages = new List<ChatMessage>(count);
         for (var index = 0; index < count; index++)
         {
-            messages.Add(index % 2 == 0 ? ChatMessage.User(text) : ChatMessage.Assistant(text));
+            messages.Add(ChatMessage.User(text));
         }
 
         return messages;
     }
 
-    /// <summary>Stored messages for <see cref="SummaryLayers.PlanCut"/>: user, assistant, then the tool result that answers it.</summary>
+    /// <summary><paramref name="count"/> stored messages shaped like a real turn: user, tool call, tool result.</summary>
     private static List<StoredMessage> Raw(int count)
     {
         var messages = new List<StoredMessage>(count);
@@ -308,33 +185,5 @@ internal static class CompactionScenarios
         }
 
         return messages;
-    }
-
-    /// <summary>Paths across both lists, long enough that 1 200 of them overflow the two budgets.</summary>
-    private static CompactionFiles Files(int paths)
-    {
-        var files = new CompactionFiles();
-        for (var index = 0; index < paths; index++)
-        {
-            files.AddRead($"src/forge/very/deeply/nested/folder/{index:D4}/File{index:D4}.cs", new LineRange(1, 420));
-            files.AddModified($"src/forge/very/deeply/nested/folder/{index:D4}/Changed{index:D4}.cs");
-        }
-
-        return files;
-    }
-
-    /// <summary>A collection rebuilt from a stored rendering, the way the next compaction in the session starts.</summary>
-    private static string Reseed(string stored)
-    {
-        var files = new CompactionFiles();
-        const string open = "<read-files>";
-        var start = stored.IndexOf(open, StringComparison.Ordinal) + open.Length;
-        var end = stored.IndexOf("</read-files>", start, StringComparison.Ordinal);
-        foreach (var line in stored[start..end].Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            files.AddEntry(line);
-        }
-
-        return files.Render();
     }
 }

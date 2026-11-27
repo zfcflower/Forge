@@ -17,15 +17,44 @@
                    IsVisible="{Binding HasPlaceholder}" />
       </StackPanel>
     </views:SelectableCard>
-    <views:CopyTextButton Classes="ghost icon"
-                          Width="26"
-                          Height="22"
-                          HorizontalAlignment="Left"
-                          IsVisible="{Binding !IsStreaming}"
-                          ToolTip.Tip="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}"
-                          AutomationProperties.AutomationId="message-copy"
-                          AutomationProperties.Name="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}">
-      <wc:FluentIcon Data="{StaticResource IconCopy}" Width="13" Height="13" />
-    </views:CopyTextButton>
+    <!-- The row cluster under the reply: the copy button, then - only when this round has a ledger row behind it - the
+         turn entry button. No row, no button: an old session's turns simply have nothing to observe. -->
+    <StackPanel Orientation="Horizontal" Spacing="6">
+      <views:CopyTextButton Classes="ghost icon"
+                            Width="26"
+                            Height="22"
+                            HorizontalAlignment="Left"
+                            IsVisible="{Binding !IsStreaming}"
+                            ToolTip.Tip="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="message-copy"
+                            AutomationProperties.Name="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}">
+        <wc:FluentIcon Data="{StaticResource IconCopy}" Width="13" Height="13" />
+      </views:CopyTextButton>
+      <Button Classes="ghost icon"
+              Width="26"
+              Height="22"
+              HorizontalAlignment="Left"
+              IsVisible="{Binding Turn.HasLedger}"
+              ToolTip.Tip="{Binding [turn.ledger], Source={x:Static loc:Loc.Instance}}"
+              AutomationProperties.AutomationId="turn-ledger"
+              AutomationProperties.Name="{Binding [turn.ledger], Source={x:Static loc:Loc.Instance}}">
+        <wc:FluentIcon Data="{StaticResource IconNavigation}" Width="13" Height="13" />
+        <Button.Flyout>
+          <!-- The turn's own entry, the same field set the ledger stores: header, task, the reply, and the harness's
+               evidence. -->
+          <Flyout Placement="TopEdgeAlignedLeft">
+            <StackPanel Spacing="8" MaxWidth="560" AutomationProperties.AutomationId="turn-ledger-panel">
+              <TextBlock Text="{Binding Turn.Ledger.Header}" FontWeight="Medium" />
+              <TextBlock Text="{Binding Turn.Ledger.TaskHeading}" FontWeight="Medium" />
+              <TextBlock Text="{Binding Turn.Ledger.TaskText}" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding Turn.Ledger.ConclusionLabel}" FontWeight="Medium" />
+              <TextBlock Text="{Binding Turn.Ledger.ConclusionText}" TextWrapping="Wrap" MaxHeight="220" />
+              <TextBlock Text="{Binding Turn.Ledger.EvidenceLabel}" FontWeight="Medium" />
+              <TextBlock Text="{Binding Turn.Ledger.EvidenceText}" TextWrapping="Wrap" MaxHeight="160" />
+            </StackPanel>
+          </Flyout>
+        </Button.Flyout>
+      </Button>
+    </StackPanel>
   </StackPanel>
 </UserControl>
