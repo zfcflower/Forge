@@ -95,14 +95,14 @@
 
 ## 2.5 托管上下文与确定性折叠
 
-模型的历史区不是原始对话流水，而是**每轮一条 entry** 的累加，一条 entry 拆成两条消息（任务发 `user`、报告发 `assistant`）：`**Conclusion**:` + 回复正文 + `**Evidence**:` + `- turn:` / `- files:` / `- spec:` / `- seq:`。每个回合开始时由 `turn_ledger` 重建一次历史区（折叠块 + 未折叠轮的 entry）；**回合内不受影响**——本回合的每一次请求都带着本回合的真实交换（工具调用与结果全在），不裁剪、不收据、不摘要。完整算法与找回路径见 [16-context-compaction.md](16-context-compaction.md)。
+模型的历史区不是原始对话流水，而是**每轮一条 entry** 的累加，一条 entry 是三消息：任务发 `user`、回复发 `assistant`（原样，不加标题）、收据发 `tool`（一个 synthetic 的 `evidence_receipt` 调用 + 它的结果 `{"turn":…,"seq":"a-b","reads":[…],"writes":[…]}`）。每个回合开始时由 `turn_ledger` 重建一次历史区（折叠块 + 未折叠轮的 entry）；**回合内不受影响**——本回合的每一次请求都带着本回合的真实交换（工具调用与结果全在），不裁剪、不收据、不摘要。完整算法与找回路径见 [16-context-compaction.md](16-context-compaction.md)。
 
 - 缓存:兼容/Responses 协议的请求默认带 `prompt_cache_key`(lineage 根)与 `prompt_cache_retention`;拒绝这两个字段的端点由适配器一次性降级记住,之后不再发。
-- 触发与目标沿用同一套预算：`U = W − R`，回合首请求用触发线（默认 85%），回合内用紧急线（默认 95%），目标线默认 50%。
-- 过线时把最旧的**已结算**轮折进指针块，直到降到目标线下，永远保留最新 3 轮不折。折叠 = 一次单调 `folded` 标记 + 一次重渲染，**零模型调用、零摘要**。
-- 指针块固定四行：`[compacted: turns a–b · seq x–y · n turns]` / `open:`（被折轮 unresolved 去重，最多 5 项）/ `retrieve: read_context(from_turn, to_turn)` / `originals: read_history(from_seq, to_seq)`。`open:` 只聚合未解决项，**不聚合“做完了什么”**——那会变成变相摘要。
-- 回合内撞窗口：加大折叠后重发一次；仍不够（本回合自身超窗口）按原错误失败。没有第二级压缩。
-- 手动 `/compact`：折叠到只剩最新 3 轮，忽略阈值与开关，不再接受“关注点”（折叠是确定性的，没有可steer的余地）。
+- 预算 `U = W − R`（窗口减输出预留）：回合首请求用触发线（默认 85%），回合内用紧急线（默认 95%）。**没有目标线**——折一次就折到底。
+- 过线时把除最新 N 轮以外的**已结算**轮全部折进指针块（N 默认 3，设置里可调 1–10）。折叠不花模型调用，一次折到底与折一半代价相同，而折得越深下一次折叠越晚——所以不设“折到百分之几”。折叠 = 一次单调 `folded` 标记 + 一次重渲染，**零模型调用、零摘要**。
+- 指针块固定三行：`[compacted: turns a–b · seq x–y · n turns]` / `retrieve: read_context(from_turn, to_turn)` / `originals: read_history(from_seq, to_seq)`。它**不聚合任何内容**——聚合“做完了什么”会变成变相摘要，而它过去聚合的 `unresolved` 已随状态节一起删除。
+- 回合内撞窗口：再折一次后重发一遍；仍不够（本回合自身超窗口）按原错误失败。没有第二级压缩。
+- 手动 `/compact`：折叠到只剩最新 N 轮，忽略阈值与开关，不再接受“关注点”（折叠是确定性的，没有可steer的余地）。
 - 找回：entry 的 `seq:` 与折叠块的 `originals:` 指向 `read_history`；超长工具输出（>32k）仍在 artifact 里，用 `read_artifact`。`read_context` 取回被折叠轮的 entry，`search_context` 查 `turn_ledger` 的全文索引。
 - 旧会话（无 ledger 行，或宿主没配 ledger）继续走 `summaries` 摘要视图 + 原始尾部；新会话不再写摘要。摘要级与收据级的代码、`compaction.summarizer` 槽位都随本变更删除。
 - 计划摘要（`plan_summaries`）与此无关，另存：每次替换把旧文本记一条修订，每会话保留最新 50 条。
