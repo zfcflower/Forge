@@ -10,7 +10,7 @@ public sealed class HandoverSummaryException(string message, Exception? inner = 
 /// <summary>
 /// Handover summary (context mode "summary", section 8.1): one model call that turns the old session's context and a
 /// description of its uncommitted changes into the text of the first, persisted user message of the new session.
-/// It has its own prompt; the compactor's <see cref="SummaryCompactor.SummarizerPrompt"/> serves a different reader.
+/// It has its own prompt; the managed context renders history from the ledger instead, with no model call at all.
 /// </summary>
 public static class HandoverSummary
 {

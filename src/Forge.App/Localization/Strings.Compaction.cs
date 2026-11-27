@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Forge.App.Agents;
 
 namespace Forge.App.Localization;
 
@@ -13,28 +14,24 @@ internal static class CompactionStrings
     public const string SettingsEnabledKey = "compaction.settings.enabled";
     public const string SettingsTriggerKey = "compaction.settings.trigger";
     public const string SettingsTriggerHintKey = "compaction.settings.triggerHint";
-    public const string SettingsTargetHintKey = "compaction.settings.targetHint";
 
-    public const string SettingsKeepRecentKey = "compaction.settings.keepRecent";
+    public const string SettingsKeepRecentTurnsKey = "compaction.settings.keepRecentTurns";
 
-    public const string SettingsKeepRecentHintKey = "compaction.settings.keepRecentHint";
+    public const string SettingsKeepRecentTurnsHintKey = "compaction.settings.keepRecentTurnsHint";
 
-    public const string SettingsKeepRecentInvalidKey = "compaction.settings.keepRecentInvalid";
+    public const string SettingsKeepRecentTurnsInvalidKey = "compaction.settings.keepRecentTurnsInvalid";
 
     public const string SettingsEmergencyKey = "compaction.settings.emergency";
 
     public const string SettingsEmergencyHintKey = "compaction.settings.emergencyHint";
 
     public const string SettingsEmergencyInvalidKey = "compaction.settings.emergencyInvalid";
-    public const string SettingsTargetKey = "compaction.settings.target";
     public const string SettingsHintKey = "compaction.settings.hint";
     public const string SettingsTriggerInvalidKey = "compaction.settings.triggerInvalid";
-    public const string SettingsTargetInvalidKey = "compaction.settings.targetInvalid";
     public const string SettingsSaveFailedKey = "compaction.settings.saveFailed";
 
     // ---------------------------------------------------------------- session
     public const string CommandDescriptionKey = "compaction.command.description";
-    public const string StalledKey = "compaction.stalled";
     public const string BlockedKey = "compaction.blocked";
     public const string NothingKey = "compaction.manual.nothing";
     public const string BusyKey = "compaction.manual.busy";
@@ -53,14 +50,22 @@ internal static class CompactionStrings
 
     public static string SettingsTriggerHint => Loc.Instance[SettingsTriggerHintKey];
 
-    public static string SettingsTargetHint => Loc.Instance[SettingsTargetHintKey];
+    public static string SettingsKeepRecentTurns => Loc.Instance[SettingsKeepRecentTurnsKey];
 
-    public static string SettingsKeepRecent => Loc.Instance[SettingsKeepRecentKey];
+    public static string SettingsKeepRecentTurnsHint =>
+        Loc.Instance.Format(
+            SettingsKeepRecentTurnsHintKey,
+            CompactionSettings.MinKeepRecentTurns,
+            CompactionSettings.MaxKeepRecentTurns,
+            CompactionSettings.DefaultKeepRecentTurns,
+            CompactionSettings.MinKeepRecentTurns,
+            CompactionSettings.MaxKeepRecentTurns);
 
-    public static string SettingsKeepRecentHint => Loc.Instance[SettingsKeepRecentHintKey];
-
-    public static string SettingsKeepRecentInvalid =>
-        Loc.Instance.Format(SettingsKeepRecentInvalidKey, 1_000, 1_000_000);
+    public static string SettingsKeepRecentTurnsInvalid =>
+        Loc.Instance.Format(
+            SettingsKeepRecentTurnsInvalidKey,
+            CompactionSettings.MinKeepRecentTurns,
+            CompactionSettings.MaxKeepRecentTurns);
 
     public static string SettingsEmergency => Loc.Instance[SettingsEmergencyKey];
 
@@ -68,13 +73,9 @@ internal static class CompactionStrings
 
     public static string SettingsEmergencyInvalid => Loc.Instance[SettingsEmergencyInvalidKey];
 
-    public static string SettingsTarget => Loc.Instance[SettingsTargetKey];
-
     public static string SettingsHint => Loc.Instance[SettingsHintKey];
 
     public static string SettingsTriggerInvalid => Loc.Instance.Format(SettingsTriggerInvalidKey, 50, 95);
-
-    public static string SettingsTargetInvalid => Loc.Instance[SettingsTargetInvalidKey];
 
     public static string SettingsSaveFailed(string message) => Loc.Instance.Format(SettingsSaveFailedKey, message);
 
@@ -82,11 +83,7 @@ internal static class CompactionStrings
 
     public static string GaugeTooltip => Loc.Instance[GaugeTooltipKey];
 
-    /// <summary>Transcript notice: automatic compaction stopped for this agent after attempts that could not reach the line.</summary>
-    public static LocText Stalled(int contextTokens, int triggerTokens) =>
-        new(StalledKey, TextFormat.Number(contextTokens), TextFormat.Number(triggerTokens));
-
-    /// <summary>Transcript notice: what no summary can drop already exceeds the line, so no attempt was made.</summary>
+    /// <summary>Transcript notice: nothing is left to fold and the context is still above the line.</summary>
     public static LocText Blocked(int contextTokens, int triggerTokens) =>
         new(BlockedKey, TextFormat.Number(contextTokens), TextFormat.Number(triggerTokens));
 
@@ -101,29 +98,24 @@ internal static class CompactionStrings
         Loc.Register(SettingsTitleKey, "上下文压缩", "Context compaction");
         Loc.Register(SettingsEnabledKey, "自动压缩", "Compact automatically");
         Loc.Register(SettingsTriggerKey, "触发线（可用窗口的 %）", "Trigger (% of the usable window)");
-        Loc.Register(SettingsTargetKey, "压缩目标（可用窗口的 %）", "Target (% of the usable window)");
         Loc.Register(
             SettingsHintKey,
-            "用量达到「触发线 × 可用输入」就把最旧的轮折成一行指针 → 折到「目标 × 可用输入」；最新 3 轮不动，折叠只是不再带进请求，原文仍在库里（read_context / read_history 取回）。可用输入 = 模型窗口 − 输出预留。",
-            "Reaching trigger × usable input folds the oldest turns into one pointer line, down to target × usable input; the newest 3 turns stay verbatim and nothing is lost — a folded turn is still in the store (read_context / read_history). Usable input = window − output reserve.");
+            "用量达到「触发线 × 可用输入」时，把除最新 N 轮以外的所有已结算轮折成一行指针。折叠不花模型调用，所以一次折到底：省下的上下文能撑更久，折叠次数更少。折叠只是不再带进请求，原文仍在库里（read_context / read_history 取回）。可用输入 = 模型窗口 − 输出预留。",
+            "Reaching trigger × usable input folds every finished turn except the newest N into one pointer line. A fold costs no model call, so it goes as deep as it can: the freed context lasts longer and folds happen less often. Nothing is lost — a folded turn is still in the store (read_context / read_history). Usable input = window − output reserve.");
         Loc.Register(
             SettingsTriggerHintKey,
             "上下文用到可用输入的这么多时开始压缩。调低=更早压、原文更少；调高=压缩次数更少，但更容易撞上溢出重试。建议 80–90；中文或长文档会话建议 75。",
             "Compaction starts once the context reaches this share of the usable input. Lower = earlier, less raw text kept; higher = fewer compactions but a likelier overflow retry. 80–90 is a good range, 75 for CJK-heavy sessions.");
-        Loc.Register(
-            SettingsTargetHintKey,
-            "压缩后上下文的大小（摘要 + 保留的原文尾部），不是“保留多少原文”。它决定下一次压缩还有多远：85→50 大约留出 0.35×可用输入，约 5–6 次普通读取。建议取触发线的大约六成。",
-            "The size of the context after compaction (summary + the raw tail kept), not “how much raw text survives”. It decides how far off the next compaction is: 85→50 leaves about 0.35 × usable input, roughly 5–6 ordinary reads. About 60% of the trigger is a good target.");
         Loc.Register(SettingsTriggerInvalidKey, "触发线须在 {0}–{1} 之间", "The trigger must be between {0} and {1}.");
-        Loc.Register(SettingsKeepRecentKey, "保留最近（token）", "Keep recent (tokens)");
+        Loc.Register(SettingsKeepRecentTurnsKey, "保留最新轮数", "Keep newest turns");
         Loc.Register(
-            SettingsKeepRecentHintKey,
-            "压缩时原样保留的最新对话量。留空 = 自动（min(20 000, 0.2×可用输入)）；1M 窗口的模型建议 100 000。实际值还会被夹到压缩目标的一半以内，保证仍能压到目标。",
-            "How much of the newest conversation stays verbatim across a compaction. Empty = derived (min(20 000, 0.2 × usable input)); 100 000 suits a 1M-window model. It is still capped at half the target so a compaction can reach the target.");
+            SettingsKeepRecentTurnsHintKey,
+            "折叠时永远原样保留的最新轮数（{0}–{1}）。轮是整体折或不折，所以这里按轮计数而不是按 token；默认 {2}。调大 = 最近的上下文更完整，但折叠能腾出的空间更少。",
+            "How many of the newest finished turns a fold always leaves alone ({0}–{1}). A turn is folded whole or not at all, so this counts turns rather than tokens; the default is {2}. Higher keeps more of the recent past intact and leaves less room for a fold to free.");
         Loc.Register(
-            SettingsKeepRecentInvalidKey,
-            "保留最近须在 {0}–{1} 之间，或留空",
-            "Keep recent must be between {0} and {1}, or empty");
+            SettingsKeepRecentTurnsInvalidKey,
+            "保留最新轮数须在 {0}–{1} 之间",
+            "Keep newest turns must be between {0} and {1}");
         Loc.Register(SettingsEmergencyKey, "回合内触发线（可用窗口的 %）", "Mid-turn line (% of the usable window)");
         Loc.Register(
             SettingsEmergencyHintKey,
@@ -133,14 +125,9 @@ internal static class CompactionStrings
             SettingsEmergencyInvalidKey,
             "回合内触发线须在 90–99 之间，且高于触发线",
             "The mid-turn line must be between 90 and 99 and above the trigger");
-        Loc.Register(SettingsTargetInvalidKey, "目标须至少为 1，且小于触发线", "The target must be at least 1 and below the trigger.");
         Loc.Register(SettingsSaveFailedKey, "保存压缩设置失败：{0}", "Could not save the compaction settings: {0}");
 
-        Loc.Register(CommandDescriptionKey, "压缩上下文（保留最近的原文；可在后面写关注点）", "Compact the context (keeps the recent messages; add text to set a focus)");
-        Loc.Register(
-            StalledKey,
-            "上下文仍高于触发线（{0} tokens，触发线 {1}），已没有可折叠的旧轮；可用 /compact 手动折叠或换一个窗口更大的模型",
-            "The context is still above the trigger line ({0} tokens, trigger {1}) and there is nothing left to fold; /compact or a model with a larger window is the way forward.");
+        Loc.Register(CommandDescriptionKey, "折叠上下文（只留最新几轮；可在后面写关注点）", "Fold the context (keeps the newest turns; add text to set a focus)");
         Loc.Register(
             BlockedKey,
             "无可折叠的部分（{0} tokens，触发线 {1}）：系统前缀、工具定义与最新几轮本身已经占满窗口，折叠旧轮也降不到线下；换一个窗口更大的模型或减少工具才能继续",

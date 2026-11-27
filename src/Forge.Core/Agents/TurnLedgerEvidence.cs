@@ -20,9 +20,9 @@ internal sealed class TurnLedgerEvidence
     public const int MaxFiles = 50;
 
     /// <summary>
-    /// The file tools and the argument that names what they touched. <c>copy</c> and <c>move</c> name their target, the
-    /// same argument <see cref="CompactionFiles"/> records them under - the one precedent this mirrors. <c>read</c> is
-    /// not listed here: it names its file through <c>path</c> or the <c>paths</c> array, both read below.
+    /// The file tools that change a file and the argument naming it. <c>copy</c> and <c>move</c> name their target.
+    /// <c>read</c> is not listed here: it names its file through <c>path</c> or the <c>paths</c> array, both read below, and
+    /// it belongs in the read set rather than this one.
     /// </summary>
     private static readonly FrozenDictionary<string, string> PathArguments =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -264,7 +264,7 @@ internal sealed class TurnLedgerEvidence
             var items = value.ValueKind == JsonValueKind.Array ? value.EnumerateArray().ToArray() : [value];
             foreach (var item in items)
             {
-                // The same normalization CompactionFiles applies: the trimmed text, nothing else.
+                // The same normalization the evidence has always applied: the trimmed text, nothing else.
                 if (item.ValueKind == JsonValueKind.String && item.GetString()?.Trim() is { Length: > 0 } trimmed)
                 {
                     values.Add(trimmed);

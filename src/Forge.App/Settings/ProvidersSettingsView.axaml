@@ -62,9 +62,10 @@
                  Text="{Binding DefaultContextWindowHint}" />
     </StackPanel>
 
-    <!-- Automatic compaction: trigger and target in percent of each model's usable window (the window above caps it). -->
+    <!-- Automatic compaction: a trigger line in percent of each model's usable window (the window above caps it), the
+         mid-turn line, and how many of the newest turns a fold leaves alone. -->
     <StackPanel Spacing="3" DataContext="{Binding Compaction}" x:DataType="settings:CompactionSettingsViewModel">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10">
+      <Grid ColumnDefinitions="Auto,Auto,Auto" ColumnSpacing="10">
         <CheckBox Grid.Column="0"
                   IsChecked="{Binding Enabled, Mode=TwoWay}"
                   Content="{Binding EnabledLabel}"
@@ -78,47 +79,45 @@
                  Width="64"
                  Text="{Binding TriggerText, Mode=TwoWay}"
                  IsEnabled="{Binding Enabled}"
+                 Classes.invalid="{Binding HasTriggerError}"
+                 ToolTip.Tip="{Binding TriggerError}"
                  LostFocus="OnCompactionCommit"
                  KeyDown="OnCompactionKeyDown"
                  AutomationProperties.AutomationId="providers-compaction-trigger"
                  AutomationProperties.Name="{Binding TriggerLabel}" />
-        <TextBlock Grid.Column="3"
-                   Classes="label"
-                   Text="{Binding TargetLabel}"
-                   VerticalAlignment="Center" />
-        <TextBox Grid.Column="4"
-                 Width="64"
-                 Text="{Binding TargetText, Mode=TwoWay}"
-                 IsEnabled="{Binding Enabled}"
-                 LostFocus="OnCompactionCommit"
-                 KeyDown="OnCompactionKeyDown"
-                 AutomationProperties.AutomationId="providers-compaction-target"
-                 AutomationProperties.Name="{Binding TargetLabel}" />
-      </Grid>
-      <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="10">
-        <TextBlock Grid.Column="0"
-                   Classes="label"
-                   Text="{Binding KeepRecentLabel}"
-                   VerticalAlignment="Center" />
-        <TextBox Grid.Column="1"
-                 Width="120"
-                 Text="{Binding KeepRecentText, Mode=TwoWay}"
-                 IsEnabled="{Binding Enabled}"
-                 Classes.invalid="{Binding HasKeepRecentError}"
-                 ToolTip.Tip="{Binding KeepRecentError}"
-                 LostFocus="OnCompactionCommit"
-                 KeyDown="OnCompactionKeyDown"
-                 AutomationProperties.AutomationId="providers-compaction-keep-recent"
-                 AutomationProperties.Name="{Binding KeepRecentLabel}" />
       </Grid>
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
                  Foreground="{DynamicResource StatusErrorBrush}"
-                 IsVisible="{Binding HasKeepRecentError}"
-                 Text="{Binding KeepRecentError}" />
+                 IsVisible="{Binding HasTriggerError}"
+                 Text="{Binding TriggerError}" />
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
-                 Text="{Binding KeepRecentHint}" />
+                 Text="{Binding TriggerHint}" />
+      <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="10">
+        <TextBlock Grid.Column="0"
+                   Classes="label"
+                   Text="{Binding KeepRecentTurnsLabel}"
+                   VerticalAlignment="Center" />
+        <TextBox Grid.Column="1"
+                 Width="64"
+                 Text="{Binding KeepRecentTurnsText, Mode=TwoWay}"
+                 IsEnabled="{Binding Enabled}"
+                 Classes.invalid="{Binding HasKeepRecentTurnsError}"
+                 ToolTip.Tip="{Binding KeepRecentTurnsError}"
+                 LostFocus="OnCompactionCommit"
+                 KeyDown="OnCompactionKeyDown"
+                 AutomationProperties.AutomationId="providers-compaction-keep-turns"
+                 AutomationProperties.Name="{Binding KeepRecentTurnsLabel}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource StatusErrorBrush}"
+                 IsVisible="{Binding HasKeepRecentTurnsError}"
+                 Text="{Binding KeepRecentTurnsError}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding KeepRecentTurnsHint}" />
       <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="10">
         <TextBlock Grid.Column="0"
                    Classes="label"
@@ -143,22 +142,6 @@
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
                  Text="{Binding EmergencyHint}" />
-      <TextBlock Classes="caption"
-                 TextWrapping="Wrap"
-                 Text="{Binding TriggerHint}" />
-      <TextBlock Classes="caption"
-                 TextWrapping="Wrap"
-                 Text="{Binding TargetHint}" />
-      <TextBlock Classes="caption"
-                 TextWrapping="Wrap"
-                 Foreground="{DynamicResource StatusErrorBrush}"
-                 IsVisible="{Binding HasTriggerError}"
-                 Text="{Binding TriggerError}" />
-      <TextBlock Classes="caption"
-                 TextWrapping="Wrap"
-                 Foreground="{DynamicResource StatusErrorBrush}"
-                 IsVisible="{Binding HasTargetError}"
-                 Text="{Binding TargetError}" />
       <TextBlock Classes="caption"
                  TextWrapping="Wrap"
                  Foreground="{DynamicResource StatusErrorBrush}"

@@ -192,12 +192,11 @@ internal static class ManagedContext
     /// on.</para>
     /// </summary>
     public const string Legend =
-        "[managed context] each finished turn is three messages: the user message that asked, the assistant message that "
-        + "answered, and the harness's own tool result carrying that turn's receipt. The receipt is data, not something to "
-        + "write or repeat: turn is the number read_context(from_turn, to_turn) takes, seq its message range for "
-        + "read_history(from_seq, to_seq), reads the files that turn opened, writes the files it changed, and specs the specs "
-        + "it touched. A [compacted: ...] block stands in for older turns and names read_context(from_turn, to_turn) for "
-        + "them.";
+        "[managed context] a finished turn is three messages: the user message that asked, the assistant message that "
+        + "answered, and a harness tool result carrying its receipt. That receipt is data, not text to write: turn feeds "
+        + "read_context's from_turn, seq feeds read_history's from_seq..to_seq, reads are the files opened, writes the files "
+        + "changed (read-and-changed counts as changed), specs the specs looked up. A [compacted: ...] block replaces older "
+        + "turns and names both lookups for them.";
 
     /// <summary>
     /// The managed history as the request carries it: the legend, the folded block (when anything is folded), then one entry per

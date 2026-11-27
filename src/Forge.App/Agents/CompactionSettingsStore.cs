@@ -9,31 +9,34 @@ using Forge.IO;
 namespace Forge.App.Agents;
 
 /// <summary>
-/// The automatic-compaction settings: off/on, the trigger line and the target, both in percent of each model's usable
-/// input budget (its effective window minus the output reserve). Valid when 50 ≤ trigger ≤ 95 and 1 ≤ target &lt; trigger.
+/// The automatic-compaction settings: off/on, the trigger line in percent of each model's usable input budget (its effective
+/// window minus the output reserve), the emergency line for a running turn, and how many of the newest finished turns a fold
+/// always leaves alone. Valid when 50 ≤ trigger ≤ 95, 90 ≤ emergency ≤ 99 with emergency &gt; trigger, and
+/// 1 ≤ keepRecentTurns ≤ 10.
 /// </summary>
-internal sealed record CompactionSettings(bool Enabled = true, int TriggerPercent = CompactionSettings.DefaultTriggerPercent, int TargetPercent = CompactionSettings.DefaultTargetPercent, int? KeepRecentTokens = null, int EmergencyPercent = CompactionSettings.DefaultEmergencyPercent)
+internal sealed record CompactionSettings(
+    bool Enabled = true,
+    int TriggerPercent = CompactionSettings.DefaultTriggerPercent,
+    int KeepRecentTurns = CompactionSettings.DefaultKeepRecentTurns,
+    int EmergencyPercent = CompactionSettings.DefaultEmergencyPercent)
 {
     public const int DefaultTriggerPercent = 85;
-    public const int DefaultTargetPercent = 50;
     public const int DefaultEmergencyPercent = 95;
     public const int MinTriggerPercent = 50;
     public const int MaxTriggerPercent = 95;
     public const int MinEmergencyPercent = 90;
     public const int MaxEmergencyPercent = 99;
-    public const int MinTargetPercent = 1;
-    public const int MinKeepRecentTokens = 1_000;
-    public const int MaxKeepRecentTokens = 1_000_000;
+    public const int DefaultKeepRecentTurns = 3;
+    public const int MinKeepRecentTurns = 1;
+    public const int MaxKeepRecentTurns = 10;
 
     public static CompactionSettings Default { get; } = new();
 
     public static bool IsValidTrigger(int percent) => percent is >= MinTriggerPercent and <= MaxTriggerPercent;
 
-    public static bool IsValidTarget(int target, int trigger) => target >= MinTargetPercent && target < trigger;
-
-    /// <summary>Null means "derive it per model" (min(20 000, 0.2·U)); a number has to be inside the allowed range.</summary>
-    public static bool IsValidKeepRecent(int? tokens) =>
-        tokens is null || tokens is >= MinKeepRecentTokens and <= MaxKeepRecentTokens;
+    /// <summary>How many newest turns a fold keeps: a turn is folded whole, so the honoured figure is a count.</summary>
+    public static bool IsValidKeepRecentTurns(int turns) =>
+        turns is >= MinKeepRecentTurns and <= MaxKeepRecentTurns;
 
     /// <summary>The emergency line sits above the trigger, so a running turn compacts only when it must.</summary>
     public static bool IsValidEmergency(int percent, int trigger) =>
@@ -41,8 +44,7 @@ internal sealed record CompactionSettings(bool Enabled = true, int TriggerPercen
 
     public bool IsValid =>
         IsValidTrigger(TriggerPercent)
-        && IsValidTarget(TargetPercent, TriggerPercent)
-        && IsValidKeepRecent(KeepRecentTokens)
+        && IsValidKeepRecentTurns(KeepRecentTurns)
         && IsValidEmergency(EmergencyPercent, TriggerPercent);
 
     /// <summary>The Core policy for these settings; the resolvers come from the provider catalog.</summary>
@@ -56,8 +58,7 @@ internal sealed record CompactionSettings(bool Enabled = true, int TriggerPercen
         {
             Enabled = valid.Enabled,
             TriggerRatio = valid.TriggerPercent / 100d,
-            TargetRatio = valid.TargetPercent / 100d,
-            KeepRecentTokens = valid.KeepRecentTokens,
+            KeepRecentTurns = valid.KeepRecentTurns,
             EmergencyRatio = valid.EmergencyPercent / 100d,
             ContextWindow = contextWindow,
             MaxOutputTokens = maxOutput,
@@ -132,18 +133,12 @@ internal sealed class CompactionSettingsStore
             var section = root[SectionName] as JsonObject ?? new JsonObject();
             section["enabled"] = value.Enabled;
             section["triggerPercent"] = value.TriggerPercent;
-            section["targetPercent"] = value.TargetPercent;
             section["emergencyPercent"] = value.EmergencyPercent;
-            if (value.KeepRecentTokens is { } keepRecent)
-            {
-                section["keepRecentTokens"] = keepRecent;
-            }
-            else
-            {
-                // "absent" is the documented way to say "derive it per model"; writing null would read back the same but
-                // leave a field the user never set.
-                section.Remove("keepRecentTokens");
-            }
+            section["keepRecentTurns"] = value.KeepRecentTurns;
+            // Retired knobs are removed rather than left behind: the token-based tail, and the target depth a fold used to aim
+            // at (a fold now goes as deep as it can, so there is nothing to aim at).
+            section.Remove("keepRecentTokens");
+            section.Remove("targetPercent");
             root[SectionName] = section;
             var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
             AtomicFile.WriteAllBytes(settingsPath, Encoding.UTF8.GetBytes(json));
@@ -157,15 +152,9 @@ internal sealed class CompactionSettingsStore
     {
         var enabled = ReadBool(section["enabled"]) ?? true;
         var trigger = ReadInt(section["triggerPercent"]) ?? CompactionSettings.DefaultTriggerPercent;
-        var target = ReadInt(section["targetPercent"]) ?? CompactionSettings.DefaultTargetPercent;
-        var keepRecent = ReadInt(section["keepRecentTokens"]);
+        var keepRecentTurns = ReadInt(section["keepRecentTurns"]) ?? CompactionSettings.DefaultKeepRecentTurns;
         var emergency = ReadInt(section["emergencyPercent"]) ?? CompactionSettings.DefaultEmergencyPercent;
-        var parsed = new CompactionSettings(
-            enabled,
-            trigger,
-            target,
-            CompactionSettings.IsValidKeepRecent(keepRecent) && keepRecent is > 0 ? keepRecent : null,
-            emergency);
+        var parsed = new CompactionSettings(enabled, trigger, keepRecentTurns, emergency);
         return parsed.IsValid ? parsed : CompactionSettings.Default with { Enabled = enabled };
     }
 

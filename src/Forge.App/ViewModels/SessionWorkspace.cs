@@ -3110,9 +3110,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 break;
             case AgentCompactionStalled stalled:
                 Card(stalled.AgentId)?.AddNotice(
-                    stalled.Reason == CompactionStallReason.Irreducible
-                        ? CompactionStrings.Blocked(stalled.ContextTokens, stalled.TriggerTokens)
-                        : CompactionStrings.Stalled(stalled.ContextTokens, stalled.TriggerTokens),
+                    CompactionStrings.Blocked(stalled.ContextTokens, stalled.TriggerTokens),
                     isError: true);
                 break;
             case StampedInterjection stamped:

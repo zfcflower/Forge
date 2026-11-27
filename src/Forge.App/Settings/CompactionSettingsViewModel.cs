@@ -18,12 +18,10 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool enabled;
     private string triggerText = string.Empty;
-    private string targetText = string.Empty;
-    private string keepRecentText = string.Empty;
+    private string keepRecentTurnsText = string.Empty;
     private string emergencyText = string.Empty;
     private string? triggerError;
-    private string? targetError;
-    private string? keepRecentError;
+    private string? keepRecentTurnsError;
     private string? emergencyError;
     private string? saveError;
     private bool loading;
@@ -45,16 +43,11 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
 
     public string TriggerHint => CompactionStrings.SettingsTriggerHint;
 
-    public string TargetHint => CompactionStrings.SettingsTargetHint;
-
-    public string TargetLabel => CompactionStrings.SettingsTarget;
-
     public string Hint => CompactionStrings.SettingsHint;
 
-    /// <summary>The context-budget line's switch, which lives in <c>preferences</c> rather than the compaction section.</summary>
-    public string KeepRecentLabel => CompactionStrings.SettingsKeepRecent;
+    public string KeepRecentTurnsLabel => CompactionStrings.SettingsKeepRecentTurns;
 
-    public string KeepRecentHint => CompactionStrings.SettingsKeepRecentHint;
+    public string KeepRecentTurnsHint => CompactionStrings.SettingsKeepRecentTurnsHint;
 
     public string EmergencyLabel => CompactionStrings.SettingsEmergency;
 
@@ -81,26 +74,26 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
 
     public bool HasEmergencyError => emergencyError is not null;
 
-    /// <summary>The raw tail kept verbatim, in tokens; empty means "derive it per model" (min(20 000, 0.2·U)).</summary>
-    public string KeepRecentText
+    /// <summary>How many of the newest finished turns a fold leaves alone; turns, not tokens, because a turn folds whole.</summary>
+    public string KeepRecentTurnsText
     {
-        get => keepRecentText;
+        get => keepRecentTurnsText;
         set
         {
-            if (Set(ref keepRecentText, value ?? string.Empty))
+            if (Set(ref keepRecentTurnsText, value ?? string.Empty))
             {
                 Validate();
             }
         }
     }
 
-    public string? KeepRecentError
+    public string? KeepRecentTurnsError
     {
-        get => keepRecentError;
-        private set => SetAndNotify(ref keepRecentError, value, nameof(HasKeepRecentError));
+        get => keepRecentTurnsError;
+        private set => SetAndNotify(ref keepRecentTurnsError, value, nameof(HasKeepRecentTurnsError));
     }
 
-    public bool HasKeepRecentError => keepRecentError is not null;
+    public bool HasKeepRecentTurnsError => keepRecentTurnsError is not null;
 
     public bool Enabled
     {
@@ -126,18 +119,6 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
         }
     }
 
-    public string TargetText
-    {
-        get => targetText;
-        set
-        {
-            if (Set(ref targetText, value ?? string.Empty))
-            {
-                Validate();
-            }
-        }
-    }
-
     public string? TriggerError
     {
         get => triggerError;
@@ -145,14 +126,6 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
     }
 
     public bool HasTriggerError => triggerError is not null;
-
-    public string? TargetError
-    {
-        get => targetError;
-        private set => SetAndNotify(ref targetError, value, nameof(HasTargetError));
-    }
-
-    public bool HasTargetError => targetError is not null;
 
     public string? SaveError
     {
@@ -162,21 +135,27 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
 
     public bool HasSaveError => saveError is not null;
 
-    /// <summary>Saves the percentages and the raw tail when all are valid; false when a value is invalid or the write failed.</summary>
+    /// <summary>Saves the percentages and the kept-turn count when all are valid; false when a value is invalid or the write failed.</summary>
     public bool Commit()
     {
-        if (!Validate(out var trigger, out var target, out var keepRecent, out var emergency))
+        if (!Validate(out var trigger, out var keepRecentTurns, out var emergency))
         {
             return false;
         }
 
         var current = store.Current;
-        if (current.TriggerPercent == trigger && current.TargetPercent == target && current.KeepRecentTokens == keepRecent && current.EmergencyPercent == emergency)
+        if (current.TriggerPercent == trigger && current.KeepRecentTurns == keepRecentTurns
+            && current.EmergencyPercent == emergency)
         {
             return true;
         }
 
-        return Save(current with { TriggerPercent = trigger, TargetPercent = target, KeepRecentTokens = keepRecent, EmergencyPercent = emergency });
+        return Save(current with
+        {
+            TriggerPercent = trigger,
+            KeepRecentTurns = keepRecentTurns,
+            EmergencyPercent = emergency,
+        });
     }
 
     /// <summary>Re-reads the settings file (the page's refresh) and shows what it holds.</summary>
@@ -195,8 +174,7 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
         {
             Enabled = current.Enabled;
             TriggerText = current.TriggerPercent.ToString(CultureInfo.InvariantCulture);
-            TargetText = current.TargetPercent.ToString(CultureInfo.InvariantCulture);
-            KeepRecentText = current.KeepRecentTokens?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+            KeepRecentTurnsText = current.KeepRecentTurns.ToString(CultureInfo.InvariantCulture);
             EmergencyText = current.EmergencyPercent.ToString(CultureInfo.InvariantCulture);
             }
         finally
@@ -224,31 +202,23 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
         }
     }
 
-    private void Validate() => Validate(out _, out _, out _, out _);
+    private void Validate() => Validate(out _, out _, out _);
 
-    private bool Validate(out int trigger, out int target, out int? keepRecent, out int emergency)
+    private bool Validate(out int trigger, out int keepRecentTurns, out int emergency)
     {
         var triggerOk = int.TryParse(triggerText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out trigger)
                         && CompactionSettings.IsValidTrigger(trigger);
         TriggerError = triggerOk ? null : CompactionStrings.SettingsTriggerInvalid;
-        var targetParsed = int.TryParse(targetText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out target);
-        // The target is checked against the typed trigger when that is valid, else against the saved one.
+        // The emergency line is checked against the typed trigger when that is valid, else against the saved one.
         var against = triggerOk ? trigger : store.Current.TriggerPercent;
-        var targetOk = targetParsed && CompactionSettings.IsValidTarget(target, against);
-        TargetError = targetOk ? null : CompactionStrings.SettingsTargetInvalid;
-        // Empty means "derive it per model"; anything else has to be a number in range.
-        var keepRecentText = this.keepRecentText.Trim();
-        keepRecent = null;
-        var keepRecentOk = keepRecentText.Length == 0
-                           || (int.TryParse(keepRecentText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
-                               && CompactionSettings.IsValidKeepRecent(parsed));
-        keepRecent = keepRecentOk && keepRecentText.Length > 0 ? int.Parse(keepRecentText, CultureInfo.InvariantCulture) : null;
-        KeepRecentError = keepRecentOk ? null : CompactionStrings.SettingsKeepRecentInvalid;
+        var keepRecentTurnsOk = int.TryParse(keepRecentTurnsText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out keepRecentTurns)
+                           && CompactionSettings.IsValidKeepRecentTurns(keepRecentTurns);
+        KeepRecentTurnsError = keepRecentTurnsOk ? null : CompactionStrings.SettingsKeepRecentTurnsInvalid;
         // The emergency line has to sit above the typed trigger (or the saved one when the trigger is invalid).
         var emergencyOk = int.TryParse(emergencyText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out emergency)
                           && CompactionSettings.IsValidEmergency(emergency, against);
         EmergencyError = emergencyOk ? null : CompactionStrings.SettingsEmergencyInvalid;
-        return triggerOk && targetOk && keepRecentOk && emergencyOk;
+        return triggerOk && keepRecentTurnsOk && emergencyOk;
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -264,11 +234,9 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(EnabledLabel));
         OnPropertyChanged(nameof(TriggerLabel));
         OnPropertyChanged(nameof(TriggerHint));
-        OnPropertyChanged(nameof(TargetLabel));
-        OnPropertyChanged(nameof(TargetHint));
         OnPropertyChanged(nameof(Hint));
-        OnPropertyChanged(nameof(KeepRecentLabel));
-        OnPropertyChanged(nameof(KeepRecentHint));
+        OnPropertyChanged(nameof(KeepRecentTurnsLabel));
+        OnPropertyChanged(nameof(KeepRecentTurnsHint));
         OnPropertyChanged(nameof(EmergencyLabel));
         OnPropertyChanged(nameof(EmergencyHint));
         Validate();
@@ -277,9 +245,14 @@ internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
             OnPropertyChanged(nameof(TriggerError));
         }
 
-        if (TargetError is not null)
+        if (KeepRecentTurnsError is not null)
         {
-            OnPropertyChanged(nameof(TargetError));
+            OnPropertyChanged(nameof(KeepRecentTurnsError));
+        }
+
+        if (EmergencyError is not null)
+        {
+            OnPropertyChanged(nameof(EmergencyError));
         }
     }
 }

@@ -174,11 +174,11 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 
 **收据的键就是工具参数的键。** `{"turn":3,"seq":"9-14","reads":[…],"writes":[…],"specs":[…]}`：`turn` 是 `read_context` 的 `from_turn`，`seq` 是 `read_history` 的 `from_seq`/`to_seq`，`reads`/`writes` 分别是这一轮读过与改过的文件（同一路径只进 `writes`，后续轮要复核的是改动），`specs` 是它碰过的 spec；列表为空时整键省略。列表用复数键名，因为它们本来就可能是多个。账本不再有"校验状态"这类东西（回复是自由格式，没有可校验的形状）；不再有 `[Turn N · …]` 表头，也没有 `# 任务` 标签。`RenderEntry` = 任务 + 回复 + 收据三段的拼接，是 `read_context` 与折叠测量用的唯一整条文本。原始执行照旧存 `messages`（工具结果仍按 32k 阈值转 artifact），只作为证据，不再进跨轮上下文。
 
-**轮内不受托管化影响。** 一个回合从第一个请求到最后一个请求，模型看到的都是本回合的真实交换（user、assistant+tool_calls、每个工具结果、插话与 steering），逐字完整：不裁剪、不收据、不摘要。托管上下文只替换**已经结束的轮**的呈现；轮末进入累加历史的只有本轮那两条消息。
+**轮内不受托管化影响。** 一个回合从第一个请求到最后一个请求，模型看到的都是本回合的真实交换（user、assistant+tool_calls、每个工具结果、插话与 steering），逐字完整：不裁剪、不收据、不摘要。托管上下文只替换**已经结束的轮**的呈现；轮末进入累加历史的只有本轮那三条消息。
 
 **每轮开头重建，且只丢"已结算轮"。** `AgentLoop` 在回合开始时（写开场消息之前）用 `ReloadManagedAsync` 从 `turn_ledger.ListAsync` 重建历史：折叠块（若有）+ 每个**已结算**轮的 entry，然后**逐字保留 seq 高于最后一条已结算轮的所有消息**——回合进行中折叠时那就是本回合的开场消息、工具调用、工具结果与 steering（折叠绝不能改写本轮已产出的东西），回合开始时那就是空闲期送达的回执/插话（否则模型永远读不到子 Agent 的报告）。`pending` 行一律不进视图：它是进行中的轮本身。同一进程与重开标签走同一条规则（`SessionHistory.LoadAsync` 的 ledger 分支），两处看到的历史逐字节一致。
 
-**折叠。** 过线（回合首请求用 τ、回合内用 ε）时把最旧的已结算轮折进折叠块，直到降到目标线以下，且**永远保留最新 `ManagedContext.MinRecentEntries`（3）轮**不折叠。折叠是纯代码：`MarkFoldedAsync(session, throughTurn)` 一次单调 UPDATE（折叠区间只增不减），随后一次重渲染；**零模型调用、零摘要**。折叠块固定三行：
+**折叠。** 过线（回合首请求用 τ、回合内用 ε）时**把除最新 `CompactionPolicy.KeepRecentTurns` 轮之外的已结算轮全部折进折叠块**（默认 `ManagedContext.MinRecentEntries` = 3，设置页可调 1–10；轮是整体折或不折，所以按轮数而不是 token 数）。**没有"折到百分之几"的目标线**：折叠不花模型调用，也不产生文本，一次折到底与折一半的代价相同，而折得越深，下一次折叠来得越晚——每次折叠都要重写整个请求前缀，所以折叠次数才是要省的东西。用户想保留更多原文就调大轮数（那是唯一表达"我要多少最近历史"的旋钮）。`keepRecentTokens`（保留原文尾巴）与 `targetPercent`（折叠深度）两条旋钮都随摘要级压缩一起删除。折叠是纯代码：`MarkFoldedAsync(session, throughTurn)` 一次单调 UPDATE（折叠区间只增不减），随后一次重渲染；**零模型调用、零摘要**。折叠块固定三行：
 
 ```
 [compacted: turns 1–30 · seq 1–18640 · 30 turns]
@@ -186,7 +186,7 @@ retrieve: read_context(from_turn=1, to_turn=30)
 originals: read_history(from_seq=1, to_seq=18640)
 ```
 
-它**不聚合任何内容**——不聚合"做完了什么"（那是变相摘要），也不再有 `open:` 行：折叠块曾经聚合的 `unresolved` 随状态节一起去掉了，剩下的只有范围与两个指针，尺寸随时间戳位数变化、不随被折轮的内容变化。**为什么是两条消息（而非一条）：缓存单元是按消息切的。** 网关类提供商比对提示缓存的最小单位是**一条消息**（相邻同 role 的消息还会被合并成一条），所以一条 entry = 一条消息时，整段历史被拼成一个不可分的大块：新一轮多一条 entry，前 21.5k 的 system+tools 一个都不命中。实测（2026-11-27，opencode-go/hy4-flash-free）：整条 entry 都是 `user` 时跨轮首请求 **0%**，拆成 `user` 任务 + `assistant` 报告后 **84%**；同一形状在 DeepSeek（真 token 前缀缓存）上两种都是 98%，所以这是纯投影收益、不改其它 provider 的行为。推理与脚本：`artifacts/cache-exp/REPORT.md`（本地实验目录，不入仓）。
+它**不聚合任何内容**——不聚合"做完了什么"（那是变相摘要），也不再有 `open:` 行：折叠块曾经聚合的 `unresolved` 随状态节一起去掉了，剩下的只有范围与两个指针，尺寸随时间戳位数变化、不随被折轮的内容变化。**为什么按消息拆开（而非一条）：缓存单元是按消息切的。** 网关类提供商比对提示缓存的最小单位是**一条消息**（相邻同 role 的消息还会被合并成一条），所以一条 entry = 一条消息时，整段历史被拼成一个不可分的大块：新一轮多一条 entry，前 21.5k 的 system+tools 一个都不命中。实测（2026-11-27，opencode-go/hy4-flash-free）：整条 entry 都是 `user` 时跨轮首请求 **0%**，拆成 `user` 任务 + `assistant` 报告后 **84%**（当时收据还是 assistant 消息里的一行，后来改走 `tool`）；同一形状在 DeepSeek（真 token 前缀缓存）上两种都是 98%，所以这是纯投影收益、不改其它 provider 的行为。推理与脚本：`artifacts/cache-exp/REPORT.md`（本地实验目录，不入仓）。
 
 **模型侧的图例（每请求一次，托管模式下）**：`AgentLoop.BuildRequest` 把 `ManagedContext.Legend` 作为请求的第一条消息，一句话说明"一轮 = 一条 user 任务 + 一条 assistant 回复 + 一条 harness 的 tool 结果（收据）"、**收据是数据，不是要写或重复的东西**、`turn`/`seq` 分别用 `read_context(from_turn, to_turn)` / `read_history(from_seq, to_seq)` 回读、`reads` 是读过的、`writes` 是改过的文件——字段名必须能从这句话或工具参数名直接读懂，不靠猜。**它属于请求、不属于视图**：放在视图里时，会话第一轮还没有 entry 可渲染，于是第一轮不带图例、第二轮突然带——写方会把相邻同 role 的消息合并成一条，这一跳就把历史第一块从"提问"变成"图例+提问"，那一轮每个请求都因此整段重读（实测 0%）。放请求层后这一块从第一个请求起就恒定；无 ledger 的宿主（脚本、测试）完全不发，字节与之前一致。图例是固定字节，改它等于一次性清掉所有人的历史前缀（可接受，不频繁）。
 
@@ -400,7 +400,7 @@ originals: read_history(from_seq=1, to_seq=18640)
 - 内置 Agent 的工具白名单未含 `todo`(加入会改动其可缓存工具集),目前只有根 Agent 可用。
 - 评审方式已接线（`git` 分区）：`reviewMode` = `subagent`（默认）/ `manual`；`reviewAfterStepCommit`（默认关）在步骤提交成功且模式为 subagent 时，把一条带 `step_id` 的 `request_review` 请求交给该会话（空闲起一回合、忙则进草稿，绝不背着用户起第二回合）。评审结论被步骤完成门禁读取并持久化到 `step_review_verdicts`，但计划面板不显示，`pr_create` 也不读取它。
 - 步骤完成门禁的两个缺口:(已由内容指纹与步骤基线解决,保留作历史)评审之后的工作树改动无法察觉;Agent 自行 `git commit` 后工作树干净且步骤无提交,会被判成「没改代码」而放行。两者都需要新的证据源(步骤基线 HEAD / 树指纹),未实现。
-- Artifact 转存阈值、keepRecent 默认值与摘要文件清单的两个字符预算(4000/8000)都未经使用验证(前两项现分别由 `preferences.chatArtifactSpillChars`/`ChatArtifactPreviewChars` 与 `compaction.keepRecentTokens` 覆盖);清单预算没有设置项,按长会话实测再调。
+- Artifact 转存阈值、keepRecent 默认值与摘要文件清单的两个字符预算(4000/8000)都未经使用验证(前两项现分别由 `preferences.chatArtifactSpillChars`/`ChatArtifactPreviewChars` 与 `compaction.keepRecentTurns` 覆盖);清单预算没有设置项,按长会话实测再调。
 - 文件追踪只认 `read`/`edit`/`write`/`delete`/`copy`/`move` 的工具参数；`grep`/`ls`/`find` 与插件工具不产生条目。
 - 分批预算按 4 字符/token 折算,对中文等高密度文本偏乐观,0.6 的窗口份额是余量;旧 Turn Context 的合并依赖摘要模型遵从指令,代码只保证正式标题不叠加。
 - `search_history`/`read_history` 只看本会话自己的消息。`read_history` 的单条消息超过 200,000 字符时被截断,而提示的 "narrow the range" 切不开单条消息——越出的尾部只能靠 Spill 后的 Artifact 分片读,(未修)。

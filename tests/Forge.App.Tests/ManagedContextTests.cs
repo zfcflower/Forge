@@ -404,7 +404,6 @@ public sealed class ManagedContextTests : IDisposable
                 {
                     ContextWindow = _ => 900,
                     TriggerRatio = 0.5,
-                    TargetRatio = 0.3,
                     EmergencyRatio = 0.9,
                 },
             },
@@ -420,6 +419,60 @@ public sealed class ManagedContextTests : IDisposable
         // The newest entries stay verbatim, and the newest of them is the one right before this turn.
         Assert.Contains(managed, text => text.Contains("\"turn\":6,", StringComparison.Ordinal));
         Assert.DoesNotContain(managed, text => text.Contains("\"turn\":1,", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_kept_turn_count_is_what_decides_where_a_fold_stops()
+    {
+        // The same six settled turns and the same trigger line, twice: only the configured count differs, and it is the count
+        // - not a token budget - that decides how many turns survive verbatim.
+        async Task<string[]> FoldedAsync(int keepTurns)
+        {
+            var ledger = new SeededLedger();
+            for (var turn = 1; turn <= 6; turn++)
+            {
+                ledger.Seed("s1", turn, $"task {turn}", $"conclusion {turn}", turn * 10, turn * 10 + 5);
+            }
+
+            var provider = new ScriptedProvider(_ => Says(Answered));
+            var host = new AgentHost(new AgentHostOptions
+            {
+                Providers = _ => provider,
+                Tools = [],
+                Layers = new PromptLayers("sys", null, null),
+                TurnLedger = ledger,
+                Options = new AgentOptions
+                {
+                    Compaction = new CompactionPolicy
+                    {
+                        ContextWindow = _ => 900,
+                        TriggerRatio = 0.5,
+                            EmergencyRatio = 0.9,
+                        KeepRecentTurns = keepTurns,
+                    },
+                },
+            });
+            // The class's own temp workspace: a test must never delete a directory it did not create - an earlier version
+            // of this one swept the shared temp root and took other tests' repositories with it.
+            var root = host.CreateRoot("s1", workspace);
+            await RunTurnAsync(host, root, "seventh turn");
+
+            return provider.Requests[0].Messages
+                .Where(message => message.Content.OfType<ToolResultBlock>().Any(block => block.CallId.StartsWith("ev-", StringComparison.Ordinal)))
+                .Select(message => Assert.IsType<ToolResultBlock>(Assert.Single(message.Content)).Content)
+                .ToArray();
+        }
+
+        // Five kept: only turn 1 is folded, so turns 2..6 still carry their receipts.
+        var wide = await FoldedAsync(keepTurns: 5);
+        Assert.Equal(5, wide.Length);
+        Assert.DoesNotContain(wide, receipt => receipt.Contains("\"turn\":1,", StringComparison.Ordinal));
+        Assert.Contains(wide, receipt => receipt.Contains("\"turn\":2,", StringComparison.Ordinal));
+        Assert.Contains(wide, receipt => receipt.Contains("\"turn\":6,", StringComparison.Ordinal));
+
+        // One kept: everything but the newest turn is folded.
+        var narrow = await FoldedAsync(keepTurns: 1);
+        Assert.Contains("\"turn\":6,", Assert.Single(narrow), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -506,7 +559,6 @@ public sealed class ManagedContextTests : IDisposable
                 {
                     ContextWindow = _ => 900,
                     TriggerRatio = 0.5,
-                    TargetRatio = 0.3,
                     EmergencyRatio = 0.6,
                 },
             },

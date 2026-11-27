@@ -1331,7 +1331,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope, IAgentSes
     // --- compaction (feature B) ---
     /// <summary>
     /// Manual compaction of the root context (<c>/compact [focus]</c>, the context gauge): ignores the threshold and the
-    /// automatic-compaction switch, keeps the newest keepRecent tokens verbatim, passes <paramref name="instructions"/> to
+    /// automatic-compaction switch, keeps the newest few turns verbatim, passes <paramref name="instructions"/> to
     /// deterministic folding and re-enables automatic compaction. Returns null when nothing could be folded.
     /// Throws <see cref="InvalidOperationException"/> while a turn runs (the caller offers it only when the session is
     /// idle).

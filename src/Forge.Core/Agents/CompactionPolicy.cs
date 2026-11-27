@@ -16,28 +16,10 @@ public sealed record CompactionPolicy
     /// <summary>Largest share of the window reserved for output.</summary>
     public const double MaxReserveShare = 0.2;
 
-    /// <summary>Share of the usable budget this instance's own content must grow by before a fruitless compaction is retried.</summary>
-    public const double RegrowthShare = 0.1;
-
-    /// <summary>Consecutive fruitless automatic attempts after which automatic compaction stops for the instance.</summary>
-    public const int MaxFruitlessAttempts = 2;
-
-    /// <summary>Most raw history a compaction keeps verbatim at least (also the figure used when the window is unknown).</summary>
-    public const int MaxKeepRecentTokens = 20_000;
-
-    /// <summary>Share of the usable budget kept verbatim at least, when that is below <see cref="MaxKeepRecentTokens"/>.</summary>
-    public const double KeepRecentShare = 0.2;
-
-    /// <summary>Smallest raw tail a configured keep-recent figure may ask for.</summary>
-    public const int MinKeepRecentTokens = 1_000;
-
     public bool Enabled { get; init; } = true;
 
-    /// <summary>Share of the usable budget at which compaction starts (0 &lt; target &lt; trigger ≤ 1).</summary>
+    /// <summary>Share of the usable budget at which a fold starts (0 &lt; trigger ≤ 1).</summary>
     public double TriggerRatio { get; init; } = 0.85;
-
-    /// <summary>Share of the usable budget a compaction aims to leave in context.</summary>
-    public double TargetRatio { get; init; } = 0.5;
 
     /// <summary>Share of the usable budget at which a turn that is already running compacts (0 &lt; trigger &lt; urgent ≤ 1).</summary>
     public double EmergencyRatio { get; init; } = 0.95;
@@ -57,20 +39,20 @@ public sealed record CompactionPolicy
     public Func<ModelSettings, int?>? WireMaxOutputTokens { get; init; }
 
     /// <summary>
-    /// How much of the newest conversation stays verbatim across a compaction, in tokens. Null (the default) derives it per
-    /// model as min(20 000, 0.2·U); a value is clamped to [1 000, U/2] and still cut to half the target by the caller, so a
-    /// large-window model can keep far more raw text than the derived figure allows without breaking the target.
+    /// How many of the newest finished turns a fold always leaves alone. Turns, not tokens: a turn is folded whole or not at
+    /// all (its entry is what the view carries), so the figure that can be honoured is a count. The default is what the view
+    /// used to hardcode.
     /// </summary>
-    public int? KeepRecentTokens { get; init; }
+    public int KeepRecentTurns { get; init; } = ManagedContext.MinRecentEntries;
 
     /// <summary>Throws when the ratios are out of range.</summary>
     public void Validate()
     {
-        if (!(TargetRatio > 0 && TargetRatio < TriggerRatio && TriggerRatio <= 1))
+        if (!(TriggerRatio > 0 && TriggerRatio <= 1))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(TriggerRatio),
-                $"Compaction ratios must satisfy 0 < target ({TargetRatio}) < trigger ({TriggerRatio}) <= 1.");
+                $"The trigger line must satisfy 0 < trigger ({TriggerRatio}) <= 1.");
         }
 
         if (!(EmergencyRatio > TriggerRatio && EmergencyRatio <= 1))
@@ -78,6 +60,13 @@ public sealed record CompactionPolicy
             throw new ArgumentOutOfRangeException(
                 nameof(EmergencyRatio),
                 $"The emergency line must sit above the trigger ({TriggerRatio}) and at most at 1, not {EmergencyRatio}.");
+        }
+
+        if (KeepRecentTurns < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(KeepRecentTurns),
+                $"A fold must leave at least one finished turn alone, not {KeepRecentTurns}.");
         }
     }
 
@@ -99,7 +88,7 @@ public sealed record CompactionPolicy
             return null;
         }
 
-        return Budget(window, maxOutput, KeepRecentTokens, wire);
+        return Budget(window, maxOutput, wire);
     }
 
     /// <summary>
@@ -108,10 +97,9 @@ public sealed record CompactionPolicy
     /// Null when <paramref name="window"/> is unknown or not positive, and when the reserve leaves no input room at all (a
     /// request whose own output cap does not fit its window is not something a compaction can fix).
     /// </summary>
-    /// <param name="keepRecentTokens">A configured raw tail, clamped to [1 000, U/2]; null derives it from U.</param>
     /// <param name="wireMaxOutput">The cap the request carries; taken as is, because capping it is what lets a trigger line
     /// sit above the real prompt limit.</param>
-    public static CompactionBudget? Budget(int? window, int? maxOutput, int? keepRecentTokens = null, int? wireMaxOutput = null)
+    public static CompactionBudget? Budget(int? window, int? maxOutput, int? wireMaxOutput = null)
     {
         if (window is not { } w || w <= 1)
         {
@@ -128,55 +116,26 @@ public sealed record CompactionPolicy
             return null;
         }
 
-        var usable = w - reserve;
-        var derived = Math.Max(1, Math.Min(MaxKeepRecentTokens, (int)(usable * KeepRecentShare)));
-        var keepRecent = keepRecentTokens is > 0
-            ? Math.Clamp(keepRecentTokens.Value, Math.Min(MinKeepRecentTokens, usable), Math.Max(1, usable / 2))
-            : derived;
-        return new CompactionBudget(w, reserve, usable, keepRecent);
+        return new CompactionBudget(w, reserve, w - reserve);
     }
 }
 
-/// <summary>A model's window <see cref="Window"/>, its output reserve, the usable input budget U = W − R and the raw tail kept.</summary>
-public readonly record struct CompactionBudget(int Window, int Reserve, int Usable, int KeepRecent)
+/// <summary>A model's window <see cref="Window"/>, its output reserve and the usable input budget U = W − R.</summary>
+public readonly record struct CompactionBudget(int Window, int Reserve, int Usable)
 {
     public int TriggerTokens(double ratio) => (int)(Usable * ratio);
 
     /// <summary>The line a running turn compacts at: well above the trigger, so a turn usually finishes before it.</summary>
     public int EmergencyTokens(double ratio) => (int)(Usable * ratio);
-
-    public int TargetTokens(double ratio) => Math.Max(1, (int)(Usable * ratio));
-
-    public int RegrowthTokens => Math.Max(1, (int)(Usable * CompactionPolicy.RegrowthShare));
-
-    /// <summary>The newest tokens kept verbatim: the configured figure or min(20 000, ⌊0.2·U⌋), at least 1.</summary>
-    public int KeepRecentTokens => Math.Max(1, KeepRecent);
-}
-
-/// <summary>Why automatic folding stopped on an instance: nothing is left to fold and the context still exceeds the line.</summary>
-public enum CompactionStallReason
-{
-    /// <summary>Kept for the stored/UI vocabulary; folding reports only <see cref="Irreducible"/>.</summary>
-    Ineffective = 0,
-
-    /// <summary>
-    /// What no summary can drop — the inherited prefix, the stable prefix, the tool definitions and the newest messages the
-    /// fold must keep the newest turns verbatim — already exceeds the line.
-    /// </summary>
-    Irreducible = 1,
 }
 
 /// <summary>
-/// Automatic summarization gave up on an instance: either <see cref="CompactionStallReason.Ineffective"/> (two attempts left the
-/// context above the trigger line) or <see cref="CompactionStallReason.Irreducible"/> (a floor no summary can get below already
-/// exceeds it, detected before any fold is attempted). It stays off until a manual compaction, another model, or a context
-/// reduction that brings the instance back under the line.
+/// Automatic folding ran and could not bring the context under the line: nothing foldable is left. What remains — the stable
+/// prefix, the tool definitions, the fold block and the newest turns the fold must keep verbatim — already exceeds it, so no
+/// later request can change anything until something outside the history moves (a manual compaction, another model, a
+/// smaller tool set).
 /// </summary>
-public sealed record AgentCompactionStalled(string AgentId, int ContextTokens, int TriggerTokens) : AgentEvent(AgentId)
-{
-    /// <summary>Which of the two dead ends was hit; the shell says a different thing for each.</summary>
-    public CompactionStallReason Reason { get; init; }
-}
+public sealed record AgentCompactionStalled(string AgentId, int ContextTokens, int TriggerTokens) : AgentEvent(AgentId);
 
 /// <summary>
 /// The context size C of an instance as automatic compaction sees it (the last real prompt size plus an estimate of what was

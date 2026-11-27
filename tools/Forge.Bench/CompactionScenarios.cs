@@ -10,7 +10,7 @@ namespace Forge.Bench;
 /// (R = 200 000 with outputs unknown, so U = 800 000, trigger line 680 000, target 400 000).
 /// <para><c>compaction.budget</c> and <c>compaction.wire</c> are the per-request arithmetic, which must stay allocation-free;
 /// <c>compaction.estimate.*</c> is the token estimate behind the context reading - the whole history on the cold path (after
-/// a fold replaced it) and the appended tail on the hot one; <c>compaction.plan-cut</c> is the cut search over a large raw
+/// a fold replaced it) and the appended tail on the hot one
 /// tail.</para>
 /// <para>What these rows do not cover: folding itself (a single ledger UPDATE plus one render, measured by
 /// <c>turnledger.write</c> and <c>agentloop.dynamic</c>) and the summarizer, which no longer exists - compaction never calls a
@@ -31,7 +31,6 @@ internal static class CompactionScenarios
         yield return Wire();
         yield return Estimate("compaction.estimate.history", HistoryMessages, warmup: 20, iterations: 200, "the whole history: the cold path after a compaction, and the floor's inherited half");
         yield return Estimate("compaction.estimate.appended", 20, warmup: 500, iterations: 20_000, "the appended tail: one request's steady-state context reading");
-        yield return PlanCut();
     }
 
     /// <summary>The reserve arithmetic: three inputs, no allocation, called before every model request.</summary>
@@ -44,7 +43,7 @@ internal static class CompactionScenarios
             CompactionPolicy.Budget(1_000_000, null)!.Value,
             CompactionPolicy.Budget(1_000_000, 64_000)!.Value,
             CompactionPolicy.Budget(1_000_000, 64_000, wireMaxOutput: 53_248)!.Value,
-            CompactionPolicy.Budget(1_000_000, 64_000, keepRecentTokens: 100_000)!.Value,
+            CompactionPolicy.Budget(1_000_000, 100_000, wireMaxOutput: 100_000)!.Value,
         };
         var results = new Task<OpResult>[answers.Length];
         for (var index = 0; index < answers.Length; index++)
@@ -70,7 +69,7 @@ internal static class CompactionScenarios
                         0 => CompactionPolicy.Budget(1_000_000, null),
                         1 => CompactionPolicy.Budget(1_000_000, 64_000),
                         2 => CompactionPolicy.Budget(1_000_000, 64_000, wireMaxOutput: 53_248),
-                        _ => CompactionPolicy.Budget(1_000_000, 64_000, keepRecentTokens: 100_000),
+                        _ => CompactionPolicy.Budget(1_000_000, 100_000, wireMaxOutput: 100_000),
                     };
                     return results[shape];
                 },
@@ -126,30 +125,6 @@ internal static class CompactionScenarios
             }));
     }
 
-    /// <summary>The cut search: a suffix sum plus a scan for the longest legal suffix, over the raw tail of a compacted session.</summary>
-    private static BenchScenario PlanCut()
-    {
-        var raw = Raw(20_000);
-        return new BenchScenario(
-            "compaction.plan-cut",
-            "compaction",
-            Heavy: false,
-            token => Task.FromResult(new BenchCase
-            {
-                Warmup = 20,
-                Iterations = 200,
-                Note = "20 000 raw messages, goal = 100 000 tokens: the whole tail on every compaction",
-                Run = token =>
-                {
-                    var cut = SummaryLayers.PlanCut(raw, 100_000, 80_000, static message => message.Content.Count * 50);
-                    return Task.FromResult(new OpResult(Items: raw.Count, Signature: cut?.KeepFrom ?? -1));
-                },
-                Check = comparison => comparison.Implementation.Signature > 0
-                    ? new Verdict("PlanCut finds a cut", $"keepFrom={comparison.Implementation.Signature}", true)
-                    : new Verdict("PlanCut finds a cut", "no cut (the tail fits)", false),
-            }));
-    }
-
     /// <summary><paramref name="count"/> user messages of <see cref="MessageChars"/> characters each.</summary>
     private static List<ChatMessage> Messages(int count)
     {
@@ -158,30 +133,6 @@ internal static class CompactionScenarios
         for (var index = 0; index < count; index++)
         {
             messages.Add(ChatMessage.User(text));
-        }
-
-        return messages;
-    }
-
-    /// <summary><paramref name="count"/> stored messages shaped like a real turn: user, tool call, tool result.</summary>
-    private static List<StoredMessage> Raw(int count)
-    {
-        var messages = new List<StoredMessage>(count);
-        for (var index = 0; index < count; index++)
-        {
-            var role = (index % 3) switch
-            {
-                0 => MessageRole.User,
-                1 => MessageRole.Assistant,
-                _ => MessageRole.Tool,
-            };
-            var message = role switch
-            {
-                MessageRole.User => ChatMessage.User("go"),
-                MessageRole.Assistant => new ChatMessage(MessageRole.Assistant, [new ToolCallBlock($"c{index}", "read", "{}")]),
-                _ => new ChatMessage(MessageRole.Tool, [new ToolResultBlock($"c{index - 1}", new string('x', 400))]),
-            };
-            messages.Add(new StoredMessage(index + 1, message, null, DateTimeOffset.UnixEpoch));
         }
 
         return messages;

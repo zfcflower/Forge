@@ -907,7 +907,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             return;
         }
 
-        var after = await FoldAsync(instance, current, budget.TargetTokens(policy.TargetRatio), ct).ConfigureAwait(false);
+        var after = await FoldAsync(instance, current, policy.KeepRecentTurns, ct).ConfigureAwait(false);
         if (after < current)
         {
             sink.Emit(new AgentCompacted(instance.Id, current, after));
@@ -920,19 +920,16 @@ public sealed class AgentLoop(AgentLoopServices services)
 
         // Nothing left to fold (the newest turns plus the stable prefix already exceed the line): the instance is as small
         // as the managed context can be, and no further request can change that until something outside the history moves.
-        sink.Emit(new AgentCompactionStalled(instance.Id, after, budget.TriggerTokens(policy.TriggerRatio))
-        {
-            Reason = CompactionStallReason.Irreducible,
-        });
+        sink.Emit(new AgentCompactionStalled(instance.Id, after, budget.TriggerTokens(policy.TriggerRatio)));
     }
 
     /// <summary>
-    /// Folds the oldest settled turns until the context is at or below <paramref name="target"/>, keeping at least
-    /// <see cref="ManagedContext.MinRecentEntries"/> newest turns verbatim, and answers the resulting size. The fold range
-    /// only grows (the store's UPDATE is monotonic), so a later turn never unfolds what an earlier one folded. One entry
-    /// costs one token estimate per call, so how many turns fold is decided in a single pass, not by re-rendering.
+    /// Folds every settled turn but the newest <paramref name="keepRecentTurns"/>, and answers the resulting size - a fold costs
+    /// nothing but the entry text it stops carrying, so there is no reason to stop early: every turn kept back is one more turn
+    /// that has to be read back with <c>read_context</c>, and every fold event rewrites the request prefix. The fold range only
+    /// grows (the store's UPDATE is monotonic), so a later turn never unfolds what an earlier one folded.
     /// </summary>
-    private async ValueTask<int> FoldAsync(AgentInstance instance, int current, int target, CancellationToken ct)
+    private async ValueTask<int> FoldAsync(AgentInstance instance, int current, int keepRecentTurns, CancellationToken ct)
     {
         if (services.TurnLedger is not { } store)
         {
@@ -940,7 +937,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         var rows = await store.ListAsync(instance.SessionId, ct).ConfigureAwait(false);
-        if (rows.Count <= ManagedContext.MinRecentEntries)
+        if (rows.Count <= keepRecentTurns)
         {
             return current;
         }
@@ -955,34 +952,13 @@ public sealed class AgentLoop(AgentLoopServices services)
             }
         }
 
-        var foldable = Math.Max(0, candidates.Count - ManagedContext.MinRecentEntries);
+        var foldable = Math.Max(0, candidates.Count - keepRecentTurns);
         if (foldable == 0)
         {
             return current;
         }
 
-        // What each candidate costs, so one pass decides how many are absorbed instead of re-rendering the view per turn.
-        var counter = services.TokenCounter;
-        var sizes = new int[candidates.Count];
-        for (var index = 0; index < candidates.Count; index++)
-        {
-            sizes[index] = counter.Count(ManagedContext.RenderEntry(candidates[index]));
-        }
-
-        var remaining = current;
-        var folded = 0;
-        while (folded < foldable && remaining > target)
-        {
-            remaining -= sizes[folded];
-            folded++;
-        }
-
-        if (folded == 0)
-        {
-            return current;
-        }
-
-        await store.MarkFoldedAsync(instance.SessionId, candidates[folded - 1].TurnSequence, CancellationToken.None)
+        await store.MarkFoldedAsync(instance.SessionId, candidates[foldable - 1].TurnSequence, CancellationToken.None)
             .ConfigureAwait(false);
         // The rebuild keeps everything past the last settled turn verbatim (see ReloadManagedAsync), which is exactly the turn
         // in flight: a fold can shrink the finished turns but can never rewrite what this turn has produced.
@@ -1053,7 +1029,7 @@ public sealed class AgentLoop(AgentLoopServices services)
     private async Task<bool> FoldAfterOverflowAsync(AgentInstance instance, ToolSelection tools, IAgentEventSink sink, CancellationToken ct)
     {
         var before = ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter));
-        var after = await FoldAsync(instance, before, 1, ct).ConfigureAwait(false);
+        var after = await FoldAsync(instance, before, CurrentCompaction.KeepRecentTurns, ct).ConfigureAwait(false);
         if (after >= before)
         {
             return false;
@@ -1079,7 +1055,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         var before = ContextTokens(instance, instance.Compaction.ToolTokens);
-        var after = await FoldAsync(instance, before, target: 1, ct).ConfigureAwait(false);
+        var after = await FoldAsync(instance, before, CurrentCompaction.KeepRecentTurns, ct).ConfigureAwait(false);
         if (after >= before)
         {
             return null;
@@ -1175,7 +1151,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         return services.TokenCounter.Count(slice);
     }
 
-    /// <summary>Usage recorded for another model no longer applies, and neither does that model's hysteresis.</summary>
+    /// <summary>Usage recorded for another model no longer applies.</summary>
     private static CompactionState SyncModel(AgentInstance instance)
     {
         var state = instance.Compaction;
@@ -1184,7 +1160,6 @@ public sealed class AgentLoop(AgentLoopServices services)
         {
             state.ModelKey = key;
             state.ForgetUsage();
-            state.ResetHysteresis();
         }
 
         return state;
