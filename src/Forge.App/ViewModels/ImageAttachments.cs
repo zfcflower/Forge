@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using Forge.Abstractions;
 using Forge.App.Localization;
+using Forge.App.Services;
 using Forge.App.ViewModels.Preview;
 
 namespace Forge.App.ViewModels;
@@ -302,6 +303,19 @@ internal sealed class PendingImageViewModel : ImageThumbnailViewModel
     public RelayCommand RemoveCommand { get; }
 }
 
-/// <summary>One image of a sent user message in the transcript.</summary>
-internal sealed class TranscriptImageViewModel(ImageBlock block)
-    : ImageThumbnailViewModel(block, ContentPlaceholders.DecodedLength(block.Data), thumbnail: null);
+/// <summary>One image of a sent user message in the transcript: its thumbnail, and the click that opens it.</summary>
+internal sealed class TranscriptImageViewModel : ImageThumbnailViewModel, IAttachmentFile
+{
+    public TranscriptImageViewModel(ImageBlock block)
+        : base(block, ContentPlaceholders.DecodedLength(block.Data), thumbnail: null)
+    {
+        OpenCommand = new AsyncRelayCommand(_ => AttachmentOpener.OpenAsync(this));
+    }
+
+    /// <summary>Opens the picture in FORGE's own preview.</summary>
+    public AsyncRelayCommand OpenCommand { get; }
+
+    AttachmentKind IAttachmentFile.Kind => AttachmentKind.Image;
+
+    string? IAttachmentFile.Materialize() => AttachmentFiles.Materialize(Block);
+}

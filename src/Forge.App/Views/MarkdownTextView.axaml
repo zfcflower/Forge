@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Forge.App.Views.MarkdownTextView">
+  <!--
+    A fixed stretch of Markdown rendered with the transcript's own renderer: the blocks live in the code-behind (one render
+    per value), and the presentation is the shared dictionary the reply cards, the diff preview and the plan panel use.
+  -->
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/MarkdownStyles.axaml" />
+  </UserControl.Styles>
+  <StackPanel x:Name="Body" Spacing="8" />
+</UserControl>

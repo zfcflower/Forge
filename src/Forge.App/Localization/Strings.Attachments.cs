@@ -37,6 +37,10 @@ internal static class AttachmentStrings
     public const string CountKey = "session.attachments.count";
     public const string CaptionKey = "session.attachments.caption";
 
+    /// <summary>What a click on a sent message's attachment does: FORGE's preview, or the system's application.</summary>
+    public const string OpenKey = "session.attachments.open";
+    public const string OpenImageKey = "session.attachments.openImage";
+
     [ModuleInitializer]
     internal static void Register()
     {
@@ -47,6 +51,8 @@ internal static class AttachmentStrings
             "Attach images, PDFs, audio, video or text files (or paste or drop them here)");
         Loc.Register(RemoveKey, "移除附件", "Remove attachment");
         Loc.Register(PickerTitleKey, "选择附件", "Choose files to attach");
+        Loc.Register(OpenKey, "打开附件", "Open attachment");
+        Loc.Register(OpenImageKey, "预览图片", "Preview image");
         Loc.Register(AllTypesKey, "所有支持的文件", "All supported files");
         Loc.Register(PdfTypeKey, "PDF 文档", "PDF documents");
         Loc.Register(AudioTypeKey, "音频", "Audio");
@@ -84,6 +90,11 @@ internal static class AttachmentStrings
     public static LocText BlockedTitle => new(BlockedTitleKey);
 
     public static string PickerTitle => Loc.Instance[PickerTitleKey];
+
+    /// <summary>What a click on a sent message's attachment does, as a screen reader announces it.</summary>
+    public static string Open => Loc.Instance[OpenKey];
+
+    public static string OpenImage => Loc.Instance[OpenImageKey];
 
     public static string AllTypes => Loc.Instance[AllTypesKey];
 

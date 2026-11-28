@@ -2,6 +2,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.VisualTree;
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.App.Views;
 using TextBlock = Avalonia.Controls.TextBlock;
@@ -10,22 +11,26 @@ using Xunit;
 namespace Forge.App.Tests;
 
 /// <summary>
-/// The two ledger observation windows, headless: the reply card's turn entry button exists only for the rounds that
-/// have a row behind it (a card without one shows no button, not a disabled one), its flyout shows the row's own
-/// fields, and the session dialog lists the rows in turn order.
+/// The session's managed context as a timeline, headless: one node per turn with 「第 N 轮 — 用户输入」 at it and that turn's
+/// card under it, read a page at a time — the newest page on open, older ones as the reader reaches the top, each landing in
+/// front of what is already there. That window is the ledger's only surface.
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class TurnLedgerWindowTests
 {
     private static readonly DateTimeOffset At = new(2026, 11, 26, 8, 0, 0, TimeSpan.FromHours(8));
 
-    private static TurnLedgerEntry Entry(long turn) => new(
+    private static TurnLedgerEntry Entry(
+        long turn,
+        string task = "the task text",
+        string conclusion = "the parsed conclusion",
+        TurnLedgerStatus status = TurnLedgerStatus.Settled) => new(
         "s1",
         turn,
-        TurnLedgerStatus.Settled,
-        "the task text",
+        status,
+        task,
         "the answer as shown",
-        "the parsed conclusion",
+        conclusion,
         ["src/Forge.Core/Agents/ManagedContext.cs"],
         ["src/Forge.Core/Agents/AgentLoop.cs"],
         ["forge-core"],
@@ -40,110 +45,115 @@ public sealed class TurnLedgerWindowTests
         At,
         At.AddMinutes(1));
 
-    private static TurnTextViewModel ReplyOf(TurnCardViewModel card)
+    [Fact]
+    public void A_row_is_the_round_the_question_and_the_card_the_ledger_recorded()
     {
-        card.AppendText("the reply");
-        return Assert.IsType<TurnTextViewModel>(Assert.Single(card.Blocks.OfType<TurnTextViewModel>()));
+        var row = new TurnLedgerRowViewModel(Entry(2, "fix the parser\nThe second line is not the header's business."));
+
+        Assert.Equal(SessionStrings.UserTurnRound(2) + " — fix the parser", row.Header);
+        // The whole question stays reachable even though the header shows one line.
+        Assert.Contains("The second line", row.TaskText, StringComparison.Ordinal);
+
+        // The card: the conclusion under its label, then the evidence as bullets — the files it read and changed, the specs
+        // it touched and the message range the model can read back.
+        Assert.Contains("**" + SessionStrings.SessionLedgerConclusion + "**", row.Markdown, StringComparison.Ordinal);
+        Assert.Contains("the parsed conclusion", row.Markdown, StringComparison.Ordinal);
+        Assert.Contains("**" + SessionStrings.SessionLedgerEvidence + "**", row.Markdown, StringComparison.Ordinal);
+        Assert.Contains(
+            "- " + SessionStrings.SessionLedgerRead + ": `src/Forge.Core/Agents/ManagedContext.cs`",
+            row.Markdown,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "- " + SessionStrings.SessionLedgerWrote + ": `src/Forge.Core/Agents/AgentLoop.cs`",
+            row.Markdown,
+            StringComparison.Ordinal);
+        Assert.Contains("- " + SessionStrings.SessionLedgerSpecs + ": `forge-core`", row.Markdown, StringComparison.Ordinal);
+        Assert.Contains("seq 4-12", row.Markdown, StringComparison.Ordinal);
     }
 
-    private static (Window Window, TurnTextView View) ShowReply(TurnTextViewModel text)
+    [Fact]
+    public void A_turn_with_no_conclusion_yet_says_so_instead_of_showing_an_empty_card()
     {
-        var view = new TurnTextView { DataContext = text };
-        var window = new Window { Content = view, Width = 640, Height = 480 };
-        window.Show();
-        SharedUi.Settle(window);
-        return (window, view);
+        var row = new TurnLedgerRowViewModel(Entry(1, conclusion: "**Conclusion**:"));
+
+        // The echoed label is stripped, so what is left is nothing to show - and the card says that rather than leaving a
+        // blank paragraph under the label.
+        Assert.Contains(SessionStrings.SessionLedgerNoConclusion, row.Markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("**Conclusion**", row.Markdown, StringComparison.Ordinal);
     }
 
-    private static IReadOnlyList<Button> ButtonsOf(TurnTextView view) =>
-        view.GetVisualDescendants().OfType<Button>().ToList();
-
     [Fact]
-    public Task A_round_without_a_row_shows_no_turn_entry_button() => SharedUi.RunAsync(() =>
-    {
-        var transcript = new TranscriptViewModel(collapseOlderTurns: false);
-        transcript.AddUserMessage("task", At);
-        var card = transcript.BeginTurn(At);
-        var text = ReplyOf(card);
-
-        var (window, view) = ShowReply(text);
-
-        Assert.Contains(ButtonsOf(view), button => AutomationProperties.GetAutomationId(button) == "message-copy");
-        // No row, no button: the turn entry is invisible, not a disabled control the user can point at.
-        Assert.DoesNotContain(
-            ButtonsOf(view),
-            button => AutomationProperties.GetAutomationId(button) == "turn-ledger" && button.IsVisible);
-        window.Close();
-        return Task.CompletedTask;
-    });
-
-    [Fact]
-    public Task A_round_with_a_row_shows_the_button_and_its_flyout_reads_the_row() => SharedUi.RunAsync(() =>
-    {
-        var transcript = new TranscriptViewModel(collapseOlderTurns: false);
-        transcript.AddUserMessage("task", At);
-        var card = transcript.BeginTurn(At);
-        var text = ReplyOf(card);
-        card.SetLedger(Entry(1));
-
-        var (window, view) = ShowReply(text);
-
-        var button = Assert.Single(ButtonsOf(view), button => AutomationProperties.GetAutomationId(button) == "turn-ledger");
-        Assert.True(button.IsVisible);
-        var flyout = Assert.IsType<Flyout>(button.Flyout);
-        flyout.ShowAt(button);
-        SharedUi.Settle(window);
-
-        // The flyout's content lives in the window's overlay layer, not under the view that opened it.
-        var lines = window.GetVisualDescendants()
-            .OfType<StackPanel>()
-            .Single(panel => AutomationProperties.GetAutomationId(panel) == "turn-ledger-panel")
-            .GetVisualDescendants()
-            .OfType<TextBlock>()
-            .Select(block => block.Text ?? string.Empty)
-            .ToList();
-        Assert.Equal("Turn 1", lines[0]);
-        Assert.Equal("Task", lines[1]);
-        Assert.Equal("the task text", lines[2]);
-        Assert.Contains("Conclusion", lines);
-        Assert.Contains("the parsed conclusion", lines);
-        Assert.Contains("Evidence", lines);
-        // A reply is free-form: the window shows no state section and no verdict, only the answer and the evidence.
-        Assert.DoesNotContain("Status", lines);
-        Assert.DoesNotContain(lines, line => line.Contains("unresolved", StringComparison.Ordinal));
-        // The evidence section is one text block, so its lines are read inside it.
-        Assert.Contains(lines, line => line.Contains("read: src/Forge.Core/Agents/ManagedContext.cs", StringComparison.Ordinal));
-        Assert.Contains(lines, line => line.Contains("wrote: src/Forge.Core/Agents/AgentLoop.cs", StringComparison.Ordinal));
-        Assert.Contains(lines, line => line.Contains("spec: forge-core", StringComparison.Ordinal));
-        // The evidence pin is `seq:` — the same word the model reads and the same one `read_history` takes.
-        Assert.Contains(lines, line => line.Contains("turn: 1", StringComparison.Ordinal));
-        Assert.Contains(lines, line => line.Contains("seq: 4-12", StringComparison.Ordinal));
-        Assert.DoesNotContain(lines, line => line.Contains("events:", StringComparison.Ordinal));
-        window.Close();
-        return Task.CompletedTask;
-    });
-
-    [Fact]
-    public Task The_session_dialog_lists_the_rows_in_turn_order() => SharedUi.RunAsync(() =>
+    public Task The_timeline_draws_one_node_and_one_card_per_turn() => SharedUi.RunAsync(async () =>
     {
         var rows = new[] { Entry(1), Entry(2), Entry(3) };
-        var window = new TurnLedgerWindow(new TurnLedgerWindowViewModel(rows)) { Width = 640, Height = 480 };
+        var model = new TurnLedgerWindowViewModel((_, _, _) => Task.FromResult(new TurnLedgerPage(rows, false, 3)));
+        var window = new TurnLedgerWindow(model) { Width = 760, Height = 640 };
         window.Show();
+        await model.LoadOlderAsync(TestContext.Current.CancellationToken);
         SharedUi.Settle(window);
 
-        // One header per row, in the store's order, and nothing else: a row records a turn, it does not grade a reply.
-        var headers = window.GetVisualDescendants()
-            .OfType<TextBlock>()
-            .Select(block => block.Text ?? string.Empty)
-            .Where(text => text.StartsWith("Turn ", StringComparison.Ordinal))
-            .ToList();
-        Assert.Equal(["Turn 1", "Turn 2", "Turn 3"], headers);
+        // One node per turn, one card per turn: the timeline, not a table of rows.
+        var nodes = window.GetVisualDescendants().OfType<TimelineGutter>().Count();
+        Assert.Equal(3, nodes);
+        Assert.Equal(3, window.GetVisualDescendants().OfType<MarkdownTextView>().Count());
 
         var footer = Assert.Single(
             window.GetVisualDescendants().OfType<TextBlock>(),
             block => AutomationProperties.GetAutomationId(block) == "session-ledger-footer");
-        Assert.Contains("3", footer.Text ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal(SessionStrings.SessionLedgerFooter(3).Resolve(), footer.Text);
         window.Close();
-        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public async Task An_older_page_lands_in_front_of_the_timeline_and_moves_the_cursor()
+    {
+        var pages = new Queue<TurnLedgerPage>([
+            new TurnLedgerPage([Entry(4), Entry(5)], true, 5),
+            new TurnLedgerPage([Entry(1), Entry(2), Entry(3)], false, 5),
+        ]);
+        var asked = new List<long>();
+        var model = new TurnLedgerWindowViewModel((before, _, _) =>
+        {
+            asked.Add(before);
+            return Task.FromResult(pages.Count > 0 ? pages.Dequeue() : new TurnLedgerPage([], false, 5));
+        });
+
+        await model.LoadOlderAsync(TestContext.Current.CancellationToken);
+        Assert.Equal([4L, 5L], model.Rows.Select(row => row.TurnSequence));
+
+        await model.LoadOlderAsync(TestContext.Current.CancellationToken);
+
+        // The second read starts below the oldest turn already on screen, and the page joins in front of it: the list is one
+        // timeline, oldest first.
+        Assert.Equal([long.MaxValue, 4L], asked);
+        Assert.Equal([1L, 2L, 3L, 4L, 5L], model.Rows.Select(row => row.TurnSequence));
+        Assert.False(model.HasOlder);
+
+        // Nothing older is left, so a third ask reads nothing at all.
+        await model.LoadOlderAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, asked.Count);
+    }
+
+    [Fact]
+    public Task An_empty_session_says_so_instead_of_showing_an_empty_timeline() => SharedUi.RunAsync(async () =>
+    {
+        var model = new TurnLedgerWindowViewModel(static (_, _, _) => Task.FromResult(new TurnLedgerPage([], false, 0)));
+        var window = new TurnLedgerWindow(model) { Width = 760, Height = 640 };
+        window.Show();
+        await model.LoadOlderAsync(TestContext.Current.CancellationToken);
+        SharedUi.Settle(window);
+
+        Assert.True(model.IsEmpty);
+        var empty = Assert.Single(
+            window.GetVisualDescendants().OfType<TextBlock>(),
+            block => AutomationProperties.GetAutomationId(block) == "session-ledger-empty");
+        Assert.Equal(SessionStrings.SessionLedgerEmpty.Resolve(), empty.Text);
+        // The footer counts turns and has nothing to say about a session that recorded none.
+        Assert.False(model.ShowsFooter);
+        var footer = Assert.Single(
+            window.GetVisualDescendants().OfType<TextBlock>(),
+            block => AutomationProperties.GetAutomationId(block) == "session-ledger-footer");
+        Assert.False(footer.IsEffectivelyVisible);
+        window.Close();
     });
 }

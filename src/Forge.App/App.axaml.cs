@@ -7,6 +7,7 @@ using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.App.ViewModels;
+using Forge.App.Views;
 using Forge.IO;
 using Forge.App.Logging;
 using ZLogger;
@@ -55,6 +56,9 @@ public partial class App : Application
             viewModel = new MainWindowViewModel(composition) { ShowFirstRunWizardOnStartup = true };
             var window = new MainWindow { DataContext = viewModel };
             viewModel.SettingsOwner = () => window;
+            // The system's own opener, for what FORGE cannot render (an attachment's PDF, audio or video): a leaf of the
+            // transcript has no window to reach a TopLevel from, so the shell installs the one entry that has one.
+            SystemFileOpener.Handler = path => _ = LinkLauncher.OpenWithSystemAsync(window, path);
             desktop.MainWindow = window;
             // Wave W10c: the install confirmation is written once the main window is actually up — that is the proof the
             // applier's watchdog is waiting for — and a finished swap's backup is cleaned at the same point.

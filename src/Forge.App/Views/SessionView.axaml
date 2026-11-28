@@ -182,12 +182,13 @@
                 <!-- No status dot, no path and no branch: the project tree already carries the session, its state and
                      the branch it runs on, so a chip for any of them repeated a value the user already sees twice. The
                      ahead/behind pair moved to the right group, next to the readings it belongs with. -->
-                <!-- The resource button: a plain button that opens the resource window. A dot and the number of running
-                     automation agents appear beside it while any runs (green), or a bare red dot when an MCP server failed. -->
+                <!-- The resource chip: it opens a menu, not the window directly - the same place now carries both the
+                     window ("当前会话资源") and the session's ledger timeline ("托管会话记录"). A dot and the number of
+                     running automation agents appear beside the label while any runs (green), or a bare red dot when an
+                     MCP server failed; the chevron says the chip is a menu. -->
                 <Button x:Name="StripResources"
                         Classes="instrument-chip"
-                        Command="{Binding Instruments.OpenInspectorCommand}"
-                        IsEnabled="{Binding Instruments.CanOpenInspector}"
+                        Click="OnResourcesClick"
                         ToolTip.Tip="{Binding Instruments.ResourcesTooltip}"
                         AutomationProperties.AutomationId="strip-resources"
                         AutomationProperties.Name="{Binding Instruments.ResourcesLabel}">
@@ -213,6 +214,7 @@
                                  IsVisible="{Binding Instruments.HasRunningResources}"
                                  VerticalAlignment="Center" />
                     </StackPanel>
+                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
                   </StackPanel>
                 </Button>
 

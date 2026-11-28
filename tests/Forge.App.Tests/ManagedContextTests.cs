@@ -85,10 +85,12 @@ public sealed class ManagedContextTests : IDisposable
         public Task<TurnLedgerEntry?> GetAsync(string sessionId, long turnSequence, CancellationToken ct) =>
             Task.FromResult(Rows.FirstOrDefault(row => row.SessionId == sessionId && row.TurnSequence == turnSequence));
 
-        public Task<TurnLedgerEntry?> FindByAnswerSeqAsync(string sessionId, long answerSeq, CancellationToken ct)
+        public Task<TurnLedgerPage> ListPageAsync(string sessionId, long beforeTurnSequence, int maxTurns, CancellationToken ct)
         {
-            var hits = Rows.Where(row => row.SessionId == sessionId && row.AnswerSeq == answerSeq).ToArray();
-            return Task.FromResult(hits.Length == 1 ? hits[0] : null);
+            var all = Rows.Where(row => row.SessionId == sessionId).OrderBy(row => row.TurnSequence).ToArray();
+            var below = all.Where(row => row.TurnSequence < beforeTurnSequence).ToArray();
+            var page = below.TakeLast(maxTurns).ToArray();
+            return Task.FromResult(new TurnLedgerPage(page, below.Length > page.Length, all.Length));
         }
 
         public Task<IReadOnlyList<TurnLedgerHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct)

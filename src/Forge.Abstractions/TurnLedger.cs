@@ -95,9 +95,15 @@ public sealed record TurnLedgerCompletion(
 public sealed record TurnLedgerHit(long TurnSequence, double Score, string Snippet);
 
 /// <summary>
-/// The per-turn state facts: one row per task turn, appended at the turn's start and settled at its end. Reads serve the two
-/// observation windows and (from a later stage) the model's own context timeline; nothing in stage one reads it back into a
-/// request.
+/// One page of one session's rows, read backwards from the newest: the rows themselves oldest first, whether older turns
+/// remain above the page, and how many turns the session holds in all (the window's footer, which a paged read cannot
+/// otherwise state).
+/// </summary>
+public sealed record TurnLedgerPage(IReadOnlyList<TurnLedgerEntry> Rows, bool HasOlder, long Total);
+
+/// <summary>
+/// The per-turn state facts: one row per task turn, appended at the turn's start and settled at its end. Reads serve the
+/// session timeline window and the model's own context timeline (see the managed-context projection).
 /// </summary>
 public interface ITurnLedgerStore
 {
@@ -117,14 +123,15 @@ public interface ITurnLedgerStore
     /// <summary>Every row of one session, oldest turn first.</summary>
     Task<IReadOnlyList<TurnLedgerEntry>> ListAsync(string sessionId, CancellationToken ct);
 
+    /// <summary>
+    /// One page of a session's rows, for a window that opens on the newest turns and reads older ones as the reader scrolls:
+    /// the rows with a turn below <paramref name="beforeTurnSequence"/> (<c>long.MaxValue</c> for the newest page), at most
+    /// <paramref name="maxTurns"/> of them, oldest first, with whether older turns remain and the session's total.
+    /// </summary>
+    Task<TurnLedgerPage> ListPageAsync(string sessionId, long beforeTurnSequence, int maxTurns, CancellationToken ct);
+
     /// <summary>One turn's row, or null when the session has no such turn.</summary>
     Task<TurnLedgerEntry?> GetAsync(string sessionId, long turnSequence, CancellationToken ct);
-
-    /// <summary>
-    /// The row whose <see cref="TurnLedgerEntry.AnswerSeq"/> is this message: the key the transcript pairs a turn card by,
-    /// the same one the metrics rows use. Null when no row of the session ends on that message.
-    /// </summary>
-    Task<TurnLedgerEntry?> FindByAnswerSeqAsync(string sessionId, long answerSeq, CancellationToken ct);
 
     /// <summary>Full-text search over the normalized fields of one session's rows, best match first.</summary>
     Task<IReadOnlyList<TurnLedgerHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct);
@@ -150,26 +157,12 @@ public static class TurnReportTemplate
     /// reply has to write itself.</summary>
     public const string ConclusionLabel = "**Conclusion**:";
 
-    /// <summary>The label over the harness-written evidence. Only the harness writes it.</summary>
-    public const string EvidenceLabel = "**Evidence**:";
-
-    /// <summary>A label as the observation windows show it: plain words, since they draw a section header rather than
-    /// markdown. Derived from the label itself, so the two can never drift apart.</summary>
-    public static string Plain(string label)
-    {
-        ArgumentNullException.ThrowIfNull(label);
-        return label.Replace("**", string.Empty, StringComparison.Ordinal).TrimEnd(':', '：').Trim();
-    }
-
     /// <summary>
     /// The spellings earlier builds used and rows already stored still carry: the Chinese label forms and the <c>##</c> headings.
     /// They are accepted on the way in (a reply written from memory, a conclusion recorded before the labels changed) and
     /// stripped on the way out; nothing writes them any more, so no prompt text mixes two languages.
     /// </summary>
     public static readonly string[] LegacyConclusionLabels = ["**结论**:", "## 结论", "## Conclusion"];
-
-    /// <summary>The legacy spellings of the evidence label, accepted so a reply that echoes an older habit is still read.</summary>
-    public static readonly string[] LegacyEvidenceLabels = ["**证据**:", "## 证据", "## Evidence"];
 
     /// <summary>
     /// The answer with its own vestiges of the harness's shape removed: a conclusion label or heading it echoed, and any

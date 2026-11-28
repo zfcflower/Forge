@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Unicode;
 using Forge.Abstractions;
 using Forge.App.Localization;
+using Forge.App.Services;
 using Forge.Core.Providers;
 using Forge.Core.Storage;
 
@@ -369,6 +370,22 @@ internal sealed class PendingFileViewModel : FileChipViewModel
     public RelayCommand RemoveCommand { get; }
 }
 
-/// <summary>One non-image attachment of a sent user message in the transcript.</summary>
-internal sealed class TranscriptFileViewModel(ContentBlock block, string name, AttachmentKind kind, string mediaType, long bytes)
-    : FileChipViewModel(block, name, kind, mediaType, bytes);
+/// <summary>One non-image attachment of a sent user message in the transcript: its chip, and the click that opens it.</summary>
+internal sealed class TranscriptFileViewModel : FileChipViewModel, IAttachmentFile
+{
+    public TranscriptFileViewModel(ContentBlock block, string name, AttachmentKind kind, string mediaType, long bytes)
+        : base(block, name, kind, mediaType, bytes)
+    {
+        OpenCommand = new AsyncRelayCommand(_ => AttachmentOpener.OpenAsync(this));
+    }
+
+    /// <summary>Opens a text or source file in the editor; a PDF, audio or video goes to the system's own application.</summary>
+    public AsyncRelayCommand OpenCommand { get; }
+
+    string? IAttachmentFile.Materialize() => Block switch
+    {
+        FileBlock file => AttachmentFiles.Materialize(file),
+        TextBlock text => AttachmentFiles.Materialize(text),
+        _ => null,
+    };
+}

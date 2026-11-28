@@ -63,17 +63,18 @@ internal sealed class ChatPicture
 
         try
         {
-            var folder = Path.Combine(Path.GetTempPath(), "forge-pictures");
+            var folder = TempFiles.Folder("forge-pictures");
             Directory.CreateDirectory(folder);
-            PictureSet.Sweep(folder);
+            TempFiles.Sweep(folder);
             if (Vector is { Svg: { } svg })
             {
-                return Store(folder, "diagram-", ".svg", svg, path => File.WriteAllText(path, svg));
+                return Write(folder, svg, "diagram.svg", path => File.WriteAllText(path, svg));
             }
 
             if (Bitmap is { } bitmap)
             {
-                return Store(folder, "picture-", ".png", Url + "|" + bitmap.PixelSize, path => bitmap.Save(path, new PngBitmapEncoderOptions()));
+                var key = Url + "|" + bitmap.PixelSize;
+                return Write(folder, key, "picture.png", path => bitmap.Save(path, new PngBitmapEncoderOptions()));
             }
 
             return null;
@@ -88,12 +89,11 @@ internal sealed class ChatPicture
         }
     }
 
-    /// <summary>The file for <paramref name="key"/> under <paramref name="folder"/>, written once: the name is the key's hash.</summary>
-    private static string Store(string folder, string prefix, string extension, string key, Action<string> write)
+    /// <summary>The file for <paramref name="key"/>, written once: two views of the same picture share one path.</summary>
+    private static string Write(string folder, string key, string suffix, Action<string> write)
     {
-        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..16];
-        var path = Path.Combine(folder, prefix + hash.ToLowerInvariant() + extension);
-        if (!File.Exists(path))
+        var path = TempFiles.PathFor(folder, key, suffix);
+        if (!TempFiles.Exists(path))
         {
             write(path);
         }
@@ -497,7 +497,6 @@ internal static class ChatPictures
 internal static class PictureSet
 {
     private static string[] paths = [];
-    private static bool swept;
 
     internal static void Set(IEnumerable<string> files) => paths = [.. files];
 
@@ -512,28 +511,4 @@ internal static class PictureSet
 
     private static int IndexOf(string path) =>
         Array.FindIndex(paths, candidate => string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>Once per run, removes the files of earlier runs that are over a week old from the temp picture folder.</summary>
-    internal static void Sweep(string folder)
-    {
-        if (swept)
-        {
-            return;
-        }
-
-        swept = true;
-        foreach (var file in Directory.EnumerateFiles(folder))
-        {
-            try
-            {
-                if (File.GetLastWriteTimeUtc(file) < DateTime.UtcNow.AddDays(-7))
-                {
-                    File.Delete(file);
-                }
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
-    }
 }

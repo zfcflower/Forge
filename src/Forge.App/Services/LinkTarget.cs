@@ -180,3 +180,14 @@ internal static class EditorFileOpener
     /// <summary>Opens a full path in the editor; null in a host without one.</summary>
     internal static Action<string>? Handler { get; set; }
 }
+
+/// <summary>
+/// The system's "open this file with its own application" entry, installed by the window that owns a <c>TopLevel</c> like
+/// <see cref="EditorFileOpener"/>: what FORGE cannot render itself (a PDF, an audio track, a video, an office file) is handed
+/// to the OS, and a leaf of the transcript has no window of its own to ask.
+/// </summary>
+internal static class SystemFileOpener
+{
+    /// <summary>Opens a full path with the OS's default application; null in a host without a window.</summary>
+    internal static Action<string>? Handler { get; set; }
+}

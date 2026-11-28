@@ -23,7 +23,7 @@ internal static class ReceiptReportOpener
 internal static class ReceiptReport
 {
     /// <summary>Where the copies go; nothing else lives here.</summary>
-    internal static string Folder { get; } = Path.Combine(Path.GetTempPath(), "forge-reports");
+    internal static string Folder { get; } = TempFiles.Folder("forge-reports");
 
     /// <summary>
     /// Writes one artifact's bytes as a markdown file and returns its path, or null when there is nothing to write. The name is
@@ -40,9 +40,8 @@ internal static class ReceiptReport
 
         var folder = Folder;
         Directory.CreateDirectory(folder);
-        PictureSet.Sweep(folder);
-        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(info.Id)))[..16];
-        var path = Path.Combine(folder, "report-" + hash.ToLowerInvariant() + ".md");
+        TempFiles.Sweep(folder);
+        var path = TempFiles.PathFor(folder, info.Id, "report.md");
         File.WriteAllBytes(path, content.ToArray());
         return path;
     }

@@ -77,8 +77,8 @@ public sealed class TurnLedgerLoopTests : IDisposable
         public Task<TurnLedgerEntry?> GetAsync(string sessionId, long turnSequence, CancellationToken ct) =>
             Task.FromResult<TurnLedgerEntry?>(null);
 
-        public Task<TurnLedgerEntry?> FindByAnswerSeqAsync(string sessionId, long answerSeq, CancellationToken ct) =>
-            Task.FromResult<TurnLedgerEntry?>(null);
+        public Task<TurnLedgerPage> ListPageAsync(string sessionId, long beforeTurnSequence, int maxTurns, CancellationToken ct) =>
+            Task.FromResult(new TurnLedgerPage([], false, 0));
 
         public Task MarkFoldedAsync(string sessionId, long throughTurn, CancellationToken ct) => Task.CompletedTask;
 

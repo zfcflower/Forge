@@ -60,6 +60,10 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     /// <summary>The window's resource window; null leaves the strip's button disabled rather than a dead entry.</summary>
     private readonly Action? openInspector;
+
+    /// <summary>The session's ledger, read a page at a time when the timeline window opens; null when the host runs no ledger,
+    /// and the menu then carries no such entry.</summary>
+    private readonly TurnLedgerPageReader? sessionLedger;
     private int runningResources;
     private bool mcpFailed;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
@@ -115,6 +119,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         Func<string> currentModel,
         Func<string?>? currentProvider = null,
         Action? openInspector = null,
+        TurnLedgerPageReader? sessionLedger = null,
         string? agentId = null)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -126,6 +131,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         this.currentModel = currentModel ?? (static () => string.Empty);
         this.currentProvider = currentProvider ?? (static () => null);
         this.openInspector = openInspector;
+        this.sessionLedger = sessionLedger;
 
         OpenInspectorCommand = new RelayCommand(() => this.openInspector?.Invoke(), () => CanOpenInspector);
 
@@ -837,6 +843,9 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     /// <summary>Opens the resource window for this session.</summary>
     public RelayCommand OpenInspectorCommand { get; }
+
+    /// <summary>The session's ledger, for the timeline window behind this menu entry; null when the host runs no ledger.</summary>
+    internal TurnLedgerPageReader? SessionLedger => sessionLedger;
 
     /// <summary>Automation agents of this session that are queued or running; the number beside the green dot.</summary>
     public int RunningResources => runningResources;

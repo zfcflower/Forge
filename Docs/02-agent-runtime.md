@@ -154,6 +154,7 @@
 - 门控：模型声明的 `ModelInputs` 缺该类即拒绝；协议没有该类的线路形状（如 Anthropic 无音视频、Chat Completions 只认 wav/mp3）同样拒绝并通知；文本文件不受模型门控。
 - 换模型后已有附件不再被接受时：弹一次 Warning、输入框下方常驻原因、发送/排队/插话/转弯全部禁用，附件**绝不静默丢弃**；移除或换回模型即解除。
 - 工具结果里的图片条数/大小按协议发送；界面显示不受“发给模型”开关影响——开关只决定模型收不收。
+- 点击已发送消息里的附件：图片与文本/源码进 FORGE 自己的预览（图片预览标签页 / 编辑器），PDF、音频、视频交本机默认应用打开；内联字节先写成 `%TEMP%/forge-attachments/` 下的文件（名称 = 内容哈希 + 原名，同一附件只写一次）。
 
 ## 2.10 用量、成本、缓存与上下文读数
 
@@ -206,7 +207,7 @@
 - **一轮一行**：轮开始写 `pending`，轮末原地 settle；`(session_id, turn_sequence)` 是主键。异常轮（取消、失败、无进展收尾、轮次上限）由 harness 按轮结局写终态，不要求模型配合。
 - **台账即上下文**：ledger 不再是旁路记录——模型的历史区就是它的渲染结果（见 2.5）。异常轮（`missing`/`invalid`）照旧交付答案、不晋升状态，但它们的 entry 仍进上下文，那是模型那一轮实际说过的话。遵从率按（提供商 × 模型 × Agent 种类 × 任务类型）计数，是 ledger 字段的派生查询。
 - **动态尾**：`<forge-context>` 每请求临时（不落库、不入历史），今天只载会话命名提示；它前面永远压一条固定的 assistant 承载消息让它独占一块——否则它会和开场提问并成同一块，下一次请求就在第一块断开、整段提示词重读。
-- **两个观察窗**：转录里每轮回复卡下方的复制按钮旁一枚图标按钮弹出该轮的 ledger entry，输入区工具条一枚图标按钮弹出整个会话的 ledger 时间线（见 [07-workbench-ui.md](07-workbench-ui.md)）。
+- **一个观察窗**：输入区上条“资源”菜单里的“托管会话记录”弹出整个会话的 ledger 时间线——每轮一个节点「第 N 轮 — 用户输入」+ 一张与回复卡同款的卡片（结论、证据），分页异步读（见 [07-workbench-ui.md](07-workbench-ui.md)）；转录区的回复卡不再挂轮级 entry。
 - **子 Agent 回执**：回执的“报告”行取该子 Agent 的「结论」节，头行、改动行、状态行形状不变。
 
-相关文档：[07-workbench-ui.md](07-workbench-ui.md)（两个观察窗）、[12-storage-and-data.md](12-storage-and-data.md)（`turn_ledger` 表与索引）、[16-context-compaction.md](16-context-compaction.md)（压缩，本期未改）。
+相关文档：[07-workbench-ui.md](07-workbench-ui.md)（观察窗）、[12-storage-and-data.md](12-storage-and-data.md)（`turn_ledger` 表与索引）、[16-context-compaction.md](16-context-compaction.md)（压缩，本期未改）。

@@ -41,8 +41,24 @@ public static class TextAttachment
     /// </summary>
     public static bool TryParse(string text, out string name, out long contentBytes)
     {
+        if (!TryExtract(text, out name, out var content))
+        {
+            contentBytes = 0;
+            return false;
+        }
+
+        contentBytes = Encoding.UTF8.GetByteCount(content.Length > 0 ? content[..^1] : content);
+        return true;
+    }
+
+    /// <summary>
+    /// The same shape, recognised down to the file's own text: what a preview writes back to disk when the user opens the
+    /// attachment. The content keeps the newline <see cref="Create"/> added, since anything writing the file wants it.
+    /// </summary>
+    public static bool TryExtract(string text, out string name, out string content)
+    {
         name = string.Empty;
-        contentBytes = 0;
+        content = string.Empty;
         if (text is null || !text.StartsWith(Header, StringComparison.Ordinal))
         {
             return false;
@@ -74,14 +90,14 @@ public static class TextAttachment
             return false;
         }
 
-        var content = body[..^fence.Length];
-        if (content.Length > 0 && content[^1] != '\n')
+        var bodyText = body[..^fence.Length];
+        if (bodyText.Length > 0 && bodyText[^1] != '\n')
         {
             return false;
         }
 
         name = span[Header.Length..nameEnd].ToString();
-        contentBytes = Encoding.UTF8.GetByteCount(content.Length > 0 ? content[..^1] : content);
+        content = bodyText.ToString();
         return true;
     }
 

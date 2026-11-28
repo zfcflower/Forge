@@ -1,9 +1,11 @@
 using System.Collections.Specialized;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
@@ -42,6 +44,59 @@ public partial class SessionView : UserControl
         {
             box.SelectAll();
             e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// The strip's resource chip: a menu, because the place that answers "what is this session made of" now carries both
+    /// the resource window and the session's ledger timeline. Its items are built on every open from the strip's own state.
+    /// </summary>
+    private void OnResourcesClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && DataContext is SessionWorkspaceViewModel model)
+        {
+            ResourceMenu(model.Instruments, read => _ = ShowSessionLedgerAsync(read)).ShowAt(button);
+        }
+    }
+
+    /// <summary>
+    /// The resource chip's menu for one strip: the window's entry always, then the session's ledger timeline only when the
+    /// host wired a ledger source - no source, no entry (not a disabled one). Built per open rather than declared in the
+    /// XAML, the same rule the project tree follows: a menu belongs to the state it opens on.
+    /// </summary>
+    internal static MenuFlyout ResourceMenu(
+        SessionInstrumentsViewModel instruments,
+        Action<TurnLedgerPageReader> showLedger)
+    {
+        var flyout = new MenuFlyout();
+        var resources = new MenuItem
+        {
+            Header = InstrumentsStrings.ResourcesCurrent,
+            Command = instruments.OpenInspectorCommand,
+        };
+        AutomationProperties.SetAutomationId(resources, "strip-resources-current");
+        flyout.Items.Add(resources);
+
+        if (instruments.SessionLedger is { } read)
+        {
+            var ledger = new MenuItem { Header = SessionStrings.SessionLedger.Resolve() };
+            AutomationProperties.SetAutomationId(ledger, "strip-resources-ledger");
+            ledger.Click += (_, _) => showLedger(read);
+            flyout.Items.Add(ledger);
+        }
+
+        return flyout;
+    }
+
+    /// <summary>
+    /// Shows the session's timeline over this view's window. The window reads the store itself, a page at a time, so nothing
+    /// here has to wait for a read: a page that fails costs that page, not the dialog.
+    /// </summary>
+    private async Task ShowSessionLedgerAsync(TurnLedgerPageReader read)
+    {
+        if (TopLevel.GetTopLevel(this) is Window owner)
+        {
+            await TurnLedgerWindow.ShowAsync(owner, read).ConfigureAwait(true);
         }
     }
 

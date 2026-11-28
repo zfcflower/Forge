@@ -223,6 +223,59 @@ public sealed class SqliteTurnLedgerStore : ITurnLedgerStore, IAsyncDisposable, 
             ct);
     }
 
+    public Task<TurnLedgerPage> ListPageAsync(string sessionId, long beforeTurnSequence, int maxTurns, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        return _writer.ReadAsync(
+            async connection =>
+            {
+                var rows = new List<TurnLedgerEntry>();
+                var more = false;
+                if (maxTurns > 0)
+                {
+                    // One row past the page tells whether older turns remain, so a full page is not a guess.
+                    await using (var command = connection.CreateCommand())
+                    {
+                        command.CommandText =
+                            $"""
+                            SELECT {Columns} FROM turn_ledger
+                            WHERE session_id = $session AND turn_sequence < $before
+                            ORDER BY turn_sequence DESC
+                            LIMIT $take
+                            """;
+                        command.Parameters.AddWithValue("$session", sessionId);
+                        command.Parameters.AddWithValue("$before", beforeTurnSequence);
+                        command.Parameters.AddWithValue("$take", maxTurns + 1);
+                        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                        {
+                            if (rows.Count == maxTurns)
+                            {
+                                more = true;
+                                break;
+                            }
+
+                            rows.Add(ReadEntry(reader, sessionId));
+                        }
+                    }
+                }
+
+                // The read went backwards to find the newest page; the page itself is oldest first, like the timeline.
+                rows.Reverse();
+
+                long total;
+                await using (var count = connection.CreateCommand())
+                {
+                    count.CommandText = "SELECT COUNT(*) FROM turn_ledger WHERE session_id = $session";
+                    count.Parameters.AddWithValue("$session", sessionId);
+                    total = Convert.ToInt64(await count.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
+                }
+
+                return new TurnLedgerPage(rows, more, total);
+            },
+            ct);
+    }
+
     public Task<TurnLedgerEntry?> GetAsync(string sessionId, long turnSequence, CancellationToken ct)
     {
         StoragePaths.SafeSegment(sessionId, nameof(sessionId));
@@ -235,37 +288,6 @@ public sealed class SqliteTurnLedgerStore : ITurnLedgerStore, IAsyncDisposable, 
                 command.Parameters.AddWithValue("$turn", turnSequence);
                 await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadEntry(reader, sessionId) : null;
-            },
-            ct);
-    }
-
-    /// <summary>The row whose <see cref="TurnLedgerEntry.AnswerSeq"/> is this message - only when exactly one row of
-    /// the session ends on it. None, or two (a store bug, never a position two turns share on purpose), answers null:
-    /// the pairing key is a position, and an ambiguous position pins nothing.</summary>
-    public Task<TurnLedgerEntry?> FindByAnswerSeqAsync(string sessionId, long answerSeq, CancellationToken ct)
-    {
-        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
-        return _writer.ReadAsync<TurnLedgerEntry?>(
-            async connection =>
-            {
-                await using var command = connection.CreateCommand();
-                command.CommandText =
-                    $"""
-                    SELECT {Columns} FROM turn_ledger
-                    WHERE session_id = $session AND answer_seq = $answer
-                    ORDER BY turn_sequence
-                    LIMIT 2
-                    """;
-                command.Parameters.AddWithValue("$session", sessionId);
-                command.Parameters.AddWithValue("$answer", answerSeq);
-                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                if (!await reader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    return null;
-                }
-
-                var only = ReadEntry(reader, sessionId);
-                return await reader.ReadAsync(ct).ConfigureAwait(false) ? null : only;
             },
             ct);
     }

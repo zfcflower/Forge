@@ -57,60 +57,6 @@ public sealed class TranscriptRoundsTests
         Assert.IsType<TurnTextViewModel>(rows[2]);
     }
 
-    /// <summary>One ledger row: a turn the shadow ledger settled, ending at <paramref name="answerSeq"/>.</summary>
-    private static TurnLedgerEntry LedgerRow(long turn, long answerSeq) =>
-        new(
-            "s",
-            turn,
-            TurnLedgerStatus.Settled,
-            "the task text",
-            "the answer as shown",
-            "the parsed conclusion",
-            [],
-            [],
-            [],
-            turn * 2 - 1,
-            answerSeq,
-            answerSeq,
-            null,
-            null,
-            "Root",
-            0,
-            false,
-            At,
-            At.AddSeconds(3));
-
-    [Fact]
-    public void A_ledger_row_alone_gives_its_replayed_card_the_turn_entry_button()
-    {
-        var transcript = MainTranscript();
-        var messages = Turns(2);
-
-        // No turn_metrics row exists at all - the database predates the metrics table - and the ledger row alone still
-        // has to prove which card its turn was, paired by its own answer_seq.
-        TranscriptReplay.Apply(transcript, messages, [], [LedgerRow(turn: 1, answerSeq: 2)]);
-
-        var cards = transcript.Rounds.Select(round => round.Card!).ToArray();
-        Assert.True(cards[0].HasLedger);
-        Assert.False(cards[1].HasLedger);
-    }
-
-    [Fact]
-    public void An_answer_seq_two_rows_share_pairs_no_card()
-    {
-        var transcript = MainTranscript();
-        var messages = Turns(2);
-
-        // Two rows claim the same ending position: no card can be proven to be the one either of them ended on, so
-        // neither gets the button - the replay refuses the same ambiguity FindByAnswerSeqAsync refuses, instead of
-        // letting the last row written win the pairing.
-        TranscriptReplay.Apply(transcript, messages, [], [LedgerRow(turn: 1, answerSeq: 2), LedgerRow(turn: 2, answerSeq: 2)]);
-
-        var cards = transcript.Rounds.Select(round => round.Card!).ToArray();
-        Assert.False(cards[0].HasLedger);
-        Assert.False(cards[1].HasLedger);
-    }
-
     [Fact]
     public void A_sub_agent_round_holds_its_task_row_and_its_turn_together()
     {

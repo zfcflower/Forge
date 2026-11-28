@@ -1,54 +1,90 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Forge.App.ViewModels"
+        xmlns:views="using:Forge.App.Views"
+        xmlns:loc="using:Forge.App.Localization"
         x:Class="Forge.App.Views.TurnLedgerWindow"
         x:DataType="vm:TurnLedgerWindowViewModel"
         Title="{Binding Title}"
-        Width="640"
-        Height="560"
-        MinWidth="440"
+        Width="760"
+        Height="640"
+        MinWidth="480"
         MinHeight="320"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}">
   <Window.Styles>
-    <StyleInclude Source="avares://Forge.App/Resources/ChromeStyles.axaml" />
-    <!-- One entry of the timeline: the excerpt lines are the entry's own text, exactly as the turn's flyout shows them. -->
-    <Style Selector="TextBlock.ledger-excerpt">
-      <Setter Property="TextWrapping" Value="Wrap" />
-      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-      <Setter Property="MaxLines" Value="3" />
-    </Style>
-    <Style Selector="TextBlock.ledger-detail">
-      <Setter Property="TextWrapping" Value="Wrap" />
+    <!-- The header at a turn's node: the round and the question, one line, the transcript's user meta line's own type. -->
+    <Style Selector="TextBlock.ledger-round">
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-      <Setter Property="Foreground" Value="{DynamicResource StatusWarningBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
   </Window.Styles>
-  <Grid RowDefinitions="*,Auto" Margin="18,16">
-    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
-      <StackPanel Spacing="12" AutomationProperties.AutomationId="session-ledger-list">
-        <ItemsControl ItemsSource="{Binding Rows}">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="vm:TurnLedgerEntryViewModel">
-              <StackPanel Spacing="3" Margin="0,0,0,12" AutomationProperties.Name="{Binding Header}">
-                <TextBlock Text="{Binding Header}" FontWeight="Medium" />
-                <StackPanel Spacing="1">
-                  <TextBlock Classes="ledger-detail" Text="{Binding TaskHeading}" />
-                  <TextBlock Classes="ledger-excerpt" Text="{Binding TaskText}" />
-                </StackPanel>
-                <TextBlock Classes="ledger-excerpt" Text="{Binding ConclusionText}" IsVisible="{Binding ConclusionText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-              </StackPanel>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </StackPanel>
-    </ScrollViewer>
-    <Border Grid.Row="1"
+  <!-- The timeline: one node per turn, oldest first, the turn's card under its header. Same list, same panel and same card
+       the transcript uses, so a long session opens on a page and the rows it scrolls through are built one screen at a time. -->
+  <Grid RowDefinitions="Auto,*,Auto" Margin="18,16">
+    <TextBlock Grid.Row="0"
+               Classes="caption"
+               Margin="0,0,0,8"
+               IsVisible="{Binding IsLoading}"
+               Text="{Binding [session.ledger.loading], Source={x:Static loc:Loc.Instance}}"
+               AutomationProperties.AutomationId="session-ledger-loading" />
+    <!-- A read that failed is its own line, and the way to retry it: a wedged store is not polled (the transcript's strip
+         above its own list follows the same rule). -->
+    <Button Grid.Row="0"
+            Classes="link"
+            Margin="0,0,0,8"
+            HorizontalAlignment="Left"
+            Foreground="{DynamicResource StatusErrorBrush}"
+            IsVisible="{Binding LoadFailed}"
+            Click="OnRetryClick"
+            Content="{Binding [session.ledger.loadFailed], Source={x:Static loc:Loc.Instance}}"
+            AutomationProperties.AutomationId="session-ledger-retry" />
+    <ListBox x:Name="Timeline"
+             Grid.Row="1"
+             ItemsSource="{Binding Rows}"
+             SelectionMode="Single"
+             AutoScrollToSelectedItem="False"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             AutomationProperties.AutomationId="session-ledger-list">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <views:TranscriptStackPanel />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:TurnLedgerRowViewModel">
+          <Grid ColumnDefinitions="Auto,*">
+            <views:TimelineGutter Kind="User" />
+            <StackPanel Grid.Column="1" Margin="0,4,0,16" Spacing="6">
+              <TextBlock Classes="ledger-round"
+                         MaxLines="1"
+                         Text="{Binding Header}"
+                         TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding TaskText}" />
+              <views:SelectableCard Classes="assistant-card">
+                <views:MarkdownTextView Text="{Binding Markdown}" />
+              </views:SelectableCard>
+            </StackPanel>
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+    <StackPanel Grid.Row="1"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsVisible="{Binding IsEmpty}">
+      <TextBlock Classes="caption"
+                 Text="{Binding [session.ledger.empty], Source={x:Static loc:Loc.Instance}}"
+                 AutomationProperties.AutomationId="session-ledger-empty" />
+    </StackPanel>
+    <Border Grid.Row="2"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,1,0,0"
             Padding="0,10,0,0"
-            Margin="0,12,0,0">
+            Margin="0,12,0,0"
+            IsVisible="{Binding ShowsFooter}">
       <TextBlock Classes="caption" Text="{Binding FooterText}" AutomationProperties.AutomationId="session-ledger-footer" />
     </Border>
   </Grid>

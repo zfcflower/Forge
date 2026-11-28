@@ -205,26 +205,36 @@ public sealed class SqliteTurnLedgerStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task The_row_a_turn_ends_on_is_found_by_its_answer_seq_and_only_when_it_is_alone()
+    public async Task A_page_reads_backwards_from_the_newest_and_says_whether_older_turns_remain()
     {
         await using var store = new SqliteTurnLedgerStore(dir);
-        await store.BeginAsync(Begin(1), CancellationToken.None);
-        await store.CompleteAsync(Completion(1, answerSeq: 12, toSeq: 12), CancellationToken.None);
-        await store.BeginAsync(Begin(2), CancellationToken.None);
-        await store.CompleteAsync(Completion(2, answerSeq: 21, toSeq: 21), CancellationToken.None);
+        for (var turn = 1; turn <= 5; turn++)
+        {
+            await store.BeginAsync(Begin(turn), CancellationToken.None);
+            await store.CompleteAsync(Completion(turn, toSeq: turn), CancellationToken.None);
+        }
 
-        var found = await store.FindByAnswerSeqAsync(Session, 21, CancellationToken.None);
-        Assert.NotNull(found);
-        Assert.Equal(2, found.TurnSequence);
-        Assert.Equal(TurnLedgerStatus.Settled, found.Status);
-        // No row of this session ends on that message.
-        Assert.Null(await store.FindByAnswerSeqAsync(Session, 999, CancellationToken.None));
-        // Another session's rows are not this session's timeline.
-        Assert.Null(await store.FindByAnswerSeqAsync("s2", 21, CancellationToken.None));
+        // The newest page is the end of the timeline, read backwards and handed back oldest first.
+        var newest = await store.ListPageAsync(Session, long.MaxValue, 2, CancellationToken.None);
+        Assert.Equal([4L, 5L], newest.Rows.Select(row => row.TurnSequence));
+        Assert.True(newest.HasOlder);
+        Assert.Equal(5, newest.Total);
 
-        // A position two rows share pins nothing: the pairing key must be a position, not a guess.
-        await store.CompleteAsync(Completion(3, answerSeq: 21, toSeq: 21), CancellationToken.None);
-        Assert.Null(await store.FindByAnswerSeqAsync(Session, 21, CancellationToken.None));
+        var older = await store.ListPageAsync(Session, 4, 2, CancellationToken.None);
+        Assert.Equal([2L, 3L], older.Rows.Select(row => row.TurnSequence));
+        Assert.True(older.HasOlder);
+
+        // A short page ends the timeline: the row that proved the previous page full is not counted as one of its own.
+        var oldest = await store.ListPageAsync(Session, 2, 2, CancellationToken.None);
+        Assert.Equal([1L], oldest.Rows.Select(row => row.TurnSequence));
+        Assert.False(oldest.HasOlder);
+        Assert.Equal(5, oldest.Total);
+
+        // Another session's rows are not this timeline, and an empty one has nothing older.
+        var foreign = await store.ListPageAsync("s2", long.MaxValue, 2, CancellationToken.None);
+        Assert.Empty(foreign.Rows);
+        Assert.False(foreign.HasOlder);
+        Assert.Equal(0, foreign.Total);
     }
 
     [Fact]

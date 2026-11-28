@@ -110,12 +110,19 @@ internal static class SessionStrings
     public const string ToolResultCutKey = "turn.toolResultCut";
     public const string NoTextKey = "turn.noText";
     public const string CopyMessageKey = "turn.copyMessage";
-    // The turn ledger's two observation windows (stage one, shadow mode): the per-turn entry button on the reply card
-    // and the session-level timeline dialog behind the composer toolbar's button.
-    public const string TurnLedgerKey = "turn.ledger";
+    // The session ledger's window: opened from the composer strip's resource menu.
     public const string SessionLedgerKey = "session.ledger";
     public const string SessionLedgerFooterKey = "session.ledger.footer";
     public const string SessionLedgerEmptyKey = "session.ledger.empty";
+    public const string SessionLedgerLoadingKey = "session.ledger.loading";
+    public const string SessionLedgerLoadFailedKey = "session.ledger.loadFailed";
+    public const string SessionLedgerConclusionKey = "session.ledger.conclusion";
+    public const string SessionLedgerEvidenceKey = "session.ledger.evidence";
+    public const string SessionLedgerReadKey = "session.ledger.read";
+    public const string SessionLedgerWroteKey = "session.ledger.wrote";
+    public const string SessionLedgerSpecsKey = "session.ledger.specs";
+    public const string SessionLedgerMessagesKey = "session.ledger.messages";
+    public const string SessionLedgerNoConclusionKey = "session.ledger.noConclusion";
     public const string NoToolResultKey = "turn.noToolResult";
     public const string TurnFailedKey = "turn.failed";
     public const string TurnFailedRetriedKey = "turn.failedRetried";
@@ -395,16 +402,30 @@ internal static class SessionStrings
     public static LocText TurnFailedRetried(string message, int retries, TimeSpan wait) =>
         new(TurnFailedRetriedKey, message, retries, (int)Math.Round(wait.TotalSeconds));
 
-    // The turn ledger's observation windows (stage one): the per-turn entry button and the session timeline dialog.
-    public static LocText TurnLedger => new(TurnLedgerKey);
-
+    // The session ledger's window, opened from the composer strip's resource menu.
     public static LocText SessionLedger => new(SessionLedgerKey);
 
-    /// <summary>The dialog's footer: how many turns the session recorded, split by the row's status.</summary>
-    public static LocText SessionLedgerFooter(int total) => new(SessionLedgerFooterKey, total);
+    /// <summary>The dialog's footer: how many turns the session holds, read once with the first page.</summary>
+    public static LocText SessionLedgerFooter(long total) => new(SessionLedgerFooterKey, TextFormat.Number(total));
 
     /// <summary>The dialog's empty state: no turn of this session has a row yet.</summary>
     public static LocText SessionLedgerEmpty => new(SessionLedgerEmptyKey);
+
+    /// <summary>The card's own labels: what the turn concluded, and the evidence the harness recorded beside it.</summary>
+    public static string SessionLedgerConclusion => Loc.Instance[SessionLedgerConclusionKey];
+
+    public static string SessionLedgerEvidence => Loc.Instance[SessionLedgerEvidenceKey];
+
+    public static string SessionLedgerRead => Loc.Instance[SessionLedgerReadKey];
+
+    public static string SessionLedgerWrote => Loc.Instance[SessionLedgerWroteKey];
+
+    public static string SessionLedgerSpecs => Loc.Instance[SessionLedgerSpecsKey];
+
+    public static string SessionLedgerMessages => Loc.Instance[SessionLedgerMessagesKey];
+
+    /// <summary>What a turn that left no conclusion shows: a pending turn, or one whose reply carried none.</summary>
+    public static string SessionLedgerNoConclusion => Loc.Instance[SessionLedgerNoConclusionKey];
 
     /// <summary>
     /// The banner above the composer while the session waits out a busy endpoint on its own. A plain string, not a
@@ -694,10 +715,18 @@ internal static class SessionStrings
         Loc.Register(ToolResultCutKey, "仅显示前 {0} 个字符（共 {1} 个），复制可得完整输出", "Showing the first {0} of {1} characters; copy gives the whole output");
         Loc.Register(NoTextKey, "（模型没有返回文本）", "(the model returned no text)");
         Loc.Register(CopyMessageKey, "复制消息", "Copy message");
-        Loc.Register(TurnLedgerKey, "本轮记录", "Turn ledger");
-        Loc.Register(SessionLedgerKey, "会话记录", "Session ledger");
+        Loc.Register(SessionLedgerKey, "托管会话记录", "Session ledger");
         Loc.Register(SessionLedgerFooterKey, "共 {0} 轮", "Turns: {0}");
         Loc.Register(SessionLedgerEmptyKey, "还没有任何一轮的记录", "No turn has been recorded yet");
+        Loc.Register(SessionLedgerLoadingKey, "正在加载更早的轮次…", "Loading older turns…");
+        Loc.Register(SessionLedgerLoadFailedKey, "读不出更早的轮次，点这里重试", "Could not read the older turns - click to retry");
+        Loc.Register(SessionLedgerConclusionKey, "结论", "Conclusion");
+        Loc.Register(SessionLedgerEvidenceKey, "证据", "Evidence");
+        Loc.Register(SessionLedgerReadKey, "读取", "Read");
+        Loc.Register(SessionLedgerWroteKey, "修改", "Changed");
+        Loc.Register(SessionLedgerSpecsKey, "规格", "Specs");
+        Loc.Register(SessionLedgerMessagesKey, "消息", "Messages");
+        Loc.Register(SessionLedgerNoConclusionKey, "（本轮还没有结论）", "(no conclusion yet)");
         Loc.Register(NoToolResultKey, "没有结果：本轮已结束", "No result: the turn ended");
         Loc.Register(TurnFailedKey, "本轮无法运行：{0}", "This turn could not run: {0}");
         Loc.Register(

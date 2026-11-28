@@ -439,17 +439,22 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:TranscriptImageViewModel">
-              <Border Width="72"
-                      Height="72"
+              <!-- A click opens the picture in FORGE's own preview: its bytes become a file under the temp folder first. -->
+              <Button Classes="attachment-tile"
                       Margin="6,0,0,4"
-                      CornerRadius="6"
-                      ClipToBounds="True"
-                      BorderThickness="1"
-                      BorderBrush="{DynamicResource BorderBrush}"
-                      Background="{DynamicResource SurfaceSubtleBrush}"
-                      ToolTip.Tip="{Binding Caption}">
-                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
-              </Border>
+                      Command="{Binding OpenCommand}"
+                      ToolTip.Tip="{Binding Caption}"
+                      AutomationProperties.Name="{Binding [session.attachments.openImage], Source={x:Static loc:Loc.Instance}}">
+                <Border Width="72"
+                        Height="72"
+                        CornerRadius="6"
+                        ClipToBounds="True"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        Background="{DynamicResource SurfaceSubtleBrush}">
+                  <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+                </Border>
+              </Button>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
@@ -464,21 +469,26 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:TranscriptFileViewModel">
-              <Border Margin="6,0,0,4"
-                      Padding="8,4"
-                      CornerRadius="6"
-                      BorderThickness="1"
-                      BorderBrush="{DynamicResource BorderBrush}"
-                      Background="{DynamicResource SurfaceSubtleBrush}"
-                      ToolTip.Tip="{Binding Name}">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                  <wc:FluentIcon Data="{StaticResource IconChangesDocument}" Width="14" Height="14" VerticalAlignment="Center" />
-                  <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Name}" MaxWidth="220" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Classes="caption" Text="{Binding Caption}" />
+              <!-- A text or source file opens in the editor; a PDF, audio or video goes to the system's own application. -->
+              <Button Classes="attachment-tile"
+                      Margin="6,0,0,4"
+                      Command="{Binding OpenCommand}"
+                      ToolTip.Tip="{Binding Name}"
+                      AutomationProperties.Name="{Binding [session.attachments.open], Source={x:Static loc:Loc.Instance}}">
+                <Border Padding="8,4"
+                        CornerRadius="6"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        Background="{DynamicResource SurfaceSubtleBrush}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <wc:FluentIcon Data="{StaticResource IconChangesDocument}" Width="14" Height="14" VerticalAlignment="Center" />
+                    <StackPanel VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Name}" MaxWidth="220" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Classes="caption" Text="{Binding Caption}" />
+                    </StackPanel>
                   </StackPanel>
-                </StackPanel>
-              </Border>
+                </Border>
+              </Button>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>

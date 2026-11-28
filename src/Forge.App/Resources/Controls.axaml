@@ -264,6 +264,35 @@
     <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
 
+  <!-- An attachment of a sent message is a button, so a click (or Enter / Space) opens it: the tile's own border
+     draws it, so the button around it is bare chrome - no fill, no ring, no padding, no minimum size - and the only
+     feedback is the hand cursor and a press tint, since hovering must not repaint the picture or the chip it wraps.
+     It lives here, not in the composer's sheet: these tiles are drawn from App.axaml's templates, inside the
+     transcript list, where no view-scoped sheet is in scope. -->
+  <Style Selector="Button.attachment-tile">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.attachment-tile /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="Button.attachment-tile:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.attachment-tile:pressed">
+    <Setter Property="Opacity" Value="0.7" />
+  </Style>
+
   <Style Selector="Border.tool-row">
     <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />

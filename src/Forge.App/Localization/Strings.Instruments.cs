@@ -64,6 +64,7 @@ internal static class InstrumentsStrings
     public const string CacheTtlTooltipKey = "session.strip.cache.ttl.tooltip";
 
     public const string ResourcesKey = "session.strip.resources";
+    public const string ResourcesCurrentKey = "session.strip.resources.current";
 
     public const string ApprovalsSectionTitleKey = "settings.approvals.title";
     public const string SkillsSectionTitleKey = "settings.skills.title";
@@ -238,6 +239,9 @@ internal static class InstrumentsStrings
 
     public static string Resources => Loc.Instance[ResourcesKey];
 
+    /// <summary>The resource menu's first entry: the window over this session's tools, prompts and automation agents.</summary>
+    public static string ResourcesCurrent => Loc.Instance[ResourcesCurrentKey];
+
     /// <summary>The value of a section title key; <c>SettingsSection</c> wants the <c>...Key</c> constant, not this.</summary>
     public static string ApprovalsSectionTitle => Loc.Instance[ApprovalsSectionTitleKey];
 
@@ -366,6 +370,7 @@ internal static class InstrumentsStrings
             "Rate limit (short-term throttling, not a subscription window): requests {0}, tokens {1}; {2}");
 
         Loc.Register(ResourcesKey, "资源", "Resources");
+        Loc.Register(ResourcesCurrentKey, "当前会话资源", "Current session resources");
 
         Loc.Register(ApprovalsSectionTitleKey, "审批", "Approvals");
         Loc.Register(SkillsSectionTitleKey, "技能", "Skills");
