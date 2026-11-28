@@ -319,6 +319,24 @@ internal sealed class PromptsSettingsViewModel : NotifyingObject, IDisposable, I
         Editor = PromptEditorViewModel.ForNew(this, workspace());
     }
 
+    /// <summary>
+    /// Opens a new command with <paramref name="body"/> already written under its frontmatter: the composer's "save as
+    /// instruction" hands a message over this way, so the user lands on a filled editor instead of an empty skeleton. An
+    /// unsaved editor is still confirmed first - the message is not worth losing someone's half-written prompt for.
+    /// </summary>
+    public void NewFromText(string body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (!ConfirmDiscard(null))
+        {
+            return;
+        }
+
+        openVersion++;
+        SetSelection(null);
+        Editor = PromptEditorViewModel.ForNew(this, workspace(), body);
+    }
+
     private void SetFilter(bool value, PromptFilter target)
     {
         if (value)

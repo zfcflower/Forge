@@ -34,6 +34,9 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   The chat timeline (wave W13) added a second, exact regular variant of `search`, `edit`, `globe`, `plug_connected`,
   `shield_checkmark` and `wrench` (`*Regular` + `*Filled` in `Icons.axaml`) because the older outline keys were
   coordinate-rounded replays of the same FIS path; the two variants of one node type must be the same glyph at two weights.
+  The composer's attach and history buttons (2026-11) add `attach`, `chat_history`, `comment_note` and `arrow_up_right`;
+  the set has no `location_arrow_up`, so "locate the message" wears `arrow_up_right` — the closest published glyph.
+  `comment_note` is the one icon shipped as two `<path>` elements, so both subpaths are concatenated into one geometry.
 - One icon comes from the 20 px set: `panel_bottom` exists only at 20 px, so its path was scaled by 24/20 about the grid
   centre into the 24 grid the app renders on (`IconTerminal`, the terminal button).
 - The same geometry, for the tree glyphs, is reused through `src/Forge.App/ViewModels/TreeIcons.cs` (`branch`,

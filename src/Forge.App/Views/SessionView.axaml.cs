@@ -2,8 +2,10 @@ using System.Collections.Specialized;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
 using Avalonia.Threading;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
@@ -123,6 +125,63 @@ public partial class SessionView : UserControl
 
         var outcome = await model.LoadOlderHistoryAsync(CancellationToken.None);
         return outcome is SessionWorkspaceViewModel.OlderPageLoad.Loaded or SessionWorkspaceViewModel.OlderPageLoad.NotReady;
+    }
+
+    /// <summary>
+    /// The Chat History flyout is rebuilt from the transcript every time it opens: the transcript is the one list that knows
+    /// which rounds exist (a session read backwards from the store grows it a page at a time), so the flyout holds no copy
+    /// that could drift from it.
+    /// </summary>
+    private void OnHistoryOpening(object? sender, EventArgs e)
+    {
+        if (DataContext is SessionWorkspaceViewModel model)
+        {
+            model.ComposerHistory.Refresh();
+        }
+    }
+
+    /// <summary>Clicking a user message writes it back into the composer, after whatever is already typed there.</summary>
+    private void OnHistoryFillClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: ComposerHistoryEntry entry } && DataContext is SessionWorkspaceViewModel model)
+        {
+            model.FillFromHistory(entry);
+            HideHistoryFlyout(sender);
+            this.FindControl<TextBox>("Input")?.Focus();
+        }
+    }
+
+    /// <summary>The row's "save as instruction": the shell opens the prompts settings with this message prefilled.</summary>
+    private void OnHistorySaveClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: ComposerHistoryEntry entry } && DataContext is SessionWorkspaceViewModel model)
+        {
+            HideHistoryFlyout(sender);
+            model.SaveHistoryAsInstruction(entry);
+        }
+    }
+
+    /// <summary>The row's "locate": the transcript scrolls that message's round to the top and stops following the reply.</summary>
+    private void OnHistoryLocateClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: ComposerHistoryEntry entry })
+        {
+            HideHistoryFlyout(sender);
+            follower?.Locate(entry.RoundIndex);
+        }
+    }
+
+    /// <summary>
+    /// Closes the flyout a row button lives in. The flyout's own object is not in the logical tree of its content (the
+    /// presenter's parent is the popup, the popup's is the button that owns it), so the owner is what gets asked.
+    /// </summary>
+    private static void HideHistoryFlyout(object? sender)
+    {
+        if (sender is Control control
+            && control.GetLogicalAncestors().OfType<Popup>().FirstOrDefault() is { Parent: Button owner })
+        {
+            owner.Flyout?.Hide();
+        }
     }
 
     protected override void OnDataContextChanged(EventArgs e)

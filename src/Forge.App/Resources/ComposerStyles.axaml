@@ -185,6 +185,9 @@
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Padding" Value="10,8,10,4" />
+      <!-- The body size, stated here rather than inherited: the session's input is the one field a user types whole messages
+           into, and it must stay at the body size no matter what the Fluent theme does to a text box. -->
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     </Style>
     <Style Selector="TextBox.composer-input:pointerover /template/ Border#PART_BorderElement">
       <Setter Property="Background" Value="Transparent" />

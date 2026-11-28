@@ -522,14 +522,28 @@ internal sealed class TranscriptFollower
             return;
         }
 
+        Locate(stickyIndex);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Brings one round to the top of the viewport and stops following: the sticky message uses it for its own round, the
+    /// composer's Chat History for whichever round a listed message lives in.
+    /// </summary>
+    internal void Locate(int index)
+    {
+        if (index < 0 || index >= list.ItemCount)
+        {
+            return;
+        }
+
         StopFollowing();
         anchor.UserScrolled();
         TranscriptStackPanel.AllowNextBringIntoView();
-        list.ScrollIntoView(stickyIndex);
+        list.ScrollIntoView(index);
 
-        // ScrollIntoView only guarantees "somewhere visible"; the sticky stands for the message itself, so the round's own top
-        // goes to the top of the viewport once the panel has placed it.
-        var index = stickyIndex;
+        // ScrollIntoView only guarantees "somewhere visible"; the caller named one row, so that row's own top goes to the top
+        // of the viewport once the panel has placed it.
         Dispatcher.UIThread.Post(
             () =>
             {
@@ -540,7 +554,6 @@ internal sealed class TranscriptFollower
                 }
             },
             DispatcherPriority.Background);
-        e.Handled = true;
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e) => RefreshText();

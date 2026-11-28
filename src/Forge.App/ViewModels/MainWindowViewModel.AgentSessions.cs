@@ -348,7 +348,8 @@ internal sealed partial class MainWindowViewModel
             // The tab's label carries the root's name as a prefix, and the launch only carries a snapshot of it: a root renamed
             // after this tab was opened has its own tab (when it has one) answer with the title it holds now. Read the root
             // off the view, not off this closure: a promotion re-homes the tab under another root (RehomeTo).
-            rootTitle: () => created is { } view ? CurrentRootTitle(view.AgentSessionRoot?.Id ?? root.Id) : null)
+            rootTitle: () => created is { } view ? CurrentRootTitle(view.AgentSessionRoot?.Id ?? root.Id) : null,
+            saveAsInstruction: OpenPromptFromMessage)
         {
             // A read-only child has no runtime to ask for its own children: the transcript replays them from the store.
             ChildQuery = readOnly

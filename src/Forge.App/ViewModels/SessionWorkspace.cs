@@ -63,6 +63,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     private readonly Action<SubAgentViewModel>? subAgentOpened;
     private readonly Action? openSession;
     private readonly string providerModel;
+    private readonly Action<string>? saveAsInstruction;
 
     /// <summary>The live preferences this session reads values from (the inspector's line limit); null lists the defaults.</summary>
     private readonly AppPreferences? appPreferences;
@@ -312,7 +313,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         Func<IReadOnlyList<SessionMentionTarget>>? sessionMentions = null,
         Action<string, string>? sessionReceipt = null,
         Func<string?>? rootTitle = null,
-        SessionComposerStore? sessionComposer = null)
+        SessionComposerStore? sessionComposer = null,
+        Action<string>? saveAsInstruction = null)
     {
         Info = session;
         this.agentSession = agentSession;
@@ -334,7 +336,9 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         metricsRecorder = instrumentSourcesResolved.TurnMetricsRecorder;
         this.instrumentSources = instrumentSourcesResolved;
         this.sessionComposer = sessionComposer;
+        this.saveAsInstruction = saveAsInstruction;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
+        ComposerHistory = new ComposerHistoryViewModel(() => Transcript);
 
         // A failed turn that ran no tool is replayed through this session's own turn entry. The button itself lives on the
         // transcript's footnote row, so it belongs to every transcript; these two hooks are the whole of what a session
@@ -514,6 +518,29 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     public string BranchText => string.IsNullOrEmpty(Info.Branch) ? string.Empty : Info.Branch;
 
     public TranscriptViewModel Transcript { get; }
+
+    /// <summary>
+    /// The composer's Chat History: the session's messages as one searchable list. It reads the transcript when the flyout
+    /// opens, so it holds no copy of its own between opens.
+    /// </summary>
+    public ComposerHistoryViewModel ComposerHistory { get; }
+
+    /// <summary>
+    /// Writes one message of the history back into the composer, after whatever the user already typed - the same append the
+    /// withdrawal of a queued message performs, so taking a message back never overwrites a half-written draft.
+    /// </summary>
+    internal void FillFromHistory(ComposerHistoryEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        Draft = ComposerDraft.Append(Draft, entry.Text);
+    }
+
+    /// <summary>Turns one message into a new prompt template: the shell opens the prompts settings with it prefilled.</summary>
+    internal void SaveHistoryAsInstruction(ComposerHistoryEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        saveAsInstruction?.Invoke(entry.Text);
+    }
 
     public ReadOnlyObservableCollection<SubAgentViewModel> SubAgents { get; }
 

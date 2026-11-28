@@ -616,6 +616,9 @@ public partial class FileDocumentView
             }
 
             var content = new TextBlock { Text = string.Join("\n\n", parts), TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = 560 };
+            // A hover card answers about the word under the cursor, so it follows the pointer instead of hanging off the
+            // editor's own bottom-right corner (the app's default tooltip anchor).
+            ToolTipPlacement.FollowPointer(Editor);
             ToolTip.SetPlacement(Editor, PlacementMode.Pointer);
             ToolTip.SetTip(Editor, content);
             ToolTip.SetIsOpen(Editor, true);

@@ -61,13 +61,14 @@ internal sealed class PromptEditorViewModel : NotifyingObject
         PromptEditorMode mode,
         PromptRowViewModel? row,
         PromptTemplateText? stored,
-        string? workspace)
+        string? workspace,
+        string? body = null)
     {
         this.owner = owner;
         this.row = row;
         this.workspace = workspace;
         Mode = mode;
-        text = stored?.Text ?? CommandSkeleton;
+        text = stored?.Text ?? CommandSkeleton + (body ?? string.Empty);
         original = text;
         revision = stored?.Revision;
         path = stored?.Path;
@@ -288,9 +289,9 @@ internal sealed class PromptEditorViewModel : NotifyingObject
     internal static PromptEditorViewModel ForCustom(PromptsSettingsViewModel owner, PromptRowViewModel row, PromptTemplateText stored, string? workspace) =>
         new(owner, PromptEditorMode.Custom, row, stored, workspace);
 
-    internal static PromptEditorViewModel ForNew(PromptsSettingsViewModel owner, string? workspace)
+    internal static PromptEditorViewModel ForNew(PromptsSettingsViewModel owner, string? workspace, string? body = null)
     {
-        var editor = new PromptEditorViewModel(owner, PromptEditorMode.New, null, null, workspace);
+        var editor = new PromptEditorViewModel(owner, PromptEditorMode.New, null, null, workspace, body);
         editor.ScheduleValidation();
         return editor;
     }

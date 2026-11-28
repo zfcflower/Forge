@@ -3,12 +3,14 @@
         xmlns:wc="using:Forge.App.Workbench.Controls">
 
   <!-- The composer's chips and the rows of the pickers that open from them (agent, model, orchestration). Shared by the toolbar
-       and the suggestion list, so they live here instead of in either view. -->
+       and the suggestion list, so they live here instead of in either view. The chip and the composer's icon buttons wear the
+       light, borderless tier: one grey fill at rest, two deeper ones under the pointer, so a chip reads as a button without
+       drawing a second outline inside the card's own. -->
     <Style Selector="Button.composer-chip">
       <Setter Property="MinHeight" Value="24" />
       <Setter Property="Padding" Value="7,2" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
@@ -18,9 +20,37 @@
       <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
+    <Style Selector="Button.composer-chip:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
     <Style Selector="Button.composer-chip:disabled /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Opacity" Value="0.5" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <!-- The composer bar's icon buttons (attach, history) are the same light tier in an icon's box: 26px square, the small
+         radius, no border - the geometry `Button.icon` has, with the fill the chip carries. -->
+    <Style Selector="Button.composer-tool">
+      <Setter Property="MinWidth" Value="26" />
+      <Setter Property="MinHeight" Value="26" />
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.composer-tool:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.composer-tool:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.composer-tool:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSubtleBrush}" />
+      <Setter Property="Opacity" Value="0.45" />
     </Style>
     <Style Selector="Rectangle.effort-bar">
       <Setter Property="Width" Value="2.5" />
@@ -83,9 +113,9 @@
       <Setter Property="VerticalAlignment" Value="Bottom" />
       <Setter Property="Margin" Value="26,0,0,0" />
     </Style>
-    <!-- The model id itself: one step below the provider headers, so the name reads as an entry, not a heading. -->
+    <!-- The model id itself: the body size, the same as the provider headers above it and as the composer that named the model. -->
     <Style Selector="TextBlock.model-name">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     </Style>
     <!-- The provider header is a band: the same grey as a panel's scope row, at the body size, with 2 px more headroom than a
          model row on each side - the group names the block below it instead of looking like one more entry. Declared after
@@ -125,8 +155,9 @@
       <Setter Property="LetterSpacing" Value="0.6" />
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     </Style>
+    <!-- The price line under the model id: one size with the id above it (the body size), quieter only through its colour. -->
     <Style Selector="TextBlock.model-price">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
       <Setter Property="TextWrapping" Value="NoWrap" />
     </Style>
@@ -258,5 +289,89 @@
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="MinHeight" Value="26" />
       <Setter Property="Padding" Value="8,3" />
+    </Style>
+    <!-- The Chat History flyout: one block per round - the user's message, then the answer it got. The block's two lines are
+         the fill target (one message, one answer), so that button is bare chrome and takes no hover fill of its own: a tint
+         under the words would read as selection, and the two icon buttons beside them are separate targets with their own. -->
+    <Style Selector="Border.composer-history-row">
+      <Setter Property="Padding" Value="4,3" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <!-- The row is the hover surface: the whole row - message, answer, age and the two actions - lights up together, because the
+         whole row is what the pointer is on. The text block inside paints nothing of its own, so the tint is never doubled. -->
+    <Style Selector="Border.composer-history-row:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+    </Style>
+    <Style Selector="Button.composer-history-block">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <!-- Stretch, not Left: the block's lines must be measured against the row's width, otherwise a long message lays out at
+           its full length and never trims. -->
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.composer-history-block:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.composer-history-block:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <!-- The block's two lines: the user's own words in the body ink on one line (the whole message is its tooltip), the
+         answer a step quieter and allowed two lines. -->
+    <Style Selector="TextBlock.composer-history-text">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.composer-history-text.user">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="MaxLines" Value="1" />
+    </Style>
+    <Style Selector="TextBlock.composer-history-text.agent">
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="MaxLines" Value="2" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="MaxWidth" Value="240" />
+    </Style>
+    <!-- The answer is quoted under the message it answers: the divider's colour as a 2 px rule on its left edge and 9 px of
+         indent (2 + 7), no fill of its own - the row already owns the hover tint, and a second surface would read as a card
+         inside a card. -->
+    <Style Selector="Border.composer-history-quote">
+      <Setter Property="BorderThickness" Value="2,0,0,0" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Padding" Value="7,0,0,0" />
+      <Setter Property="Margin" Value="0,1,0,0" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style Selector="TextBlock.composer-history-time">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="8,0,4,0" />
+    </Style>
+    <!-- The two row actions: one 22px box each, the small radius, nothing until the pointer is on them. -->
+    <Style Selector="Button.composer-history-action">
+      <Setter Property="MinWidth" Value="22" />
+      <Setter Property="MinHeight" Value="22" />
+      <Setter Property="Padding" Value="3" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.composer-history-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.composer-history-action:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
     </Style>
 </Styles>

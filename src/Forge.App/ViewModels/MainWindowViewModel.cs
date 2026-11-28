@@ -1181,7 +1181,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             openSession: () => ActivateSessionTab(info.Id),
             sessionMentions: () => created is null ? [] : SessionMentionTargetsFor(created),
             sessionReceipt: DeliverReceipt,
-            sessionComposer: composerSelections)
+            sessionComposer: composerSelections,
+            saveAsInstruction: OpenPromptFromMessage)
         {
             ChildQuery = readOnly
                 ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)
@@ -3610,6 +3611,22 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Settings.SelectSection(sectionId);
         var window = ShowSettingsWindow();
         window.Activate();
+    }
+
+    /// <summary>
+    /// The composer's Chat History hands one message over as a new instruction: the prompts section opens with a fresh
+    /// command editor already holding the text. A composition without that section (a headless host) only gets the window.
+    /// </summary>
+    private void OpenPromptFromMessage(string message)
+    {
+        if (Settings.Sections.Items.FirstOrDefault(
+                section => string.Equals(section.Id, Forge.App.Preferences.SettingsSectionIds.Prompts, StringComparison.Ordinal))?.ViewModel
+            is Forge.App.Settings.Prompts.PromptsSettingsViewModel prompts)
+        {
+            prompts.NewFromText(message);
+        }
+
+        OpenSettingsSection(Forge.App.Preferences.SettingsSectionIds.Prompts);
     }
 
     /// <summary>The gear button: closes the window when it is open, otherwise opens (or re-focuses) it.</summary>

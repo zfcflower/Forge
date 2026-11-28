@@ -75,6 +75,7 @@ internal sealed class UserMessageViewModel : TranscriptItemViewModel, ICopyableT
         TimeSpan? gapSincePrevious = null)
     {
         Text = text;
+        At = at;
         Time = TextFormat.Clock(at);
         Round = round;
         GapSincePrevious = gapSincePrevious;
@@ -118,6 +119,9 @@ internal sealed class UserMessageViewModel : TranscriptItemViewModel, ICopyableT
     public bool HasFiles => Files.Count > 0;
 
     public string Time { get; }
+
+    /// <summary>When the message was written: the history flyout reads it for the row's relative age.</summary>
+    public DateTimeOffset At { get; }
 
     /// <summary>
     /// The round this message starts, peeked from the transcript's counter when the message arrived. The card the next

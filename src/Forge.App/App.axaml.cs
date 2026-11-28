@@ -32,6 +32,7 @@ public partial class App : Application
     {
         Views.TrimmedTextToolTip.Install();
         Views.NumberField.Install();
+        Views.ToolTipPlacement.Install();
         AvaloniaXamlLoader.Load(this);
     }
 

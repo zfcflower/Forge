@@ -436,7 +436,7 @@
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom">
                   <!-- Always enabled: each picked file is gated by kind; the tooltip says when images are refused. -->
-                  <Button Classes="icon"
+                  <Button Classes="composer-tool"
                           Click="OnAttachImagesClick"
                           AutomationProperties.AutomationId="composer-attach-images"
                           AutomationProperties.Name="{Binding [session.attachments.attach], Source={x:Static loc:Loc.Instance}}">
@@ -447,7 +447,99 @@
                                    IsVisible="{Binding !Composer.AcceptsImages}" />
                       </StackPanel>
                     </ToolTip.Tip>
-                    <wc:FluentIcon Data="{StaticResource IconPlus}" Width="14" Height="14" />
+                    <wc:FluentIcon Data="{StaticResource IconAttach}" Width="14" Height="14" />
+                  </Button>
+                  <!-- The session's own messages, one searchable list: a message goes back into the composer, becomes an
+                       instruction, or is located in the transcript. Rebuilt on every open, because the transcript is the only
+                       list that knows which rounds exist. -->
+                  <Button Classes="composer-tool"
+                          AutomationProperties.AutomationId="composer-history"
+                          AutomationProperties.Name="{Binding [session.history.name], Source={x:Static loc:Loc.Instance}}"
+                          ToolTip.Tip="{Binding [session.history.name], Source={x:Static loc:Loc.Instance}}">
+                    <wc:FluentIcon Data="{StaticResource IconChatHistory}" Width="14" Height="14" />
+                    <Button.Flyout>
+                      <Flyout Placement="TopEdgeAlignedLeft" Opening="OnHistoryOpening">
+                        <Border Classes="composer-history" Width="420" AutomationProperties.AutomationId="composer-history-panel">
+                          <Border.Styles>
+                            <StyleInclude Source="avares://Forge.App/Resources/FieldStyles.axaml" />
+                          </Border.Styles>
+                          <Grid RowDefinitions="Auto,Auto">
+                            <TextBox Classes="menu-search"
+                                     Text="{Binding ComposerHistory.Search, Mode=TwoWay}"
+                                     PlaceholderText="{Binding [session.history.search], Source={x:Static loc:Loc.Instance}}"
+                                     AutomationProperties.AutomationId="composer-history-search"
+                                     AutomationProperties.Name="{Binding [session.history.search], Source={x:Static loc:Loc.Instance}}">
+                              <TextBox.InnerLeftContent>
+                                <wc:FluentIcon Data="{StaticResource IconSearch}"
+                                               Width="12"
+                                               Height="12"
+                                               Margin="8,0,0,0"
+                                               Foreground="{DynamicResource TextMutedBrush}" />
+                              </TextBox.InnerLeftContent>
+                            </TextBox>
+                            <Panel Grid.Row="1">
+                              <ScrollViewer MaxHeight="320" HorizontalScrollBarVisibility="Disabled">
+                                <ItemsControl ItemsSource="{Binding ComposerHistory.Entries}"
+                                              AutomationProperties.AutomationId="composer-history-list">
+                                  <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:ComposerHistoryEntry">
+                                      <Border Classes="composer-history-row">
+                                        <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                                          <!-- One block per round: the user's message on top, the answer under it. The block is the
+                                               fill target - the two lines are one message and its answer, so clicking either takes
+                                               the message back. -->
+                                          <Button Classes="composer-history-block"
+                                                  Click="OnHistoryFillClick"
+                                                  AutomationProperties.AutomationId="composer-history-fill"
+                                                  AutomationProperties.Name="{Binding DisplayText}">
+                                            <StackPanel Spacing="1">
+                                              <TextBlock Classes="composer-history-text user" Text="{Binding DisplayText}" />
+                                              <!-- The answer is quoted under the message: a 2 px rule on its left edge, indented. -->
+                                              <Border Classes="composer-history-quote" IsVisible="{Binding HasReply}">
+                                                <TextBlock Classes="composer-history-text agent" Text="{Binding Reply}" />
+                                              </Border>
+                                            </StackPanel>
+                                          </Button>
+                                          <TextBlock Grid.Column="1" Classes="composer-history-time" Text="{Binding Time}" />
+                                          <Button Grid.Column="2"
+                                                  Classes="composer-history-action"
+                                                  Click="OnHistorySaveClick"
+                                                  ToolTip.Tip="{Binding [session.history.saveAsInstruction], Source={x:Static loc:Loc.Instance}}"
+                                                  AutomationProperties.AutomationId="composer-history-save"
+                                                  AutomationProperties.Name="{Binding [session.history.saveAsInstruction], Source={x:Static loc:Loc.Instance}}">
+                                            <wc:FluentIcon Data="{StaticResource IconCommentNote}" Width="12" Height="12" />
+                                          </Button>
+                                          <Button Grid.Column="3"
+                                                  Classes="composer-history-action"
+                                                  Click="OnHistoryLocateClick"
+                                                  ToolTip.Tip="{Binding [session.history.locate], Source={x:Static loc:Loc.Instance}}"
+                                                  AutomationProperties.AutomationId="composer-history-locate"
+                                                  AutomationProperties.Name="{Binding [session.history.locate], Source={x:Static loc:Loc.Instance}}">
+                                            <wc:FluentIcon Data="{StaticResource IconLocationArrowUp}" Width="12" Height="12" />
+                                          </Button>
+                                        </Grid>
+                                      </Border>
+                                    </DataTemplate>
+                                  </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                              </ScrollViewer>
+                              <TextBlock Classes="caption"
+                                         Margin="0,12"
+                                         HorizontalAlignment="Center"
+                                         IsVisible="{Binding ComposerHistory.IsEmpty}"
+                                         Text="{Binding [session.history.empty], Source={x:Static loc:Loc.Instance}}"
+                                         AutomationProperties.AutomationId="composer-history-empty" />
+                              <TextBlock Classes="caption"
+                                         Margin="0,12"
+                                         HorizontalAlignment="Center"
+                                         IsVisible="{Binding ComposerHistory.HasNoMatch}"
+                                         Text="{Binding [session.history.noMatch], Source={x:Static loc:Loc.Instance}}"
+                                         AutomationProperties.AutomationId="composer-history-no-match" />
+                            </Panel>
+                          </Grid>
+                        </Border>
+                      </Flyout>
+                    </Button.Flyout>
                   </Button>
                   <Button Classes="icon"
                           Command="{Binding CancelCommand}"
